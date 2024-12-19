@@ -1,1 +1,3 @@
 # pi-health
+
+docker run -v /proc:/host_proc -v /sys:/host_sys ...
