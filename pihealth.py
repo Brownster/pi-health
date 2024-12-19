@@ -4,9 +4,15 @@ import psutil
 import os
 
 def get_system_stats():
-    """Gather system statistics including CPU, memory, disk, and network."""
-    # CPU usage (percentage)
-    cpu_usage = psutil.cpu_percent(interval=1)
+    """Gather system statistics from the host."""
+    with open('/host_proc/stat', 'r') as f:
+        # Parse CPU usage from host /proc/stat (simplified example)
+        cpu_line = f.readline().split()
+        cpu_usage_percent = calculate_cpu_usage(cpu_line)  # Custom function for parsing
+
+    # Similarly, parse memory and other metrics from /host_proc/meminfo or /host_sys
+    return {
+        "cpu_usage_percent": cpu_usage_percent,
 
     # Memory usage
     memory = psutil.virtual_memory()
