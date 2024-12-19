@@ -1,5 +1,5 @@
 # Use linuxserver.io base image
-FROM lscr.io/linuxserver/baseimage:latest
+FROM python:3.10-slim
 
 # Set environment variables
 ENV APP_NAME="pi-health-dashboard"
