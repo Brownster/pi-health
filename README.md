@@ -1,12 +1,13 @@
 # pi-health
 RUN
 docker run -d \
-  -p 8080:8080 \
-  -v /proc:/host_proc \
-  -v /sys:/host_sys \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  --name pi-health-dashboard \
-  <your-docker-image>
+-p 8080:8080 \
+-v /proc:/host_proc \
+-v /sys:/host_sys \
+-v /var/run/docker.sock:/var/run/docker.sock \
+--name pi-health-dashboard \
+brownster/pi-health:latest
+
 
 DOCKER COMPOSE
 pi-health-dashboard:
