@@ -9,10 +9,7 @@
         .status-running { background-color: #38a169; }
         .status-stopped { background-color: #e53e3e; }
         .status-other { background-color: #dd6b20; }
-        button:disabled {
-            background-color: #9ca3af;
-            cursor: not-allowed;
-        }
+        .button:active { transform: scale(0.95); } /* Add feedback on button click */
     </style>
 </head>
 <body class="bg-gray-900 text-gray-200 font-sans">
@@ -24,7 +21,7 @@
         <!-- System Metrics Section -->
         <section id="system-stats" class="mb-8">
             <h2 class="text-xl font-semibold mb-4">System Metrics</h2>
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 <div class="bg-gray-700 p-4 rounded shadow">
                     <h3 class="text-lg font-semibold">CPU Usage</h3>
                     <p id="cpu-usage" class="text-xl">Loading...</p>
@@ -37,6 +34,10 @@
                     <h3 class="text-lg font-semibold">Temperature</h3>
                     <p id="temperature" class="text-xl">Loading...</p>
                 </div>
+                <div class="bg-gray-700 p-4 rounded shadow">
+                    <h3 class="text-lg font-semibold">Disk Usage</h3>
+                    <p id="disk-usage" class="text-xl">Loading...</p>
+                </div>
             </div>
         </section>
 
@@ -46,10 +47,10 @@
             <table class="table-auto w-full bg-gray-800 rounded shadow">
                 <thead>
                     <tr>
-                        <th class="px-4 py-2 text-left">Container Name</th>
-                        <th class="px-4 py-2 text-left">Image</th>
-                        <th class="px-4 py-2 text-left">Status</th>
-                        <th class="px-4 py-2 text-left">Actions</th>
+                        <th class="px-4 py-2">Container Name</th>
+                        <th class="px-4 py-2">Image</th>
+                        <th class="px-4 py-2">Status</th>
+                        <th class="px-4 py-2">Actions</th>
                     </tr>
                 </thead>
                 <tbody id="container-list">
@@ -62,10 +63,12 @@
     </main>
 
     <script>
+        // Fetch system metrics and update the dashboard
         async function fetchSystemMetrics() {
             const cpuUsageEl = document.getElementById('cpu-usage');
             const memoryUsageEl = document.getElementById('memory-usage');
             const temperatureEl = document.getElementById('temperature');
+            const diskUsageEl = document.getElementById('disk-usage');
 
             try {
                 const response = await fetch('/api/stats');
@@ -76,14 +79,17 @@
                 temperatureEl.textContent = data.temperature_celsius
                     ? `${data.temperature_celsius.toFixed(1)} °C`
                     : '-- °C';
+                diskUsageEl.textContent = `${data.disk_usage.percent.toFixed(1)}% used`;
             } catch (error) {
                 console.error('Error fetching system metrics:', error);
                 cpuUsageEl.textContent = 'Error';
                 memoryUsageEl.textContent = 'Error';
                 temperatureEl.textContent = 'Error';
+                diskUsageEl.textContent = 'Error';
             }
         }
 
+        // Fetch Docker containers and update the table
         async function fetchDockerContainers() {
             const containerListEl = document.getElementById('container-list');
             containerListEl.innerHTML = '<tr><td colspan="4" class="text-center py-4">Loading...</td></tr>';
@@ -107,13 +113,10 @@
                                     ${container.status}
                                 </span>
                             </td>
-                            <td class="px-4 py-2 space-x-2">
-                                <button class="bg-green-500 hover:bg-green-700 text-white font-bold py-1 px-2 rounded" 
-                                    onclick="handleContainerAction('${container.id}', 'start', this)">Start</button>
-                                <button class="bg-yellow-500 hover:bg-yellow-700 text-white font-bold py-1 px-2 rounded" 
-                                    onclick="handleContainerAction('${container.id}', 'stop', this)">Stop</button>
-                                <button class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-1 px-2 rounded" 
-                                    onclick="handleContainerAction('${container.id}', 'restart', this)">Restart</button>
+                            <td class="px-4 py-2">
+                                <button class="bg-green-500 hover:bg-green-700 text-white font-bold py-1 px-2 rounded button" onclick="controlContainer('${container.id}', 'start')">Start</button>
+                                <button class="bg-yellow-500 hover:bg-yellow-700 text-white font-bold py-1 px-2 rounded button" onclick="controlContainer('${container.id}', 'stop')">Stop</button>
+                                <button class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-1 px-2 rounded button" onclick="controlContainer('${container.id}', 'restart')">Restart</button>
                             </td>
                         </tr>
                     `;
@@ -125,8 +128,8 @@
             }
         }
 
-        async function handleContainerAction(id, action, button) {
-            button.disabled = true; // Disable the button to indicate an action is in progress
+        // Control Docker container (start/stop/restart)
+        async function controlContainer(id, action) {
             try {
                 const response = await fetch(`/api/containers/${id}/${action}`, { method: 'POST' });
                 const result = await response.json();
@@ -134,14 +137,14 @@
                 fetchDockerContainers(); // Refresh the container list
             } catch (error) {
                 console.error(`Error controlling container ${id}:`, error);
-            } finally {
-                button.disabled = false; // Re-enable the button after the action is complete
             }
         }
 
+        // Initial data fetch
         fetchSystemMetrics();
         fetchDockerContainers();
 
+        // Periodic updates
         setInterval(fetchSystemMetrics, 5000);
         setInterval(fetchDockerContainers, 10000);
     </script>
