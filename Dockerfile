@@ -5,7 +5,7 @@ ENV PYTHONUNBUFFERED=1
 ENV APP_NAME="pi-health-dashboard"
 ENV APP_PORT=8080
 
-# Install Python dependencies
+# Install system dependencies
 RUN apt-get update && \
     apt-get install -y python3-pip && \
     apt-get clean && \
@@ -14,11 +14,11 @@ RUN apt-get update && \
 # Set working directory
 WORKDIR /app
 
-# Copy application files into the container
+# Copy all application files, including the static folder
 COPY ./ /app
 
-# Install Python libraries from requirements.txt
-RUN pip install -r requirements.txt
+# Install Python dependencies from requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Expose the application port
 EXPOSE 8080
