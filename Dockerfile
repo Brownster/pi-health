@@ -5,9 +5,9 @@ ENV PYTHONUNBUFFERED=1
 ENV APP_NAME="pi-health-dashboard"
 ENV APP_PORT=8080
 
-# Install necessary packages
+# Install necessary system packages
 RUN apt-get update && \
-    apt-get install -y python3-pip raspberrypi-kernel-headers libraspberrypi-bin && \
+    apt-get install -y python3-pip && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
@@ -17,8 +17,8 @@ WORKDIR /app
 # Copy application files into the container
 COPY ./ /app
 
-# Install Python dependencies
-RUN pip install --no-cache-dir flask psutil docker
+# Install Python dependencies from requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Expose the application port
 EXPOSE 8080
