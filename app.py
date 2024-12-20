@@ -10,21 +10,16 @@ docker_client = docker.from_env()
 
 def calculate_cpu_usage(cpu_line):
     """Calculate CPU usage based on /proc/stat values."""
-    # Extract CPU times from /proc/stat
     user, nice, system, idle, iowait, irq, softirq, steal = map(int, cpu_line[1:9])
-
-    # Calculate the total and idle time
     total_time = user + nice + system + idle + iowait + irq + softirq + steal
     idle_time = idle + iowait
-
-    # Calculate CPU usage as a percentage
     usage_percent = 100 * (total_time - idle_time) / total_time
     return usage_percent
 
 
 def get_system_stats():
     """Gather system statistics including CPU, memory, disk, and network."""
-    # CPU usage from /proc/stat
+    # CPU usage
     try:
         with open('/host_proc/stat', 'r') as f:
             cpu_line = f.readline().split()
@@ -41,8 +36,9 @@ def get_system_stats():
         "percent": memory.percent,
     }
 
-    # Disk usage
-    disk = psutil.disk_usage('/')
+    # Disk usage (with configurable path)
+    disk_path = os.getenv('DISK_PATH', '/')
+    disk = psutil.disk_usage(disk_path)
     disk_usage = {
         "total": disk.total,
         "used": disk.used,
@@ -51,10 +47,13 @@ def get_system_stats():
     }
 
     # Temperature (specific to Raspberry Pi)
-    try:
-        temp_output = os.popen("vcgencmd measure_temp").readline()
-        temperature = float(temp_output.replace("temp=", "").replace("'C\n", ""))
-    except Exception:
+    if os.path.exists('/usr/bin/vcgencmd'):
+        try:
+            temp_output = os.popen("vcgencmd measure_temp").readline()
+            temperature = float(temp_output.replace("temp=", "").replace("'C\n", ""))
+        except Exception:
+            temperature = None
+    else:
         temperature = None
 
     # Network I/O
