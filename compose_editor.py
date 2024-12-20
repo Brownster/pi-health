@@ -7,6 +7,24 @@ compose_editor = Blueprint('compose_editor', __name__)
 # Paths to docker-compose.yml and .env files
 DOCKER_COMPOSE_PATH = os.getenv('DOCKER_COMPOSE_PATH', './docker-compose.yml')
 ENV_FILE_PATH = os.getenv('ENV_FILE_PATH', './.env')
+BACKUP_DIR = os.getenv('BACKUP_DIR', './backups')
+
+def ensure_backup_directory():
+    """Ensure the backup directory exists."""
+    os.makedirs(BACKUP_DIR, exist_ok=True)
+
+def backup_compose_file():
+    """Backup the current docker-compose.yml file."""
+    ensure_backup_directory()
+    if os.path.exists(DOCKER_COMPOSE_PATH):
+        timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+        backup_file = os.path.join(BACKUP_DIR, f"docker-compose-{timestamp}.yml")
+        shutil.copy(DOCKER_COMPOSE_PATH, backup_file)
+        # Keep only the 5 most recent backups
+        backups = sorted(os.listdir(BACKUP_DIR))
+        if len(backups) > 5:
+            for old_backup in backups[:-5]:
+                os.remove(os.path.join(BACKUP_DIR, old_backup))
 
 def read_file(file_path):
     """Read the content of a file."""
@@ -33,6 +51,19 @@ def get_docker_compose():
     if content.startswith("Error"):
         return jsonify({"error": content}), 500
     return jsonify({"content": content})
+
+@compose_editor.route('/api/compose/up', methods=['POST'])
+def compose_up():
+    """Run 'docker compose up' to apply changes."""
+    try:
+        # Backup the docker-compose.yml file
+        backup_compose_file()
+
+        # Run 'docker compose up -d'
+        os.system('docker compose up -d')
+        return jsonify({"status": "Compose updated successfully!"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @compose_editor.route('/api/compose', methods=['POST'])
