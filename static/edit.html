@@ -21,6 +21,7 @@
             <h2 class="text-xl font-semibold">Docker Compose</h2>
             <textarea id="compose-editor" class="w-full h-64 p-2 bg-gray-800 rounded shadow" placeholder="Loading..."></textarea>
             <button onclick="saveCompose()" class="mt-4 bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">Save</button>
+            <button onclick="composeUp()" class="mt-4 bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded">Compose Up</button>
             <p id="compose-status" class="mt-2 text-sm"></p>
         </section>
 
@@ -64,6 +65,21 @@
                     status.textContent = `Error: ${data.error}`;
                 } else {
                     status.textContent = 'File saved successfully!';
+                }
+            } catch (error) {
+                status.textContent = `Error: ${error}`;
+            }
+        }
+
+        async function composeUp() {
+            const status = document.getElementById('compose-status');
+            try {
+                const response = await fetch('/api/compose/up', { method: 'POST' });
+                const data = await response.json();
+                if (data.error) {
+                    status.textContent = `Error: ${data.error}`;
+                } else {
+                    status.textContent = data.status;
                 }
             } catch (error) {
                 status.textContent = `Error: ${error}`;
