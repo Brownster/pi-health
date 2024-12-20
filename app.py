@@ -131,6 +131,12 @@ def api_control_container(container_id, action):
     """API endpoint to control a Docker container."""
     return jsonify(control_container(container_id, action))
 
+@app.route('/edit.html')
+def serve_edit():
+    """Serve the edit HTML file."""
+    return send_from_directory(app.static_folder, 'edit.html')
+
+
 
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=8080)
