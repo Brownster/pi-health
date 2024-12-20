@@ -40,11 +40,12 @@ def get_temperature():
         return None
 
     try:
-        temp_output = os.popen("vcgencmd measure_temp").readline()
+        temp_output = os.popen("/usr/bin/vcgencmd measure_temp").readline()
         temperature = float(temp_output.replace("temp=", "").replace("'C\n", ""))
         return temperature
     except Exception:
         return None
+
 
 
 def get_system_stats():
