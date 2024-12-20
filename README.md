@@ -10,13 +10,22 @@ brownster/pi-health:latest
 
 
 DOCKER COMPOSE
-pi-health-dashboard:
-  image: brownster/pi-health:latest
-  container_name: pi-health
-  ports:
-    - "8080:8080"
-  volumes:
-    - /proc:/host_proc:ro        # Mount the host's /proc directory (read-only)
-    - /sys:/host_sys:ro          # Mount the host's /sys directory (read-only)
-    - /var/run/docker.sock:/var/run/docker.sock # Mount Docker socket for container management
-  restart: unless-stopped
+services:
+  pi-health-dashboard:
+    image: brownster/pi-health:latest
+    container_name: pi-health-dashboard
+    environment:
+      - TZ=${TIMEZONE}
+      - DISK_PATH=/mnt/storage
+      - DOCKER_COMPOSE_PATH=/config/docker-compose.yml
+      - ENV_FILE_PATH=/config/.env
+      - BACKUP_DIR=/config/backups
+    ports:
+      - 8080:8080
+    volumes:
+      - /proc:/host_proc:ro
+      - /sys:/host_sys:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./config:/config
+      - /mnt/storage:/mnt/storage #disk to monitor for storage space
+    restart: unless-stopped
