@@ -2,10 +2,14 @@ from flask import Flask, jsonify, send_from_directory, request
 import psutil
 import os
 import docker
+from compose_editor import compose_editor
 
 # Initialize Flask and Docker client
 app = Flask(__name__, static_folder='static')
 docker_client = docker.from_env()
+
+# Register the compose editor blueprint
+app.register_blueprint(compose_editor)
 
 
 def calculate_cpu_usage(cpu_line):
