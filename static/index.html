@@ -5,12 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Raspberry Pi Health Dashboard</title>
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
-    <style>
-        .status-running { background-color: #38a169; }
-        .status-stopped { background-color: #e53e3e; }
-        .status-other { background-color: #dd6b20; }
-        .button:active { transform: scale(0.95); } /* Add feedback on button click */
-    </style>
 </head>
 <body class="bg-gray-900 text-gray-200 font-sans">
     <header class="bg-gray-800 p-4 shadow-md">
@@ -18,30 +12,24 @@
     </header>
 
     <main class="p-4">
-        <!-- System Metrics Section -->
         <section id="system-stats" class="mb-8">
             <h2 class="text-xl font-semibold mb-4">System Metrics</h2>
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 <div class="bg-gray-700 p-4 rounded shadow">
                     <h3 class="text-lg font-semibold">CPU Usage</h3>
-                    <p id="cpu-usage" class="text-xl">Loading...</p>
+                    <p id="cpu-usage" class="text-xl">--%</p>
                 </div>
                 <div class="bg-gray-700 p-4 rounded shadow">
                     <h3 class="text-lg font-semibold">Memory Usage</h3>
-                    <p id="memory-usage" class="text-xl">Loading...</p>
+                    <p id="memory-usage" class="text-xl">--%</p>
                 </div>
                 <div class="bg-gray-700 p-4 rounded shadow">
                     <h3 class="text-lg font-semibold">Temperature</h3>
-                    <p id="temperature" class="text-xl">Loading...</p>
-                </div>
-                <div class="bg-gray-700 p-4 rounded shadow">
-                    <h3 class="text-lg font-semibold">Disk Usage</h3>
-                    <p id="disk-usage" class="text-xl">Loading...</p>
+                    <p id="temperature" class="text-xl">-- °C</p>
                 </div>
             </div>
         </section>
 
-        <!-- Docker Containers Section -->
         <section id="docker-containers">
             <h2 class="text-xl font-semibold mb-4">Docker Containers</h2>
             <table class="table-auto w-full bg-gray-800 rounded shadow">
@@ -50,13 +38,13 @@
                         <th class="px-4 py-2">Container Name</th>
                         <th class="px-4 py-2">Image</th>
                         <th class="px-4 py-2">Status</th>
-                        <th class="px-4 py-2">Web UI</th>
                         <th class="px-4 py-2">Actions</th>
+                        <th class="px-4 py-2">Open</th>
                     </tr>
                 </thead>
                 <tbody id="container-list">
                     <tr>
-                        <td colspan="5" class="text-center py-4">Loading...</td>
+                        <td colspan="5" class="text-center py-4">No containers to display</td>
                     </tr>
                 </tbody>
             </table>
@@ -64,105 +52,70 @@
     </main>
 
     <script>
-        // Fetch system metrics and update the dashboard
         async function fetchSystemMetrics() {
-            const cpuUsageEl = document.getElementById('cpu-usage');
-            const memoryUsageEl = document.getElementById('memory-usage');
-            const temperatureEl = document.getElementById('temperature');
-            const diskUsageEl = document.getElementById('disk-usage');
-
             try {
                 const response = await fetch('/api/stats');
                 const data = await response.json();
 
-                cpuUsageEl.textContent = `${data.cpu_usage_percent.toFixed(2)}%`;
-                memoryUsageEl.textContent = `${data.memory_usage.percent.toFixed(1)}%`;
-                temperatureEl.textContent = data.temperature_celsius
-                    ? `${data.temperature_celsius.toFixed(1)} °C`
-                    : '-- °C';
-                diskUsageEl.textContent = `${data.disk_usage.percent.toFixed(1)}% used`;
+                document.getElementById('cpu-usage').textContent = `${data.cpu_usage_percent}%`;
+                document.getElementById('memory-usage').textContent = `${data.memory_usage.percent}%`;
+                document.getElementById('temperature').textContent = `${data.temperature_celsius || '--'} °C`;
             } catch (error) {
                 console.error('Error fetching system metrics:', error);
-                cpuUsageEl.textContent = 'Error';
-                memoryUsageEl.textContent = 'Error';
-                temperatureEl.textContent = 'Error';
-                diskUsageEl.textContent = 'Error';
             }
         }
 
-        // Fetch Docker containers and update the table
         async function fetchDockerContainers() {
-            const containerListEl = document.getElementById('container-list');
-            containerListEl.innerHTML = '<tr><td colspan="5" class="text-center py-4">Loading...</td></tr>';
-
             try {
                 const response = await fetch('/api/containers');
                 const containers = await response.json();
 
-                // Map container names to their ports
-                const webUIPorts = {
-                    transmission: 9091,
-                    jackett: 9117,
-                    sonarr: 8989,
-                    radarr: 7878,
-                    nzbget: 6789,
-                    jellyfin: 8096,
-                };
-
-                containerListEl.innerHTML = '';
+                const containerList = document.getElementById('container-list');
+                containerList.innerHTML = '';
 
                 containers.forEach(container => {
-                    const statusClass = container.status === 'running' ? 'status-running' :
-                        container.status === 'stopped' ? 'status-stopped' : 'status-other';
+                    const row = document.createElement('tr');
 
-                    // Determine if the container has a Web UI
-                    const port = webUIPorts[container.name];
-                    const webUILink = port
-                        ? `<a href="http://${window.location.hostname}:${port}" target="_blank" class="text-blue-500 underline">Open</a>`
-                        : 'N/A';
+                    // Dynamically generate icon path
+                    const iconPath = `/static/icons/${container.name}.png`;
 
-                    const row = `
-                        <tr>
-                            <td class="px-4 py-2">${container.name}</td>
-                            <td class="px-4 py-2">${container.image}</td>
-                            <td class="px-4 py-2">
-                                <span class="px-2 py-1 text-white rounded ${statusClass}">
-                                    ${container.status}
-                                </span>
-                            </td>
-                            <td class="px-4 py-2">${webUILink}</td>
-                            <td class="px-4 py-2">
-                                <button class="bg-green-500 hover:bg-green-700 text-white font-bold py-1 px-2 rounded button" onclick="controlContainer('${container.id}', 'start')">Start</button>
-                                <button class="bg-yellow-500 hover:bg-yellow-700 text-white font-bold py-1 px-2 rounded button" onclick="controlContainer('${container.id}', 'stop')">Stop</button>
-                                <button class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-1 px-2 rounded button" onclick="controlContainer('${container.id}', 'restart')">Restart</button>
-                            </td>
-                        </tr>
+                    row.innerHTML = `
+                        <td class="px-4 py-2">${container.name}</td>
+                        <td class="px-4 py-2">${container.image}</td>
+                        <td class="px-4 py-2">${container.status}</td>
+                        <td class="px-4 py-2">
+                            <button class="bg-green-500 hover:bg-green-700 text-white font-bold py-1 px-2 rounded" onclick="controlContainer('${container.id}', 'start')">Start</button>
+                            <button class="bg-yellow-500 hover:bg-yellow-700 text-white font-bold py-1 px-2 rounded" onclick="controlContainer('${container.id}', 'stop')">Stop</button>
+                            <button class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-1 px-2 rounded" onclick="controlContainer('${container.id}', 'restart')">Restart</button>
+                        </td>
+                        <td class="px-4 py-2">
+                            <a href="http://${window.location.hostname}:${container.port}" target="_blank">
+                                <img src="${iconPath}" alt="${container.name} icon" class="h-8 w-8">
+                            </a>
+                        </td>
                     `;
-                    containerListEl.innerHTML += row;
+
+                    containerList.appendChild(row);
                 });
             } catch (error) {
                 console.error('Error fetching Docker containers:', error);
-                containerListEl.innerHTML = '<tr><td colspan="5" class="text-center py-4">Error loading containers</td></tr>';
             }
         }
 
-        // Control Docker container (start/stop/restart)
         async function controlContainer(id, action) {
             try {
                 const response = await fetch(`/api/containers/${id}/${action}`, { method: 'POST' });
                 const result = await response.json();
                 console.log(result);
-                fetchDockerContainers(); // Refresh the container list
+                fetchDockerContainers();
             } catch (error) {
-                console.error(`Error controlling container ${id}:`, error);
+                console.error('Error controlling container:', error);
             }
         }
 
-        // Initial data fetch
         fetchSystemMetrics();
         fetchDockerContainers();
 
-        // Periodic updates
         setInterval(fetchSystemMetrics, 5000);
         setInterval(fetchDockerContainers, 10000);
     </script>
