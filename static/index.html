@@ -61,6 +61,23 @@
                 </tbody>
             </table>
         </section>
+
+        <!-- Actions Section -->
+        <section id="actions">
+            <h2 class="text-xl font-semibold mb-4">System Actions</h2>
+            <div class="flex space-x-4">
+                <button
+                    class="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded"
+                    onclick="sendAction('shutdown')">
+                    Shutdown
+                </button>
+                <button
+                    class="bg-yellow-500 hover:bg-yellow-700 text-white font-bold py-2 px-4 rounded"
+                    onclick="sendAction('reboot')">
+                    Reboot
+                </button>
+            </div>
+        </section>
     </main>
 
     <script>
@@ -107,6 +124,8 @@
                     radarr: 7878,
                     nzbget: 6789,
                     jellyfin: 8096,
+                    get_iplayer: 1935,
+                    rtdclient: 6500,
                 };
 
                 containerListEl.innerHTML = '';
@@ -155,6 +174,22 @@
                 fetchDockerContainers(); // Refresh the container list
             } catch (error) {
                 console.error(`Error controlling container ${id}:`, error);
+            }
+        }
+
+        // Function to send system actions
+        async function sendAction(action) {
+            try {
+                const response = await fetch(`http://wybie:5000/api/${action}`, { method: 'POST' });
+                const data = await response.json();
+                if (response.ok) {
+                    alert(`Successful ${action.charAt(0).toUpperCase() + action.slice(1)}: ${data.status}`);
+                } else {
+                    alert(`Error during ${action.charAt(0).toUpperCase() + action.slice(1)}: ${data.error || 'Unknown error'}`);
+                }
+            } catch (error) {
+                console.error(`Error sending ${action} action:`, error);
+                alert(`Error sending ${action.charAt(0).toUpperCase() + action.slice(1)}: Unable to reach the server.`);
             }
         }
 
