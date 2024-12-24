@@ -1,62 +1,218 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <script>
+        // Redirect to login if not logged in
+        if (!sessionStorage.getItem("loggedIn")) {
+            window.location.href = "login.html";
+        }
+    </script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login - Raspberry Pi Dashboard</title>
+    <title>Wybie's Health Dashboard</title>
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        .status-running { background-color: #38a169; }
+        .status-stopped { background-color: #e53e3e; }
+        .status-other { background-color: #dd6b20; }
+        .button:active { transform: scale(0.95); } /* Add feedback on button click */
+    </style>
 </head>
-<body class="bg-gray-900 text-gray-200 font-sans flex items-center justify-center h-screen">
-    <div class="bg-gray-800 p-6 rounded shadow-md w-96">
-        <h1 class="text-2xl font-bold text-center mb-6">Raspberry Pi Login</h1>
-        <div class="mb-4">
-            <label for="username" class="block mb-2">Username</label>
-            <input
-                type="text"
-                id="username"
-                class="w-full p-2 bg-gray-700 text-white rounded"
-                placeholder="Enter your username"
-            />
-        </div>
-        <div class="mb-4">
-            <label for="password" class="block mb-2">Password</label>
-            <input
-                type="password"
-                id="password"
-                class="w-full p-2 bg-gray-700 text-white rounded"
-                placeholder="Enter your password"
-            />
-        </div>
-        <button
-            onclick="validateLogin()"
-            class="w-full bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
-        >
-            Login
-        </button>
-        <p id="login-error" class="text-red-500 mt-4 hidden text-center">Invalid username or password.</p>
-    </div>
+<body class="bg-gray-900 text-gray-200 font-sans">
+    <header class="bg-gray-800 p-4 shadow-md">
+        <h1 class="text-2xl font-bold text-center">Wybie's Health Dashboard</h1>
+    </header>
+
+    <main class="p-4">
+        <!-- System Metrics Section -->
+        <section id="system-stats" class="mb-8">
+            <h2 class="text-xl font-semibold mb-4">System Metrics</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div class="bg-gray-700 p-4 rounded shadow">
+                    <h3 class="text-lg font-semibold">CPU Usage</h3>
+                    <p id="cpu-usage" class="text-xl">Loading...</p>
+                </div>
+                <div class="bg-gray-700 p-4 rounded shadow">
+                    <h3 class="text-lg font-semibold">Memory Usage</h3>
+                    <p id="memory-usage" class="text-xl">Loading...</p>
+                </div>
+                <div class="bg-gray-700 p-4 rounded shadow">
+                    <h3 class="text-lg font-semibold">Temperature</h3>
+                    <p id="temperature" class="text-xl">Loading...</p>
+                </div>
+                <div class="bg-gray-700 p-4 rounded shadow">
+                    <h3 class="text-lg font-semibold">Disk Usage (/mnt/storage)</h3>
+                    <p id="disk-usage" class="text-xl">Loading...</p>
+                </div>
+                <div class="bg-gray-700 p-4 rounded shadow">
+                    <h3 class="text-lg font-semibold">Disk Usage (/mnt/downloads)</h3>
+                    <p id="disk-usage-2" class="text-xl">Loading...</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Docker Containers Section -->
+        <section id="docker-containers">
+            <h2 class="text-xl font-semibold mb-4">Docker Containers</h2>
+            <table class="table-auto w-full bg-gray-800 rounded shadow">
+                <thead>
+                    <tr>
+                        <th class="px-4 py-2">Container Name</th>
+                        <th class="px-4 py-2">Image</th>
+                        <th class="px-4 py-2">Status</th>
+                        <th class="px-4 py-2">Web UI</th>
+                        <th class="px-4 py-2">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="container-list">
+                    <tr>
+                        <td colspan="5" class="text-center py-4">Loading...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+
+        <!-- Actions Section -->
+        <section id="actions">
+            <h2 class="text-xl font-semibold mb-4">System Actions</h2>
+            <div class="flex space-x-4">
+                <button
+                    class="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded"
+                    onclick="sendAction('shutdown')">
+                    Shutdown
+                </button>
+                <button
+                    class="bg-yellow-500 hover:bg-yellow-700 text-white font-bold py-2 px-4 rounded"
+                    onclick="sendAction('reboot')">
+                    Reboot
+                </button>
+            </div>
+        </section>
+    </main>
 
     <script>
-        // Simple credentials for demonstration
-        const USERNAME = "admin";
-        const PASSWORD = "raspberry123";
+        // Fetch system metrics and update the dashboard
+        async function fetchSystemMetrics() {
+            const cpuUsageEl = document.getElementById('cpu-usage');
+            const memoryUsageEl = document.getElementById('memory-usage');
+            const temperatureEl = document.getElementById('temperature');
+            const diskUsageEl = document.getElementById('disk-usage');
+            const diskUsage2El = document.getElementById('disk-usage-2');
 
-        function validateLogin() {
-            const username = document.getElementById("username").value;
-            const password = document.getElementById("password").value;
-            const errorEl = document.getElementById("login-error");
+            try {
+                const response = await fetch('/api/stats');
+                const data = await response.json();
 
-            if (username === USERNAME && password === PASSWORD) {
-                // Store login status in session storage
-                sessionStorage.setItem("loggedIn", "true");
-                // Redirect to the dashboard
-                window.location.href = "index.html";
-            } else {
-                // Show error message
-                errorEl.classList.remove("hidden");
-                setTimeout(() => errorEl.classList.add("hidden"), 3000);
+                cpuUsageEl.textContent = `${data.cpu_usage_percent.toFixed(2)}%`;
+                memoryUsageEl.textContent = `${data.memory_usage.percent.toFixed(1)}%`;
+                temperatureEl.textContent = data.temperature_celsius
+                    ? `${data.temperature_celsius.toFixed(1)} °C`
+                    : '-- °C';
+                diskUsageEl.textContent = `${data.disk_usage.percent.toFixed(1)}% used`;
+                diskUsage2El.textContent = `${data.disk_usage_2.percent.toFixed(1)}% used`;
+            } catch (error) {
+                console.error('Error fetching system metrics:', error);
+                cpuUsageEl.textContent = 'Error';
+                memoryUsageEl.textContent = 'Error';
+                temperatureEl.textContent = 'Error';
+                diskUsageEl.textContent = 'Error';
+                diskUsage2El.textContent = 'Error';
             }
         }
+
+        // Fetch Docker containers and update the table
+        async function fetchDockerContainers() {
+            const containerListEl = document.getElementById('container-list');
+            containerListEl.innerHTML = '<tr><td colspan="5" class="text-center py-4">Loading...</td></tr>';
+
+            try {
+                const response = await fetch('/api/containers');
+                const containers = await response.json();
+
+                // Map container names to their ports
+                const webUIPorts = {
+                    transmission: 9091,
+                    jackett: 9117,
+                    sonarr: 8989,
+                    radarr: 7878,
+                    nzbget: 6789,
+                    jellyfin: 8096,
+                    get_iplayer: 1935,
+                    rtdclient: 6500,
+                };
+
+                containerListEl.innerHTML = '';
+
+                containers.forEach(container => {
+                    const statusClass = container.status === 'running' ? 'status-running' :
+                        container.status === 'stopped' ? 'status-stopped' : 'status-other';
+
+                    // Determine if the container has a Web UI
+                    const port = webUIPorts[container.name];
+                    const webUILink = port
+                        ? `<a href="http://${window.location.hostname}:${port}" target="_blank" class="text-blue-500 underline">Open</a>`
+                        : 'N/A';
+
+                    const row = `
+                        <tr>
+                            <td class="px-4 py-2">${container.name}</td>
+                            <td class="px-4 py-2">${container.image}</td>
+                            <td class="px-4 py-2">
+                                <span class="px-2 py-1 text-white rounded ${statusClass}">
+                                    ${container.status}
+                                </span>
+                            </td>
+                            <td class="px-4 py-2">${webUILink}</td>
+                            <td class="px-4 py-2">
+                                <button class="bg-green-500 hover:bg-green-700 text-white font-bold py-1 px-2 rounded button" onclick="controlContainer('${container.id}', 'start')">Start</button>
+                                <button class="bg-yellow-500 hover:bg-yellow-700 text-white font-bold py-1 px-2 rounded button" onclick="controlContainer('${container.id}', 'stop')">Stop</button>
+                                <button class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-1 px-2 rounded button" onclick="controlContainer('${container.id}', 'restart')">Restart</button>
+                            </td>
+                        </tr>
+                    `;
+                    containerListEl.innerHTML += row;
+                });
+            } catch (error) {
+                console.error('Error fetching Docker containers:', error);
+                containerListEl.innerHTML = '<tr><td colspan="5" class="text-center py-4">Error loading containers</td></tr>';
+            }
+        }
+
+        // Control Docker container (start/stop/restart)
+        async function controlContainer(id, action) {
+            try {
+                const response = await fetch(`/api/containers/${id}/${action}`, { method: 'POST' });
+                const result = await response.json();
+                console.log(result);
+                fetchDockerContainers(); // Refresh the container list
+            } catch (error) {
+                console.error(`Error controlling container ${id}:`, error);
+            }
+        }
+
+        // Function to send system actions
+        async function sendAction(action) {
+            try {
+                const response = await fetch(`http://wybie:5000/api/${action}`, { method: 'POST' });
+                const data = await response.json();
+                if (response.ok) {
+                    alert(`Successful ${action.charAt(0).toUpperCase() + action.slice(1)}: ${data.status}`);
+                } else {
+                    alert(`Error during ${action.charAt(0).toUpperCase() + action.slice(1)}: ${data.error || 'Unknown error'}`);
+                }
+            } catch (error) {
+                console.error(`Error sending ${action} action:`, error);
+                alert(`Error sending ${action.charAt(0).toUpperCase() + action.slice(1)}: Unable to reach the server.`);
+            }
+        }
+
+        // Initial data fetch
+        fetchSystemMetrics();
+        fetchDockerContainers();
+
+        // Periodic updates
+        setInterval(fetchSystemMetrics, 5000);
+        setInterval(fetchDockerContainers, 10000);
     </script>
 </body>
 </html>
