@@ -50,6 +50,16 @@ def get_system_stats():
         "percent": disk.percent,
     }
 
+    # Second Disk Usage
+    disk_path_2 = os.getenv('DISK_PATH_2', '/mnt/backup')
+    disk_2 = psutil.disk_usage(disk_path_2)
+    disk_usage_2 = {
+        "total": disk_2.total,
+        "used": disk_2.used,
+        "free": disk_2.free,
+        "percent": disk_2.percent,
+    }
+    
     # Temperature (specific to Raspberry Pi)
     if os.path.exists('/usr/bin/vcgencmd'):
         try:
@@ -72,6 +82,7 @@ def get_system_stats():
         "cpu_usage_percent": cpu_usage,
         "memory_usage": memory_usage,
         "disk_usage": disk_usage,
+        "disk_usage_2": disk_usage_2,
         "temperature_celsius": temperature,
         "network_usage": network_usage,
     }
