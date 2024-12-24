@@ -33,7 +33,7 @@
         >
             Login
         </button>
-        <p id="login-error" class="text-red-500 mt-4 hidden text-center">Invalid username or password.</p>
+        <p id="login-error" class="text-red-500 mt-4 hidden text-center"></p>
     </div>
 
     <script>
@@ -42,19 +42,20 @@
         const PASSWORD = "raspberry123";
 
         function validateLogin() {
-            const username = document.getElementById("username").value;
-            const password = document.getElementById("password").value;
+            const username = document.getElementById("username").value.trim();
+            const password = document.getElementById("password").value.trim();
             const errorEl = document.getElementById("login-error");
 
             if (username === USERNAME && password === PASSWORD) {
                 // Store login status in session storage
                 sessionStorage.setItem("loggedIn", "true");
-                // Redirect to the dashboard
-                window.location.href = "index.html";
+                // Redirect to the dashboard root
+                window.location.href = "/";
             } else {
                 // Show error message
+                errorEl.textContent = "Invalid username or password. Please try again.";
                 errorEl.classList.remove("hidden");
-                setTimeout(() => errorEl.classList.add("hidden"), 3000);
+                setTimeout(() => errorEl.classList.add("hidden"), 5000);
             }
         }
     </script>
