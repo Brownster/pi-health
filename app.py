@@ -149,7 +149,7 @@ def serve_edit():
 
 @app.route('/login.html')
 def serve_login():
-    return render_template('login.html')
+    return send_from_directory(app.static_folder, 'login.html')
 
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=8080)
