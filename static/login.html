@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Raspberry Pi Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-900 text-gray-200 font-sans flex items-center justify-center h-screen">
+    <div class="bg-gray-800 p-6 rounded shadow-md w-96">
+        <h1 class="text-2xl font-bold text-center mb-6">Raspberry Pi Login</h1>
+        <div class="mb-4">
+            <label for="username" class="block mb-2">Username</label>
+            <input
+                type="text"
+                id="username"
+                class="w-full p-2 bg-gray-700 text-white rounded"
+                placeholder="Enter your username"
+            />
+        </div>
+        <div class="mb-4">
+            <label for="password" class="block mb-2">Password</label>
+            <input
+                type="password"
+                id="password"
+                class="w-full p-2 bg-gray-700 text-white rounded"
+                placeholder="Enter your password"
+            />
+        </div>
+        <button
+            onclick="validateLogin()"
+            class="w-full bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
+        >
+            Login
+        </button>
+        <p id="login-error" class="text-red-500 mt-4 hidden text-center">Invalid username or password.</p>
+    </div>
+
+    <script>
+        // Simple credentials for demonstration
+        const USERNAME = "admin";
+        const PASSWORD = "raspberry123";
+
+        function validateLogin() {
+            const username = document.getElementById("username").value;
+            const password = document.getElementById("password").value;
+            const errorEl = document.getElementById("login-error");
+
+            if (username === USERNAME && password === PASSWORD) {
+                // Store login status in session storage
+                sessionStorage.setItem("loggedIn", "true");
+                // Redirect to the dashboard
+                window.location.href = "index.html";
+            } else {
+                // Show error message
+                errorEl.classList.remove("hidden");
+                setTimeout(() => errorEl.classList.add("hidden"), 3000);
+            }
+        }
+    </script>
+</body>
+</html>
