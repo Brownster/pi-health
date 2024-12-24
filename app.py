@@ -147,7 +147,9 @@ def serve_edit():
     """Serve the edit HTML file."""
     return send_from_directory(app.static_folder, 'edit.html')
 
-
+@app.route('/login.html')
+def serve_login():
+    return render_template('login.html')
 
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=8080)
