@@ -1,6 +1,10 @@
 # pi-health
 
-![image](https://github.com/user-attachments/assets/80bf8ed1-ad65-4255-85be-8d0ef8b20ab9)
+![image](https://github.com/user-attachments/assets/ea6db04f-52dd-4f5a-8576-731381744f56)
+
+![image](https://github.com/user-attachments/assets/baa2c074-9298-4208-868c-b178bcee7a1d)
+
+![image](https://github.com/user-attachments/assets/b0c4cb0e-308e-4ec2-8715-6a03082b99d5)
 
 
 RUN
