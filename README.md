@@ -1,4 +1,8 @@
 # pi-health
+
+![image](https://github.com/user-attachments/assets/80bf8ed1-ad65-4255-85be-8d0ef8b20ab9)
+
+
 RUN
 docker run -d \
 -p 8080:8080 \
