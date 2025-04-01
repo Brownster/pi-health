@@ -4,9 +4,18 @@ import os
 import docker
 from compose_editor import compose_editor
 
-# Initialize Flask and Docker client
+# Initialize Flask
 app = Flask(__name__, static_folder='static')
-docker_client = docker.from_env()
+
+# Initialize Docker client with graceful fallback
+try:
+    docker_client = docker.from_env()
+    docker_available = True
+except Exception as e:
+    print(f"Warning: Could not connect to Docker: {e}")
+    print("Docker functionality will be disabled")
+    docker_client = None
+    docker_available = False
 
 # Register the compose editor blueprint
 app.register_blueprint(compose_editor)
@@ -90,20 +99,44 @@ def get_system_stats():
 
 def list_containers():
     """List all Docker containers with their status."""
-    containers = docker_client.containers.list(all=True)
-    return [
-        {
-            "id": container.id[:12],
-            "name": container.name,
-            "status": container.status,
-            "image": container.image.tags[0] if container.image.tags else "unknown",
-        }
-        for container in containers
-    ]
+    if not docker_available:
+        return [
+            {
+                "id": "docker-not-available",
+                "name": "Docker Not Available",
+                "status": "unavailable",
+                "image": "N/A",
+            }
+        ]
+    
+    try:
+        containers = docker_client.containers.list(all=True)
+        return [
+            {
+                "id": container.id[:12],
+                "name": container.name,
+                "status": container.status,
+                "image": container.image.tags[0] if container.image.tags else "unknown",
+            }
+            for container in containers
+        ]
+    except Exception as e:
+        print(f"Error listing containers: {e}")
+        return [
+            {
+                "id": "error-listing",
+                "name": "Error Listing Containers",
+                "status": "error",
+                "image": str(e)[:30] + "..." if len(str(e)) > 30 else str(e),
+            }
+        ]
 
 
 def control_container(container_id, action):
     """Start, stop, or restart a container by ID."""
+    if not docker_available:
+        return {"error": "Docker is not available"}
+    
     try:
         container = docker_client.containers.get(container_id)
         if action == "start":
@@ -119,10 +152,53 @@ def control_container(container_id, action):
         return {"error": str(e)}
 
 
+def system_action(action):
+    """Perform system actions like shutdown or reboot."""
+    try:
+        if action == "shutdown":
+            # Use subprocess to run shutdown command
+            import subprocess
+            subprocess.Popen(['sudo', 'shutdown', '-h', 'now'])
+            return {"status": "Shutdown initiated"}
+        elif action == "reboot":
+            # Use subprocess to run reboot command
+            import subprocess
+            subprocess.Popen(['sudo', 'reboot'])
+            return {"status": "Reboot initiated"}
+        else:
+            return {"error": "Invalid system action"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @app.route('/')
 def serve_frontend():
-    """Serve the frontend HTML file."""
+    """Serve the main landing page."""
     return send_from_directory(app.static_folder, 'index.html')
+
+
+@app.route('/system.html')
+def serve_system():
+    """Serve the system health page."""
+    return send_from_directory(app.static_folder, 'system.html')
+
+
+@app.route('/containers.html')
+def serve_containers():
+    """Serve the containers management page."""
+    return send_from_directory(app.static_folder, 'containers.html')
+
+
+@app.route('/edit.html')
+def serve_edit():
+    """Serve the edit configuration page."""
+    return send_from_directory(app.static_folder, 'edit.html')
+
+
+@app.route('/login.html')
+def serve_login():
+    """Serve the login page."""
+    return send_from_directory(app.static_folder, 'login.html')
 
 
 @app.route('/api/stats', methods=['GET'])
@@ -142,14 +218,17 @@ def api_control_container(container_id, action):
     """API endpoint to control a Docker container."""
     return jsonify(control_container(container_id, action))
 
-@app.route('/edit.html')
-def serve_edit():
-    """Serve the edit HTML file."""
-    return send_from_directory(app.static_folder, 'edit.html')
 
-@app.route('/login.html')
-def serve_login():
-    return send_from_directory(app.static_folder, 'login.html')
+@app.route('/api/shutdown', methods=['POST'])
+def api_shutdown():
+    """API endpoint to shutdown the system."""
+    return jsonify(system_action("shutdown"))
+
+
+@app.route('/api/reboot', methods=['POST'])
+def api_reboot():
+    """API endpoint to reboot the system."""
+    return jsonify(system_action("reboot"))
 
 if __name__ == '__main__':
-    app.run(host="0.0.0.0", port=8080)
+    app.run(host="0.0.0.0", port=8070)

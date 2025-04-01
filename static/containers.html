@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script>
+        // Redirect to login if not logged in
+        if (!sessionStorage.getItem("loggedIn")) {
+            window.location.href = "/login.html";
+        }
+    </script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Containers - Pi-Health Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        .status-running { background-color: #38a169; }
+        .status-stopped { background-color: #e53e3e; }
+        .status-other { background-color: #dd6b20; }
+        .button:active { transform: scale(0.95); } /* Add feedback on button click */
+        
+        /* Animation for container actions */
+        .animate-pulse {
+            animation: pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.5;
+            }
+        }
+        
+        /* Notification styles */
+        .notification {
+            transition: opacity 0.3s, height 0.3s, margin 0.3s, padding 0.3s;
+            overflow: hidden;
+        }
+        
+        /* Container row hover effect */
+        tr:hover:not(.loading-row) {
+            background-color: rgba(255, 255, 255, 0.05);
+        }
+        
+        /* Fade transition for container status changes */
+        .status-transition {
+            transition: background-color 0.5s ease;
+        }
+        
+        /* Disable text selection on buttons */
+        button {
+            user-select: none;
+        }
+        
+        /* Loading spinner */
+        .loading-spinner {
+            display: inline-block;
+            width: 1rem;
+            height: 1rem;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s ease-in-out infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-200 font-sans min-h-screen">
+    <header class="bg-gradient-to-r from-blue-700 to-indigo-800 shadow-lg">
+        <div class="container mx-auto p-4">
+            <h1 class="text-3xl font-bold text-center text-white">Pi-Health Dashboard</h1>
+        </div>
+    </header>
+
+    <!-- Navigation bar -->
+    <nav class="bg-gray-800 shadow-md">
+        <div class="container mx-auto px-4">
+            <div class="flex items-center justify-between h-16">
+                <div class="flex space-x-4">
+                    <a href="/" class="px-3 py-2 rounded-md text-gray-300 hover:bg-gray-700 hover:text-white font-medium">Home</a>
+                    <a href="/system.html" class="px-3 py-2 rounded-md text-gray-300 hover:bg-gray-700 hover:text-white font-medium">System Health</a>
+                    <a href="/containers.html" class="px-3 py-2 rounded-md text-white bg-blue-600 font-medium">Containers</a>
+                    <a href="/edit.html" class="px-3 py-2 rounded-md text-gray-300 hover:bg-gray-700 hover:text-white font-medium">Edit Config</a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Notification area - fixed position at the top right -->
+    <div id="notification-area" class="fixed top-4 right-4 z-50 w-72 flex flex-col items-end"></div>
+
+    <!-- Main content -->
+    <main class="container mx-auto p-6">
+        <div class="mb-6 flex justify-between items-center">
+            <h2 class="text-2xl font-semibold">Docker Containers</h2>
+            <span id="last-updated" class="text-sm text-gray-400">Last updated: Never</span>
+        </div>
+
+        <!-- Filter controls -->
+        <div class="mb-6 flex flex-wrap gap-4">
+            <button id="filter-all" class="px-4 py-2 rounded-md bg-blue-600 text-white font-medium">
+                All
+            </button>
+            <button id="filter-running" class="px-4 py-2 rounded-md bg-gray-700 hover:bg-gray-600 text-gray-200 font-medium">
+                Running
+            </button>
+            <button id="filter-stopped" class="px-4 py-2 rounded-md bg-gray-700 hover:bg-gray-600 text-gray-200 font-medium">
+                Stopped
+            </button>
+            <div class="flex-grow"></div>
+            <button id="refresh-button" class="flex items-center px-4 py-2 rounded-md bg-gray-700 hover:bg-gray-600 text-gray-200 font-medium">
+                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                </svg>
+                Refresh
+            </button>
+        </div>
+
+        <!-- Containers table -->
+        <div class="bg-gray-800 rounded-lg shadow-lg overflow-hidden">
+            <table class="min-w-full divide-y divide-gray-700">
+                <thead class="bg-gray-700">
+                    <tr>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
+                            Container Name
+                        </th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
+                            Image
+                        </th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
+                            Status
+                        </th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
+                            Web UI
+                        </th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
+                            Actions
+                        </th>
+                    </tr>
+                </thead>
+                <tbody id="container-list" class="bg-gray-800 divide-y divide-gray-700">
+                    <tr>
+                        <td colspan="5" class="text-center py-4">Loading...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </main>
+
+    <script>
+        // Format timestamp
+        function formatDateTime(date) {
+            const hours = String(date.getHours()).padStart(2, '0');
+            const minutes = String(date.getMinutes()).padStart(2, '0');
+            const seconds = String(date.getSeconds()).padStart(2, '0');
+            return `${hours}:${minutes}:${seconds}`;
+        }
+
+        // Show notification function
+        function showNotification(message, type = 'info') {
+            const notificationArea = document.getElementById('notification-area');
+            const notification = document.createElement('div');
+            notification.className = `notification ${type} bg-opacity-90 p-3 mb-2 rounded shadow-lg transform transition-all duration-500 opacity-0`;
+            
+            // Set background color based on type
+            if (type === 'success') notification.classList.add('bg-green-600');
+            else if (type === 'error') notification.classList.add('bg-red-600');
+            else notification.classList.add('bg-blue-600');
+            
+            notification.innerHTML = message;
+            notificationArea.appendChild(notification);
+            
+            // Fade in
+            setTimeout(() => notification.classList.replace('opacity-0', 'opacity-100'), 10);
+            
+            // Remove after 3 seconds
+            setTimeout(() => {
+                notification.classList.replace('opacity-100', 'opacity-0');
+                notification.style.height = notification.offsetHeight + 'px';
+                notification.style.marginBottom = '0.5rem';
+                
+                setTimeout(() => {
+                    notification.style.height = '0';
+                    notification.style.marginBottom = '0';
+                    notification.style.padding = '0';
+                    
+                    setTimeout(() => {
+                        notification.remove();
+                    }, 300);
+                }, 300);
+            }, 3000);
+        }
+
+        // Filter state
+        let currentFilter = 'all';
+
+        // Store the container list
+        let containerList = [];
+
+        // Map container names to their ports
+        const webUIPorts = {
+            transmission: 9091,
+            jackett: 9117,
+            sonarr: 8989,
+            radarr: 7878,
+            nzbget: 6789,
+            jellyfin: 8096,
+            get_iplayer: 1935,
+            rtdclient: 6500,
+            'airsonic-advanced': 4040,
+            rdtclient: 6500,
+            lidarr: 8686,
+            audiobookshelf: 13378,
+        };
+
+        // Fetch Docker containers and update the table
+        async function fetchDockerContainers() {
+            const containerListEl = document.getElementById('container-list');
+            const lastUpdatedEl = document.getElementById('last-updated');
+            containerListEl.innerHTML = '<tr><td colspan="5" class="text-center py-4">Loading...</td></tr>';
+
+            try {
+                const response = await fetch('/api/containers');
+                containerList = await response.json();
+                
+                // Update last updated timestamp
+                const now = new Date();
+                lastUpdatedEl.textContent = `Last updated: ${formatDateTime(now)}`;
+                
+                // Render the filtered containers
+                renderContainers();
+            } catch (error) {
+                console.error('Error fetching Docker containers:', error);
+                containerListEl.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-red-500">Error loading containers</td></tr>';
+                showNotification('Error fetching containers', 'error');
+            }
+        }
+
+        // Render containers based on filter
+        function renderContainers() {
+            const containerListEl = document.getElementById('container-list');
+            containerListEl.innerHTML = '';
+            
+            // Filter containers based on current filter
+            const filteredContainers = containerList.filter(container => {
+                if (currentFilter === 'all') return true;
+                return container.status === currentFilter;
+            });
+            
+            if (filteredContainers.length === 0) {
+                containerListEl.innerHTML = `<tr><td colspan="5" class="text-center py-4">No ${currentFilter} containers found</td></tr>`;
+                return;
+            }
+            
+            // Special case for when Docker is not available
+            if (filteredContainers.length === 1 && 
+                (filteredContainers[0].status === 'unavailable' || filteredContainers[0].status === 'error')) {
+                const row = `
+                    <tr data-container-id="${filteredContainers[0].id}" data-container-name="${filteredContainers[0].name}">
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">${filteredContainers[0].name}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm">${filteredContainers[0].image}</td>
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            <span class="px-2 py-1 text-white rounded status-other">
+                                ${filteredContainers[0].status}
+                            </span>
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm">N/A</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm">
+                            <button class="bg-gray-500 text-white font-bold py-1 px-2 rounded opacity-50 cursor-not-allowed" disabled>Start</button>
+                            <button class="bg-gray-500 text-white font-bold py-1 px-2 rounded opacity-50 cursor-not-allowed" disabled>Stop</button>
+                            <button class="bg-gray-500 text-white font-bold py-1 px-2 rounded opacity-50 cursor-not-allowed" disabled>Restart</button>
+                        </td>
+                    </tr>
+                `;
+                containerListEl.innerHTML = row;
+                return;
+            }
+            
+            // Create rows for each container
+            filteredContainers.forEach(container => {
+                const statusClass = container.status === 'running' ? 'status-running' :
+                    container.status === 'stopped' ? 'status-stopped' : 'status-other';
+                
+                // Determine if the container has a Web UI
+                const port = webUIPorts[container.name];
+                const webUILink = port
+                    ? `<a href="http://${window.location.hostname}:${port}" target="_blank" class="text-blue-500 hover:text-blue-400 underline">Open</a>`
+                    : 'N/A';
+                
+                const row = `
+                    <tr data-container-id="${container.id}" data-container-name="${container.name}">
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">${container.name}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-400">${container.image}</td>
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            <span class="px-2 py-1 text-white rounded ${statusClass}">
+                                ${container.status}
+                            </span>
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm">${webUILink}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm">
+                            <button class="bg-green-600 hover:bg-green-700 text-white font-bold py-1 px-3 rounded button ${container.status === 'running' ? 'opacity-50 cursor-not-allowed' : ''}" 
+                                    onclick="controlContainer('${container.id}', 'start')" 
+                                    ${container.status === 'running' ? 'disabled' : ''}>Start</button>
+                            <button class="bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-1 px-3 rounded button ${container.status === 'stopped' ? 'opacity-50 cursor-not-allowed' : ''}" 
+                                    onclick="controlContainer('${container.id}', 'stop')"
+                                    ${container.status === 'stopped' ? 'disabled' : ''}>Stop</button>
+                            <button class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-1 px-3 rounded button" 
+                                    onclick="controlContainer('${container.id}', 'restart')">Restart</button>
+                        </td>
+                    </tr>
+                `;
+                containerListEl.innerHTML += row;
+            });
+        }
+
+        // Control Docker container (start/stop/restart)
+        async function controlContainer(id, action) {
+            try {
+                // Find the container row and add loading indicator
+                const containerRow = document.querySelector(`tr[data-container-id="${id}"]`);
+                if (containerRow) {
+                    const statusCell = containerRow.querySelector('td:nth-child(3)');
+                    const originalStatus = statusCell.innerHTML;
+                    statusCell.innerHTML = '<div class="animate-pulse">Processing...</div>';
+                    
+                    // Disable action buttons for this container while processing
+                    const buttons = containerRow.querySelectorAll('button');
+                    buttons.forEach(btn => btn.disabled = true);
+                    
+                    const response = await fetch(`/api/containers/${id}/${action}`, { method: 'POST' });
+                    const result = await response.json();
+                    
+                    if (result.error) {
+                        showNotification(`Error: ${result.error}`, 'error');
+                        // Reset the status cell
+                        statusCell.innerHTML = originalStatus;
+                        buttons.forEach(btn => btn.disabled = false);
+                    } else {
+                        // Show success notification
+                        const containerName = containerRow.getAttribute('data-container-name');
+                        showNotification(`${containerName} ${action}ed successfully`, 'success');
+                        
+                        // Update just this container's status without refreshing the entire list
+                        updateContainerStatus(id);
+                    }
+                } else {
+                    // Fallback if container row not found
+                    const response = await fetch(`/api/containers/${id}/${action}`, { method: 'POST' });
+                    const result = await response.json();
+                    
+                    if (result.error) {
+                        showNotification(`Error: ${result.error}`, 'error');
+                    } else {
+                        showNotification(`Container ${action}ed successfully`, 'success');
+                        fetchDockerContainers();
+                    }
+                }
+            } catch (error) {
+                console.error(`Error controlling container ${id}:`, error);
+                showNotification(`Error ${action}ing container: ${error.message}`, 'error');
+            }
+        }
+        
+        // Update a single container's status
+        async function updateContainerStatus(id) {
+            try {
+                const response = await fetch('/api/containers');
+                const containers = await response.json();
+                const container = containers.find(c => c.id === id);
+                
+                if (container && document.querySelector(`tr[data-container-id="${id}"]`)) {
+                    const row = document.querySelector(`tr[data-container-id="${id}"]`);
+                    const statusCell = row.querySelector('td:nth-child(3)');
+                    
+                    const statusClass = container.status === 'running' ? 'status-running' :
+                        container.status === 'stopped' ? 'status-stopped' : 'status-other';
+                    
+                    statusCell.innerHTML = `
+                        <span class="px-2 py-1 text-white rounded ${statusClass}">
+                            ${container.status}
+                        </span>
+                    `;
+                    
+                    // Update the container in our cached list
+                    for (let i = 0; i < containerList.length; i++) {
+                        if (containerList[i].id === id) {
+                            containerList[i] = container;
+                            break;
+                        }
+                    }
+                    
+                    // Re-render if filter might exclude this container now
+                    if (currentFilter !== 'all' && container.status !== currentFilter) {
+                        renderContainers();
+                    } else {
+                        // Just update button states
+                        const startButton = row.querySelector('button:nth-child(1)');
+                        const stopButton = row.querySelector('button:nth-child(2)');
+                        const restartButton = row.querySelector('button:nth-child(3)');
+                        
+                        if (startButton) {
+                            startButton.disabled = container.status === 'running';
+                            startButton.classList.toggle('opacity-50', container.status === 'running');
+                            startButton.classList.toggle('cursor-not-allowed', container.status === 'running');
+                        }
+                        
+                        if (stopButton) {
+                            stopButton.disabled = container.status === 'stopped';
+                            stopButton.classList.toggle('opacity-50', container.status === 'stopped');
+                            stopButton.classList.toggle('cursor-not-allowed', container.status === 'stopped');
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error(`Error updating container status:`, error);
+                showNotification('Error updating container status', 'error');
+            }
+        }
+
+        // Set up filter buttons
+        document.getElementById('filter-all').addEventListener('click', function() {
+            setFilter('all', this);
+        });
+        
+        document.getElementById('filter-running').addEventListener('click', function() {
+            setFilter('running', this);
+        });
+        
+        document.getElementById('filter-stopped').addEventListener('click', function() {
+            setFilter('stopped', this);
+        });
+        
+        // Set filter and update UI
+        function setFilter(filter, button) {
+            if (currentFilter === filter) return;
+            
+            currentFilter = filter;
+            
+            // Update button styles
+            document.querySelectorAll('#filter-all, #filter-running, #filter-stopped').forEach(btn => {
+                btn.classList.remove('bg-blue-600');
+                btn.classList.add('bg-gray-700', 'hover:bg-gray-600');
+            });
+            
+            button.classList.remove('bg-gray-700', 'hover:bg-gray-600');
+            button.classList.add('bg-blue-600');
+            
+            // Re-render containers with the new filter
+            renderContainers();
+        }
+        
+        // Set up refresh button
+        document.getElementById('refresh-button').addEventListener('click', function() {
+            this.classList.add('animate-pulse');
+            fetchDockerContainers().then(() => {
+                this.classList.remove('animate-pulse');
+            });
+        });
+        
+        // Initial data fetch
+        fetchDockerContainers();
+        
+        // Periodic updates
+        const refreshInterval = setInterval(fetchDockerContainers, 10000);
+    </script>
+</body>
+</html>

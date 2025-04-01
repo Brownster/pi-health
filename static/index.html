@@ -4,220 +4,232 @@
     <script>
         // Redirect to login if not logged in
         if (!sessionStorage.getItem("loggedIn")) {
-            window.location.href = "login.html";
+            window.location.href = "/login.html";
         }
     </script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Wybourn's Health Dashboard</title>
+    <title>Pi-Health Dashboard</title>
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <style>
         .status-running { background-color: #38a169; }
         .status-stopped { background-color: #e53e3e; }
         .status-other { background-color: #dd6b20; }
-        .button:active { transform: scale(0.95); } /* Add feedback on button click */
+        .button:active { transform: scale(0.95); }
+        
+        /* Animation for actions */
+        .animate-pulse {
+            animation: pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        /* Card hover effect */
+        .service-card {
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        
+        .service-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.4);
+        }
     </style>
 </head>
-<body class="bg-gray-900 text-gray-200 font-sans">
-    <header class="bg-gray-800 p-4 shadow-md">
-        <h1 class="text-2xl font-bold text-center">Wybie's Health Dashboard</h1>
+<body class="bg-gray-900 text-gray-200 font-sans min-h-screen">
+    <header class="bg-gradient-to-r from-blue-700 to-indigo-800 shadow-lg">
+        <div class="container mx-auto p-4">
+            <h1 class="text-3xl font-bold text-center text-white">Pi-Health Dashboard</h1>
+        </div>
     </header>
 
-    <main class="p-4">
-        <!-- System Metrics Section -->
-        <section id="system-stats" class="mb-8">
-            <h2 class="text-xl font-semibold mb-4">System Metrics</h2>
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                <div class="bg-gray-700 p-4 rounded shadow">
-                    <h3 class="text-lg font-semibold">CPU Usage</h3>
-                    <p id="cpu-usage" class="text-xl">Loading...</p>
-                </div>
-                <div class="bg-gray-700 p-4 rounded shadow">
-                    <h3 class="text-lg font-semibold">Memory Usage</h3>
-                    <p id="memory-usage" class="text-xl">Loading...</p>
-                </div>
-                <div class="bg-gray-700 p-4 rounded shadow">
-                    <h3 class="text-lg font-semibold">Temperature</h3>
-                    <p id="temperature" class="text-xl">Loading...</p>
-                </div>
-                <div class="bg-gray-700 p-4 rounded shadow">
-                    <h3 class="text-lg font-semibold">Disk Usage (/mnt/storage)</h3>
-                    <p id="disk-usage" class="text-xl">Loading...</p>
-                </div>
-                <div class="bg-gray-700 p-4 rounded shadow">
-                    <h3 class="text-lg font-semibold">Disk Usage (/mnt/downloads)</h3>
-                    <p id="disk-usage-2" class="text-xl">Loading...</p>
+    <!-- Navigation bar -->
+    <nav class="bg-gray-800 shadow-md">
+        <div class="container mx-auto px-4">
+            <div class="flex items-center justify-between h-16">
+                <div class="flex space-x-4">
+                    <a href="/" class="px-3 py-2 rounded-md text-white bg-blue-600 font-medium">Home</a>
+                    <a href="/system.html" class="px-3 py-2 rounded-md text-gray-300 hover:bg-gray-700 hover:text-white font-medium">System Health</a>
+                    <a href="/containers.html" class="px-3 py-2 rounded-md text-gray-300 hover:bg-gray-700 hover:text-white font-medium">Containers</a>
+                    <a href="/edit.html" class="px-3 py-2 rounded-md text-gray-300 hover:bg-gray-700 hover:text-white font-medium">Edit Config</a>
                 </div>
             </div>
-        </section>
+        </div>
+    </nav>
 
-        <!-- Docker Containers Section -->
-        <section id="docker-containers">
-            <h2 class="text-xl font-semibold mb-4">Docker Containers</h2>
-            <table class="table-auto w-full bg-gray-800 rounded shadow">
-                <thead>
-                    <tr>
-                        <th class="px-4 py-2">Container Name</th>
-                        <th class="px-4 py-2">Image</th>
-                        <th class="px-4 py-2">Status</th>
-                        <th class="px-4 py-2">Web UI</th>
-                        <th class="px-4 py-2">Actions</th>
-                    </tr>
-                </thead>
-                <tbody id="container-list">
-                    <tr>
-                        <td colspan="5" class="text-center py-4">Loading...</td>
-                    </tr>
-                </tbody>
-            </table>
-        </section>
-
-        <!-- Actions Section -->
-        <section id="actions">
-            <h2 class="text-xl font-semibold mb-4">System Actions</h2>
-            <div class="flex space-x-4">
-                <button
-                    class="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded"
-                    onclick="sendAction('shutdown')">
-                    Shutdown
-                </button>
-                <button
-                    class="bg-yellow-500 hover:bg-yellow-700 text-white font-bold py-2 px-4 rounded"
-                    onclick="sendAction('reboot')">
-                    Reboot
-                </button>
+    <!-- Main content -->
+    <main class="container mx-auto p-6">
+        <h2 class="text-2xl font-semibold mb-6 text-center">Docker Web Services</h2>
+        
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6" id="service-grid">
+            <!-- Service cards will be loaded here -->
+            <div class="col-span-full text-center py-10">
+                <div class="inline-block animate-pulse">
+                    <svg class="w-10 h-10 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                    </svg>
+                </div>
+                <p class="mt-2 text-xl">Loading services...</p>
             </div>
-        </section>
+        </div>
     </main>
 
     <script>
-        // Fetch system metrics and update the dashboard
-        async function fetchSystemMetrics() {
-            const cpuUsageEl = document.getElementById('cpu-usage');
-            const memoryUsageEl = document.getElementById('memory-usage');
-            const temperatureEl = document.getElementById('temperature');
-            const diskUsageEl = document.getElementById('disk-usage');
-            const diskUsage2El = document.getElementById('disk-usage-2');
+        // Map container names to their ports and icons
+        const webUIPorts = {
+            transmission: { port: 9091, icon: "transfer", name: "Transmission" },
+            jackett: { port: 9117, icon: "search", name: "Jackett" },
+            sonarr: { port: 8989, icon: "tv", name: "Sonarr" },
+            radarr: { port: 7878, icon: "film", name: "Radarr" },
+            nzbget: { port: 6789, icon: "download", name: "NZBGet" },
+            jellyfin: { port: 8096, icon: "collection", name: "Jellyfin" },
+            get_iplayer: { port: 1935, icon: "play", name: "Get iPlayer" },
+            rtdclient: { port: 6500, icon: "cloud-download", name: "RTD Client" },
+            'airsonic-advanced': { port: 4040, icon: "music", name: "Airsonic" },
+            rdtclient: { port: 6500, icon: "cloud-download", name: "RDT Client" },
+            lidarr: { port: 8686, icon: "music", name: "Lidarr" },
+            audiobookshelf: { port: 13378, icon: "book", name: "Audiobookshelf" },
+        };
 
-            try {
-                const response = await fetch('/api/stats');
-                const data = await response.json();
+        // Icon mapping
+        const iconSVGs = {
+            transfer: '<svg class="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"></path></svg>',
+            search: '<svg class="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>',
+            tv: '<svg class="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg>',
+            film: '<svg class="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z"></path></svg>',
+            download: '<svg class="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>',
+            collection: '<svg class="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>',
+            play: '<svg class="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>',
+            'cloud-download': '<svg class="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10"></path></svg>',
+            music: '<svg class="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"></path></svg>',
+            book: '<svg class="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path></svg>',
+            default: '<svg class="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"></path></svg>'
+        };
 
-                cpuUsageEl.textContent = `${data.cpu_usage_percent.toFixed(2)}%`;
-                memoryUsageEl.textContent = `${data.memory_usage.percent.toFixed(1)}%`;
-                temperatureEl.textContent = data.temperature_celsius
-                    ? `${data.temperature_celsius.toFixed(1)} °C`
-                    : '-- °C';
-                diskUsageEl.textContent = `${data.disk_usage.percent.toFixed(1)}% used`;
-                diskUsage2El.textContent = `${data.disk_usage_2.percent.toFixed(1)}% used`;
-            } catch (error) {
-                console.error('Error fetching system metrics:', error);
-                cpuUsageEl.textContent = 'Error';
-                memoryUsageEl.textContent = 'Error';
-                temperatureEl.textContent = 'Error';
-                diskUsageEl.textContent = 'Error';
-                diskUsage2El.textContent = 'Error';
+        // Get icon for container
+        function getIcon(containerName) {
+            const service = webUIPorts[containerName];
+            if (service && service.icon && iconSVGs[service.icon]) {
+                return iconSVGs[service.icon];
             }
+            return iconSVGs.default;
         }
 
-        // Fetch Docker containers and update the table
-        async function fetchDockerContainers() {
-            const containerListEl = document.getElementById('container-list');
-            containerListEl.innerHTML = '<tr><td colspan="5" class="text-center py-4">Loading...</td></tr>';
+        // Get friendly name for container
+        function getFriendlyName(containerName) {
+            const service = webUIPorts[containerName];
+            if (service && service.name) {
+                return service.name;
+            }
+            // Convert container_name or container-name to Title Case
+            return containerName
+                .replace(/[-_]/g, ' ')
+                .replace(/\w\S*/g, (w) => (w.replace(/^\w/, (c) => c.toUpperCase())));
+        }
 
+        // Get background color gradient based on container name
+        function getBackgroundGradient(containerName) {
+            // Generate a pseudorandom but consistent color based on the container name
+            let hash = 0;
+            for (let i = 0; i < containerName.length; i++) {
+                hash = containerName.charCodeAt(i) + ((hash << 5) - hash);
+            }
+            
+            // Use modulo to get one of several predefined gradients
+            const gradients = [
+                'from-blue-600 to-indigo-700',
+                'from-purple-600 to-indigo-700',
+                'from-green-600 to-teal-700',
+                'from-red-600 to-pink-700',
+                'from-yellow-600 to-orange-700',
+                'from-pink-600 to-purple-700',
+                'from-indigo-600 to-purple-700',
+                'from-teal-600 to-green-700'
+            ];
+            
+            return gradients[Math.abs(hash) % gradients.length];
+        }
+
+        // Fetch Docker containers and create service cards
+        async function fetchDockerWebServices() {
+            const serviceGrid = document.getElementById('service-grid');
+            
             try {
                 const response = await fetch('/api/containers');
                 const containers = await response.json();
-
-                // Map container names to their ports
-                const webUIPorts = {
-                    transmission: 9091,
-                    jackett: 9117,
-                    sonarr: 8989,
-                    radarr: 7878,
-                    nzbget: 6789,
-                    jellyfin: 8096,
-                    get_iplayer: 1935,
-                    rtdclient: 6500,
-                    'airsonic-advanced': 4040,
-                    rdtclient: 6500,
-                    lidarr: 8686,
-                    audiobookshelf: 13378,
-                    
-                };
-
-                containerListEl.innerHTML = '';
-
-                containers.forEach(container => {
-                    const statusClass = container.status === 'running' ? 'status-running' :
-                        container.status === 'stopped' ? 'status-stopped' : 'status-other';
-
-                    // Determine if the container has a Web UI
-                    const port = webUIPorts[container.name];
-                    const webUILink = port
-                        ? `<a href="http://${window.location.hostname}:${port}" target="_blank" class="text-blue-500 underline">Open</a>`
-                        : 'N/A';
-
-                    const row = `
-                        <tr>
-                            <td class="px-4 py-2">${container.name}</td>
-                            <td class="px-4 py-2">${container.image}</td>
-                            <td class="px-4 py-2">
-                                <span class="px-2 py-1 text-white rounded ${statusClass}">
-                                    ${container.status}
-                                </span>
-                            </td>
-                            <td class="px-4 py-2">${webUILink}</td>
-                            <td class="px-4 py-2">
-                                <button class="bg-green-500 hover:bg-green-700 text-white font-bold py-1 px-2 rounded button" onclick="controlContainer('${container.id}', 'start')">Start</button>
-                                <button class="bg-yellow-500 hover:bg-yellow-700 text-white font-bold py-1 px-2 rounded button" onclick="controlContainer('${container.id}', 'stop')">Stop</button>
-                                <button class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-1 px-2 rounded button" onclick="controlContainer('${container.id}', 'restart')">Restart</button>
-                            </td>
-                        </tr>
+                
+                // Clear loading message
+                serviceGrid.innerHTML = '';
+                
+                // Filter to only running containers with web UIs
+                const webServices = containers.filter(container => 
+                    container.status === 'running' && 
+                    webUIPorts[container.name]
+                );
+                
+                if (webServices.length === 0) {
+                    serviceGrid.innerHTML = `
+                        <div class="col-span-full text-center py-10">
+                            <svg class="w-16 h-16 mx-auto text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                            <p class="mt-4 text-xl">No running web services found</p>
+                            <a href="/containers.html" class="mt-4 inline-block bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">
+                                Manage Containers
+                            </a>
+                        </div>
                     `;
-                    containerListEl.innerHTML += row;
-                });
-            } catch (error) {
-                console.error('Error fetching Docker containers:', error);
-                containerListEl.innerHTML = '<tr><td colspan="5" class="text-center py-4">Error loading containers</td></tr>';
-            }
-        }
-
-        // Control Docker container (start/stop/restart)
-        async function controlContainer(id, action) {
-            try {
-                const response = await fetch(`/api/containers/${id}/${action}`, { method: 'POST' });
-                const result = await response.json();
-                console.log(result);
-                fetchDockerContainers(); // Refresh the container list
-            } catch (error) {
-                console.error(`Error controlling container ${id}:`, error);
-            }
-        }
-
-        // Function to send system actions
-        async function sendAction(action) {
-            try {
-                const response = await fetch(`http://wybie:5000/api/${action}`, { method: 'POST' });
-                const data = await response.json();
-                if (response.ok) {
-                    alert(`Successful ${action.charAt(0).toUpperCase() + action.slice(1)}: ${data.status}`);
-                } else {
-                    alert(`Error during ${action.charAt(0).toUpperCase() + action.slice(1)}: ${data.error || 'Unknown error'}`);
+                    return;
                 }
+                
+                // Create a card for each web service
+                webServices.forEach(container => {
+                    const port = webUIPorts[container.name].port;
+                    const icon = getIcon(container.name);
+                    const friendlyName = getFriendlyName(container.name);
+                    const gradient = getBackgroundGradient(container.name);
+                    
+                    const card = document.createElement('div');
+                    card.className = `service-card bg-gray-800 rounded-lg shadow-lg overflow-hidden`;
+                    card.innerHTML = `
+                        <div class="bg-gradient-to-br ${gradient} p-6 flex justify-center">
+                            <div class="text-white">
+                                ${icon}
+                            </div>
+                        </div>
+                        <div class="p-4 text-center">
+                            <h3 class="text-xl font-semibold mb-2">${friendlyName}</h3>
+                            <a href="http://${window.location.hostname}:${port}" target="_blank" 
+                               class="inline-block bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition duration-200">
+                                Open Service
+                            </a>
+                        </div>
+                    `;
+                    
+                    serviceGrid.appendChild(card);
+                });
+                
             } catch (error) {
-                console.error(`Error sending ${action} action:`, error);
-                alert(`Error sending ${action.charAt(0).toUpperCase() + action.slice(1)}: Unable to reach the server.`);
+                console.error('Error fetching Docker services:', error);
+                serviceGrid.innerHTML = `
+                    <div class="col-span-full text-center py-10">
+                        <svg class="w-16 h-16 mx-auto text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                        <p class="mt-4 text-xl">Error loading services</p>
+                        <p class="text-gray-400">${error.message}</p>
+                    </div>
+                `;
             }
         }
-
-        // Initial data fetch
-        fetchSystemMetrics();
-        fetchDockerContainers();
-
-        // Periodic updates
-        setInterval(fetchSystemMetrics, 5000);
-        setInterval(fetchDockerContainers, 10000);
+        
+        // Initial fetch
+        fetchDockerWebServices();
+        
+        // Refresh every 30 seconds
+        setInterval(fetchDockerWebServices, 30000);
     </script>
 </body>
 </html>

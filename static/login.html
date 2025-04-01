@@ -3,37 +3,97 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login - Raspberry Pi Dashboard</title>
+    <title>Login - Pi-Health Dashboard</title>
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        .bg-pattern {
+            background-color: #111827;
+            background-image: radial-gradient(rgba(255, 255, 255, 0.1) 1px, transparent 1px);
+            background-size: 20px 20px;
+        }
+        
+        .login-card {
+            backdrop-filter: blur(5px);
+            background-color: rgba(31, 41, 55, 0.8);
+        }
+        
+        .login-button:active {
+            transform: scale(0.98);
+        }
+        
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); }
+            20%, 40%, 60%, 80% { transform: translateX(5px); }
+        }
+        
+        .shake-animation {
+            animation: shake 0.5s cubic-bezier(.36,.07,.19,.97) both;
+        }
+    </style>
 </head>
-<body class="bg-gray-900 text-gray-200 font-sans flex items-center justify-center h-screen">
-    <div class="bg-gray-800 p-6 rounded shadow-md w-96">
-        <h1 class="text-2xl font-bold text-center mb-6">Raspberry Pi Login</h1>
-        <div class="mb-4">
-            <label for="username" class="block mb-2">Username</label>
-            <input
-                type="text"
-                id="username"
-                class="w-full p-2 bg-gray-700 text-white rounded"
-                placeholder="Enter your username"
-            />
+<body class="bg-pattern flex items-center justify-center h-screen">
+    <div class="login-card p-8 rounded-lg shadow-xl w-full max-w-md">
+        <div class="text-center mb-8">
+            <h1 class="text-3xl font-bold text-white mb-2">Pi-Health Dashboard</h1>
+            <p class="text-gray-400">Sign in to access your system</p>
         </div>
-        <div class="mb-4">
-            <label for="password" class="block mb-2">Password</label>
-            <input
-                type="password"
-                id="password"
-                class="w-full p-2 bg-gray-700 text-white rounded"
-                placeholder="Enter your password"
-            />
+        
+        <div class="mb-6">
+            <label for="username" class="block text-gray-400 text-sm font-medium mb-2">Username</label>
+            <div class="relative">
+                <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <svg class="h-5 w-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
+                    </svg>
+                </div>
+                <input
+                    type="text"
+                    id="username"
+                    class="w-full pl-10 pr-4 py-2 border border-gray-700 focus:border-blue-500 focus:ring-blue-500 rounded-lg bg-gray-800 text-white focus:outline-none"
+                    placeholder="Enter your username"
+                />
+            </div>
         </div>
+        
+        <div class="mb-8">
+            <label for="password" class="block text-gray-400 text-sm font-medium mb-2">Password</label>
+            <div class="relative">
+                <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <svg class="h-5 w-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
+                    </svg>
+                </div>
+                <input
+                    type="password"
+                    id="password"
+                    class="w-full pl-10 pr-4 py-2 border border-gray-700 focus:border-blue-500 focus:ring-blue-500 rounded-lg bg-gray-800 text-white focus:outline-none"
+                    placeholder="Enter your password"
+                    onkeydown="if(event.key === 'Enter') validateLogin()"
+                />
+            </div>
+        </div>
+        
         <button
             onclick="validateLogin()"
-            class="w-full bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
+            class="login-button w-full bg-gradient-to-r from-blue-600 to-indigo-700 hover:from-blue-700 hover:to-indigo-800 text-white font-bold py-3 px-4 rounded-lg transition duration-200 flex justify-center items-center"
         >
-            Login
+            <span>Login</span>
+            <svg class="ml-2 h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 9l3 3m0 0l-3 3m3-3H8m13 0a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+            </svg>
         </button>
-        <p id="login-error" class="text-red-500 mt-4 hidden text-center"></p>
+        
+        <div id="login-error" class="mt-6 hidden text-center">
+            <div class="p-4 bg-red-500 bg-opacity-20 border border-red-500 rounded-lg">
+                <div class="flex items-center">
+                    <svg class="h-5 w-5 text-red-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    <p class="text-red-300">Invalid username or password. Please try again.</p>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -45,6 +105,7 @@
             const username = document.getElementById("username").value.trim();
             const password = document.getElementById("password").value.trim();
             const errorEl = document.getElementById("login-error");
+            const loginCard = document.querySelector(".login-card");
 
             if (username === USERNAME && password === PASSWORD) {
                 // Store login status in session storage
@@ -52,10 +113,19 @@
                 // Redirect to the dashboard root
                 window.location.href = "/";
             } else {
-                // Show error message
-                errorEl.textContent = "Invalid username or password. Please try again.";
+                // Show error message and shake animation
                 errorEl.classList.remove("hidden");
-                setTimeout(() => errorEl.classList.add("hidden"), 5000);
+                loginCard.classList.add("shake-animation");
+                
+                // Remove shake animation after it completes
+                setTimeout(() => {
+                    loginCard.classList.remove("shake-animation");
+                }, 500);
+                
+                // Hide error after 5 seconds
+                setTimeout(() => {
+                    errorEl.classList.add("hidden");
+                }, 5000);
             }
         }
     </script>
