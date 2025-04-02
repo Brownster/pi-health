@@ -31,24 +31,41 @@
         .action-button:active {
             transform: scale(0.95);
         }
+        
+        /* Custom Coraline button */
+        .coraline-button {
+            background: linear-gradient(to bottom, #5f4b8b, #372b53);
+            border: 1px solid #8a6cbd;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.25);
+            transition: all 0.3s ease;
+        }
+        
+        .coraline-button:hover {
+            background: linear-gradient(to bottom, #6f58a3, #413162);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 10px rgba(0, 0, 0, 0.3);
+        }
     </style>
 </head>
-<body class="bg-gray-900 text-gray-200 font-sans min-h-screen">
-    <header class="bg-gradient-to-r from-blue-700 to-indigo-800 shadow-lg">
-        <div class="container mx-auto p-4">
-            <h1 class="text-3xl font-bold text-center text-white">Pi-Health Dashboard</h1>
+<body class="bg-gray-900 text-blue-100 font-sans min-h-screen">
+    <header class="bg-gradient-to-r from-purple-900 to-blue-900 shadow-lg relative overflow-hidden">
+        <div class="absolute inset-0 overflow-hidden">
+            <img src="/coraline-banner.jpg" alt="Coraline" class="w-full h-full object-cover opacity-40 blur-sm">
+        </div>
+        <div class="container mx-auto p-8 relative">
+            <h1 class="text-4xl font-bold text-center text-blue-200 font-serif" style="text-shadow: 2px 2px 4px rgba(0,0,0,0.8);">Coraline's Pi-Health Dashboard</h1>
         </div>
     </header>
 
     <!-- Navigation bar -->
-    <nav class="bg-gray-800 shadow-md">
+    <nav class="bg-purple-900 shadow-md">
         <div class="container mx-auto px-4">
             <div class="flex items-center justify-between h-16">
                 <div class="flex space-x-4">
-                    <a href="/" class="px-3 py-2 rounded-md text-gray-300 hover:bg-gray-700 hover:text-white font-medium">Home</a>
-                    <a href="/system.html" class="px-3 py-2 rounded-md text-white bg-blue-600 font-medium">System Health</a>
-                    <a href="/containers.html" class="px-3 py-2 rounded-md text-gray-300 hover:bg-gray-700 hover:text-white font-medium">Containers</a>
-                    <a href="/edit.html" class="px-3 py-2 rounded-md text-gray-300 hover:bg-gray-700 hover:text-white font-medium">Edit Config</a>
+                    <a href="/" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Home</a>
+                    <a href="/system.html" class="px-3 py-2 rounded-md text-white bg-blue-800 font-medium border border-blue-400">System Health</a>
+                    <a href="/containers.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Containers</a>
+                    <a href="/edit.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Edit Config</a>
                 </div>
             </div>
         </div>
@@ -66,12 +83,13 @@
         
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
             <!-- CPU Usage Card -->
-            <div class="bg-gray-800 rounded-lg shadow-lg overflow-hidden">
+            <div class="bg-gray-800 rounded-lg shadow-lg overflow-hidden border-2 border-purple-900/30">
                 <div class="p-6">
                     <div class="flex justify-between items-center mb-2">
                         <h3 class="text-xl font-semibold">CPU Usage</h3>
-                        <svg class="w-8 h-8 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"></path>
+                        <svg class="w-8 h-8" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <circle cx="12" cy="12" r="10" fill="#5f4b8b" stroke="#8a6cbd" stroke-width="1.5"/>
+                            <path stroke="#c9b6e6" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"></path>
                         </svg>
                     </div>
                     <p id="cpu-usage" class="text-3xl font-bold mb-2">Loading...</p>
@@ -82,12 +100,13 @@
             </div>
 
             <!-- Memory Usage Card -->
-            <div class="bg-gray-800 rounded-lg shadow-lg overflow-hidden">
+            <div class="bg-gray-800 rounded-lg shadow-lg overflow-hidden border-2 border-purple-900/30">
                 <div class="p-6">
                     <div class="flex justify-between items-center mb-2">
                         <h3 class="text-xl font-semibold">Memory Usage</h3>
-                        <svg class="w-8 h-8 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        <svg class="w-8 h-8" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <circle cx="12" cy="12" r="10" fill="#5f4b8b" stroke="#8a6cbd" stroke-width="1.5"/>
+                            <path stroke="#c9b6e6" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                         </svg>
                     </div>
                     <p id="memory-usage" class="text-3xl font-bold mb-2">Loading...</p>
@@ -98,12 +117,13 @@
             </div>
 
             <!-- Temperature Card -->
-            <div class="bg-gray-800 rounded-lg shadow-lg overflow-hidden">
+            <div class="bg-gray-800 rounded-lg shadow-lg overflow-hidden border-2 border-purple-900/30">
                 <div class="p-6">
                     <div class="flex justify-between items-center mb-2">
                         <h3 class="text-xl font-semibold">Temperature</h3>
-                        <svg class="w-8 h-8 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                        <svg class="w-8 h-8" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <circle cx="12" cy="12" r="10" fill="#5f4b8b" stroke="#8a6cbd" stroke-width="1.5"/>
+                            <path stroke="#c9b6e6" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
                         </svg>
                     </div>
                     <p id="temperature" class="text-3xl font-bold mb-2">Loading...</p>
@@ -114,12 +134,13 @@
             </div>
 
             <!-- Disk Usage 1 Card -->
-            <div class="bg-gray-800 rounded-lg shadow-lg overflow-hidden">
+            <div class="bg-gray-800 rounded-lg shadow-lg overflow-hidden border-2 border-purple-900/30">
                 <div class="p-6">
                     <div class="flex justify-between items-center mb-2">
                         <h3 class="text-xl font-semibold">Disk Usage (/mnt/storage)</h3>
-                        <svg class="w-8 h-8 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path>
+                        <svg class="w-8 h-8" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <circle cx="12" cy="12" r="10" fill="#5f4b8b" stroke="#8a6cbd" stroke-width="1.5"/>
+                            <path stroke="#c9b6e6" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path>
                         </svg>
                     </div>
                     <p id="disk-usage" class="text-3xl font-bold mb-2">Loading...</p>
@@ -130,12 +151,13 @@
             </div>
 
             <!-- Disk Usage 2 Card -->
-            <div class="bg-gray-800 rounded-lg shadow-lg overflow-hidden">
+            <div class="bg-gray-800 rounded-lg shadow-lg overflow-hidden border-2 border-purple-900/30">
                 <div class="p-6">
                     <div class="flex justify-between items-center mb-2">
                         <h3 class="text-xl font-semibold">Disk Usage (/mnt/downloads)</h3>
-                        <svg class="w-8 h-8 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path>
+                        <svg class="w-8 h-8" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <circle cx="12" cy="12" r="10" fill="#5f4b8b" stroke="#8a6cbd" stroke-width="1.5"/>
+                            <path stroke="#c9b6e6" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path>
                         </svg>
                     </div>
                     <p id="disk-usage-2" class="text-3xl font-bold mb-2">Loading...</p>
@@ -146,12 +168,13 @@
             </div>
 
             <!-- Network Card -->
-            <div class="bg-gray-800 rounded-lg shadow-lg overflow-hidden">
+            <div class="bg-gray-800 rounded-lg shadow-lg overflow-hidden border-2 border-purple-900/30">
                 <div class="p-6">
                     <div class="flex justify-between items-center mb-2">
                         <h3 class="text-xl font-semibold">Network I/O</h3>
-                        <svg class="w-8 h-8 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path>
+                        <svg class="w-8 h-8" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <circle cx="12" cy="12" r="10" fill="#5f4b8b" stroke="#8a6cbd" stroke-width="1.5"/>
+                            <path stroke="#c9b6e6" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path>
                         </svg>
                     </div>
                     <div>
@@ -167,7 +190,7 @@
             <h2 class="text-2xl font-semibold mb-6">System Actions</h2>
             <div class="flex space-x-4">
                 <button
-                    class="action-button bg-gradient-to-r from-red-600 to-red-800 hover:from-red-700 hover:to-red-900 text-white font-bold py-3 px-6 rounded-lg shadow-lg transition duration-200"
+                    class="action-button coraline-button text-blue-100 font-bold py-3 px-6 rounded-lg shadow-lg transition duration-200 border-2 border-red-900/50"
                     onclick="sendAction('shutdown')">
                     <div class="flex items-center">
                         <svg class="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
@@ -177,7 +200,7 @@
                     </div>
                 </button>
                 <button
-                    class="action-button bg-gradient-to-r from-yellow-600 to-yellow-800 hover:from-yellow-700 hover:to-yellow-900 text-white font-bold py-3 px-6 rounded-lg shadow-lg transition duration-200"
+                    class="action-button coraline-button text-blue-100 font-bold py-3 px-6 rounded-lg shadow-lg transition duration-200 border-2 border-yellow-900/50"
                     onclick="sendAction('reboot')">
                     <div class="flex items-center">
                         <svg class="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">

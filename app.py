@@ -201,6 +201,12 @@ def serve_login():
     return send_from_directory(app.static_folder, 'login.html')
 
 
+@app.route('/coraline-banner.jpg')
+def serve_banner():
+    """Serve the Coraline banner image."""
+    return send_from_directory(app.static_folder, 'coraline-banner.jpg')
+
+
 @app.route('/api/stats', methods=['GET'])
 def api_stats():
     """API endpoint to return system stats as JSON."""

@@ -52,6 +52,20 @@
             user-select: none;
         }
         
+        /* Custom Coraline button */
+        .coraline-button {
+            background: linear-gradient(to bottom, #5f4b8b, #372b53);
+            border: 1px solid #8a6cbd;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.25);
+            transition: all 0.3s ease;
+        }
+        
+        .coraline-button:hover {
+            background: linear-gradient(to bottom, #6f58a3, #413162);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 10px rgba(0, 0, 0, 0.3);
+        }
+        
         /* Loading spinner */
         .loading-spinner {
             display: inline-block;
@@ -68,22 +82,25 @@
         }
     </style>
 </head>
-<body class="bg-gray-900 text-gray-200 font-sans min-h-screen">
-    <header class="bg-gradient-to-r from-blue-700 to-indigo-800 shadow-lg">
-        <div class="container mx-auto p-4">
-            <h1 class="text-3xl font-bold text-center text-white">Pi-Health Dashboard</h1>
+<body class="bg-gray-900 text-blue-100 font-sans min-h-screen">
+    <header class="bg-gradient-to-r from-purple-900 to-blue-900 shadow-lg relative overflow-hidden">
+        <div class="absolute inset-0 overflow-hidden">
+            <img src="/coraline-banner.jpg" alt="Coraline" class="w-full h-full object-cover opacity-40 blur-sm">
+        </div>
+        <div class="container mx-auto p-8 relative">
+            <h1 class="text-4xl font-bold text-center text-blue-200 font-serif" style="text-shadow: 2px 2px 4px rgba(0,0,0,0.8);">Coraline's Pi-Health Dashboard</h1>
         </div>
     </header>
 
     <!-- Navigation bar -->
-    <nav class="bg-gray-800 shadow-md">
+    <nav class="bg-purple-900 shadow-md">
         <div class="container mx-auto px-4">
             <div class="flex items-center justify-between h-16">
                 <div class="flex space-x-4">
-                    <a href="/" class="px-3 py-2 rounded-md text-gray-300 hover:bg-gray-700 hover:text-white font-medium">Home</a>
-                    <a href="/system.html" class="px-3 py-2 rounded-md text-gray-300 hover:bg-gray-700 hover:text-white font-medium">System Health</a>
-                    <a href="/containers.html" class="px-3 py-2 rounded-md text-white bg-blue-600 font-medium">Containers</a>
-                    <a href="/edit.html" class="px-3 py-2 rounded-md text-gray-300 hover:bg-gray-700 hover:text-white font-medium">Edit Config</a>
+                    <a href="/" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Home</a>
+                    <a href="/system.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">System Health</a>
+                    <a href="/containers.html" class="px-3 py-2 rounded-md text-white bg-blue-800 font-medium border border-blue-400">Containers</a>
+                    <a href="/edit.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Edit Config</a>
                 </div>
             </div>
         </div>
@@ -101,17 +118,17 @@
 
         <!-- Filter controls -->
         <div class="mb-6 flex flex-wrap gap-4">
-            <button id="filter-all" class="px-4 py-2 rounded-md bg-blue-600 text-white font-medium">
+            <button id="filter-all" class="px-4 py-2 rounded-md coraline-button text-blue-100 font-medium">
                 All
             </button>
-            <button id="filter-running" class="px-4 py-2 rounded-md bg-gray-700 hover:bg-gray-600 text-gray-200 font-medium">
+            <button id="filter-running" class="px-4 py-2 rounded-md bg-gray-700 hover:bg-gray-600 text-blue-100 font-medium">
                 Running
             </button>
-            <button id="filter-stopped" class="px-4 py-2 rounded-md bg-gray-700 hover:bg-gray-600 text-gray-200 font-medium">
+            <button id="filter-stopped" class="px-4 py-2 rounded-md bg-gray-700 hover:bg-gray-600 text-blue-100 font-medium">
                 Stopped
             </button>
             <div class="flex-grow"></div>
-            <button id="refresh-button" class="flex items-center px-4 py-2 rounded-md bg-gray-700 hover:bg-gray-600 text-gray-200 font-medium">
+            <button id="refresh-button" class="flex items-center px-4 py-2 rounded-md coraline-button text-blue-100 font-medium">
                 <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
                 </svg>
@@ -301,13 +318,13 @@
                         </td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm">${webUILink}</td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm">
-                            <button class="bg-green-600 hover:bg-green-700 text-white font-bold py-1 px-3 rounded button ${container.status === 'running' ? 'opacity-50 cursor-not-allowed' : ''}" 
+                            <button class="coraline-button text-blue-100 font-bold py-1 px-3 rounded button border border-green-800 ${container.status === 'running' ? 'opacity-50 cursor-not-allowed' : ''}" 
                                     onclick="controlContainer('${container.id}', 'start')" 
                                     ${container.status === 'running' ? 'disabled' : ''}>Start</button>
-                            <button class="bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-1 px-3 rounded button ${container.status === 'stopped' ? 'opacity-50 cursor-not-allowed' : ''}" 
+                            <button class="coraline-button text-blue-100 font-bold py-1 px-3 rounded button border border-yellow-800 ${container.status === 'stopped' ? 'opacity-50 cursor-not-allowed' : ''}" 
                                     onclick="controlContainer('${container.id}', 'stop')"
                                     ${container.status === 'stopped' ? 'disabled' : ''}>Stop</button>
-                            <button class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-1 px-3 rounded button" 
+                            <button class="coraline-button text-blue-100 font-bold py-1 px-3 rounded button border border-blue-800" 
                                     onclick="controlContainer('${container.id}', 'restart')">Restart</button>
                         </td>
                     </tr>
@@ -441,12 +458,12 @@
             
             // Update button styles
             document.querySelectorAll('#filter-all, #filter-running, #filter-stopped').forEach(btn => {
-                btn.classList.remove('bg-blue-600');
+                btn.classList.remove('coraline-button');
                 btn.classList.add('bg-gray-700', 'hover:bg-gray-600');
             });
             
             button.classList.remove('bg-gray-700', 'hover:bg-gray-600');
-            button.classList.add('bg-blue-600');
+            button.classList.add('coraline-button');
             
             // Re-render containers with the new filter
             renderContainers();
