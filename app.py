@@ -20,6 +20,9 @@ except Exception as e:
 # Register the compose editor blueprint
 app.register_blueprint(compose_editor)
 
+# Track update status for containers
+container_updates = {}
+
 
 def calculate_cpu_usage(cpu_line):
     """Calculate CPU usage based on /proc/stat values."""
@@ -117,6 +120,7 @@ def list_containers():
                 "name": container.name,
                 "status": container.status,
                 "image": container.image.tags[0] if container.image.tags else "unknown",
+                "update_available": container_updates.get(container.id[:12], False),
             }
             for container in containers
         ]
@@ -132,6 +136,35 @@ def list_containers():
         ]
 
 
+def check_container_update(container):
+    """Check if an update is available for the container's image."""
+    try:
+        if not container.image.tags:
+            return {"error": "Container image has no tag"}
+        tag = container.image.tags[0]
+        current_id = container.image.id
+        pulled = docker_client.images.pull(tag)
+        update = pulled.id != current_id
+        container_updates[container.id[:12]] = update
+        return {"update_available": update}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def update_container(container):
+    """Pull the latest image and recreate the service using docker compose."""
+    try:
+        if not container.image.tags:
+            return {"error": "Container image has no tag"}
+        tag = container.image.tags[0]
+        docker_client.images.pull(tag)
+        import subprocess
+        subprocess.run(["docker", "compose", "up", "-d", container.name], check=False)
+        container_updates[container.id[:12]] = False
+        return {"status": "Container updated"}
+    except Exception as e:
+        return {"error": str(e)}
+
 def control_container(container_id, action):
     """Start, stop, or restart a container by ID."""
     if not docker_available:
@@ -145,6 +178,10 @@ def control_container(container_id, action):
             container.stop()
         elif action == "restart":
             container.restart()
+        elif action == "check_update":
+            return check_container_update(container)
+        elif action == "update":
+            return update_container(container)
         else:
             return {"error": "Invalid action"}
         return {"status": f"Container {action}ed successfully"}

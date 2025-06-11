@@ -309,7 +309,10 @@
                 
                 const row = `
                     <tr data-container-id="${container.id}" data-container-name="${container.name}">
-                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">${container.name}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                            ${container.name}
+                            ${container.update_available ? '<span class="ml-1 text-yellow-400" title="Update available">&#x21bb;</span>' : ''}
+                        </td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-400">${container.image}</td>
                         <td class="px-6 py-4 whitespace-nowrap">
                             <span class="px-2 py-1 text-white rounded ${statusClass}">
@@ -318,14 +321,18 @@
                         </td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm">${webUILink}</td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm">
-                            <button class="coraline-button text-blue-100 font-bold py-1 px-3 rounded button border border-green-800 ${container.status === 'running' ? 'opacity-50 cursor-not-allowed' : ''}" 
-                                    onclick="controlContainer('${container.id}', 'start')" 
+                            <button class="coraline-button text-blue-100 font-bold py-1 px-3 rounded button border border-green-800 ${container.status === 'running' ? 'opacity-50 cursor-not-allowed' : ''}"
+                                    onclick="controlContainer('${container.id}', 'start')"
                                     ${container.status === 'running' ? 'disabled' : ''}>Start</button>
-                            <button class="coraline-button text-blue-100 font-bold py-1 px-3 rounded button border border-yellow-800 ${container.status === 'stopped' ? 'opacity-50 cursor-not-allowed' : ''}" 
+                            <button class="coraline-button text-blue-100 font-bold py-1 px-3 rounded button border border-yellow-800 ${container.status === 'stopped' ? 'opacity-50 cursor-not-allowed' : ''}"
                                     onclick="controlContainer('${container.id}', 'stop')"
                                     ${container.status === 'stopped' ? 'disabled' : ''}>Stop</button>
-                            <button class="coraline-button text-blue-100 font-bold py-1 px-3 rounded button border border-blue-800" 
+                            <button class="coraline-button text-blue-100 font-bold py-1 px-3 rounded button border border-blue-800"
                                     onclick="controlContainer('${container.id}', 'restart')">Restart</button>
+                            <button class="coraline-button text-blue-100 font-bold py-1 px-3 rounded button border border-purple-800"
+                                    onclick="controlContainer('${container.id}', 'check_update')">Check</button>
+                            <button class="coraline-button text-blue-100 font-bold py-1 px-3 rounded button border border-red-800"
+                                    onclick="controlContainer('${container.id}', 'update')">Update</button>
                         </td>
                     </tr>
                 `;
@@ -356,22 +363,26 @@
                         statusCell.innerHTML = originalStatus;
                         buttons.forEach(btn => btn.disabled = false);
                     } else {
-                        // Show success notification
                         const containerName = containerRow.getAttribute('data-container-name');
-                        showNotification(`${containerName} ${action}ed successfully`, 'success');
+                        let message = `${containerName} ${action}ed successfully`;
+                        if (action === 'check_update') message = `${containerName} check complete`;
+                        if (action === 'update') message = `${containerName} update triggered`;
+                        showNotification(message, 'success');
                         
-                        // Update just this container's status without refreshing the entire list
                         updateContainerStatus(id);
                     }
                 } else {
                     // Fallback if container row not found
                     const response = await fetch(`/api/containers/${id}/${action}`, { method: 'POST' });
                     const result = await response.json();
-                    
+
                     if (result.error) {
                         showNotification(`Error: ${result.error}`, 'error');
                     } else {
-                        showNotification(`Container ${action}ed successfully`, 'success');
+                        let message = `Container ${action}ed successfully`;
+                        if (action === 'check_update') message = 'Check complete';
+                        if (action === 'update') message = 'Update triggered';
+                        showNotification(message, 'success');
                         fetchDockerContainers();
                     }
                 }
@@ -390,11 +401,14 @@
                 
                 if (container && document.querySelector(`tr[data-container-id="${id}"]`)) {
                     const row = document.querySelector(`tr[data-container-id="${id}"]`);
+                    const nameCell = row.querySelector('td:nth-child(1)');
                     const statusCell = row.querySelector('td:nth-child(3)');
                     
                     const statusClass = container.status === 'running' ? 'status-running' :
                         container.status === 'stopped' ? 'status-stopped' : 'status-other';
                     
+                    nameCell.innerHTML = `${container.name}${container.update_available ? '<span class="ml-1 text-yellow-400" title="Update available">&#x21bb;</span>' : ''}`;
+
                     statusCell.innerHTML = `
                         <span class="px-2 py-1 text-white rounded ${statusClass}">
                             ${container.status}
@@ -417,6 +431,8 @@
                         const startButton = row.querySelector('button:nth-child(1)');
                         const stopButton = row.querySelector('button:nth-child(2)');
                         const restartButton = row.querySelector('button:nth-child(3)');
+                        const checkButton = row.querySelector('button:nth-child(4)');
+                        const updateButton = row.querySelector('button:nth-child(5)');
                         
                         if (startButton) {
                             startButton.disabled = container.status === 'running';
@@ -429,6 +445,9 @@
                             stopButton.classList.toggle('opacity-50', container.status === 'stopped');
                             stopButton.classList.toggle('cursor-not-allowed', container.status === 'stopped');
                         }
+
+                        if (checkButton) checkButton.disabled = false;
+                        if (updateButton) updateButton.disabled = false;
                     }
                 }
             } catch (error) {
