@@ -2,6 +2,7 @@ from flask import Flask, jsonify, send_from_directory, request
 import psutil
 import os
 import docker
+from dotenv import load_dotenv
 from compose_editor import compose_editor
 from nas.drive_manager import DriveManager
 from nas.snapraid_manager import SnapRAIDManager
@@ -13,6 +14,9 @@ from nas.notification_manager import NotificationManager
 from apscheduler.schedulers.background import BackgroundScheduler
 import atexit
 import logging
+
+# Load environment variables from .env if present
+load_dotenv()
 
 # Initialize Flask
 app = Flask(__name__, static_folder='static')

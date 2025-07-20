@@ -5,7 +5,7 @@ import tempfile
 import shutil
 import pytest
 import json
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch, MagicMock, mock_open
 from datetime import datetime
 
 from nas.migration_manager import (
@@ -345,18 +345,21 @@ class TestMigrationWorkflow:
         success = migration_manager.rollback_migration(migration_id)
         assert success is False
     
+    @patch('builtins.open', new_callable=mock_open)
+    @patch('nas.migration_manager.SystemCommandExecutor.execute_command')
     @patch('shutil.copy2')
     @patch('os.path.exists')
     @patch('os.makedirs')
     def test_create_configuration_backup(self, mock_makedirs, mock_exists, mock_copy,
-                                       migration_manager):
+                                         mock_exec, mock_open_fn, migration_manager):
         """Test creating configuration backup."""
         migration_id = "test_backup_123"
         metadata = {}
-        
+
         # Mock file existence
         mock_exists.return_value = True
-        
+        mock_exec.return_value = (True, "", "")
+
         # Test backup creation
         success = migration_manager._create_configuration_backup(migration_id, metadata)
         
