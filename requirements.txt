@@ -2,3 +2,4 @@ flask
 psutil
 docker
 apscheduler
+python-dotenv

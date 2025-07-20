@@ -50,11 +50,19 @@ class TestFailureDetector:
             parity_drives=[]
         )
         return mock
-    
+
     @pytest.fixture
-    def failure_detector(self, mock_drive_manager, mock_snapraid_manager):
+    def mock_smart_manager(self):
+        """Create mock SMART manager."""
+        return Mock()
+
+    @pytest.fixture
+    def failure_detector(self, mock_drive_manager, mock_snapraid_manager, mock_smart_manager):
         """Create FailureDetector instance with mocked dependencies."""
-        return FailureDetector(mock_drive_manager, mock_snapraid_manager)
+        detector = FailureDetector(mock_drive_manager, mock_snapraid_manager, mock_smart_manager)
+        # Avoid filesystem dependencies in tests
+        detector._check_io_health = Mock(return_value=[])
+        return detector
     
     def test_assess_drive_health_healthy(self, failure_detector):
         """Test health assessment for healthy drive."""
@@ -354,7 +362,9 @@ class TestNotificationManager:
     @pytest.fixture
     def notification_manager(self, temp_config_file):
         """Create NotificationManager instance."""
-        return NotificationManager(config_file=temp_config_file)
+        manager = NotificationManager(config_file=temp_config_file)
+        manager.config.min_level = NotificationLevel.INFO
+        return manager
     
     def test_initialization(self, notification_manager):
         """Test notification manager initialization."""

@@ -729,7 +729,7 @@ class TestMergerFSPoolExpansion(unittest.TestCase):
         # Mock MergerFS availability and other methods
         with patch.object(self.manager, 'is_mergerfs_available', return_value=True):
             with patch.object(self.manager, 'discover_pools'):
-                success, message = self.manager.expand_pool('/mnt/storage', ['/mnt/disk3'])
+                success, message = self.manager.expand_pool('/mnt/storage', ['/mnt/disk3'], update_fstab=False, update_systemd=False)
         
         self.assertTrue(success)
         self.assertIn("Successfully expanded", message)

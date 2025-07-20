@@ -310,14 +310,21 @@ class TestInstallerIntegration(unittest.TestCase):
     def test_pooled_storage_dependencies(self):
         """Test that pooled storage function includes required dependencies."""
         try:
-            # Check that the function installs mergerfs and snapraid
-            result = subprocess.run([
+            # Check that mergerfs is installed
+            result_mergerfs = subprocess.run([
                 'grep', '-E', 'apt-get install.*mergerfs', self.installer_script
             ], capture_output=True, text=True, timeout=10)
-            
-            self.assertEqual(result.returncode, 0)
-            self.assertIn("mergerfs", result.stdout)
-            self.assertIn("snapraid", result.stdout)
+
+            self.assertEqual(result_mergerfs.returncode, 0)
+            self.assertIn("mergerfs", result_mergerfs.stdout)
+
+            # Check that snapraid is installed
+            result_snapraid = subprocess.run([
+                'grep', '-E', 'apt-get install.*snapraid', self.installer_script
+            ], capture_output=True, text=True, timeout=10)
+
+            self.assertEqual(result_snapraid.returncode, 0)
+            self.assertIn("snapraid", result_snapraid.stdout)
             
         except subprocess.TimeoutExpired:
             self.fail("Dependencies test timed out")

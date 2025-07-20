@@ -121,6 +121,9 @@ curl -sSL https://raw.githubusercontent.com/Brownster/pi-health/main/docs/Pi-Ins
 ## Configuration
 
 ### Environment Variables
+Copy `.env.example` to `.env` and adjust values as needed. The application loads
+these settings automatically using `python-dotenv`.
+
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `TZ` | `UTC` | Timezone for log timestamps |
