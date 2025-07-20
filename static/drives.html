@@ -1,0 +1,1193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script>
+        // Redirect to login if not logged in
+        if (!sessionStorage.getItem("loggedIn")) {
+            window.location.href = "/login.html";
+        }
+    </script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Drives Management - Pi-Health Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        /* Animation for refreshing data */
+        @keyframes fadeIn {
+            from { opacity: 0.5; }
+            to { opacity: 1; }
+        }
+        
+        .fade-in {
+            animation: fadeIn 0.5s ease-in-out;
+        }
+        
+        /* Progress bar animation */
+        .progress-bar {
+            transition: width 0.5s ease-in-out;
+        }
+        
+        /* Drive card hover effect */
+        .drive-card {
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            border: 2px solid rgba(95, 75, 139, 0.3);
+        }
+        
+        .drive-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgba(138, 43, 226, 0.4);
+            border: 2px solid rgba(138, 43, 226, 0.6);
+        }
+        
+        /* Custom Coraline button */
+        .coraline-button {
+            background: linear-gradient(to bottom, #5f4b8b, #372b53);
+            border: 1px solid #8a6cbd;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.25);
+            transition: all 0.3s ease;
+        }
+        
+        .coraline-button:hover {
+            background: linear-gradient(to bottom, #6f58a3, #413162);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 10px rgba(0, 0, 0, 0.3);
+        }
+        
+        /* Health status indicators */
+        .health-healthy { color: #10b981; }
+        .health-warning { color: #f59e0b; }
+        .health-critical { color: #ef4444; }
+        .health-unknown { color: #6b7280; }
+        
+        /* Status badges */
+        .status-badge {
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        
+        .status-healthy {
+            background-color: rgba(16, 185, 129, 0.2);
+            color: #10b981;
+            border: 1px solid #10b981;
+        }
+        
+        .status-warning {
+            background-color: rgba(245, 158, 11, 0.2);
+            color: #f59e0b;
+            border: 1px solid #f59e0b;
+        }
+        
+        .status-critical {
+            background-color: rgba(239, 68, 68, 0.2);
+            color: #ef4444;
+            border: 1px solid #ef4444;
+        }
+        
+        .status-unknown {
+            background-color: rgba(107, 114, 128, 0.2);
+            color: #6b7280;
+            border: 1px solid #6b7280;
+        }
+        
+        /* Loading spinner */
+        .spinner {
+            border: 2px solid #374151;
+            border-top: 2px solid #8b5cf6;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-blue-100 font-sans min-h-screen">
+    <header class="bg-gradient-to-r from-purple-900 to-blue-900 shadow-lg relative overflow-hidden">
+        <div class="absolute inset-0 overflow-hidden">
+            <img src="/coraline-banner.jpg" alt="Coraline" class="w-full h-full object-cover opacity-40 blur-sm">
+        </div>
+        <div class="container mx-auto p-8 relative">
+            <h1 class="text-4xl font-bold text-center text-blue-200 font-serif" style="text-shadow: 2px 2px 4px rgba(0,0,0,0.8);">Coraline's Pi-Health Dashboard</h1>
+        </div>
+    </header>
+
+    <!-- Navigation bar -->
+    <nav class="bg-purple-900 shadow-md">
+        <div class="container mx-auto px-4">
+            <div class="flex items-center justify-between h-16">
+                <div class="flex space-x-4">
+                    <a href="/" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Home</a>
+                    <a href="/system.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">System Health</a>
+                    <a href="/containers.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Containers</a>
+                    <a href="/drives.html" class="px-3 py-2 rounded-md text-white bg-blue-800 font-medium border border-blue-400">Drives</a>
+                    <a href="/edit.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Edit Config</a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Notification area - fixed position at the top right -->
+    <div id="notification-area" class="fixed top-4 right-4 z-50 w-72 flex flex-col items-end"></div>
+
+    <!-- Main content -->
+    <main class="container mx-auto p-6">
+        <div class="mb-6 flex justify-between items-center">
+            <h2 class="text-2xl font-semibold">Drive Management</h2>
+            <div class="flex items-center space-x-4">
+                <span id="last-updated" class="text-sm text-gray-400">Last updated: Never</span>
+                <button id="refresh-btn" onclick="fetchDriveData()" class="coraline-button text-blue-100 font-bold py-2 px-4 rounded-lg">
+                    <div class="flex items-center">
+                        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                        </svg>
+                        Refresh
+                    </div>
+                </button>
+            </div>
+        </div>
+        
+        <!-- NAS Management Panel -->
+        <div class="bg-gray-800 rounded-lg shadow-lg p-6 mb-6">
+            <h3 class="text-xl font-semibold mb-4">NAS Management</h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <!-- SnapRAID Status -->
+                <div class="bg-gray-700 rounded-lg p-4">
+                    <h4 class="text-sm font-medium mb-2">SnapRAID Status</h4>
+                    <button onclick="viewSnapraidStatus()" class="coraline-button text-xs px-3 py-2 rounded w-full">
+                        <div class="flex items-center justify-center">
+                            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+                            </svg>
+                            View Status
+                        </div>
+                    </button>
+                </div>
+                
+                <!-- MergerFS Pools -->
+                <div class="bg-gray-700 rounded-lg p-4">
+                    <h4 class="text-sm font-medium mb-2">MergerFS Pools</h4>
+                    <button onclick="viewMergerfsConfig()" class="coraline-button text-xs px-3 py-2 rounded w-full">
+                        <div class="flex items-center justify-center">
+                            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>
+                            </svg>
+                            View Pools
+                        </div>
+                    </button>
+                </div>
+                
+                <!-- Global Sync -->
+                <div class="bg-gray-700 rounded-lg p-4">
+                    <h4 class="text-sm font-medium mb-2">Parity Sync</h4>
+                    <button onclick="triggerSnapraidSync()" class="coraline-button text-xs px-3 py-2 rounded w-full border border-yellow-800">
+                        <div class="flex items-center justify-center">
+                            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                            </svg>
+                            Start Sync
+                        </div>
+                    </button>
+                </div>
+                
+                <!-- Global Scrub -->
+                <div class="bg-gray-700 rounded-lg p-4">
+                    <h4 class="text-sm font-medium mb-2">Data Scrub</h4>
+                    <button onclick="triggerSnapraidScrub()" class="coraline-button text-xs px-3 py-2 rounded w-full border border-orange-800">
+                        <div class="flex items-center justify-center">
+                            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                            </svg>
+                            Start Scrub
+                        </div>
+                    </button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Drive Cards Grid -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6" id="drives-grid">
+            <!-- Loading state -->
+            <div class="col-span-full text-center py-10">
+                <div class="inline-block animate-pulse">
+                    <svg class="w-10 h-10 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path>
+                    </svg>
+                </div>
+                <p class="mt-2 text-xl">Loading drives...</p>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // Format bytes to human-readable format
+        function formatBytes(bytes, decimals = 2) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(decimals)) + ' ' + sizes[i];
+        }
+
+        // Format timestamp
+        function formatDateTime(date) {
+            const hours = String(date.getHours()).padStart(2, '0');
+            const minutes = String(date.getMinutes()).padStart(2, '0');
+            const seconds = String(date.getSeconds()).padStart(2, '0');
+            return `${hours}:${minutes}:${seconds}`;
+        }
+
+        // Show notification function
+        function showNotification(message, type = 'info') {
+            const notificationArea = document.getElementById('notification-area');
+            const notification = document.createElement('div');
+            notification.className = `notification ${type} bg-opacity-90 p-3 mb-2 rounded shadow-lg transform transition-all duration-500 opacity-0`;
+            
+            // Set background color based on type
+            if (type === 'success') notification.classList.add('bg-green-600');
+            else if (type === 'error') notification.classList.add('bg-red-600');
+            else notification.classList.add('bg-blue-600');
+            
+            notification.innerHTML = message;
+            notificationArea.appendChild(notification);
+            
+            // Fade in
+            setTimeout(() => notification.classList.replace('opacity-0', 'opacity-100'), 10);
+            
+            // Remove after 3 seconds
+            setTimeout(() => {
+                notification.classList.replace('opacity-100', 'opacity-0');
+                notification.style.height = notification.offsetHeight + 'px';
+                notification.style.marginBottom = '0.5rem';
+                
+                setTimeout(() => {
+                    notification.style.height = '0';
+                    notification.style.marginBottom = '0';
+                    notification.style.padding = '0';
+                    
+                    setTimeout(() => {
+                        notification.remove();
+                    }, 300);
+                }, 300);
+            }, 3000);
+        }
+
+        // Get health status class and text
+        function getHealthStatus(healthStatus, smartHealth) {
+            if (!smartHealth) {
+                return { class: 'health-unknown', text: 'Unknown', badge: 'status-unknown' };
+            }
+            
+            if (smartHealth.overall_health === 'PASSED') {
+                return { class: 'health-healthy', text: 'Healthy', badge: 'status-healthy' };
+            } else if (smartHealth.overall_health === 'FAILED') {
+                return { class: 'health-critical', text: 'Failed', badge: 'status-critical' };
+            } else {
+                return { class: 'health-warning', text: 'Warning', badge: 'status-warning' };
+            }
+        }
+
+        // Get drive role display text
+        function getDriveRoleText(role) {
+            switch (role) {
+                case 'data': return 'Data Drive';
+                case 'parity': return 'Parity Drive';
+                case 'cache': return 'Cache Drive';
+                default: return 'Storage Drive';
+            }
+        }
+
+        // Get drive icon based on role and type
+        function getDriveIcon(role, isUsb) {
+            if (isUsb) {
+                return `<svg class="w-8 h-8" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="12" cy="12" r="10" fill="#5f4b8b" stroke="#8a6cbd" stroke-width="1.5"/>
+                    <path stroke="#c9b6e6" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 10l5 5 5-5M7 14l5 5 5-5"/>
+                </svg>`;
+            } else {
+                return `<svg class="w-8 h-8" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="12" cy="12" r="10" fill="#5f4b8b" stroke="#8a6cbd" stroke-width="1.5"/>
+                    <path stroke="#c9b6e6" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"/>
+                </svg>`;
+            }
+        }
+
+        // Create drive card HTML
+        function createDriveCard(drive) {
+            const health = getHealthStatus(drive.health_status, drive.smart_health);
+            const roleText = getDriveRoleText(drive.role);
+            const icon = getDriveIcon(drive.role, drive.is_usb);
+            const usagePercent = drive.usage_percent || 0;
+            
+            return `
+                <div class="drive-card bg-gray-800 rounded-lg shadow-lg overflow-hidden">
+                    <!-- Drive Header -->
+                    <div class="bg-gradient-to-br from-purple-800 to-indigo-900 p-4">
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center space-x-3">
+                                ${icon}
+                                <div>
+                                    <h3 class="text-lg font-semibold text-white">${drive.device_path}</h3>
+                                    <p class="text-sm text-purple-200">${roleText}</p>
+                                </div>
+                            </div>
+                            <div class="text-right">
+                                <span class="status-badge ${health.badge}">${health.text}</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Drive Details -->
+                    <div class="p-4 space-y-4">
+                        <!-- Capacity and Usage -->
+                        <div>
+                            <div class="flex justify-between items-center mb-2">
+                                <span class="text-sm font-medium">Storage Usage</span>
+                                <span class="text-sm ${health.class}">${usagePercent.toFixed(1)}%</span>
+                            </div>
+                            <div class="w-full bg-gray-700 rounded-full h-3 overflow-hidden">
+                                <div class="progress-bar bg-blue-500 h-3 rounded-full" style="width: ${usagePercent}%"></div>
+                            </div>
+                            <div class="flex justify-between text-xs text-gray-400 mt-1">
+                                <span>${formatBytes(drive.used_bytes)} used</span>
+                                <span>${formatBytes(drive.size_bytes)} total</span>
+                            </div>
+                        </div>
+                        
+                        <!-- Drive Information -->
+                        <div class="grid grid-cols-2 gap-4 text-sm">
+                            <div>
+                                <span class="text-gray-400">Mount Point:</span>
+                                <p class="font-mono text-blue-300">${drive.mount_point || 'Not mounted'}</p>
+                            </div>
+                            <div>
+                                <span class="text-gray-400">Filesystem:</span>
+                                <p class="font-mono text-blue-300">${drive.filesystem || 'Unknown'}</p>
+                            </div>
+                            <div>
+                                <span class="text-gray-400">UUID:</span>
+                                <p class="font-mono text-blue-300 text-xs">${drive.uuid ? drive.uuid.substring(0, 8) + '...' : 'N/A'}</p>
+                            </div>
+                            <div>
+                                <span class="text-gray-400">Connection:</span>
+                                <p class="font-mono text-blue-300">${drive.is_usb ? 'USB' : 'Internal'}</p>
+                            </div>
+                        </div>
+                        
+                        <!-- SMART Health Details -->
+                        ${drive.smart_health ? `
+                        <div class="border-t border-gray-700 pt-4">
+                            <h4 class="text-sm font-medium mb-2">SMART Health</h4>
+                            <div class="grid grid-cols-2 gap-2 text-xs">
+                                <div>
+                                    <span class="text-gray-400">Overall:</span>
+                                    <span class="${health.class} font-medium">${drive.smart_health.overall_health || 'Unknown'}</span>
+                                </div>
+                                ${drive.smart_health.temperature ? `
+                                <div>
+                                    <span class="text-gray-400">Temperature:</span>
+                                    <span class="text-blue-300">${drive.smart_health.temperature}°C</span>
+                                </div>
+                                ` : ''}
+                                ${drive.smart_health.power_on_hours ? `
+                                <div>
+                                    <span class="text-gray-400">Power On:</span>
+                                    <span class="text-blue-300">${drive.smart_health.power_on_hours}h</span>
+                                </div>
+                                ` : ''}
+                                ${drive.smart_health.power_cycle_count ? `
+                                <div>
+                                    <span class="text-gray-400">Power Cycles:</span>
+                                    <span class="text-blue-300">${drive.smart_health.power_cycle_count}</span>
+                                </div>
+                                ` : ''}
+                            </div>
+                        </div>
+                        ` : ''}
+                        
+                        <!-- Action Buttons -->
+                        <div class="border-t border-gray-700 pt-4">
+                            <div class="space-y-2">
+                                <!-- SMART Test Actions -->
+                                <div class="flex flex-wrap gap-2">
+                                    <button onclick="runSmartTest('${drive.device_path}', 'short')" 
+                                            class="coraline-button text-xs px-3 py-1 rounded border border-blue-800">
+                                        <div class="flex items-center">
+                                            <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                                            </svg>
+                                            Quick Test
+                                        </div>
+                                    </button>
+                                    <button onclick="runSmartTest('${drive.device_path}', 'long')" 
+                                            class="coraline-button text-xs px-3 py-1 rounded border border-purple-800">
+                                        <div class="flex items-center">
+                                            <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                                            </svg>
+                                            Extended Test
+                                        </div>
+                                    </button>
+                                    <button onclick="viewSmartDetails('${drive.device_path}')" 
+                                            class="coraline-button text-xs px-3 py-1 rounded border border-green-800">
+                                        <div class="flex items-center">
+                                            <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                                            </svg>
+                                            Details
+                                        </div>
+                                    </button>
+                                </div>
+                                
+                                <!-- SnapRAID Actions (only for data/parity drives) -->
+                                ${drive.role === 'data' || drive.role === 'parity' ? `
+                                <div class="flex flex-wrap gap-2">
+                                    <button onclick="triggerSnapraidSync()" 
+                                            class="coraline-button text-xs px-3 py-1 rounded border border-yellow-800">
+                                        <div class="flex items-center">
+                                            <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                                            </svg>
+                                            Sync Parity
+                                        </div>
+                                    </button>
+                                    <button onclick="triggerSnapraidScrub()" 
+                                            class="coraline-button text-xs px-3 py-1 rounded border border-orange-800">
+                                        <div class="flex items-center">
+                                            <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                                            </svg>
+                                            Scrub Data
+                                        </div>
+                                    </button>
+                                </div>
+                                ` : ''}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Fetch drive data from API
+        async function fetchDriveData() {
+            const drivesGrid = document.getElementById('drives-grid');
+            const lastUpdatedEl = document.getElementById('last-updated');
+            const refreshBtn = document.getElementById('refresh-btn');
+            
+            // Show loading state on refresh button
+            refreshBtn.disabled = true;
+            refreshBtn.innerHTML = `
+                <div class="flex items-center">
+                    <div class="spinner mr-2"></div>
+                    Loading...
+                </div>
+            `;
+
+            try {
+                const response = await fetch('/api/disks');
+                const data = await response.json();
+
+                if (data.status === 'success') {
+                    // Clear loading message
+                    drivesGrid.innerHTML = '';
+
+                    if (data.drives.length === 0) {
+                        drivesGrid.innerHTML = `
+                            <div class="col-span-full text-center py-10">
+                                <svg class="w-16 h-16 mx-auto text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path>
+                                </svg>
+                                <p class="mt-4 text-xl">No drives detected</p>
+                                <p class="text-gray-400">Connect drives to see them here</p>
+                            </div>
+                        `;
+                    } else {
+                        // Create drive cards
+                        data.drives.forEach(drive => {
+                            const cardElement = document.createElement('div');
+                            cardElement.innerHTML = createDriveCard(drive);
+                            drivesGrid.appendChild(cardElement.firstElementChild);
+                        });
+                    }
+
+                    // Update last updated timestamp
+                    const now = new Date();
+                    lastUpdatedEl.textContent = `Last updated: ${formatDateTime(now)}`;
+                    
+                    showNotification(`Loaded ${data.drives.length} drives`, 'success');
+                } else {
+                    throw new Error(data.message || 'Failed to fetch drive data');
+                }
+
+            } catch (error) {
+                console.error('Error fetching drive data:', error);
+                drivesGrid.innerHTML = `
+                    <div class="col-span-full text-center py-10">
+                        <svg class="w-16 h-16 mx-auto text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                        <p class="mt-4 text-xl">Error loading drives</p>
+                        <p class="text-gray-400">${error.message}</p>
+                        <button onclick="fetchDriveData()" class="mt-4 coraline-button text-blue-100 font-bold py-2 px-4 rounded-lg">
+                            Try Again
+                        </button>
+                    </div>
+                `;
+                showNotification('Error loading drive data', 'error');
+            } finally {
+                // Reset refresh button
+                refreshBtn.disabled = false;
+                refreshBtn.innerHTML = `
+                    <div class="flex items-center">
+                        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                        </svg>
+                        Refresh
+                    </div>
+                `;
+            }
+        }
+
+        // Run SMART test on a drive
+        async function runSmartTest(devicePath, testType) {
+            try {
+                showNotification(`Starting ${testType} SMART test on ${devicePath}...`, 'info');
+                
+                // Encode device path for URL
+                const encodedPath = devicePath.substring(1); // Remove leading slash
+                const response = await fetch(`/api/smart/${encodedPath}/${testType}`, {
+                    method: 'POST'
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showNotification(`${testType.charAt(0).toUpperCase() + testType.slice(1)} SMART test started on ${devicePath}`, 'success');
+                } else {
+                    showNotification(`Error starting SMART test: ${data.message}`, 'error');
+                }
+            } catch (error) {
+                console.error('Error starting SMART test:', error);
+                showNotification(`Error starting SMART test: ${error.message}`, 'error');
+            }
+        }
+
+        // View detailed SMART information
+        async function viewSmartDetails(devicePath) {
+            try {
+                // Encode device path for URL
+                const encodedPath = devicePath.substring(1); // Remove leading slash
+                const response = await fetch(`/api/smart/${encodedPath}/health`);
+                const data = await response.json();
+                
+                if (response.ok && data.health) {
+                    // Create a modal or detailed view
+                    const details = JSON.stringify(data.health, null, 2);
+                    alert(`SMART Details for ${devicePath}:\n\n${details}`);
+                } else {
+                    showNotification(`Error getting SMART details: ${data.message}`, 'error');
+                }
+            } catch (error) {
+                console.error('Error getting SMART details:', error);
+                showNotification(`Error getting SMART details: ${error.message}`, 'error');
+            }
+        }
+
+        // Trigger SnapRAID sync operation
+        async function triggerSnapraidSync() {
+            try {
+                if (!confirm('Are you sure you want to start a SnapRAID sync operation? This may take a while.')) {
+                    return;
+                }
+                
+                showNotification('Starting SnapRAID sync operation...', 'info');
+                
+                const response = await fetch('/api/snapraid/sync/async', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ force: false })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showNotification(`SnapRAID sync started successfully. Operation ID: ${data.operation_id}`, 'success');
+                    // Start monitoring the operation
+                    monitorSnapraidOperation(data.operation_id);
+                } else {
+                    showNotification(`Error starting SnapRAID sync: ${data.message}`, 'error');
+                }
+            } catch (error) {
+                console.error('Error starting SnapRAID sync:', error);
+                showNotification(`Error starting SnapRAID sync: ${error.message}`, 'error');
+            }
+        }
+
+        // Trigger SnapRAID scrub operation
+        async function triggerSnapraidScrub() {
+            try {
+                const percentage = prompt('Enter percentage of data to scrub (1-100):', '10');
+                if (!percentage || isNaN(percentage) || percentage < 1 || percentage > 100) {
+                    showNotification('Invalid percentage. Please enter a number between 1 and 100.', 'error');
+                    return;
+                }
+                
+                if (!confirm(`Are you sure you want to start a SnapRAID scrub operation for ${percentage}% of data? This may take a while.`)) {
+                    return;
+                }
+                
+                showNotification(`Starting SnapRAID scrub operation for ${percentage}% of data...`, 'info');
+                
+                const response = await fetch('/api/snapraid/scrub/async', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ percentage: parseInt(percentage) })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showNotification(`SnapRAID scrub started successfully. Operation ID: ${data.operation_id}`, 'success');
+                    // Start monitoring the operation
+                    monitorSnapraidOperation(data.operation_id);
+                } else {
+                    showNotification(`Error starting SnapRAID scrub: ${data.message}`, 'error');
+                }
+            } catch (error) {
+                console.error('Error starting SnapRAID scrub:', error);
+                showNotification(`Error starting SnapRAID scrub: ${error.message}`, 'error');
+            }
+        }
+
+        // Monitor SnapRAID operation progress
+        async function monitorSnapraidOperation(operationId) {
+            const checkStatus = async () => {
+                try {
+                    const response = await fetch(`/api/snapraid/operations/${operationId}`);
+                    const data = await response.json();
+                    
+                    if (response.ok && data.operation) {
+                        const operation = data.operation;
+                        
+                        if (operation.status === 'completed') {
+                            showNotification(`SnapRAID ${operation.operation_type} completed successfully!`, 'success');
+                            return; // Stop monitoring
+                        } else if (operation.status === 'failed') {
+                            showNotification(`SnapRAID ${operation.operation_type} failed: ${operation.error_message || 'Unknown error'}`, 'error');
+                            return; // Stop monitoring
+                        } else if (operation.status === 'cancelled') {
+                            showNotification(`SnapRAID ${operation.operation_type} was cancelled`, 'info');
+                            return; // Stop monitoring
+                        } else {
+                            // Operation still running, check again in 5 seconds
+                            setTimeout(checkStatus, 5000);
+                        }
+                    } else {
+                        console.error('Error checking operation status:', data.message);
+                        // Stop monitoring on error
+                    }
+                } catch (error) {
+                    console.error('Error monitoring operation:', error);
+                    // Stop monitoring on error
+                }
+            };
+            
+            // Start monitoring
+            setTimeout(checkStatus, 2000); // Initial check after 2 seconds
+        }
+
+        // View MergerFS pool configuration
+        async function viewMergerfsConfig() {
+            try {
+                showNotification('Loading MergerFS configuration...', 'info');
+                
+                const response = await fetch('/api/mergerfs');
+                const data = await response.json();
+                
+                if (response.ok) {
+                    if (data.pools && data.pools.length > 0) {
+                        let configText = 'MergerFS Pool Configuration:\n\n';
+                        data.pools.forEach((pool, index) => {
+                            configText += `Pool ${index + 1}:\n`;
+                            configText += `  Mount Point: ${pool.mount_point}\n`;
+                            configText += `  Source Paths: ${pool.source_paths.join(', ')}\n`;
+                            configText += `  Options: ${pool.options}\n\n`;
+                        });
+                        alert(configText);
+                    } else {
+                        showNotification('No MergerFS pools found', 'info');
+                    }
+                } else {
+                    showNotification(`Error loading MergerFS config: ${data.message}`, 'error');
+                }
+            } catch (error) {
+                console.error('Error loading MergerFS config:', error);
+                showNotification(`Error loading MergerFS config: ${error.message}`, 'error');
+            }
+        }
+
+        // View SnapRAID status
+        async function viewSnapraidStatus() {
+            try {
+                showNotification('Loading SnapRAID status...', 'info');
+                
+                const response = await fetch('/api/snapraid/status');
+                const data = await response.json();
+                
+                if (response.ok && data.snapraid_status) {
+                    const status = data.snapraid_status;
+                    let statusText = 'SnapRAID Status:\n\n';
+                    statusText += `Last Sync: ${status.last_sync || 'Never'}\n`;
+                    statusText += `Parity Coverage: ${status.parity_coverage || 'Unknown'}\n`;
+                    statusText += `Data Drives: ${status.data_drives ? status.data_drives.length : 0}\n`;
+                    statusText += `Parity Drives: ${status.parity_drives ? status.parity_drives.length : 0}\n`;
+                    
+                    if (status.errors && status.errors.length > 0) {
+                        statusText += `\nErrors: ${status.errors.length}\n`;
+                    }
+                    
+                    alert(statusText);
+                } else {
+                    showNotification(`Error loading SnapRAID status: ${data.message}`, 'error');
+                }
+            } catch (error) {
+                console.error('Error loading SnapRAID status:', error);
+                showNotification(`Error loading SnapRAID status: ${error.message}`, 'error');
+            }
+        }
+
+        // Real-time update configuration
+        let updateInterval = 30000; // 30 seconds default
+        let fastUpdateInterval = 5000; // 5 seconds for active operations
+        let currentUpdateInterval = updateInterval;
+        let updateTimer = null;
+        let activeOperations = new Set();
+        let lastUpdateTime = 0;
+
+        // Start real-time updates
+        function startRealTimeUpdates() {
+            // Clear any existing timer
+            if (updateTimer) {
+                clearInterval(updateTimer);
+            }
+            
+            // Set up new timer with current interval
+            updateTimer = setInterval(() => {
+                fetchDriveData();
+                checkActiveOperations();
+            }, currentUpdateInterval);
+        }
+
+        // Switch to fast update mode when operations are active
+        function enableFastUpdates() {
+            if (currentUpdateInterval !== fastUpdateInterval) {
+                currentUpdateInterval = fastUpdateInterval;
+                startRealTimeUpdates();
+                showNotification('Switched to fast update mode for active operations', 'info');
+            }
+        }
+
+        // Switch back to normal update mode when no operations are active
+        function enableNormalUpdates() {
+            if (currentUpdateInterval !== updateInterval) {
+                currentUpdateInterval = updateInterval;
+                startRealTimeUpdates();
+                showNotification('Switched to normal update mode', 'info');
+            }
+        }
+
+        // Check for active SnapRAID operations
+        async function checkActiveOperations() {
+            try {
+                const response = await fetch('/api/snapraid/operations?active_only=true');
+                const data = await response.json();
+                
+                if (response.ok && data.operations) {
+                    const currentActiveOps = new Set(data.operations.map(op => op.operation_id));
+                    
+                    // Check for newly completed operations
+                    for (const opId of activeOperations) {
+                        if (!currentActiveOps.has(opId)) {
+                            // Operation completed or failed
+                            showNotification(`Operation ${opId} has completed`, 'success');
+                        }
+                    }
+                    
+                    // Update active operations set
+                    activeOperations = currentActiveOps;
+                    
+                    // Switch update modes based on active operations
+                    if (activeOperations.size > 0) {
+                        enableFastUpdates();
+                        updateOperationStatus(data.operations);
+                    } else {
+                        enableNormalUpdates();
+                    }
+                } else {
+                    // If we can't check operations, assume none are active
+                    if (activeOperations.size > 0) {
+                        activeOperations.clear();
+                        enableNormalUpdates();
+                    }
+                }
+            } catch (error) {
+                console.error('Error checking active operations:', error);
+                // Don't show notification for this error as it would be too noisy
+            }
+        }
+
+        // Update operation status display
+        function updateOperationStatus(operations) {
+            if (operations.length === 0) return;
+            
+            // Create or update operation status display
+            let statusDisplay = document.getElementById('operation-status-display');
+            if (!statusDisplay) {
+                statusDisplay = document.createElement('div');
+                statusDisplay.id = 'operation-status-display';
+                statusDisplay.className = 'fixed bottom-4 right-4 z-50 bg-gray-800 border border-purple-600 rounded-lg p-4 shadow-lg max-w-sm';
+                document.body.appendChild(statusDisplay);
+            }
+            
+            let statusHTML = '<h4 class="text-sm font-semibold mb-2 text-purple-300">Active Operations</h4>';
+            
+            operations.forEach(op => {
+                const progressPercent = op.progress || 0;
+                statusHTML += `
+                    <div class="mb-3 last:mb-0">
+                        <div class="flex justify-between items-center mb-1">
+                            <span class="text-xs text-blue-200">${op.operation_type.toUpperCase()}</span>
+                            <span class="text-xs text-gray-400">${progressPercent}%</span>
+                        </div>
+                        <div class="w-full bg-gray-700 rounded-full h-2">
+                            <div class="bg-purple-500 h-2 rounded-full transition-all duration-500" style="width: ${progressPercent}%"></div>
+                        </div>
+                        <div class="text-xs text-gray-400 mt-1">
+                            Status: ${op.status} ${op.estimated_completion ? `• ETA: ${op.estimated_completion}` : ''}
+                        </div>
+                    </div>
+                `;
+            });
+            
+            statusDisplay.innerHTML = statusHTML;
+        }
+
+        // Remove operation status display when no operations are active
+        function removeOperationStatusDisplay() {
+            const statusDisplay = document.getElementById('operation-status-display');
+            if (statusDisplay) {
+                statusDisplay.remove();
+            }
+        }
+
+        // Enhanced notification system with operation alerts
+        function showOperationNotification(message, type = 'info', persistent = false) {
+            const notification = showNotification(message, type);
+            
+            if (persistent) {
+                // Make notification persistent by preventing auto-removal
+                notification.addEventListener('click', () => {
+                    notification.remove();
+                });
+                
+                // Add close button for persistent notifications
+                const closeButton = document.createElement('button');
+                closeButton.innerHTML = '×';
+                closeButton.className = 'ml-2 text-white hover:text-gray-300 font-bold text-lg';
+                closeButton.onclick = () => notification.remove();
+                notification.appendChild(closeButton);
+            }
+        }
+
+        // Enhanced drive data fetching with change detection
+        let previousDriveData = null;
+        
+        async function fetchDriveDataWithChangeDetection() {
+            try {
+                const response = await fetch('/api/disks');
+                const data = await response.json();
+
+                if (data.status === 'success') {
+                    // Detect changes in drive data
+                    if (previousDriveData) {
+                        detectDriveChanges(previousDriveData.drives, data.drives);
+                    }
+                    
+                    previousDriveData = data;
+                    return data;
+                }
+                
+                throw new Error(data.message || 'Failed to fetch drive data');
+            } catch (error) {
+                console.error('Error fetching drive data:', error);
+                throw error;
+            }
+        }
+
+        // Detect and notify about drive changes
+        function detectDriveChanges(oldDrives, newDrives) {
+            const oldDriveMap = new Map(oldDrives.map(d => [d.device_path, d]));
+            const newDriveMap = new Map(newDrives.map(d => [d.device_path, d]));
+            
+            // Check for new drives
+            for (const [path, drive] of newDriveMap) {
+                if (!oldDriveMap.has(path)) {
+                    showOperationNotification(`New drive detected: ${path}`, 'success', true);
+                }
+            }
+            
+            // Check for removed drives
+            for (const [path, drive] of oldDriveMap) {
+                if (!newDriveMap.has(path)) {
+                    showOperationNotification(`Drive removed: ${path}`, 'error', true);
+                }
+            }
+            
+            // Check for health status changes
+            for (const [path, newDrive] of newDriveMap) {
+                const oldDrive = oldDriveMap.get(path);
+                if (oldDrive) {
+                    // Check SMART health changes
+                    if (oldDrive.smart_health && newDrive.smart_health) {
+                        if (oldDrive.smart_health.overall_health !== newDrive.smart_health.overall_health) {
+                            const healthChange = `${oldDrive.smart_health.overall_health} → ${newDrive.smart_health.overall_health}`;
+                            const notificationType = newDrive.smart_health.overall_health === 'PASSED' ? 'success' : 'error';
+                            showOperationNotification(`Drive ${path} health changed: ${healthChange}`, notificationType, true);
+                        }
+                    }
+                    
+                    // Check for significant usage changes (>5%)
+                    const usageDiff = Math.abs(newDrive.usage_percent - oldDrive.usage_percent);
+                    if (usageDiff > 5) {
+                        showNotification(`Drive ${path} usage changed by ${usageDiff.toFixed(1)}%`, 'info');
+                    }
+                }
+            }
+        }
+
+        // Override the original fetchDriveData to use change detection
+        const originalFetchDriveData = fetchDriveData;
+        fetchDriveData = async function() {
+            const drivesGrid = document.getElementById('drives-grid');
+            const lastUpdatedEl = document.getElementById('last-updated');
+            const refreshBtn = document.getElementById('refresh-btn');
+            
+            // Show loading state on refresh button
+            refreshBtn.disabled = true;
+            refreshBtn.innerHTML = `
+                <div class="flex items-center">
+                    <div class="spinner mr-2"></div>
+                    Loading...
+                </div>
+            `;
+
+            try {
+                const data = await fetchDriveDataWithChangeDetection();
+
+                // Clear loading message
+                drivesGrid.innerHTML = '';
+
+                if (data.drives.length === 0) {
+                    drivesGrid.innerHTML = `
+                        <div class="col-span-full text-center py-10">
+                            <svg class="w-16 h-16 mx-auto text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path>
+                            </svg>
+                            <p class="mt-4 text-xl">No drives detected</p>
+                            <p class="text-gray-400">Connect drives to see them here</p>
+                        </div>
+                    `;
+                } else {
+                    // Create drive cards with fade-in animation
+                    data.drives.forEach((drive, index) => {
+                        const cardElement = document.createElement('div');
+                        cardElement.innerHTML = createDriveCard(drive);
+                        cardElement.style.opacity = '0';
+                        cardElement.style.transform = 'translateY(20px)';
+                        drivesGrid.appendChild(cardElement.firstElementChild);
+                        
+                        // Animate in with staggered delay
+                        setTimeout(() => {
+                            cardElement.firstElementChild.style.transition = 'opacity 0.5s ease, transform 0.5s ease';
+                            cardElement.firstElementChild.style.opacity = '1';
+                            cardElement.firstElementChild.style.transform = 'translateY(0)';
+                        }, index * 100);
+                    });
+                }
+
+                // Update last updated timestamp
+                const now = new Date();
+                lastUpdatedEl.textContent = `Last updated: ${formatDateTime(now)}`;
+                lastUpdateTime = now.getTime();
+                
+                // Only show success notification on manual refresh
+                if (refreshBtn.disabled) {
+                    showNotification(`Loaded ${data.drives.length} drives`, 'success');
+                }
+
+            } catch (error) {
+                console.error('Error fetching drive data:', error);
+                drivesGrid.innerHTML = `
+                    <div class="col-span-full text-center py-10">
+                        <svg class="w-16 h-16 mx-auto text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                        <p class="mt-4 text-xl">Error loading drives</p>
+                        <p class="text-gray-400">${error.message}</p>
+                        <button onclick="fetchDriveData()" class="mt-4 coraline-button text-blue-100 font-bold py-2 px-4 rounded-lg">
+                            Try Again
+                        </button>
+                    </div>
+                `;
+                showNotification('Error loading drive data', 'error');
+            } finally {
+                // Reset refresh button
+                refreshBtn.disabled = false;
+                refreshBtn.innerHTML = `
+                    <div class="flex items-center">
+                        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                        </svg>
+                        Refresh
+                    </div>
+                `;
+            }
+        };
+
+        // Add connection status indicator
+        function updateConnectionStatus(isOnline) {
+            let statusIndicator = document.getElementById('connection-status');
+            if (!statusIndicator) {
+                statusIndicator = document.createElement('div');
+                statusIndicator.id = 'connection-status';
+                statusIndicator.className = 'fixed top-20 right-4 z-40 px-3 py-1 rounded-full text-xs font-medium';
+                document.body.appendChild(statusIndicator);
+            }
+            
+            if (isOnline) {
+                statusIndicator.className = 'fixed top-20 right-4 z-40 px-3 py-1 rounded-full text-xs font-medium bg-green-600 text-white';
+                statusIndicator.textContent = 'Connected';
+                statusIndicator.style.opacity = '0.8';
+            } else {
+                statusIndicator.className = 'fixed top-20 right-4 z-40 px-3 py-1 rounded-full text-xs font-medium bg-red-600 text-white';
+                statusIndicator.textContent = 'Disconnected';
+                statusIndicator.style.opacity = '1';
+            }
+        }
+
+        // Monitor connection status
+        function monitorConnectionStatus() {
+            // Check if we can reach the API
+            fetch('/api/disks', { method: 'HEAD' })
+                .then(() => updateConnectionStatus(true))
+                .catch(() => updateConnectionStatus(false));
+        }
+
+        // Enhanced operation monitoring with better error handling
+        const originalMonitorSnapraidOperation = monitorSnapraidOperation;
+        monitorSnapraidOperation = function(operationId) {
+            // Add to active operations set
+            activeOperations.add(operationId);
+            enableFastUpdates();
+            
+            const checkStatus = async () => {
+                try {
+                    const response = await fetch(`/api/snapraid/operations/${operationId}`);
+                    const data = await response.json();
+                    
+                    if (response.ok && data.operation) {
+                        const operation = data.operation;
+                        
+                        if (operation.status === 'completed') {
+                            activeOperations.delete(operationId);
+                            showOperationNotification(`SnapRAID ${operation.operation_type} completed successfully!`, 'success', true);
+                            
+                            if (activeOperations.size === 0) {
+                                enableNormalUpdates();
+                                removeOperationStatusDisplay();
+                            }
+                            return; // Stop monitoring
+                        } else if (operation.status === 'failed') {
+                            activeOperations.delete(operationId);
+                            showOperationNotification(`SnapRAID ${operation.operation_type} failed: ${operation.error_message || 'Unknown error'}`, 'error', true);
+                            
+                            if (activeOperations.size === 0) {
+                                enableNormalUpdates();
+                                removeOperationStatusDisplay();
+                            }
+                            return; // Stop monitoring
+                        } else if (operation.status === 'cancelled') {
+                            activeOperations.delete(operationId);
+                            showOperationNotification(`SnapRAID ${operation.operation_type} was cancelled`, 'info', true);
+                            
+                            if (activeOperations.size === 0) {
+                                enableNormalUpdates();
+                                removeOperationStatusDisplay();
+                            }
+                            return; // Stop monitoring
+                        } else {
+                            // Operation still running, check again in 3 seconds
+                            setTimeout(checkStatus, 3000);
+                        }
+                    } else {
+                        console.error('Error checking operation status:', data.message);
+                        // Remove from active operations on error
+                        activeOperations.delete(operationId);
+                        if (activeOperations.size === 0) {
+                            enableNormalUpdates();
+                            removeOperationStatusDisplay();
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error monitoring operation:', error);
+                    // Remove from active operations on error
+                    activeOperations.delete(operationId);
+                    if (activeOperations.size === 0) {
+                        enableNormalUpdates();
+                        removeOperationStatusDisplay();
+                    }
+                }
+            };
+            
+            // Start monitoring
+            setTimeout(checkStatus, 2000); // Initial check after 2 seconds
+        };
+
+        // Initialize real-time updates
+        fetchDriveData();
+        startRealTimeUpdates();
+        
+        // Monitor connection status every 30 seconds
+        setInterval(monitorConnectionStatus, 30000);
+        monitorConnectionStatus(); // Initial check
+
+        // Handle page visibility changes to pause/resume updates
+        document.addEventListener('visibilitychange', function() {
+            if (document.hidden) {
+                // Page is hidden, pause updates
+                if (updateTimer) {
+                    clearInterval(updateTimer);
+                    updateTimer = null;
+                }
+            } else {
+                // Page is visible, resume updates
+                startRealTimeUpdates();
+                // Immediate update when page becomes visible
+                fetchDriveData();
+                checkActiveOperations();
+            }
+        });
+    </script>
+</body>
+</html>

@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <script>
         // Redirect to login if not logged in
@@ -12,33 +13,51 @@
     <title>Pi-Health Dashboard</title>
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <style>
-        .status-running { background-color: #38a169; }
-        .status-stopped { background-color: #e53e3e; }
-        .status-other { background-color: #dd6b20; }
-        .button:active { transform: scale(0.95); }
-        
+        .status-running {
+            background-color: #38a169;
+        }
+
+        .status-stopped {
+            background-color: #e53e3e;
+        }
+
+        .status-other {
+            background-color: #dd6b20;
+        }
+
+        .button:active {
+            transform: scale(0.95);
+        }
+
         /* Animation for actions */
         .animate-pulse {
             animation: pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
         }
-        
+
         @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.5;
+            }
         }
-        
+
         /* Card hover effect */
         .service-card {
             transition: transform 0.2s ease, box-shadow 0.2s ease;
             border: 2px solid rgba(95, 75, 139, 0.3);
         }
-        
+
         .service-card:hover {
             transform: translateY(-5px);
             box-shadow: 0 10px 15px -3px rgba(138, 43, 226, 0.4);
             border: 2px solid rgba(138, 43, 226, 0.6);
         }
-        
+
         /* Custom Coraline button */
         .coraline-button {
             background: linear-gradient(to bottom, #5f4b8b, #372b53);
@@ -46,7 +65,7 @@
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.25);
             transition: all 0.3s ease;
         }
-        
+
         .coraline-button:hover {
             background: linear-gradient(to bottom, #6f58a3, #413162);
             transform: translateY(-2px);
@@ -54,13 +73,15 @@
         }
     </style>
 </head>
+
 <body class="bg-gray-900 text-blue-100 font-sans min-h-screen">
     <header class="bg-gradient-to-r from-purple-900 to-blue-900 shadow-lg relative overflow-hidden">
         <div class="absolute inset-0 overflow-hidden">
             <img src="/coraline-banner.jpg" alt="Coraline" class="w-full h-full object-cover opacity-40 blur-sm">
         </div>
         <div class="container mx-auto p-8 relative">
-            <h1 class="text-4xl font-bold text-center text-blue-200 font-serif" style="text-shadow: 2px 2px 4px rgba(0,0,0,0.8);">Coraline's Pi-Health Dashboard</h1>
+            <h1 class="text-4xl font-bold text-center text-blue-200 font-serif"
+                style="text-shadow: 2px 2px 4px rgba(0,0,0,0.8);">Coraline's Pi-Health Dashboard</h1>
         </div>
     </header>
 
@@ -69,10 +90,18 @@
         <div class="container mx-auto px-4">
             <div class="flex items-center justify-between h-16">
                 <div class="flex space-x-4">
-                    <a href="/" class="px-3 py-2 rounded-md text-white bg-blue-800 font-medium border border-blue-400">Home</a>
-                    <a href="/system.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">System Health</a>
-                    <a href="/containers.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Containers</a>
-                    <a href="/edit.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Edit Config</a>
+                    <a href="/"
+                        class="px-3 py-2 rounded-md text-white bg-blue-800 font-medium border border-blue-400">Home</a>
+                    <a href="/system.html"
+                        class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">System
+                        Health</a>
+                    <a href="/containers.html"
+                        class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Containers</a>
+                    <a href="/drives.html"
+                        class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Drives</a>
+                    <a href="/edit.html"
+                        class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Edit
+                        Config</a>
                 </div>
             </div>
         </div>
@@ -81,13 +110,16 @@
     <!-- Main content -->
     <main class="container mx-auto p-6">
         <h2 class="text-2xl font-semibold mb-6 text-center">Docker Web Services</h2>
-        
+
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6" id="service-grid">
             <!-- Service cards will be loaded here -->
             <div class="col-span-full text-center py-10">
                 <div class="inline-block animate-pulse">
-                    <svg class="w-10 h-10 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                    <svg class="w-10 h-10 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                        xmlns="http://www.w3.org/2000/svg">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15">
+                        </path>
                     </svg>
                 </div>
                 <p class="mt-2 text-xl">Loading services...</p>
@@ -159,33 +191,33 @@
                 'from-indigo-900 to-blue-900',
                 'from-blue-900 to-indigo-900'
             ];
-            
+
             // Generate a pseudorandom but consistent color based on the container name
             let hash = 0;
             for (let i = 0; i < containerName.length; i++) {
                 hash = containerName.charCodeAt(i) + ((hash << 5) - hash);
             }
-            
+
             return gradients[Math.abs(hash) % gradients.length];
         }
 
         // Fetch Docker containers and create service cards
         async function fetchDockerWebServices() {
             const serviceGrid = document.getElementById('service-grid');
-            
+
             try {
                 const response = await fetch('/api/containers');
                 const containers = await response.json();
-                
+
                 // Clear loading message
                 serviceGrid.innerHTML = '';
-                
+
                 // Filter to only running containers with web UIs
-                const webServices = containers.filter(container => 
-                    container.status === 'running' && 
+                const webServices = containers.filter(container =>
+                    container.status === 'running' &&
                     webUIPorts[container.name]
                 );
-                
+
                 if (webServices.length === 0) {
                     serviceGrid.innerHTML = `
                         <div class="col-span-full text-center py-10">
@@ -200,14 +232,14 @@
                     `;
                     return;
                 }
-                
+
                 // Create a card for each web service
                 webServices.forEach(container => {
                     const port = webUIPorts[container.name].port;
                     const icon = getIcon(container.name);
                     const friendlyName = getFriendlyName(container.name);
                     const gradient = getBackgroundGradient(container.name);
-                    
+
                     const card = document.createElement('div');
                     card.className = `service-card bg-gray-800 rounded-lg shadow-lg overflow-hidden`;
                     card.innerHTML = `
@@ -224,10 +256,10 @@
                             </a>
                         </div>
                     `;
-                    
+
                     serviceGrid.appendChild(card);
                 });
-                
+
             } catch (error) {
                 console.error('Error fetching Docker services:', error);
                 serviceGrid.innerHTML = `
@@ -241,12 +273,13 @@
                 `;
             }
         }
-        
+
         // Initial fetch
         fetchDockerWebServices();
-        
+
         // Refresh every 30 seconds
         setInterval(fetchDockerWebServices, 30000);
     </script>
 </body>
+
 </html>
