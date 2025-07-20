@@ -3,3 +3,7 @@ psutil
 docker
 apscheduler
 python-dotenv
+black
+flake8
+pre-commit
+pyyaml
