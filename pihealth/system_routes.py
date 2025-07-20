@@ -5,11 +5,18 @@ from flask import Blueprint, jsonify, send_from_directory
 
 from . import docker_client, docker_available, container_updates
 
-system_bp = Blueprint('system_bp', __name__)
+system_bp = Blueprint(
+    "system_bp",
+    __name__,
+    static_folder="../static",
+)
 
 
 def calculate_cpu_usage(cpu_line):
-    user, nice, system, idle, iowait, irq, softirq, steal = map(int, cpu_line[1:9])
+    user, nice, system, idle, iowait, irq, softirq, steal = map(
+        int,
+        cpu_line[1:9],
+    )
     total_time = user + nice + system + idle + iowait + irq + softirq + steal
     idle_time = idle + iowait
     usage_percent = 100 * (total_time - idle_time) / total_time
@@ -18,7 +25,7 @@ def calculate_cpu_usage(cpu_line):
 
 def get_system_stats():
     try:
-        with open('/host_proc/stat', 'r') as f:
+        with open("/host_proc/stat", "r") as f:
             cpu_line = f.readline().split()
             cpu_usage = calculate_cpu_usage(cpu_line)
     except Exception:
@@ -32,7 +39,7 @@ def get_system_stats():
         "percent": memory.percent,
     }
 
-    disk_path = os.getenv('DISK_PATH', '/')
+    disk_path = os.getenv("DISK_PATH", "/")
     disk = psutil.disk_usage(disk_path)
     disk_usage = {
         "total": disk.total,
@@ -41,7 +48,7 @@ def get_system_stats():
         "percent": disk.percent,
     }
 
-    disk_path_2 = os.getenv('DISK_PATH_2', '/mnt/backup')
+    disk_path_2 = os.getenv("DISK_PATH_2", "/mnt/backup")
     disk_2 = psutil.disk_usage(disk_path_2)
     disk_usage_2 = {
         "total": disk_2.total,
@@ -50,10 +57,12 @@ def get_system_stats():
         "percent": disk_2.percent,
     }
 
-    if os.path.exists('/usr/bin/vcgencmd'):
+    if os.path.exists("/usr/bin/vcgencmd"):
         try:
-            temp_output = os.popen('vcgencmd measure_temp').readline()
-            temperature = float(temp_output.replace('temp=', '').replace("'C\n", ''))
+            temp_output = os.popen("vcgencmd measure_temp").readline()
+            temperature = float(
+                temp_output.replace("temp=", "").replace("'C\n", ""),
+            )
         except Exception:
             temperature = None
     else:
@@ -77,7 +86,14 @@ def get_system_stats():
 
 def list_containers():
     if not docker_available:
-        return [{"id": "docker-not-available", "name": "Docker Not Available", "status": "unavailable", "image": "N/A"}]
+        return [
+            {
+                "id": "docker-not-available",
+                "name": "Docker Not Available",
+                "status": "unavailable",
+                "image": "N/A",
+            }
+        ]
     try:
         containers = docker_client.containers.list(all=True)
         return [
@@ -85,14 +101,21 @@ def list_containers():
                 "id": c.id[:12],
                 "name": c.name,
                 "status": c.status,
-                "image": c.image.tags[0] if c.image.tags else 'unknown',
+                "image": c.image.tags[0] if c.image.tags else "unknown",
                 "update_available": container_updates.get(c.id[:12], False),
             }
             for c in containers
         ]
     except Exception as e:
         logging.error(f"Error listing containers: {e}")
-        return [{"id": "error-listing", "name": "Error Listing Containers", "status": "error", "image": str(e)}]
+        return [
+            {
+                "id": "error-listing",
+                "name": "Error Listing Containers",
+                "status": "error",
+                "image": str(e),
+            }
+        ]
 
 
 def check_container_update(container):
@@ -116,7 +139,11 @@ def update_container(container):
         tag = container.image.tags[0]
         docker_client.images.pull(tag)
         import subprocess
-        subprocess.run(['docker', 'compose', 'up', '-d', container.name], check=False)
+
+        subprocess.run(
+            ["docker", "compose", "up", "-d", container.name],
+            check=False,
+        )
         container_updates[container.id[:12]] = False
         return {"status": "Container updated"}
     except Exception as e:
@@ -128,15 +155,15 @@ def control_container(container_id, action):
         return {"error": "Docker is not available"}
     try:
         container = docker_client.containers.get(container_id)
-        if action == 'start':
+        if action == "start":
             container.start()
-        elif action == 'stop':
+        elif action == "stop":
             container.stop()
-        elif action == 'restart':
+        elif action == "restart":
             container.restart()
-        elif action == 'check_update':
+        elif action == "check_update":
             return check_container_update(container)
-        elif action == 'update':
+        elif action == "update":
             return update_container(container)
         else:
             return {"error": "Invalid action"}
@@ -147,13 +174,15 @@ def control_container(container_id, action):
 
 def system_action(action):
     try:
-        if action == 'shutdown':
+        if action == "shutdown":
             import subprocess
-            subprocess.Popen(['sudo', 'shutdown', '-h', 'now'])
+
+            subprocess.Popen(["sudo", "shutdown", "-h", "now"])
             return {"status": "Shutdown initiated"}
-        elif action == 'reboot':
+        elif action == "reboot":
             import subprocess
-            subprocess.Popen(['sudo', 'reboot'])
+
+            subprocess.Popen(["sudo", "reboot"])
             return {"status": "Reboot initiated"}
         else:
             return {"error": "Invalid system action"}
@@ -161,53 +190,71 @@ def system_action(action):
         return {"error": str(e)}
 
 
-@system_bp.route('/')
+@system_bp.route("/")
 def serve_frontend():
-    return send_from_directory(system_bp.static_folder or 'static', 'index.html')
+    return send_from_directory(
+        system_bp.static_folder or "static",
+        "index.html",
+    )
 
 
-@system_bp.route('/system.html')
+@system_bp.route("/system.html")
 def serve_system():
-    return send_from_directory(system_bp.static_folder or 'static', 'system.html')
+    return send_from_directory(
+        system_bp.static_folder or "static",
+        "system.html",
+    )
 
 
-@system_bp.route('/containers.html')
+@system_bp.route("/containers.html")
 def serve_containers():
-    return send_from_directory(system_bp.static_folder or 'static', 'containers.html')
+    return send_from_directory(
+        system_bp.static_folder or "static",
+        "containers.html",
+    )
 
 
-@system_bp.route('/drives.html')
+@system_bp.route("/drives.html")
 def serve_drives():
-    return send_from_directory(system_bp.static_folder or 'static', 'drives.html')
+    return send_from_directory(
+        system_bp.static_folder or "static",
+        "drives.html",
+    )
 
 
-@system_bp.route('/edit.html')
+@system_bp.route("/edit.html")
 def serve_edit():
-    return send_from_directory(system_bp.static_folder or 'static', 'edit.html')
+    return send_from_directory(
+        system_bp.static_folder or "static",
+        "edit.html",
+    )
 
 
-@system_bp.route('/login.html')
+@system_bp.route("/login.html")
 def serve_login():
-    return send_from_directory(system_bp.static_folder or 'static', 'login.html')
+    return send_from_directory(
+        system_bp.static_folder or "static",
+        "login.html",
+    )
 
 
-@system_bp.route('/coraline-banner.jpg')
+@system_bp.route("/coraline-banner.jpg")
 def serve_banner():
-    return send_from_directory(system_bp.static_folder or 'static', 'coraline-banner.jpg')
+    return send_from_directory(
+        system_bp.static_folder or "static", "coraline-banner.jpg"
+    )
 
 
-@system_bp.route('/api/stats', methods=['GET'])
+@system_bp.route("/api/stats", methods=["GET"])
 def api_stats():
     return jsonify(get_system_stats())
 
 
-
-
-@system_bp.route('/api/shutdown', methods=['POST'])
+@system_bp.route("/api/shutdown", methods=["POST"])
 def api_shutdown():
-    return jsonify(system_action('shutdown'))
+    return jsonify(system_action("shutdown"))
 
 
-@system_bp.route('/api/reboot', methods=['POST'])
+@system_bp.route("/api/reboot", methods=["POST"])
 def api_reboot():
-    return jsonify(system_action('reboot'))
+    return jsonify(system_action("reboot"))
