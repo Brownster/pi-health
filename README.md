@@ -134,6 +134,22 @@ these settings automatically using `python-dotenv`.
 | `ENV_FILE_PATH` | `/config/.env` | Path to environment file |
 | `BACKUP_DIR` | `/config/backups` | Backup directory for configurations |
 
+### User Accounts
+User credentials are stored in a simple JSON file. By default the application
+loads `users.json` from the project root, but this can be overridden with the
+`USERS_FILE_PATH` environment variable.
+
+To add or update a user, edit `users.json` and provide a hashed password
+generated with `werkzeug.security.generate_password_hash`. Example:
+
+```json
+{
+  "holly": "<hashed>"
+}
+```
+
+After creating or updating the file, restart the application.
+
 ### Storage Configuration
 The dashboard automatically discovers and monitors:
 - **Data Drives**: USB drives and additional storage

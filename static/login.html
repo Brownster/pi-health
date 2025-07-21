@@ -114,36 +114,34 @@
     </div>
 
     <script>
-        // Simple credentials for demonstration
-        const USERNAME = "holly";
-        const PASSWORD = "pass123";
-
-        function validateLogin() {
+        async function validateLogin() {
             const username = document.getElementById("username").value.trim();
             const password = document.getElementById("password").value.trim();
             const errorEl = document.getElementById("login-error");
             const loginCard = document.querySelector(".login-card");
 
-            if (username === USERNAME && password === PASSWORD) {
-                // Store login status in session storage
-                sessionStorage.setItem("loggedIn", "true");
-                // Redirect to the dashboard root
-                window.location.href = "/";
-            } else {
-                // Show error message and shake animation
-                errorEl.classList.remove("hidden");
-                loginCard.classList.add("shake-animation");
-                
-                // Remove shake animation after it completes
-                setTimeout(() => {
-                    loginCard.classList.remove("shake-animation");
-                }, 500);
-                
-                // Hide error after 5 seconds
-                setTimeout(() => {
-                    errorEl.classList.add("hidden");
-                }, 5000);
+            try {
+                const resp = await fetch("/api/login", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ username, password })
+                });
+
+                if (resp.ok) {
+                    // Store login status in session storage
+                    sessionStorage.setItem("loggedIn", "true");
+                    window.location.href = "/";
+                    return;
+                }
+            } catch (err) {
+                console.error("Login failed", err);
             }
+
+            // Show error message and shake animation on failure
+            errorEl.classList.remove("hidden");
+            loginCard.classList.add("shake-animation");
+            setTimeout(() => loginCard.classList.remove("shake-animation"), 500);
+            setTimeout(() => errorEl.classList.add("hidden"), 5000);
         }
     </script>
 </body>

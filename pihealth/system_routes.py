@@ -5,7 +5,12 @@ from flask import Blueprint, jsonify, send_from_directory
 
 from . import docker_client, docker_available, container_updates
 
-system_bp = Blueprint('system_bp', __name__)
+# Serve static HTML files from the project-level static directory
+system_bp = Blueprint(
+    "system_bp",
+    __name__,
+    static_folder=os.path.join(os.path.dirname(__file__), "..", "static"),
+)
 
 
 def calculate_cpu_usage(cpu_line):

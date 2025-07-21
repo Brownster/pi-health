@@ -43,6 +43,8 @@ def create_app():
     logging.basicConfig(level=getattr(logging, log_level, logging.INFO))
 
     app = Flask(__name__, static_folder='static')
+    # Secret key for session management
+    app.secret_key = os.getenv("SECRET_KEY", "pihealth-secret-key")
 
     # Initialize Docker client if available
     try:
