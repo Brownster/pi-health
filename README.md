@@ -36,7 +36,7 @@ A comprehensive system monitoring and NAS management dashboard for Raspberry Pi 
 
 ### 🌐 Web Interface
 - **Modern UI**: Responsive design with Tailwind CSS and Coraline theme
-- **Authentication**: Session-based login system
+ - **Authentication**: Session-based login with credentials stored in `users.json`
 - **Real-time Updates**: Live dashboard updates without page refresh
 - **Multi-page Navigation**: Dedicated pages for containers, drives, and system stats
 
@@ -108,7 +108,7 @@ services:
 
 4. **Access the dashboard**:
    - Open http://localhost:8080
-   - Default login: Use the built-in authentication
+   - Credentials are stored in `users.json`. Add new users with the `/api/users` endpoint or by editing the file.
 
 ### Production Deployment
 Use the Pi-Installer for automated setup with integrated NAS functionality:

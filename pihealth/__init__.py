@@ -43,6 +43,7 @@ def create_app():
     logging.basicConfig(level=getattr(logging, log_level, logging.INFO))
 
     app = Flask(__name__, static_folder='static')
+    app.secret_key = os.getenv("PIHEALTH_SECRET_KEY", "change-me")
 
     # Initialize Docker client if available
     try:
