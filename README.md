@@ -39,3 +39,18 @@ services:
       - ./config:/config
       - /mnt/storage:/mnt/storage #disk to monitor for storage space
     restart: unless-stopped
+
+## Ops-Copilot AI Agent
+
+The Ops-Copilot UI now talks to a lightweight AI agent that can aggregate telemetry
+before answering questions. To enable cloud-backed responses, provide the following
+environment variables when launching the app:
+
+- `OPENAI_API_KEY` – API key for the OpenAI account the agent should use.
+- `OPENAI_API_MODEL` (optional) – override the default `gpt-4o-mini` model name.
+
+If the API key is omitted the agent runs in a safe offline mode, summarising the
+available Model Context Protocol (MCP) tooling instead of calling the model. The
+first MCP tool ships with this update and streams live system statistics into the
+prompt, giving the AI immediate visibility into CPU, memory, disk, and temperature
+data when analysing an incident.
