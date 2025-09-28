@@ -1,0 +1,680 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script>
+        if (!sessionStorage.getItem("loggedIn")) {
+            window.location.href = "/login.html";
+        }
+    </script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ops-Copilot AI Assistant - Pi-Health</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        .glass-panel {
+            background: rgba(31, 41, 55, 0.8);
+            border: 1px solid rgba(148, 163, 184, 0.18);
+            border-radius: 1rem;
+            backdrop-filter: blur(12px);
+        }
+
+        .chat-bubble-assistant {
+            background: rgba(17, 24, 39, 0.85);
+            border: 1px solid rgba(129, 140, 248, 0.35);
+        }
+
+        .chat-bubble-user {
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.95), rgba(124, 58, 237, 0.95));
+            color: white;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 9999px;
+        }
+
+        .status-dot-online {
+            background: #10b981;
+            box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.2);
+        }
+
+        .status-dot-warning {
+            background: #f59e0b;
+            box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.2);
+        }
+
+        .status-dot-offline {
+            background: #ef4444;
+            box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.2);
+        }
+
+        .spinner {
+            border-top-color: rgba(129, 140, 248, 1);
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        @media (max-width: 640px) {
+            .status-grid {
+                grid-template-columns: repeat(1, minmax(0, 1fr));
+            }
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-blue-100 font-sans min-h-screen">
+    <header class="bg-gradient-to-r from-purple-900 to-blue-900 shadow-lg relative overflow-hidden">
+        <div class="absolute inset-0 overflow-hidden">
+            <img src="/coraline-banner.jpg" alt="Coraline" class="w-full h-full object-cover opacity-40 blur-sm">
+        </div>
+        <div class="container mx-auto p-8 relative">
+            <h1 class="text-4xl font-bold text-center text-blue-200 font-serif" style="text-shadow: 2px 2px 4px rgba(0,0,0,0.8);">Coraline's Ops-Copilot AI</h1>
+            <p class="text-center text-blue-100/70 mt-2">Guided automation for your Pi-Health media stack</p>
+        </div>
+    </header>
+
+    <nav class="bg-purple-900 shadow-md">
+        <div class="container mx-auto px-4">
+            <div class="flex items-center justify-between h-16">
+                <div class="flex space-x-4">
+                    <a href="/" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Home</a>
+                    <a href="/system.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">System Health</a>
+                    <a href="/containers.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Containers</a>
+                    <a href="/ops-copilot.html" class="px-3 py-2 rounded-md text-white bg-blue-800 font-medium border border-blue-400">Ops-Copilot AI</a>
+                    <a href="/edit.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Edit Config</a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <main class="container mx-auto p-6 space-y-8">
+        <section aria-label="system status" class="grid gap-4 md:grid-cols-2 xl:grid-cols-4 status-grid">
+            <article class="glass-panel p-5 flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <span class="status-dot status-dot-online" aria-hidden="true"></span>
+                    <div>
+                        <p class="text-sm uppercase tracking-wide text-blue-200/70">AI Agent</p>
+                        <p id="status-agent" class="text-lg font-semibold">Online</p>
+                    </div>
+                </div>
+                <svg class="w-9 h-9 text-blue-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+            </article>
+            <article class="glass-panel p-5 flex items-center justify-between">
+                <div>
+                    <p class="text-sm uppercase tracking-wide text-blue-200/70">CPU Load</p>
+                    <p id="status-cpu" class="text-lg font-semibold">--%</p>
+                    <p id="status-cpu-detail" class="text-xs text-blue-200/60 mt-1">Collecting metrics…</p>
+                </div>
+                <svg class="w-9 h-9 text-blue-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 4h5l2 5H9l2 5h5l2 5H9l-2-5h2l-2-5H4z" />
+                </svg>
+            </article>
+            <article class="glass-panel p-5 flex items-center justify-between">
+                <div>
+                    <p class="text-sm uppercase tracking-wide text-blue-200/70">Memory</p>
+                    <p id="status-memory" class="text-lg font-semibold">--</p>
+                    <p id="status-memory-detail" class="text-xs text-blue-200/60 mt-1">Collecting metrics…</p>
+                </div>
+                <svg class="w-9 h-9 text-blue-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7h18M3 12h18M3 17h18M6 3v4m12-4v4M6 17v4m12-4v4" />
+                </svg>
+            </article>
+            <article class="glass-panel p-5 flex items-center justify-between">
+                <div>
+                    <p class="text-sm uppercase tracking-wide text-blue-200/70">Temperature</p>
+                    <p id="status-temp" class="text-lg font-semibold">-- °C</p>
+                    <p class="text-xs text-blue-200/60 mt-1" id="status-temp-detail">Awaiting sensor…</p>
+                </div>
+                <svg class="w-9 h-9 text-blue-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M14 14.76V5a2 2 0 10-4 0v9.76a4 4 0 104 0z" />
+                </svg>
+            </article>
+        </section>
+
+        <section class="grid gap-6 xl:grid-cols-[1.6fr_1fr]">
+            <article class="glass-panel p-6 flex flex-col h-[640px]" aria-label="Chat with Ops-Copilot AI">
+                <header class="flex items-center justify-between mb-4">
+                    <div>
+                        <h2 class="text-xl font-semibold">Ops-Copilot Chat</h2>
+                        <p class="text-sm text-blue-200/70">Ask about service health, automation, or request a fix.</p>
+                    </div>
+                    <span id="chat-status" class="text-xs text-blue-200/60">Ready</span>
+                </header>
+                <div id="chat-log" class="flex-1 overflow-y-auto pr-2 space-y-4" role="log" aria-live="polite" aria-label="Conversation history"></div>
+                <div id="chat-loading" class="hidden items-center gap-2 text-blue-200/70 mt-2" aria-live="assertive">
+                    <div class="w-4 h-4 border-2 border-blue-400/40 rounded-full spinner"></div>
+                    <span>Analyzing…</span>
+                </div>
+                <form id="chat-form" class="mt-4" aria-label="Send a message to Ops-Copilot">
+                    <label for="chat-input" class="sr-only">Message Ops-Copilot</label>
+                    <div class="flex gap-3 items-end">
+                        <textarea
+                            id="chat-input"
+                            class="flex-1 bg-gray-900/70 border border-blue-500/20 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/40 rounded-xl text-blue-100 px-4 py-3 resize-none min-h-[52px] max-h-40"
+                            placeholder="Ask me to check on a service or run a diagnostic…"
+                            rows="2"
+                            aria-label="Chat input"
+                        ></textarea>
+                        <button
+                            type="submit"
+                            id="chat-submit"
+                            class="inline-flex items-center justify-center px-5 py-3 rounded-xl font-medium bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-lg hover:shadow-xl transition focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                        >
+                            <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 10l18-7-7 18-2-7-7-4z" />
+                            </svg>
+                            Send
+                        </button>
+                    </div>
+                </form>
+            </article>
+
+            <aside class="space-y-6">
+                <section class="glass-panel p-6" aria-label="Service status">
+                    <header class="flex items-center justify-between mb-4">
+                        <h2 class="text-lg font-semibold">Services Status</h2>
+                        <button id="refresh-services" class="text-sm text-blue-200/70 hover:text-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900 rounded-lg px-2 py-1">
+                            Refresh
+                        </button>
+                    </header>
+                    <ul id="service-status" class="space-y-3" aria-live="polite">
+                        <li class="flex items-center justify-between text-blue-200/70 text-sm" id="service-loading">
+                            <span>Loading services…</span>
+                            <div class="w-4 h-4 border-2 border-blue-400/40 rounded-full spinner"></div>
+                        </li>
+                    </ul>
+                </section>
+
+                <section class="glass-panel p-6" aria-label="Quick actions">
+                    <h2 class="text-lg font-semibold mb-4">Quick Actions</h2>
+                    <div class="space-y-3">
+                        <button data-quick-action="health" class="w-full flex items-center justify-between px-4 py-3 rounded-lg bg-gray-900/60 border border-blue-500/20 hover:border-blue-400 transition focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <span>Run system health check</span>
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                        </button>
+                        <button data-quick-action="logs" class="w-full flex items-center justify-between px-4 py-3 rounded-lg bg-gray-900/60 border border-blue-500/20 hover:border-blue-400 transition focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <span>Review recent error logs</span>
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 20h9" />
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 4h9M12 12h9M5 4h.01M5 12h.01M5 20h.01" />
+                            </svg>
+                        </button>
+                        <button data-quick-action="disk" class="w-full flex items-center justify-between px-4 py-3 rounded-lg bg-gray-900/60 border border-blue-500/20 hover:border-blue-400 transition focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <span>Get disk space report</span>
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V7M3 7l9-4 9 4M3 7l9 4 9-4" />
+                            </svg>
+                        </button>
+                        <button data-quick-action="queue" class="w-full flex items-center justify-between px-4 py-3 rounded-lg bg-gray-900/60 border border-blue-500/20 hover:border-blue-400 transition focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <span>Check download queue</span>
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                            </svg>
+                        </button>
+                    </div>
+                </section>
+            </aside>
+        </section>
+    </main>
+
+    <div id="approval-modal" class="fixed inset-0 flex items-center justify-center bg-black/70 backdrop-blur-sm opacity-0 pointer-events-none transition-opacity duration-200" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="approval-title">
+        <div class="glass-panel w-full max-w-lg p-6 shadow-2xl transform scale-95 transition-transform duration-200" role="document">
+            <header class="flex items-start gap-3">
+                <div class="flex-shrink-0">
+                    <svg class="w-10 h-10 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v2m0 4h.01M5.07 19h13.86a2 2 0 001.74-3L13.74 4.99a2 2 0 00-3.48 0L3.33 16a2 2 0 001.74 3z" />
+                    </svg>
+                </div>
+                <div>
+                    <h2 id="approval-title" class="text-xl font-semibold">Approve automated fix</h2>
+                    <p id="approval-description" class="text-sm text-blue-200/70 mt-1"></p>
+                </div>
+            </header>
+            <div class="mt-4">
+                <p class="text-sm uppercase tracking-wide text-blue-200/60">Command Preview</p>
+                <pre id="approval-command" class="mt-2 bg-gray-900/70 border border-blue-500/20 rounded-lg px-4 py-3 text-sm text-emerald-300 overflow-x-auto"></pre>
+            </div>
+            <p id="approval-impact" class="mt-4 text-sm text-blue-200/70"></p>
+            <div class="mt-6 flex justify-end gap-3">
+                <button id="approval-cancel" class="px-4 py-2 rounded-lg border border-blue-500/30 text-blue-100 hover:bg-gray-900/60 focus:outline-none focus:ring-2 focus:ring-blue-500">Cancel</button>
+                <button id="approval-confirm" class="px-4 py-2 rounded-lg bg-gradient-to-r from-emerald-500 to-emerald-600 text-white font-semibold shadow-lg hover:shadow-xl focus:outline-none focus:ring-2 focus:ring-emerald-400">
+                    Approve &amp; Run
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const aiState = {
+            messages: [],
+            suggestions: {},
+            loading: false,
+            loadingNode: null
+        };
+
+        const chatLog = document.getElementById('chat-log');
+        const chatForm = document.getElementById('chat-form');
+        const chatInput = document.getElementById('chat-input');
+        const chatSubmit = document.getElementById('chat-submit');
+        const chatStatus = document.getElementById('chat-status');
+        const chatLoadingRow = document.getElementById('chat-loading');
+        const serviceList = document.getElementById('service-status');
+        const refreshServicesButton = document.getElementById('refresh-services');
+
+        const statusCpu = document.getElementById('status-cpu');
+        const statusCpuDetail = document.getElementById('status-cpu-detail');
+        const statusMemory = document.getElementById('status-memory');
+        const statusMemoryDetail = document.getElementById('status-memory-detail');
+        const statusTemp = document.getElementById('status-temp');
+        const statusTempDetail = document.getElementById('status-temp-detail');
+
+        const approvalModal = document.getElementById('approval-modal');
+        const approvalDescription = document.getElementById('approval-description');
+        const approvalCommand = document.getElementById('approval-command');
+        const approvalImpact = document.getElementById('approval-impact');
+        const approvalCancel = document.getElementById('approval-cancel');
+        const approvalConfirm = document.getElementById('approval-confirm');
+        let activeSuggestionId = null;
+        let modalKeyListener = null;
+        let previouslyFocusedElement = null;
+
+        function createMessageNode(message) {
+            const wrapper = document.createElement('div');
+            wrapper.className = message.role === 'user' ? 'flex justify-end' : 'flex justify-start';
+
+            const bubble = document.createElement('div');
+            bubble.className = `max-w-xl px-4 py-3 rounded-2xl shadow-lg text-sm leading-relaxed ${message.role === 'user' ? 'chat-bubble-user text-left' : 'chat-bubble-assistant text-blue-100'}`;
+            bubble.innerHTML = message.content;
+
+            if (message.role === 'assistant' && message.suggestion && !message.suggestionResolved) {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.textContent = message.suggestion.ctaLabel || 'Apply Fix';
+                button.className = 'mt-3 inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-emerald-500 to-emerald-600 text-white text-sm font-medium shadow focus:outline-none focus:ring-2 focus:ring-emerald-400';
+                button.setAttribute('data-suggestion', message.suggestion.id);
+                button.addEventListener('click', () => openApprovalModal(message.suggestion.id));
+                bubble.appendChild(button);
+            }
+
+            if (message.role === 'assistant' && message.suggestion && message.suggestionResolved) {
+                const note = document.createElement('p');
+                note.className = 'mt-3 text-xs text-emerald-300/80';
+                note.textContent = message.suggestionResolutionNote || 'Action approved and completed.';
+                bubble.appendChild(note);
+            }
+
+            wrapper.appendChild(bubble);
+            return wrapper;
+        }
+
+        function renderMessages() {
+            chatLog.innerHTML = '';
+            aiState.messages.forEach(message => {
+                chatLog.appendChild(createMessageNode(message));
+            });
+            chatLog.scrollTop = chatLog.scrollHeight;
+        }
+
+        function addMessage(role, content, options = {}) {
+            const message = {
+                id: options.id || `msg-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+                role,
+                content,
+                suggestion: options.suggestion || null,
+                suggestionResolved: options.suggestionResolved || false,
+                suggestionResolutionNote: options.suggestionResolutionNote || ''
+            };
+
+            if (message.suggestion && message.suggestion.id) {
+                aiState.suggestions[message.suggestion.id] = message;
+            }
+
+            aiState.messages.push(message);
+            renderMessages();
+        }
+
+        function setLoading(isLoading) {
+            aiState.loading = isLoading;
+            chatSubmit.disabled = isLoading;
+            chatInput.readOnly = isLoading;
+            chatLoadingRow.classList.toggle('hidden', !isLoading);
+        }
+
+        function escapeHtml(value) {
+            return value
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function formatBytes(bytes) {
+            if (typeof bytes !== 'number') return 'N/A';
+            const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+            let value = bytes;
+            let unit = 0;
+            while (value >= 1024 && unit < units.length - 1) {
+                value /= 1024;
+                unit++;
+            }
+            return `${value.toFixed(1)} ${units[unit]}`;
+        }
+
+        async function fetchSystemStats() {
+            try {
+                const response = await fetch('/api/system-stats');
+                if (!response.ok) throw new Error('Failed to load stats');
+                const stats = await response.json();
+                if (typeof stats.cpu_usage_percent === 'number') {
+                    statusCpu.textContent = `${stats.cpu_usage_percent.toFixed(0)}%`;
+                    statusCpuDetail.textContent = 'Live load from Pi-Health';
+                } else {
+                    statusCpu.textContent = 'N/A';
+                    statusCpuDetail.textContent = 'CPU metrics unavailable';
+                }
+
+                if (stats.memory_usage) {
+                    const used = stats.memory_usage.used;
+                    const total = stats.memory_usage.total;
+                    const percent = stats.memory_usage.percent;
+                    statusMemory.textContent = `${formatBytes(used)} / ${formatBytes(total)}`;
+                    statusMemoryDetail.textContent = typeof percent === 'number'
+                        ? `${percent.toFixed(0)}% utilized`
+                        : 'Usage unknown';
+                } else {
+                    statusMemory.textContent = 'N/A';
+                    statusMemoryDetail.textContent = 'Memory metrics unavailable';
+                }
+
+                if (typeof stats.temperature_celsius === 'number') {
+                    statusTemp.textContent = `${stats.temperature_celsius.toFixed(1)} °C`;
+                    statusTempDetail.textContent = stats.temperature_celsius > 70 ? 'Running warm' : 'Operating within safe range';
+                } else {
+                    statusTemp.textContent = 'N/A';
+                    statusTempDetail.textContent = 'Temperature sensor offline';
+                }
+            } catch (error) {
+                statusCpu.textContent = 'N/A';
+                statusCpuDetail.textContent = 'Unable to retrieve metrics';
+                statusMemory.textContent = 'N/A';
+                statusMemoryDetail.textContent = 'Unable to retrieve metrics';
+                statusTemp.textContent = 'N/A';
+                statusTempDetail.textContent = 'Unable to retrieve metrics';
+            }
+        }
+
+        function friendlyName(containerName) {
+            return containerName
+                .replace(/[-_]/g, ' ')
+                .replace(/\w\S*/g, word => word.charAt(0).toUpperCase() + word.substr(1).toLowerCase());
+        }
+
+        function serviceStatusBadge(status) {
+            const normalized = status ? status.toLowerCase() : '';
+            if (normalized.includes('running') || normalized === 'up') {
+                return { text: 'Running', className: 'status-dot status-dot-online', tone: 'text-emerald-300' };
+            }
+            if (normalized.includes('paused') || normalized.includes('restarting')) {
+                return { text: 'Warning', className: 'status-dot status-dot-warning', tone: 'text-amber-300' };
+            }
+            if (normalized.includes('exited') || normalized.includes('stopped') || normalized.includes('error')) {
+                return { text: 'Stopped', className: 'status-dot status-dot-offline', tone: 'text-rose-300' };
+            }
+            return { text: status || 'Unknown', className: 'status-dot status-dot-warning', tone: 'text-blue-200/70' };
+        }
+
+        async function fetchServices() {
+            try {
+                const response = await fetch('/api/containers');
+                if (!response.ok) throw new Error('Failed to load services');
+                const services = await response.json();
+                serviceList.innerHTML = '';
+
+                services.forEach(service => {
+                    const item = document.createElement('li');
+                    item.className = 'flex items-center justify-between rounded-lg bg-gray-900/60 border border-blue-500/10 px-4 py-3';
+
+                    const left = document.createElement('div');
+                    left.className = 'flex flex-col';
+                    const name = document.createElement('span');
+                    name.className = 'font-medium text-blue-100';
+                    name.textContent = friendlyName(service.name);
+                    const image = document.createElement('span');
+                    image.className = 'text-xs text-blue-200/60';
+                    image.textContent = service.image || 'Image unknown';
+                    left.appendChild(name);
+                    left.appendChild(image);
+
+                    const badgeInfo = serviceStatusBadge(service.status);
+                    const statusWrapper = document.createElement('div');
+                    statusWrapper.className = 'flex items-center gap-2';
+                    const dot = document.createElement('span');
+                    dot.className = badgeInfo.className;
+                    dot.setAttribute('aria-hidden', 'true');
+                    const statusText = document.createElement('span');
+                    statusText.className = `text-sm ${badgeInfo.tone}`;
+                    statusText.textContent = badgeInfo.text;
+                    statusWrapper.appendChild(dot);
+                    statusWrapper.appendChild(statusText);
+
+                    item.appendChild(left);
+                    item.appendChild(statusWrapper);
+                    serviceList.appendChild(item);
+                });
+            } catch (error) {
+                serviceList.innerHTML = '';
+                const errorItem = document.createElement('li');
+                errorItem.className = 'px-4 py-3 rounded-lg bg-rose-900/40 border border-rose-500/30 text-rose-200 text-sm';
+                errorItem.textContent = 'Unable to load container data. Docker may be offline or unreachable.';
+                serviceList.appendChild(errorItem);
+            }
+        }
+
+        function autoResizeTextarea(event) {
+            const target = event.target;
+            target.style.height = 'auto';
+            target.style.height = `${Math.min(target.scrollHeight, 160)}px`;
+        }
+
+        async function handleChatSubmit(event) {
+            event.preventDefault();
+            const message = chatInput.value.trim();
+            if (!message || aiState.loading) {
+                return;
+            }
+
+            addMessage('user', escapeHtml(message).replace(/\n/g, '<br>'));
+            chatInput.value = '';
+            chatInput.style.height = '';
+            setLoading(true);
+            chatStatus.textContent = 'Thinking…';
+
+            try {
+                const response = await fetch('/api/ops-copilot/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message })
+                });
+
+                if (!response.ok) {
+                    throw new Error('Chat service returned an error');
+                }
+
+                const payload = await response.json();
+                const messages = Array.isArray(payload.messages) && payload.messages.length
+                    ? payload.messages
+                    : (payload.reply ? [{ role: 'assistant', content: payload.reply, suggestion: payload.suggestion }] : []);
+
+                if (!messages.length) {
+                    addMessage('assistant', 'I did not receive a response. Please try again in a moment.');
+                } else {
+                    messages.forEach(msg => {
+                        addMessage(msg.role || 'assistant', msg.content, {
+                            suggestion: msg.suggestion || null,
+                            id: msg.id
+                        });
+                    });
+                }
+            } catch (error) {
+                addMessage('assistant', '<p class="text-rose-200">I had trouble reaching the automation service. Please retry shortly.</p>');
+            } finally {
+                setLoading(false);
+                chatStatus.textContent = 'Ready';
+                chatInput.focus();
+                fetchServices();
+            }
+        }
+
+        function openApprovalModal(suggestionId) {
+            const message = aiState.suggestions[suggestionId];
+            if (!message) {
+                return;
+            }
+
+            const suggestion = message.suggestion;
+            approvalDescription.textContent = suggestion.description || '';
+            approvalCommand.textContent = suggestion.command || '';
+            approvalImpact.textContent = suggestion.impact || '';
+            activeSuggestionId = suggestionId;
+            previouslyFocusedElement = document.activeElement;
+            approvalModal.classList.remove('pointer-events-none', 'opacity-0');
+            approvalModal.classList.add('opacity-100');
+            approvalModal.querySelector('.glass-panel').classList.remove('scale-95');
+            approvalModal.querySelector('.glass-panel').classList.add('scale-100');
+            approvalModal.setAttribute('aria-hidden', 'false');
+            approvalConfirm.focus();
+
+            modalKeyListener = function(event) {
+                if (event.key === 'Escape') {
+                    closeApprovalModal();
+                }
+                if (event.key === 'Tab') {
+                    const focusable = [approvalConfirm, approvalCancel];
+                    const index = focusable.indexOf(document.activeElement);
+                    if (event.shiftKey && document.activeElement === focusable[0]) {
+                        event.preventDefault();
+                        focusable[focusable.length - 1].focus();
+                    } else if (!event.shiftKey && document.activeElement === focusable[focusable.length - 1]) {
+                        event.preventDefault();
+                        focusable[0].focus();
+                    }
+                }
+            };
+
+            document.addEventListener('keydown', modalKeyListener);
+        }
+
+        function closeApprovalModal() {
+            approvalModal.classList.add('pointer-events-none');
+            approvalModal.classList.remove('opacity-100');
+            approvalModal.classList.add('opacity-0');
+            approvalModal.querySelector('.glass-panel').classList.add('scale-95');
+            approvalModal.querySelector('.glass-panel').classList.remove('scale-100');
+            approvalModal.setAttribute('aria-hidden', 'true');
+            activeSuggestionId = null;
+            document.removeEventListener('keydown', modalKeyListener);
+            if (previouslyFocusedElement) {
+                previouslyFocusedElement.focus();
+            }
+        }
+
+        async function handleApprovalConfirm() {
+            if (!activeSuggestionId) {
+                return;
+            }
+            const message = aiState.suggestions[activeSuggestionId];
+            if (!message) {
+                return;
+            }
+
+            approvalConfirm.disabled = true;
+            approvalConfirm.textContent = 'Running…';
+
+            try {
+                const response = await fetch('/api/ops-copilot/approve', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action_id: activeSuggestionId })
+                });
+
+                if (!response.ok) {
+                    throw new Error('Approval failed');
+                }
+
+                const payload = await response.json();
+                closeApprovalModal();
+                addMessage('user', '✅ Approval granted.');
+
+                message.suggestionResolved = true;
+                message.suggestionResolutionNote = payload.result || 'Action completed successfully.';
+                if (message.suggestion && message.suggestion.id) {
+                    delete aiState.suggestions[message.suggestion.id];
+                }
+                renderMessages();
+
+                if (payload.followup) {
+                    addMessage('assistant', payload.followup);
+                }
+
+                fetchServices();
+            } catch (error) {
+                closeApprovalModal();
+                addMessage('assistant', '<p class="text-rose-200">I could not execute that automation. Please try again later.</p>');
+            } finally {
+                approvalConfirm.disabled = false;
+                approvalConfirm.textContent = 'Approve & Run';
+            }
+        }
+
+        document.querySelectorAll('[data-quick-action]').forEach(button => {
+            button.addEventListener('click', () => {
+                const action = button.getAttribute('data-quick-action');
+                const promptMap = {
+                    health: 'Please run a full system health check and summarize any issues.',
+                    logs: 'Show me the most recent error logs and highlight anything critical.',
+                    disk: 'Can you provide a current disk space report?',
+                    queue: 'Check on the download queue status for Sonarr and Radarr.'
+                };
+                if (aiState.loading) {
+                    return;
+                }
+                const prompt = promptMap[action] || '';
+                if (!prompt) {
+                    return;
+                }
+                chatInput.value = prompt;
+                chatInput.dispatchEvent(new Event('input'));
+                chatForm.requestSubmit();
+            });
+        });
+
+        chatForm.addEventListener('submit', handleChatSubmit);
+        chatInput.addEventListener('keydown', event => {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                handleChatSubmit(event);
+            }
+        });
+        chatInput.addEventListener('input', autoResizeTextarea);
+        refreshServicesButton.addEventListener('click', () => fetchServices());
+        approvalCancel.addEventListener('click', closeApprovalModal);
+        approvalConfirm.addEventListener('click', handleApprovalConfirm);
+
+        addMessage('assistant', '<p>👋 Hi! I\'m your Ops-Copilot. I can inspect services, analyze logs, and queue safe automation. Try asking “What\'s wrong with my media stack?” or “Check Radarr status”.</p>');
+
+        fetchSystemStats();
+        fetchServices();
+        setInterval(fetchSystemStats, 15000);
+        setInterval(fetchServices, 30000);
+    </script>
+</body>
+</html>
