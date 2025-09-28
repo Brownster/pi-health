@@ -2,8 +2,14 @@ from flask import Flask, jsonify, send_from_directory, request
 import psutil
 import os
 import docker
-from uuid import uuid4
 from compose_editor import compose_editor
+
+from ops_copilot import (
+    OpsCopilotAgent,
+    OpsCopilotApprovalError,
+    SystemStatsTool,
+    assistant_message,
+)
 
 # Initialize Flask
 app = Flask(__name__, static_folder='static')
@@ -215,133 +221,9 @@ def system_action(action):
         return {"error": str(e)}
 
 
-def build_suggestion(action_id, description, command, impact, cta_label="Apply Fix"):
-    """Create a structured suggestion payload for the Ops-Copilot UI."""
-    return {
-        "id": action_id,
-        "description": description,
-        "command": command,
-        "impact": impact,
-        "ctaLabel": cta_label,
-    }
+system_stats_tool = SystemStatsTool(get_system_stats)
+ops_copilot_agent = OpsCopilotAgent([system_stats_tool])
 
-
-def assistant_message(content, suggestion=None):
-    """Return a chat message formatted for the Ops-Copilot frontend."""
-    message = {
-        "id": f"assistant-{uuid4().hex}",
-        "role": "assistant",
-        "content": content,
-    }
-    if suggestion:
-        message["suggestion"] = suggestion
-    return message
-
-
-def generate_mock_chat_response(message_text):
-    """Generate a mocked AI response for the Ops-Copilot chat endpoint."""
-    lower = message_text.lower()
-
-    if any(keyword in lower for keyword in ["wrong", "problem", "issue", "stalled", "stuck"]):
-        suggestion = build_suggestion(
-            action_id="restart_sonarr",
-            description="Restart the Sonarr container to clear the stalled download queue.",
-            command="docker restart sonarr",
-            impact="Expected downtime: ~30 seconds. Action will be logged for audit.",
-            cta_label="Apply Fix",
-        )
-        content = (
-            "<p class='font-semibold text-blue-100'>🔍 System analysis complete</p>"
-            "<p class='mt-2 text-blue-100/80'>Sonarr's download queue has been idle for 3 hours and is reporting stalled items.</p>"
-            "<ul class='mt-3 list-disc space-y-1 pl-5 text-blue-100/80'>"
-            "<li>Queue depth: 4 releases waiting</li>"
-            "<li>Last successful import: 3h 12m ago</li>"
-            "<li>No network errors detected, container uptime 3d</li>"
-            "</ul>"
-            "<p class='mt-4 text-blue-100/80'>I recommend restarting the Sonarr container to clear the queue state.</p>"
-        )
-        return [assistant_message(content, suggestion)]
-
-    if "health" in lower or "system" in lower:
-        content = (
-            "<p class='font-semibold text-blue-100'>🩺 System health snapshot</p>"
-            "<ul class='mt-3 list-disc space-y-1 pl-5 text-blue-100/80'>"
-            "<li>CPU load averaging 41% over the last minute</li>"
-            "<li>Memory usage holding at 62% (no swap pressure)</li>"
-            "<li>Disks healthy with 46% free on media volume</li>"
-            "<li>No recent critical events in syslog</li>"
-            "</ul>"
-            "<p class='mt-4 text-blue-100/70'>Let me know if you want to drill into any specific service.</p>"
-        )
-        return [assistant_message(content)]
-
-    if "radarr" in lower:
-        content = (
-            "<p class='font-semibold text-blue-100'>🎬 Radarr status</p>"
-            "<ul class='mt-3 list-disc space-y-1 pl-5 text-blue-100/80'>"
-            "<li>Service is up with normal response times</li>"
-            "<li>Download queue: 3 active, 1 completed in the last hour</li>"
-            "<li>Free disk space on media volume: 847 GB</li>"
-            "<li>Last indexer sync completed 4 minutes ago</li>"
-            "</ul>"
-            "<p class='mt-4 text-emerald-300/80'>Everything looks healthy for Radarr.</p>"
-        )
-        return [assistant_message(content)]
-
-    if "disk" in lower or "space" in lower:
-        content = (
-            "<p class='font-semibold text-blue-100'>💾 Disk utilisation</p>"
-            "<ul class='mt-3 list-disc space-y-1 pl-5 text-blue-100/80'>"
-            "<li>Media array: 2.1 TB used of 4 TB (47% free)</li>"
-            "<li>System drive: 28 GB used of 64 GB (56% free)</li>"
-            "<li>Download cache: 156 GB used of 200 GB (22% headroom)</li>"
-            "</ul>"
-            "<p class='mt-4 text-blue-100/70'>Consider purging the download cache when convenient to reclaim space.</p>"
-        )
-        return [assistant_message(content)]
-
-    if "log" in lower:
-        content = (
-            "<p class='font-semibold text-blue-100'>🗒️ Recent log highlights</p>"
-            "<ul class='mt-3 list-disc space-y-1 pl-5 text-blue-100/80'>"
-            "<li>Radarr: No warnings in the past 60 minutes</li>"
-            "<li>Sonarr: Queue stalled warning recorded at 14:32</li>"
-            "<li>Jellyfin: Transcoding job completed successfully</li>"
-            "</ul>"
-            "<p class='mt-4 text-blue-100/70'>No critical alerts detected. The Sonarr stall matches the queue issue we can remediate.</p>"
-        )
-        return [assistant_message(content)]
-
-    if "queue" in lower:
-        content = (
-            "<p class='font-semibold text-blue-100'>📥 Download queue status</p>"
-            "<ul class='mt-3 list-disc space-y-1 pl-5 text-blue-100/80'>"
-            "<li>Sonarr: 4 episodes queued, none importing</li>"
-            "<li>Radarr: 2 films downloading, ETA 18 minutes</li>"
-            "<li>SABnzbd: Bandwidth steady at 38 MB/s</li>"
-            "</ul>"
-            "<p class='mt-4 text-blue-100/70'>The stalled Sonarr queue can be cleared with a container restart if you approve.</p>"
-        )
-        suggestion = build_suggestion(
-            action_id="restart_sonarr",
-            description="Restart the Sonarr container to resume queue processing.",
-            command="docker restart sonarr",
-            impact="Service interruption ~30 seconds. Audit trail entry will be created.",
-            cta_label="Apply Fix",
-        )
-        return [assistant_message(content, suggestion)]
-
-    content = (
-        "<p class='font-semibold text-blue-100'>🤖 Ops-Copilot capabilities</p>"
-        "<ul class='mt-3 list-disc space-y-1 pl-5 text-blue-100/80'>"
-        "<li>Check service health and container status</li>"
-        "<li>Summarise logs and resource usage</li>"
-        "<li>Propose safe automated fixes for common issues</li>"
-        "<li>Request approvals before executing changes</li>"
-        "</ul>"
-        "<p class='mt-4 text-blue-100/70'>Ask me about a specific service or say “What\'s wrong?” to start a diagnostic.</p>"
-    )
-    return [assistant_message(content)]
 
 @app.route('/')
 def serve_frontend():
@@ -405,62 +287,46 @@ def api_list_containers():
 
 @app.route('/api/ops-copilot/chat', methods=['POST'])
 def api_ops_copilot_chat():
-    """Mocked chat endpoint powering the Ops-Copilot UI."""
+    """Chat endpoint backed by the Ops-Copilot AI agent."""
     payload = request.get_json(silent=True) or {}
-    message = (payload.get('message') or '').strip()
+    message = payload.get('message', '')
 
-    if not message:
+    try:
+        result = ops_copilot_agent.chat(message)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        print(f"Ops-Copilot chat error: {exc}")
         return jsonify({
             "messages": [
                 assistant_message(
-                    "<p class='text-blue-100/80'>Share a question or request so I can help troubleshoot.</p>"
+                    "<p class='text-rose-200'>I ran into an error while processing that. Please try again.</p>"
                 )
             ]
-        })
+        }), 500
 
-    try:
-        messages = generate_mock_chat_response(message)
-    except Exception as exc:  # pragma: no cover - defensive logging
-        print(f"Ops-Copilot mock response error: {exc}")
-        messages = [
-            assistant_message(
-                "<p class='text-rose-200'>I ran into an error while processing that. Please try again.</p>"
-            )
-        ]
-
-    return jsonify({"messages": messages})
+    return jsonify(result)
 
 
 @app.route('/api/ops-copilot/approve', methods=['POST'])
 def api_ops_copilot_approve():
-    """Mock approval endpoint to confirm automation steps."""
+    """Process approval for an automation suggested by the AI agent."""
     payload = request.get_json(silent=True) or {}
-    action_id = payload.get('action_id')
+    action_id = (payload.get('action_id') or '').strip()
 
     if not action_id:
-        return jsonify({"error": "action_id is required"}), 400
+        return jsonify({"status": "error", "error": "action_id is required"}), 400
 
-    if action_id == "restart_sonarr":
-        followup = (
-            "<p class='font-semibold text-blue-100'>🔧 Automation complete</p>"
-            "<p class='mt-2 text-blue-100/80'>The Sonarr container restarted successfully and the queue resumed processing.</p>"
-            "<ul class='mt-3 list-disc space-y-1 pl-5 text-blue-100/80'>"
-            "<li>Restart duration: 18 seconds</li>"
-            "<li>Queue throughput restored (4 items pending)</li>"
-            "<li>Action logged to the audit trail</li>"
-            "</ul>"
-        )
+    try:
+        result = ops_copilot_agent.approve(action_id)
+    except OpsCopilotApprovalError as exc:
+        return jsonify({"status": "error", "error": str(exc)}), 400
+    except Exception as exc:  # pragma: no cover - defensive logging
+        print(f"Ops-Copilot approval error: {exc}")
         return jsonify({
-            "status": "success",
-            "result": "Sonarr container restart simulated successfully.",
-            "followup": followup,
-        })
+            "status": "error",
+            "error": "Failed to execute the requested automation.",
+        }), 500
 
-    return jsonify({
-        "status": "error",
-        "error": "Unknown automation request."
-    }), 400
-
+    return jsonify(result)
 
 @app.route('/api/containers/<container_id>/<action>', methods=['POST'])
 def api_control_container(container_id, action):
