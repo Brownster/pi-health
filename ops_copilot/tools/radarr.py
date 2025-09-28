@@ -2,46 +2,46 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-from app.services.sonarr_mcp import SonarrMCPClient, SonarrMCPError
+from app.services.radarr_mcp import RadarrMCPClient, RadarrMCPError
 
 from ..mcp import BaseMCPTool
 
 
-class SonarrStatusTool(BaseMCPTool):
-    """Summarise Sonarr health, queue, and missing items."""
+class RadarrStatusTool(BaseMCPTool):
+    """Summarise Radarr health, queue, and missing movies."""
 
-    tool_id = "sonarr_status"
+    tool_id = "radarr_status"
 
-    def __init__(self, client: SonarrMCPClient) -> None:
+    def __init__(self, client: RadarrMCPClient) -> None:
         self._client = client
 
     def should_run(self, message: str) -> bool:
         lowered = message.lower()
-        keywords = ["sonarr", "series", "episode", "tv", "arr"]
+        keywords = ["radarr", "movie", "films", "4k", "uhd"]
         return any(keyword in lowered for keyword in keywords)
 
     def collect(self, message: str) -> Dict[str, Any]:
         errors: List[str] = []
-        queue = health = missing = status = None
+        status = queue = health = missing = None
 
         try:
             status = self._client.system_status()
-        except SonarrMCPError as exc:
+        except RadarrMCPError as exc:
             errors.append(str(exc))
 
         try:
             queue = self._client.queue()
-        except SonarrMCPError as exc:
+        except RadarrMCPError as exc:
             errors.append(str(exc))
 
         try:
             health = self._client.health()
-        except SonarrMCPError as exc:
+        except RadarrMCPError as exc:
             errors.append(str(exc))
 
         try:
             missing = self._client.wanted_missing()
-        except SonarrMCPError as exc:
+        except RadarrMCPError as exc:
             errors.append(str(exc))
 
         return {
@@ -64,37 +64,34 @@ class SonarrStatusTool(BaseMCPTool):
         missing_summary = _summarise_missing(payload.get("missing"))
 
         parts = [piece for piece in [status_summary, queue_summary, health_summary, missing_summary] if piece]
-        return " | ".join(parts) if parts else "Sonarr MCP returned no data"
+        return " | ".join(parts) if parts else "Radarr MCP returned no data"
 
     def derive_signals(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         signals: Dict[str, Any] = {}
-        health = payload.get("health")
-        issues = _health_issues(health)
+        issues = _health_issues(payload.get("health"))
         if issues:
-            signals["sonarr_health"] = ", ".join(issues)
+            signals["radarr_health"] = ", ".join(issues)
 
-        queue = payload.get("queue")
-        if queue:
-            count = _queue_length(queue)
-            if count and count >= 5:
-                signals["sonarr_queue_backlog"] = count
+        queue_len = _queue_length(payload.get("queue"))
+        if queue_len and queue_len >= 5:
+            signals["radarr_queue_backlog"] = queue_len
         return signals
 
-    def search_episode(self, episode_id: int) -> Dict[str, Any]:
-        if episode_id <= 0:
-            raise ValueError("episode_id must be positive")
+    def search_movie(self, movie_id: int) -> Dict[str, Any]:
+        if movie_id <= 0:
+            raise ValueError("movie_id must be positive")
         try:
-            result = self._client.search_episode(episode_id)
-            return {"status": "queued", "episode_id": episode_id, "result": result}
-        except SonarrMCPError as exc:
-            return {"status": "error", "episode_id": episode_id, "error": str(exc)}
+            result = self._client.search_movie(movie_id)
+            return {"status": "queued", "movie_id": movie_id, "result": result}
+        except RadarrMCPError as exc:
+            return {"status": "error", "movie_id": movie_id, "error": str(exc)}
 
 
 def _summarise_status(data: Any) -> str:
     if not isinstance(data, dict):
         return ""
     version = data.get("version") or data.get("Version")
-    app_name = data.get("appName") or data.get("AppName") or "Sonarr"
+    app_name = data.get("appName") or data.get("AppName") or "Radarr"
     return f"{app_name} {version}" if version else app_name
 
 
@@ -112,18 +109,15 @@ def _summarise_queue(data: Any) -> str:
     length = _queue_length(data)
     if not length:
         return "Queue: empty"
-    return f"Queue: {length} download{'s' if length != 1 else ''}"
+    return f"Queue: {length} movie{'s' if length != 1 else ''}"
 
 
 def _health_issues(data: Any) -> List[str]:
     issues: List[str] = []
     if isinstance(data, list):
         for entry in data:
-            if not isinstance(entry, dict):
-                continue
-            message = entry.get("message") or entry.get("Message")
-            if message:
-                issues.append(str(message))
+            if isinstance(entry, dict) and entry.get("message"):
+                issues.append(str(entry["message"]))
     elif isinstance(data, dict):
         warnings = data.get("issues")
         if isinstance(warnings, list):
@@ -144,15 +138,15 @@ def _summarise_missing(data: Any) -> str:
     if isinstance(data, dict):
         total = data.get("totalRecords") or data.get("total")
         if isinstance(total, int) and total > 0:
-            return f"Missing episodes: {total}"
+            return f"Missing movies: {total}"
         entries = data.get("records") or data.get("items")
         if isinstance(entries, list):
             count = len(entries)
             if count:
-                return f"Missing episodes: {count}"
+                return f"Missing movies: {count}"
     if isinstance(data, list) and data:
-        return f"Missing episodes: {len(data)}"
+        return f"Missing movies: {len(data)}"
     return ""
 
 
-__all__ = ["SonarrStatusTool"]
+__all__ = ["RadarrStatusTool"]

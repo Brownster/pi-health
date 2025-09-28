@@ -159,23 +159,29 @@ class DockerActionTool(BaseMCPTool):
     def restart_container(self, container_name: str) -> Dict[str, Any]:
         if not container_name:
             raise ValueError("container_name is required")
-        result = self._client.compose_restart(container_name)
+        try:
+            result = self._client.compose_restart(container_name)
+        except DockerMCPError as exc:
+            return {"action": "restart", "container": container_name, "error": str(exc)}
         return {"action": "restart", "container": container_name, "result": result}
 
     def start_container(self, container_name: str) -> Dict[str, Any]:
         if not container_name:
             raise ValueError("container_name is required")
-        result = self._client.compose_start(container_name)
+        try:
+            result = self._client.compose_start(container_name)
+        except DockerMCPError as exc:
+            return {"action": "start", "container": container_name, "error": str(exc)}
         return {"action": "start", "container": container_name, "result": result}
 
     def stop_container(self, container_name: str) -> Dict[str, Any]:
         if not container_name:
             raise ValueError("container_name is required")
-        result = self._client.compose_stop(container_name)
+        try:
+            result = self._client.compose_stop(container_name)
+        except DockerMCPError as exc:
+            return {"action": "stop", "container": container_name, "error": str(exc)}
         return {"action": "stop", "container": container_name, "result": result}
-
-
-__all__ = ["DockerStatusTool", "DockerActionTool"]
 
 
 __all__ = ["DockerStatusTool"]

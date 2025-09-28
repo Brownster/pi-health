@@ -56,7 +56,23 @@ secrets:
 
 ---
 
-## 2) Jellyfin Tool Registry
+## 2) Pi-Health Integration Steps
+
+1. Deploy the Jellyfin MCP server alongside the services above (see the repository outlined earlier).
+2. Set the following environment variable before restarting Pi-Health:
+
+   ```bash
+   JELLYFIN_MCP_BASE_URL=http://jellyfin-mcp:8080
+   ```
+
+   (Optional) override `MCP_READ_TIMEOUT`/`MCP_WRITE_TIMEOUT` if the default 5s/30s windows need tuning.
+
+3. Restart the Flask app (`docker compose restart pi-health-dashboard`, `systemctl restart`, etc.).
+4. Visit Ops-Copilot and ask “Who is streaming right now?” — the response should include active session counts and failing tasks sourced from the MCP server. If the environment variable is absent, the assistant falls back to its static response.
+
+---
+
+## 3) Jellyfin Tool Registry
 
 ```yaml
 services:

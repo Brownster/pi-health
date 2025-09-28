@@ -8,6 +8,8 @@ Once `SONARR_MCP_BASE_URL` is exported (and optionally `MCP_READ_TIMEOUT` / `MCP
 2. Add `SONARR_MCP_BASE_URL=http://sonarr-mcp:8080` to the Pi-Health environment and restart the app.
 3. Ask the assistant “How is Sonarr doing?” – the reply now includes queue length, health warnings, and missing items sourced from the MCP server. If the variable isn’t set, the assistant falls back to the legacy static message.
 
+Repeat the same steps for Radarr by setting `RADARR_MCP_BASE_URL=http://radarr-mcp:8080`. After restarting Pi-Health, prompt “Any issues with Radarr?” and confirm the assistant calls out queue depth, missing movies, and health warnings from the MCP feed. Unsetting the variable removes the tool again without code changes.
+
 ---
 
 ## 1) Extended Docker Compose
@@ -169,6 +171,16 @@ tools:
     approval: required
     cooldown: { seconds: 300, key_by: series_id }
     summary: "Trigger manual search for specific episode"
+
+  tip: After exporting SONARR_MCP_BASE_URL, you can trigger a search via:
+
+  ```bash
+  curl -sX POST http://sonarr-mcp:8080/tools/search_episode \
+       -H 'content-type: application/json' \
+       -d '{"episodeId":12345}'
+  ```
+
+  Ops-Copilot will surface this action automatically when an episode is missing.
 
   sonarr_refresh_series:
     mcp: { service: sonarr-mcp, fn: refresh_series }

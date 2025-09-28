@@ -4,6 +4,14 @@ This guide adds a **Jellyseerr** MCP server to your ops‑copilot stack so non�
 
 ---
 
+## 0) Pi-Health Integration Quickstart
+
+1. Deploy the Jellyseerr MCP server from this guide’s compose snippet and confirm it reports `healthy` (`curl http://jellyseerr-mcp:8080/health`).
+2. Export `JELLYSEERR_MCP_BASE_URL=http://jellyseerr-mcp:8080` for the Pi-Health app (plus optional `MCP_READ_TIMEOUT` / `MCP_WRITE_TIMEOUT` overrides) and restart the container/service.
+3. Ask Ops-Copilot “Any pending requests?” — the assistant now summarises pending vs approved counts sourced from Jellyseerr. Unset the variable to disable the tool without code changes.
+
+---
+
 ## 1) Extended Docker Compose
 
 ```yaml

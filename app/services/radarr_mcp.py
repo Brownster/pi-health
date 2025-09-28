@@ -5,15 +5,15 @@ from typing import Any, Mapping, Optional
 from .mcp_client import MCPClientConfig, MCPClientError, MCPHTTPClient
 
 
-SonarrMCPConfig = MCPClientConfig
-SonarrMCPError = MCPClientError
+RadarrMCPConfig = MCPClientConfig
+RadarrMCPError = MCPClientError
 
 
-def config_from_mapping(config: Mapping[str, Any]) -> Optional[SonarrMCPConfig]:
-    return MCPClientConfig.from_mapping(config, base_key="SONARR_MCP_BASE_URL")
+def config_from_mapping(config: Mapping[str, Any]) -> Optional[RadarrMCPConfig]:
+    return MCPClientConfig.from_mapping(config, base_key="RADARR_MCP_BASE_URL")
 
 
-class SonarrMCPClient(MCPHTTPClient):
+class RadarrMCPClient(MCPHTTPClient):
     def system_status(self) -> Any:
         return self.call_tool("get_system_status", {})
 
@@ -26,14 +26,14 @@ class SonarrMCPClient(MCPHTTPClient):
     def wanted_missing(self) -> Any:
         return self.call_tool("get_wanted_missing", {})
 
-    def search_episode(self, episode_id: int) -> Any:
-        payload = {"episode_id": episode_id}
-        return self.call_tool("search_episode", payload, mutating=True)
+    def search_movie(self, movie_id: int) -> Any:
+        payload = {"movie_id": movie_id}
+        return self.call_tool("search_movie", payload, mutating=True)
 
 
 __all__ = [
-    "SonarrMCPClient",
-    "SonarrMCPConfig",
-    "SonarrMCPError",
+    "RadarrMCPClient",
+    "RadarrMCPConfig",
+    "RadarrMCPError",
     "config_from_mapping",
 ]

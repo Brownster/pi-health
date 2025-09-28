@@ -1,14 +1,17 @@
 """Ops-Copilot AI agent orchestration."""
 from __future__ import annotations
 
+import json
 import os
+import re
 import textwrap
 from collections import deque
-from typing import Any, Deque, Dict, Iterable, List, Optional
+from typing import Any, Deque, Dict, Iterable, List, Optional, Tuple
 
 from .messages import assistant_message, build_suggestion
 from .mcp import BaseMCPTool
 from .providers import AIProvider
+from .structured_schema import SCHEMA as STRUCTURED_SCHEMA
 
 try:  # pragma: no cover - optional dependency
     from markdown import markdown as markdown_to_html
@@ -28,6 +31,26 @@ DEFAULT_SYSTEM_PROMPT = textwrap.dedent(
     tooling provides, and suggest a single actionable next step when appropriate.
     Always prefer safe, reversible actions and call out when human assistance may
     be required. Never invent commands that were not provided in the tool catalog.
+
+Respond ONLY with JSON matching this schema:
+
+{
+  "thought": "short internal reasoning",
+  "speak": "markdown response for the user",
+  "action": {
+    "id": "restart_sonarr",
+    "tool_id": "docker_actions",
+    "action": "restart_container",
+    "action_params": {"container_name": "sonarr"},
+    "description": "Restart the Sonarr container to unstick the queue.",
+    "command": "docker compose restart sonarr",
+    "impact": "Downtime ~30s",
+    "cta_label": "Approve Restart",
+    "confidence": 0.85
+  }
+}
+
+If no automation is appropriate set "action": null. Always return valid JSON without extra commentary or markdown fences.
     """
 ).strip()
 
@@ -49,6 +72,7 @@ class OpsCopilotAgent:
         provider: Optional[AIProvider] = None,
         model: Optional[str] = None,
         api_key: Optional[str] = None,
+        enable_legacy_suggestions: bool = True,
     ) -> None:
         self.tools: List[BaseMCPTool] = list(tools)
         self.system_prompt = system_prompt or DEFAULT_SYSTEM_PROMPT
@@ -59,6 +83,8 @@ class OpsCopilotAgent:
         self._api_key = api_key or os.getenv("OPENAI_API_KEY")
         self._client = self._build_client()
         self._provider = provider
+        self._action_confidence_threshold = 0.6
+        self._enable_legacy_suggestions = enable_legacy_suggestions
 
     # ------------------------------------------------------------------
     # Public API
@@ -93,9 +119,11 @@ class OpsCopilotAgent:
                 context_blocks.append(f"[{tool.tool_id}] {summary}")
             signals.update({k: str(v) for k, v in tool.derive_signals(payload).items()})
 
-        reply_text, model_used = self._generate_reply(cleaned, context_blocks)
+        reply_text, model_used, structured = self._generate_reply(cleaned, context_blocks)
         html = self._render_markdown(reply_text)
-        suggestion = self._maybe_build_suggestion(cleaned, signals)
+        suggestion = self._suggestion_from_structured(structured)
+        if suggestion is None and self._enable_legacy_suggestions:
+            suggestion = self._maybe_build_suggestion(cleaned, signals)
         if suggestion:
             self.pending_actions[suggestion["id"]] = suggestion
 
@@ -114,19 +142,6 @@ class OpsCopilotAgent:
         suggestion = self.pending_actions.pop(action_id, None)
         if not suggestion:
             raise OpsCopilotApprovalError("Unknown or expired automation request")
-
-        if action_id == "restart_sonarr" and not suggestion.get("toolId"):
-            followup = textwrap.dedent(
-                """
-                <p class='font-semibold text-blue-100'>🔧 Automation complete</p>
-                <p class='mt-2 text-blue-100/80'>The Sonarr container restart has been queued. Please confirm manually if automation support is disabled.</p>
-                """
-            ).strip()
-            return {
-                "status": "success",
-                "result": "Sonarr container restart simulated.",
-                "followup": followup,
-            }
 
         if action_id in {"cooldown_notice", "disk_cleanup_notice"}:
             acknowledgement = textwrap.dedent(
@@ -156,8 +171,10 @@ class OpsCopilotAgent:
 
             try:
                 result = action_method(**action_params)
+            except (TypeError, ValueError) as exc:
+                raise OpsCopilotApprovalError(f"Invalid automation parameters: {exc}") from exc
             except Exception as exc:
-                raise OpsCopilotApprovalError(f"Automation failed: {exc}") from exc
+                raise OpsCopilotApprovalError(f"Automation execution failed: {exc}") from exc
 
             followup = self._format_action_followup(suggestion, result)
             return {
@@ -184,7 +201,7 @@ class OpsCopilotAgent:
             print(f"Warning: could not initialise OpenAI client: {exc}")
             return None
 
-    def _generate_reply(self, message: str, context_blocks: List[str]) -> (str, str):
+    def _generate_reply(self, message: str, context_blocks: List[str]) -> Tuple[str, str, Optional[Dict[str, Any]]]:
         prompt_messages = [
             {
                 "role": "system",
@@ -224,7 +241,7 @@ class OpsCopilotAgent:
             try:
                 reply_text, model_used = self._provider.generate(prompt_messages, temperature=self.temperature)
                 if reply_text:
-                    return reply_text, model_used
+                    return self._interpret_model_output(reply_text, model_used)
             except Exception as exc:  # pragma: no cover
                 print(f"Warning: provider request failed: {exc}")
 
@@ -237,11 +254,64 @@ class OpsCopilotAgent:
                 )
                 reply_text = (response.output_text or "").strip()
                 if reply_text:
-                    return reply_text, self.model
+                    return self._interpret_model_output(reply_text, self.model)
             except Exception as exc:  # pragma: no cover - network/path errors
                 print(f"Warning: OpenAI request failed: {exc}")
 
-        return self._fallback_response(message, context_blocks), "offline-fallback"
+        return self._fallback_response(message, context_blocks), "offline-fallback", None
+
+    def _interpret_model_output(self, raw: str, model: str) -> Tuple[str, str, Optional[Dict[str, Any]]]:
+        payload = self._parse_json_response(raw)
+        if payload is None:
+            return raw, model, None
+
+        speak_text = str(payload.get("speak") or raw)
+        return speak_text, model, payload
+
+    def _parse_json_response(self, raw: str) -> Optional[Dict[str, Any]]:
+        text = raw.strip()
+        if not text:
+            return None
+
+        candidate = self._extract_json_snippet(text)
+        if candidate is None:
+            return None
+
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError:
+            return None
+
+        if not isinstance(parsed, dict):
+            return None
+        if not self._validate_structured_payload(parsed):
+            return None
+        return parsed
+
+    def _validate_structured_payload(self, payload: Dict[str, Any]) -> bool:
+        required = STRUCTURED_SCHEMA.get("required", [])
+        for key in required:
+            if key not in payload:
+                return False
+        action = payload.get("action")
+        if action in (None, {}):
+            return True
+        if not isinstance(action, dict):
+            return False
+        must_have = ["action"]
+        for key in must_have:
+            if key not in action:
+                return False
+        return True
+
+    @staticmethod
+    def _extract_json_snippet(text: str) -> Optional[str]:
+        fenced = re.search(r"```json\s*(.*?)\s*```", text, re.DOTALL | re.IGNORECASE)
+        if fenced:
+            return fenced.group(1).strip()
+        if text.startswith("{") and text.endswith("}"):
+            return text
+        return None
 
     def _fallback_response(self, message: str, context_blocks: List[str]) -> str:
         lines = [
@@ -269,24 +339,16 @@ class OpsCopilotAgent:
         lowered = message.lower()
         trigger_words = ["sonarr", "queue", "stalled", "restart"]
         docker_tool_present = any(tool.tool_id == "docker_actions" for tool in self.tools)
-        if any(word in lowered for word in trigger_words):
-            if docker_tool_present:
-                return build_suggestion(
-                    action_id="restart_sonarr",
-                    description="Restart the Sonarr container to clear the stalled download queue.",
-                    command="docker compose restart sonarr",
-                    impact="Expected downtime: ~30 seconds. Action will be logged for audit.",
-                    cta_label="Approve Restart",
-                    tool_id="docker_actions",
-                    action="restart_container",
-                    action_params={"container_name": "sonarr"},
-                )
+        if any(word in lowered for word in trigger_words) and docker_tool_present:
             return build_suggestion(
                 action_id="restart_sonarr",
                 description="Restart the Sonarr container to clear the stalled download queue.",
-                command="docker restart sonarr",
+                command="docker compose restart sonarr",
                 impact="Expected downtime: ~30 seconds. Action will be logged for audit.",
                 cta_label="Approve Restart",
+                tool_id="docker_actions",
+                action="restart_container",
+                action_params={"container_name": "sonarr"},
             )
         # Provide informational nudges when telemetry looks unhealthy.
         if "hot_system" in signals:
@@ -307,6 +369,48 @@ class OpsCopilotAgent:
             )
         return None
 
+    def _suggestion_from_structured(self, payload: Optional[Dict[str, Any]]):
+        if not isinstance(payload, dict):
+            return None
+
+        action = payload.get("action")
+        if not isinstance(action, dict):
+            return None
+
+        confidence_value = action.get("confidence") or action.get("Confidence")
+        try:
+            confidence = float(confidence_value or 0.0)
+        except (TypeError, ValueError):
+            confidence = 0.0
+        if confidence < self._action_confidence_threshold:
+            return None
+
+        tool_id = action.get("tool_id") or action.get("toolId")
+        action_name = action.get("action")
+        if not tool_id or not action_name:
+            return None
+
+        action_params = action.get("action_params") or action.get("actionParams") or {}
+        if not isinstance(action_params, dict):
+            action_params = {}
+
+        description = action.get("description") or "Automation suggested by Ops-Copilot"
+        command = action.get("command") or f"{tool_id}.{action_name}"
+        impact = action.get("impact") or "Execution will be logged."
+        cta_label = action.get("cta_label") or action.get("ctaLabel") or "Approve"
+        action_id = action.get("id") or f"{tool_id}_{action_name}"
+
+        return build_suggestion(
+            action_id=action_id,
+            description=description,
+            command=command,
+            impact=impact,
+            cta_label=cta_label,
+            tool_id=tool_id,
+            action=action_name,
+            action_params=action_params,
+        )
+
     def _find_tool(self, tool_id: str) -> Optional[BaseMCPTool]:
         for tool in self.tools:
             if tool.tool_id == tool_id:
@@ -314,14 +418,24 @@ class OpsCopilotAgent:
         return None
 
     def _format_action_followup(self, suggestion: Dict[str, Any], result: Dict[str, Any]) -> str:
-        container = result.get("container") or suggestion.get("actionParams", {}).get("container_name")
+        params = suggestion.get("action_params") or suggestion.get("actionParams") or {}
+        container = result.get("container") or params.get("container_name")
         action = result.get("action") or suggestion.get("action")
+        if result.get("status") == "error":
+            error_msg = result.get("error") or "The automation reported an error."
+            return textwrap.dedent(
+                f"""
+                <p class='font-semibold text-rose-200'>⛔ Automation failed</p>
+                <p class='mt-2 text-rose-200/90'>{error_msg}</p>
+                """
+            ).strip()
+
         action_label = action.capitalize() if isinstance(action, str) else "Automation"
-        container_label = container or "service"
+        subject = container or suggestion.get("description") or "requested action"
         message = textwrap.dedent(
             f"""
             <p class='font-semibold text-blue-100'>🔧 {action_label} complete</p>
-            <p class='mt-2 text-blue-100/80'>The {container_label} container reported success via the Docker MCP gateway.</p>
+            <p class='mt-2 text-blue-100/80'>The {subject} was queued successfully via the MCP gateway.</p>
             """
         ).strip()
         return message

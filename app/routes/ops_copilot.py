@@ -27,7 +27,13 @@ def build_agent(config: Mapping[str, Any]) -> OpsCopilotAgent:
 
     tools = build_tools(config)
     api_key_for_agent = api_key if api_key else None
-    return OpsCopilotAgent(tools, provider=provider, model=model, api_key=api_key_for_agent)
+    return OpsCopilotAgent(
+        tools,
+        provider=provider,
+        model=model,
+        api_key=api_key_for_agent,
+        enable_legacy_suggestions=bool(config.get('ENABLE_LEGACY_SUGGESTIONS', True)),
+    )
 
 
 def _get_agent() -> OpsCopilotAgent:
