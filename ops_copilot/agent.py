@@ -4,10 +4,11 @@ from __future__ import annotations
 import os
 import textwrap
 from collections import deque
-from typing import Deque, Dict, Iterable, List, Optional
+from typing import Any, Deque, Dict, Iterable, List, Optional
 
 from .messages import assistant_message, build_suggestion
 from .mcp import BaseMCPTool
+from .providers import AIProvider
 
 try:  # pragma: no cover - optional dependency
     from markdown import markdown as markdown_to_html
@@ -45,14 +46,19 @@ class OpsCopilotAgent:
         system_prompt: Optional[str] = None,
         max_history: int = 8,
         temperature: float = 0.2,
+        provider: Optional[AIProvider] = None,
+        model: Optional[str] = None,
+        api_key: Optional[str] = None,
     ) -> None:
         self.tools: List[BaseMCPTool] = list(tools)
         self.system_prompt = system_prompt or DEFAULT_SYSTEM_PROMPT
         self.temperature = temperature
         self.history: Deque[Dict[str, str]] = deque(maxlen=max_history)
         self.pending_actions: Dict[str, Dict[str, str]] = {}
-        self.model = os.getenv("OPENAI_API_MODEL", "gpt-4o-mini")
+        self.model = (model or os.getenv("OPENAI_API_MODEL", "gpt-4o-mini") or "gpt-4o-mini").strip() or "gpt-4o-mini"
+        self._api_key = api_key or os.getenv("OPENAI_API_KEY")
         self._client = self._build_client()
+        self._provider = provider
 
     # ------------------------------------------------------------------
     # Public API
@@ -109,21 +115,16 @@ class OpsCopilotAgent:
         if not suggestion:
             raise OpsCopilotApprovalError("Unknown or expired automation request")
 
-        if action_id == "restart_sonarr":
+        if action_id == "restart_sonarr" and not suggestion.get("toolId"):
             followup = textwrap.dedent(
                 """
                 <p class='font-semibold text-blue-100'>🔧 Automation complete</p>
-                <p class='mt-2 text-blue-100/80'>The Sonarr container restarted successfully and the queue resumed processing.</p>
-                <ul class='mt-3 list-disc space-y-1 pl-5 text-blue-100/80'>
-                    <li>Restart duration: 18 seconds</li>
-                    <li>Queue throughput restored (4 items pending)</li>
-                    <li>Action logged to the audit trail</li>
-                </ul>
+                <p class='mt-2 text-blue-100/80'>The Sonarr container restart has been queued. Please confirm manually if automation support is disabled.</p>
                 """
             ).strip()
             return {
                 "status": "success",
-                "result": "Sonarr container restart simulated successfully.",
+                "result": "Sonarr container restart simulated.",
                 "followup": followup,
             }
 
@@ -140,13 +141,38 @@ class OpsCopilotAgent:
                 "followup": acknowledgement,
             }
 
+        tool_id = suggestion.get("toolId") or suggestion.get("tool_id")
+        action = suggestion.get("action")
+        action_params = suggestion.get("actionParams") or suggestion.get("action_params") or {}
+
+        if tool_id and action:
+            tool = self._find_tool(tool_id)
+            if tool is None:
+                raise OpsCopilotApprovalError("Automation unavailable: required tool not loaded")
+
+            action_method = getattr(tool, action, None)
+            if not callable(action_method):
+                raise OpsCopilotApprovalError("Automation action is not available")
+
+            try:
+                result = action_method(**action_params)
+            except Exception as exc:
+                raise OpsCopilotApprovalError(f"Automation failed: {exc}") from exc
+
+            followup = self._format_action_followup(suggestion, result)
+            return {
+                "status": "success",
+                "result": result,
+                "followup": followup,
+            }
+
         raise OpsCopilotApprovalError("This automation is not yet implemented")
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
     def _build_client(self):
-        api_key = os.getenv("OPENAI_API_KEY")
+        api_key = self._api_key
         if not api_key:
             return None
         if OpenAI is None:
@@ -193,6 +219,15 @@ class OpsCopilotAgent:
             }
         )
 
+        # Prefer injected provider if available
+        if self._provider is not None and self._provider.is_available():
+            try:
+                reply_text, model_used = self._provider.generate(prompt_messages, temperature=self.temperature)
+                if reply_text:
+                    return reply_text, model_used
+            except Exception as exc:  # pragma: no cover
+                print(f"Warning: provider request failed: {exc}")
+
         if self._client is not None:
             try:
                 response = self._client.responses.create(
@@ -233,7 +268,19 @@ class OpsCopilotAgent:
     def _maybe_build_suggestion(self, message: str, signals: Dict[str, str]):
         lowered = message.lower()
         trigger_words = ["sonarr", "queue", "stalled", "restart"]
+        docker_tool_present = any(tool.tool_id == "docker_actions" for tool in self.tools)
         if any(word in lowered for word in trigger_words):
+            if docker_tool_present:
+                return build_suggestion(
+                    action_id="restart_sonarr",
+                    description="Restart the Sonarr container to clear the stalled download queue.",
+                    command="docker compose restart sonarr",
+                    impact="Expected downtime: ~30 seconds. Action will be logged for audit.",
+                    cta_label="Approve Restart",
+                    tool_id="docker_actions",
+                    action="restart_container",
+                    action_params={"container_name": "sonarr"},
+                )
             return build_suggestion(
                 action_id="restart_sonarr",
                 description="Restart the Sonarr container to clear the stalled download queue.",
@@ -259,3 +306,22 @@ class OpsCopilotAgent:
                 cta_label="Got It",
             )
         return None
+
+    def _find_tool(self, tool_id: str) -> Optional[BaseMCPTool]:
+        for tool in self.tools:
+            if tool.tool_id == tool_id:
+                return tool
+        return None
+
+    def _format_action_followup(self, suggestion: Dict[str, Any], result: Dict[str, Any]) -> str:
+        container = result.get("container") or suggestion.get("actionParams", {}).get("container_name")
+        action = result.get("action") or suggestion.get("action")
+        action_label = action.capitalize() if isinstance(action, str) else "Automation"
+        container_label = container or "service"
+        message = textwrap.dedent(
+            f"""
+            <p class='font-semibold text-blue-100'>🔧 {action_label} complete</p>
+            <p class='mt-2 text-blue-100/80'>The {container_label} container reported success via the Docker MCP gateway.</p>
+            """
+        ).strip()
+        return message

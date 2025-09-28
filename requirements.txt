@@ -3,3 +3,4 @@ psutil
 docker
 openai>=1.14.0
 Markdown>=3.5.0
+requests>=2.31.0
