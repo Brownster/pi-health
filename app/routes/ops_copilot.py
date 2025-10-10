@@ -36,7 +36,12 @@ def build_agent(config: Mapping[str, Any]) -> OpsCopilotAgent:
     )
 
 
-def _get_agent() -> OpsCopilotAgent:
+def _get_agent() -> OpsCopilotAgent | None:
+    """Lazily build the agent if it's not cached in the app context."""
+    # Check if AI agent is enabled
+    if not current_app.config.get('ENABLE_AI_AGENT', False):
+        return None
+
     agent = current_app.extensions.get('ops_copilot_agent')
     if agent is None:
         agent = build_agent(current_app.config)
@@ -49,6 +54,18 @@ def api_ops_copilot_chat():
     payload = request.get_json(silent=True) or {}
     message = payload.get('message', '')
     agent = _get_agent()
+
+    # Handle when AI agent is disabled
+    if agent is None:
+        return jsonify({
+            "messages": [
+                assistant_message(
+                    "<p class='text-yellow-200'>🤖 AI Assistant is currently disabled</p>"
+                    "<p class='mt-2 text-blue-100/80'>Enable it from the Settings page to start chatting. "
+                    "Basic system monitoring is still available in the meantime.</p>"
+                )
+            ]
+        })
 
     try:
         result = agent.chat(message)
@@ -74,6 +91,10 @@ def api_ops_copilot_approve():
         return jsonify({"status": "error", "error": "action_id is required"}), 400
 
     agent = _get_agent()
+    if agent is None:
+        error_message = "AI assistant is disabled; enable it before approving actions."
+        record_approval_event(action_id, "disabled", {"error": error_message})
+        return jsonify({"status": "error", "error": error_message}), 400
 
     try:
         result = agent.approve(action_id)

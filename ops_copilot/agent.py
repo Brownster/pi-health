@@ -205,9 +205,7 @@ class OpsCopilotAgent:
         prompt_messages = [
             {
                 "role": "system",
-                "content": [
-                    {"type": "text", "text": self.system_prompt},
-                ],
+                "content": self.system_prompt,
             }
         ]
 
@@ -216,9 +214,7 @@ class OpsCopilotAgent:
             prompt_messages.append(
                 {
                     "role": entry["role"],
-                    "content": [
-                        {"type": "text", "text": entry["content"]},
-                    ],
+                    "content": entry["content"],
                 }
             )
 
@@ -230,9 +226,7 @@ class OpsCopilotAgent:
         prompt_messages.append(
             {
                 "role": "user",
-                "content": [
-                    {"type": "text", "text": user_text},
-                ],
+                "content": user_text,
             }
         )
 
@@ -247,12 +241,12 @@ class OpsCopilotAgent:
 
         if self._client is not None:
             try:
-                response = self._client.responses.create(
+                response = self._client.chat.completions.create(
                     model=self.model,
-                    input=prompt_messages,
+                    messages=prompt_messages,
                     temperature=self.temperature,
                 )
-                reply_text = (response.output_text or "").strip()
+                reply_text = (response.choices[0].message.content or "").strip()
                 if reply_text:
                     return self._interpret_model_output(reply_text, self.model)
             except Exception as exc:  # pragma: no cover - network/path errors

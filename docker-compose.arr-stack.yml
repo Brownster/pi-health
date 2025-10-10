@@ -1,0 +1,341 @@
+version: "3.8"
+
+# Pi-Health Arr Stack Template
+# Complete media server setup with VPN, downloaders, and media managers
+# Copy this to docker-compose.yml and customize for your setup
+
+services:
+  # VPN Container - Routes all download traffic through VPN
+  vpn:
+    image: qmcgaw/gluetun:latest
+    container_name: vpn
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    volumes:
+      - "${DOCKER_CONFIG_PATH}/vpn:/gluetun"
+    env_file:
+      - ${DOCKER_CONFIG_PATH}/vpn/.env
+    healthcheck:
+      test: curl --fail http://localhost:8000 || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    ports:
+      # Jackett
+      - 9117:9117
+      # Sonarr
+      - 8989:8989
+      # Radarr
+      - 7878:7878
+      # Transmission
+      - 9091:9091
+      # RDTClient
+      - 6789:6789
+      # Prowlarr
+      - 9696:9696
+      # SABnzbd
+      - 8080:8080
+      # Lidarr
+      - 8686:8686
+    networks:
+      - vpn_network
+
+  # Media Request Management
+  jellyseerr:
+    image: fallenbagel/jellyseerr:latest
+    container_name: jellyseerr
+    environment:
+      - LOG_LEVEL=info
+      - TZ=${TIMEZONE}
+      - PUID=${PUID}
+      - PGID=${PGID}
+    volumes:
+      - ${DOCKER_CONFIG_PATH}/jellyseerr/config:/app/config
+    ports:
+      - 5055:5055
+    healthcheck:
+      test: wget --no-verbose --tries=1 --spider http://localhost:5055/api/v1/status || exit 1
+      start_period: 20s
+      timeout: 3s
+      interval: 15s
+      retries: 3
+    restart: unless-stopped
+
+  # Indexer Aggregator (Optional - can use instead of Jackett)
+  prowlarr:
+    image: linuxserver/prowlarr:latest
+    container_name: prowlarr
+    network_mode: "service:vpn"
+    environment:
+      - TZ=${TIMEZONE}
+      - PUID=${PUID}
+      - PGID=${PGID}
+    volumes:
+      - ${DOCKER_CONFIG_PATH}/prowlarr:/config
+    restart: unless-stopped
+
+  # Torrent/NZB Indexer
+  jackett:
+    image: linuxserver/jackett:latest
+    container_name: jackett
+    network_mode: "service:vpn"
+    environment:
+      - TZ=${TIMEZONE}
+      - PUID=${PUID}
+      - PGID=${PGID}
+    volumes:
+      - ${DOCKER_CONFIG_PATH}/jackett:/config
+      - ${DOWNLOADS_PATH}:/downloads
+    restart: unless-stopped
+
+  # TV Series Management
+  sonarr:
+    image: linuxserver/sonarr:latest
+    container_name: sonarr
+    network_mode: "service:vpn"
+    environment:
+      - TZ=${TIMEZONE}
+      - PUID=${PUID}
+      - PGID=${PGID}
+    volumes:
+      - ${DOCKER_CONFIG_PATH}/sonarr:/config
+      - ${MEDIA_PATH}/TV:/tv
+      - ${DOWNLOADS_PATH}:/downloads
+    restart: unless-stopped
+
+  # Movie Management
+  radarr:
+    image: linuxserver/radarr:latest
+    container_name: radarr
+    network_mode: "service:vpn"
+    environment:
+      - TZ=${TIMEZONE}
+      - PUID=${PUID}
+      - PGID=${PGID}
+    volumes:
+      - ${DOCKER_CONFIG_PATH}/radarr:/config
+      - ${MEDIA_PATH}/Movies:/movies
+      - ${DOWNLOADS_PATH}:/downloads
+    restart: unless-stopped
+
+  # Music Management
+  lidarr:
+    image: lscr.io/linuxserver/lidarr:latest
+    container_name: lidarr
+    network_mode: "service:vpn"
+    environment:
+      - TZ=${TIMEZONE}
+      - PUID=${PUID}
+      - PGID=${PGID}
+    volumes:
+      - ${DOCKER_CONFIG_PATH}/lidarr/config:/config
+      - ${MEDIA_PATH}/Music:/music
+      - ${DOWNLOADS_PATH}:/downloads
+    restart: unless-stopped
+
+  # Book Management
+  readarr:
+    image: linuxserver/readarr:develop
+    container_name: readarr
+    network_mode: "service:vpn"
+    environment:
+      - TZ=${TIMEZONE}
+      - PUID=${PUID}
+      - PGID=${PGID}
+    volumes:
+      - ${DOCKER_CONFIG_PATH}/readarr:/config
+      - ${MEDIA_PATH}/Books:/books
+      - ${DOWNLOADS_PATH}:/downloads
+    restart: unless-stopped
+
+  # BitTorrent Client
+  transmission:
+    image: linuxserver/transmission:latest
+    container_name: transmission
+    network_mode: "service:vpn"
+    environment:
+      - TZ=${TIMEZONE}
+      - PUID=${PUID}
+      - PGID=${PGID}
+    volumes:
+      - ${DOCKER_CONFIG_PATH}/transmission:/config
+      - ${DOWNLOADS_PATH}:/downloads
+    restart: unless-stopped
+
+  # Real-Debrid Client
+  rdtclient:
+    image: rogerfar/rdtclient
+    container_name: rdtclient
+    network_mode: "service:vpn"
+    environment:
+      - TZ=${TIMEZONE}
+      - PUID=${PUID}
+      - PGID=${PGID}
+    volumes:
+      - ${DOCKER_CONFIG_PATH}/rdtclient:/data/db
+      - ${DOWNLOADS_PATH}:/downloads
+    logging:
+       driver: json-file
+       options:
+          max-size: 10m
+    restart: unless-stopped
+
+  # Usenet Client
+  sabnzbd:
+    image: lscr.io/linuxserver/sabnzbd:latest
+    container_name: sabnzbd
+    network_mode: "service:vpn"
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TIMEZONE}
+    volumes:
+      - ${DOCKER_CONFIG_PATH}/sabnzbd/config:/config
+      - ${DOWNLOADS_PATH}/incomplete:/incomplete-downloads
+      - ${DOWNLOADS_PATH}:/downloads
+    restart: unless-stopped
+
+  # BBC iPlayer Downloader (UK specific)
+  get_iplayer:
+    image: ghcr.io/thespad/get_iplayer:latest
+    container_name: get_iplayer
+    environment:
+      - TZ=${TIMEZONE}
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - INCLUDERADIO=false
+      - ENABLEIMPORT=true
+    volumes:
+      - ${DOCKER_CONFIG_PATH}/get_iplayer/config:/config
+      - ${DOWNLOADS_PATH}/iplayer:/downloads/incomplete
+      - ${DOWNLOADS_PATH}/completed/iplayer:/downloads/completed
+    ports:
+      - 1935:1935
+    restart: unless-stopped
+
+  # Book Management Alternative
+  lazylibrarian:
+    image: linuxserver/lazylibrarian:latest
+    container_name: lazylibrarian
+    environment:
+      - TZ=${TIMEZONE}
+      - PUID=${PUID}
+      - PGID=${PGID}
+    volumes:
+      - ${DOCKER_CONFIG_PATH}/lazylibrarian:/config
+      - ${MEDIA_PATH}/Books:/books
+      - ${MEDIA_PATH}/AudioBooks:/audiobooks
+      - ${DOWNLOADS_PATH}/books:/downloads
+    ports:
+      - 5299:5299
+    restart: unless-stopped
+
+  # Audiobook Server
+  audiobookshelf:
+    image: ghcr.io/advplyr/audiobookshelf:latest
+    container_name: audiobookshelf
+    ports:
+      - 13378:80
+    volumes:
+      - ${MEDIA_PATH}/AudioBooks:/audiobooks
+      - ${MEDIA_PATH}/Podcasts:/podcasts
+      - ${DOCKER_CONFIG_PATH}/audiobookshelf/config:/config
+      - ${DOCKER_CONFIG_PATH}/audiobookshelf/metadata:/metadata
+    environment:
+      - TZ=${TIMEZONE}
+      - PUID=${PUID}
+      - PGID=${PGID}
+    restart: unless-stopped
+
+  # Music Server
+  navidrome:
+    image: deluan/navidrome:latest
+    container_name: navidrome
+    environment:
+      - TZ=${TIMEZONE}
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - ND_LASTFM_APIKEY=${LASTFM_API_KEY}
+      - ND_LASTFM_SECRET=${LASTFM_SECRET}
+    volumes:
+      - ${DOCKER_CONFIG_PATH}/navidrome:/data
+      - ${MEDIA_PATH}/Music:/music:ro
+    ports:
+      - "4533:4533"
+    restart: unless-stopped
+
+  # Media Server
+  jellyfin:
+    image: linuxserver/jellyfin:latest
+    container_name: jellyfin
+    environment:
+      - TZ=${TIMEZONE}
+      - PUID=${PUID}
+      - PGID=${PGID}
+    volumes:
+      - ${DOCKER_CONFIG_PATH}/jellyfin:/config
+      - ${MEDIA_PATH}:/media
+    ports:
+      - 8096:8096
+      - 8920:8920
+    restart: unless-stopped
+    devices:
+      # Hardware acceleration (uncomment if available)
+      # - /dev/dri:/dev/dri
+      # - /dev/vchiq:/dev/vchiq
+
+  # Pi-Health Dashboard - Manages everything above
+  pi-health-dashboard:
+    image: brownster/pi-health:latest
+    container_name: pi-health-dashboard
+    environment:
+      - TZ=${TIMEZONE}
+      - DISK_PATH=${MEDIA_PATH}
+      - DISK_PATH_2=${DOWNLOADS_PATH}
+      - DOCKER_COMPOSE_PATH=${DOCKER_CONFIG_PATH}/docker-compose.yml
+      - ENV_FILE_PATH=${DOCKER_CONFIG_PATH}/.env
+      - BACKUP_DIR=${DOCKER_CONFIG_PATH}/backups
+      - ENABLE_AI_AGENT=${ENABLE_AI_AGENT}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      # MCP Service URLs (auto-configured)
+      - SONARR_MCP_BASE_URL=http://localhost:8989
+      - RADARR_MCP_BASE_URL=http://localhost:7878
+      - LIDARR_MCP_BASE_URL=http://localhost:8686
+      - SABNZBD_MCP_BASE_URL=http://localhost:8080
+      - JELLYFIN_MCP_BASE_URL=http://localhost:8096
+      - JELLYSEERR_MCP_BASE_URL=http://localhost:5055
+      - DOCKER_MCP_BASE_URL=http://localhost:2376
+    ports:
+      - 8100:8080
+    volumes:
+      - /proc:/host_proc:ro
+      - /sys:/host_sys:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${DOCKER_CONFIG_PATH}:/config
+      - ${MEDIA_PATH}:${MEDIA_PATH}
+      - ${DOWNLOADS_PATH}:${DOWNLOADS_PATH}
+    restart: unless-stopped
+    depends_on:
+      - jellyfin
+      - sonarr
+      - radarr
+      - lidarr
+
+  # Container Auto-Updates
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: watchtower
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_POLL_INTERVAL=3600
+      - WATCHTOWER_INCLUDE_RESTARTING=true
+    restart: unless-stopped
+
+networks:
+  vpn_network:
+    driver: bridge

@@ -10,6 +10,7 @@ from .logging import init_logging
 from .routes.compose_editor import compose_editor
 from .routes.containers import containers_api
 from .routes.ops_copilot import build_agent, ops_copilot_api
+from .routes.settings import settings_api
 from .routes.system import system_api
 
 
@@ -39,14 +40,21 @@ def create_app(config_object: object | Mapping[str, object] | None = None) -> Fl
 
 def _initialise_extensions(app: Flask) -> None:
     config: MutableMapping[str, object] = app.config
-    agent = build_agent(config)
-    app.extensions.setdefault('ops_copilot_agent', agent)
+
+    # Only initialize AI agent if enabled in configuration
+    if config.get('ENABLE_AI_AGENT', False):
+        agent = build_agent(config)
+        app.extensions.setdefault('ops_copilot_agent', agent)
+    else:
+        # Set to None to indicate agent is disabled
+        app.extensions.setdefault('ops_copilot_agent', None)
 
 
 def _register_blueprints(app: Flask) -> None:
     app.register_blueprint(system_api)
     app.register_blueprint(containers_api)
     app.register_blueprint(ops_copilot_api)
+    app.register_blueprint(settings_api)
     app.register_blueprint(compose_editor)
 
 
@@ -70,6 +78,10 @@ def _register_static_routes(app: Flask) -> None:
     @app.route('/edit.html')
     def serve_edit():
         return send_from_directory(app.static_folder, 'edit.html')
+
+    @app.route('/settings.html')
+    def serve_settings():
+        return send_from_directory(app.static_folder, 'settings.html')
 
     @app.route('/login.html')
     def serve_login():

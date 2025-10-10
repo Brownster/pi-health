@@ -1,4 +1,6 @@
-# pi-health
+# Pi-Health AI Assistant 🚀
+
+**Smart system monitoring and AI-powered operations assistant for home servers and media centers.**
 
 ![image](https://github.com/user-attachments/assets/ea6db04f-52dd-4f5a-8576-731381744f56)
 
@@ -7,6 +9,41 @@
 ![image](https://github.com/user-attachments/assets/b0c4cb0e-308e-4ec2-8715-6a03082b99d5)
 
 ![image](https://github.com/user-attachments/assets/648c5ce6-f486-4e45-88a4-3157653a8533)
+
+## 🎯 Quick Start
+
+Get up and running in 3 simple steps:
+
+```bash
+# 1. Clone and setup
+git clone <repository-url>
+cd pi-health
+./setup.sh
+
+# 2. Add your OpenAI API key to .env (optional)
+# Edit .env file: OPENAI_API_KEY=your_key_here
+
+# 3. Start the application
+python3 app.py
+```
+
+**That's it!** Visit http://localhost:8100 to access your dashboard.
+
+### ✨ Features Available Immediately
+
+- **System Monitoring**: Real-time CPU, memory, disk, and network stats
+- **Container Management**: View and manage Docker containers (if available)
+- **Smart Dashboard**: Login-protected web interface with responsive design
+- **Resource Efficient**: AI assistant disabled by default to save resources
+
+### 🤖 Enable AI Assistant (Optional)
+
+1. Get an OpenAI API key from https://platform.openai.com/api-keys
+2. Add it to your `.env` file: `OPENAI_API_KEY=your_key_here`
+3. Set `ENABLE_AI_AGENT=true` in your `.env` file
+4. Restart the application
+
+The AI assistant can help with system troubleshooting, container management, and automated operations.
 
 
 RUN
