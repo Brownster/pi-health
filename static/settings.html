@@ -1,0 +1,716 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script>
+        if (!sessionStorage.getItem("loggedIn")) {
+            window.location.href = "/login.html";
+        }
+    </script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Settings - Pi-Health AI Assistant</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        .glass-panel {
+            background: rgba(31, 41, 55, 0.8);
+            border: 1px solid rgba(148, 163, 184, 0.18);
+            border-radius: 1rem;
+            backdrop-filter: blur(12px);
+        }
+
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 9999px;
+            display: inline-block;
+            margin-right: 8px;
+        }
+
+        .status-dot-online {
+            background: #10b981;
+            box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.2);
+        }
+
+        .status-dot-offline {
+            background: #ef4444;
+            box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.2);
+        }
+
+        .toggle-switch {
+            position: relative;
+            width: 60px;
+            height: 30px;
+            background: #374151;
+            border-radius: 15px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .toggle-switch.active {
+            background: #10b981;
+        }
+
+        .toggle-knob {
+            position: absolute;
+            top: 3px;
+            left: 3px;
+            width: 24px;
+            height: 24px;
+            background: white;
+            border-radius: 12px;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+
+        .toggle-switch.active .toggle-knob {
+            left: 33px;
+        }
+
+        .api-key-input {
+            font-family: 'Courier New', monospace;
+            background: rgba(17, 24, 39, 0.8);
+            border: 1px solid rgba(129, 140, 248, 0.35);
+        }
+
+        .api-key-masked {
+            letter-spacing: 2px;
+        }
+
+        .settings-section {
+            background: rgba(17, 24, 39, 0.6);
+            border: 1px solid rgba(75, 85, 99, 0.3);
+            border-radius: 0.75rem;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+            transition: all 0.2s ease;
+        }
+
+        .btn-primary:hover {
+            background: linear-gradient(135deg, #2563eb, #1e40af);
+            transform: translateY(-1px);
+        }
+
+        .btn-secondary {
+            background: rgba(75, 85, 99, 0.8);
+            border: 1px solid rgba(156, 163, 175, 0.3);
+            transition: all 0.2s ease;
+        }
+
+        .btn-secondary:hover {
+            background: rgba(107, 114, 128, 0.8);
+            transform: translateY(-1px);
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen" style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);">
+
+    <!-- Navigation -->
+    <nav class="bg-gray-800 bg-opacity-80 backdrop-filter backdrop-blur-lg border-b border-gray-700 px-6 py-4">
+        <div class="flex items-center justify-between">
+            <div class="flex items-center space-x-8">
+                <h1 class="text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
+                    Pi-Health Settings
+                </h1>
+            </div>
+            <div class="flex items-center space-x-4">
+                <a href="/" class="text-gray-300 hover:text-white transition-colors">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path>
+                    </svg>
+                </a>
+                <button onclick="logout()" class="text-red-400 hover:text-red-300 transition-colors">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mx-auto px-6 py-8 max-w-4xl">
+
+        <!-- AI Assistant Settings -->
+        <div class="settings-section">
+            <div class="flex items-center justify-between mb-6">
+                <div>
+                    <h2 class="text-xl font-semibold text-blue-300 mb-2">🤖 AI Assistant</h2>
+                    <p class="text-gray-400 text-sm">Enable or disable the intelligent operations assistant</p>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <span id="ai-status" class="text-sm font-medium"></span>
+                    <div id="ai-toggle" class="toggle-switch" onclick="toggleAI()">
+                        <div class="toggle-knob"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- AI Status Details -->
+            <div id="ai-details" class="bg-gray-800 bg-opacity-50 rounded-lg p-4 mb-4">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                    <div>
+                        <span class="text-gray-400">Status:</span>
+                        <span id="ai-status-detail" class="ml-2 font-mono"></span>
+                    </div>
+                    <div>
+                        <span class="text-gray-400">Model:</span>
+                        <span id="ai-model" class="ml-2 font-mono">gpt-4o-mini</span>
+                    </div>
+                    <div>
+                        <span class="text-gray-400">API Key:</span>
+                        <span id="api-key-status" class="ml-2 font-mono"></span>
+                    </div>
+                    <div>
+                        <span class="text-gray-400">Memory Usage:</span>
+                        <span id="memory-usage" class="ml-2 font-mono">~0 MB</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- OpenAI API Key Management -->
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-300 mb-2">
+                        OpenAI API Key
+                        <span class="text-gray-500 text-xs ml-2">(required for AI functionality)</span>
+                    </label>
+                    <div class="flex space-x-3">
+                        <input
+                            type="password"
+                            id="api-key-input"
+                            class="api-key-input flex-1 px-4 py-2 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            placeholder="sk-..."
+                            autocomplete="new-password"
+                        >
+                        <button
+                            type="button"
+                            onclick="toggleApiKeyVisibility()"
+                            class="btn-secondary px-3 py-2 rounded-lg text-white"
+                            title="Show/Hide API Key"
+                        >
+                            <svg id="eye-icon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>
+                            </svg>
+                        </button>
+                        <button
+                            onclick="updateApiKey()"
+                            class="btn-primary px-6 py-2 rounded-lg text-white font-medium"
+                        >
+                            Update Key
+                        </button>
+                    </div>
+                    <p class="text-xs text-gray-500 mt-2">
+                        Get your API key from <a href="https://platform.openai.com/api-keys" target="_blank" class="text-blue-400 hover:text-blue-300">platform.openai.com/api-keys</a>
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <!-- System Settings -->
+        <div class="settings-section">
+            <h2 class="text-xl font-semibold text-green-300 mb-4">⚙️ System Settings</h2>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <label class="block text-sm font-medium text-gray-300 mb-2">Primary Disk Path</label>
+                    <input type="text" id="disk-path" class="w-full px-4 py-2 bg-gray-800 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-green-500" value="/" readonly>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-300 mb-2">Secondary Disk Path</label>
+                    <input type="text" id="disk-path-2" class="w-full px-4 py-2 bg-gray-800 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-green-500" value="/mnt/backup" readonly>
+                </div>
+            </div>
+
+            <div class="mt-6 p-4 bg-yellow-900 bg-opacity-30 border border-yellow-600 rounded-lg">
+                <p class="text-yellow-200 text-sm">
+                    <strong>Note:</strong> System paths are read-only. To modify these settings, edit your <code>.env</code> file and restart the application.
+                </p>
+            </div>
+        </div>
+
+        <!-- MCP Services -->
+        <div class="settings-section">
+            <h2 class="text-xl font-semibold text-cyan-300 mb-4">🔧 MCP Services</h2>
+            <p class="text-gray-400 text-sm mb-4">Manage Model Context Protocol services that enhance AI capabilities</p>
+
+            <!-- Service Grid -->
+            <div id="mcp-services-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+                <!-- Services will be loaded here -->
+            </div>
+
+            <!-- Bulk Actions -->
+            <div class="flex flex-wrap gap-3 mb-4">
+                <button onclick="bulkMCPAction('start')" class="btn-primary px-4 py-2 rounded-lg text-white text-sm">
+                    Start All
+                </button>
+                <button onclick="bulkMCPAction('stop')" class="btn-secondary px-4 py-2 rounded-lg text-white text-sm">
+                    Stop All
+                </button>
+                <button onclick="bulkMCPAction('restart')" class="btn-secondary px-4 py-2 rounded-lg text-white text-sm">
+                    Restart All
+                </button>
+                <button onclick="refreshMCPServices()" class="btn-secondary px-4 py-2 rounded-lg text-white text-sm">
+                    🔄 Refresh
+                </button>
+            </div>
+
+            <!-- MCP Resource Usage -->
+            <div id="mcp-resource-usage" class="bg-gray-800 bg-opacity-50 rounded-lg p-4">
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                    <div class="text-center">
+                        <div class="text-xl font-bold text-cyan-400" id="mcp-total-services">0</div>
+                        <div class="text-gray-400">Total Services</div>
+                    </div>
+                    <div class="text-center">
+                        <div class="text-xl font-bold text-green-400" id="mcp-active-services">0</div>
+                        <div class="text-gray-400">Active Services</div>
+                    </div>
+                    <div class="text-center">
+                        <div class="text-xl font-bold text-yellow-400" id="mcp-memory-usage">0 MB</div>
+                        <div class="text-gray-400">Memory Usage</div>
+                    </div>
+                    <div class="text-center">
+                        <div class="text-xl font-bold text-purple-400" id="mcp-uptime">--</div>
+                        <div class="text-gray-400">Avg Uptime</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Resource Usage -->
+        <div class="settings-section">
+            <h2 class="text-xl font-semibold text-purple-300 mb-4">📊 Resource Usage</h2>
+
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div class="text-center">
+                    <div class="text-2xl font-bold text-blue-400" id="cpu-usage">--</div>
+                    <div class="text-xs text-gray-400">CPU Usage</div>
+                </div>
+                <div class="text-center">
+                    <div class="text-2xl font-bold text-green-400" id="memory-usage-pct">--</div>
+                    <div class="text-xs text-gray-400">Memory Usage</div>
+                </div>
+                <div class="text-center">
+                    <div class="text-2xl font-bold text-yellow-400" id="disk-usage-pct">--</div>
+                    <div class="text-xs text-gray-400">Disk Usage</div>
+                </div>
+                <div class="text-center">
+                    <div class="text-2xl font-bold text-red-400" id="temperature">--</div>
+                    <div class="text-xs text-gray-400">Temperature</div>
+                </div>
+            </div>
+
+            <div class="mt-4 text-xs text-gray-500 text-center">
+                Resource usage updates every 30 seconds
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div id="toast-container" class="fixed top-4 right-4 space-y-2 z-50"></div>
+
+    <script>
+        let aiAgentEnabled = false;
+        let resourceUpdateInterval;
+
+        // Helper function to get request headers (session-based auth now handled server-side)
+        function getAuthHeaders() {
+            return {'Content-Type': 'application/json'};
+        }
+
+        // Check if user is authenticated
+        async function checkAuthentication() {
+            try {
+                const response = await fetch('/api/auth/status');
+                const data = await response.json();
+
+                if (!data.authenticated) {
+                    // Redirect to login page
+                    window.location.href = '/login.html';
+                    return false;
+                }
+                return true;
+            } catch (error) {
+                console.error('Auth check failed:', error);
+                window.location.href = '/login.html';
+                return false;
+            }
+        }
+
+        // Initialize page
+        document.addEventListener('DOMContentLoaded', async function() {
+            if (await checkAuthentication()) {
+                loadSettings();
+                startResourceMonitoring();
+                loadMCPServices();
+            }
+        });
+
+        // Load current settings
+        async function loadSettings() {
+            try {
+                const response = await fetch('/api/settings/status');
+                const data = await response.json();
+
+                aiAgentEnabled = data.ai_agent_enabled;
+                updateAIToggle();
+                updateAIStatus();
+
+                // Update API key status
+                document.getElementById('api-key-status').textContent =
+                    data.api_key_configured ? '✓ Configured' : '✗ Not Set';
+
+                // Update system paths
+                document.getElementById('disk-path').value = data.disk_path || '/';
+                document.getElementById('disk-path-2').value = data.disk_path_2 || '/mnt/backup';
+
+            } catch (error) {
+                showToast('Failed to load settings', 'error');
+            }
+        }
+
+        // Toggle AI agent
+        async function toggleAI() {
+            try {
+                const response = await fetch('/api/settings/ai-agent/toggle', {
+                    method: 'POST',
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify({enabled: !aiAgentEnabled})
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    aiAgentEnabled = data.enabled;
+                    updateAIToggle();
+                    updateAIStatus();
+                    showToast(aiAgentEnabled ? 'AI Agent enabled' : 'AI Agent disabled', 'success');
+                } else {
+                    showToast(data.error || 'Failed to toggle AI agent', 'error');
+                }
+            } catch (error) {
+                showToast('Failed to toggle AI agent', 'error');
+            }
+        }
+
+        // Update API key
+        async function updateApiKey() {
+            const apiKey = document.getElementById('api-key-input').value.trim();
+
+            if (!apiKey) {
+                showToast('Please enter an API key', 'warning');
+                return;
+            }
+
+            if (!apiKey.startsWith('sk-')) {
+                showToast('API key should start with "sk-"', 'warning');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/settings/api-key/update', {
+                    method: 'POST',
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify({api_key: apiKey})
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    document.getElementById('api-key-input').value = '';
+                    document.getElementById('api-key-status').textContent = '✓ Configured';
+                    showToast('API key updated successfully', 'success');
+                } else {
+                    showToast(data.error || 'Failed to update API key', 'error');
+                }
+            } catch (error) {
+                showToast('Failed to update API key', 'error');
+            }
+        }
+
+        // Toggle API key visibility
+        function toggleApiKeyVisibility() {
+            const input = document.getElementById('api-key-input');
+            const icon = document.getElementById('eye-icon');
+
+            if (input.type === 'password') {
+                input.type = 'text';
+                icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L8.464 8.464a10.05 10.05 0 00-5.21 3.79m4.244 4.244L8.464 15.536a10.05 10.05 0 005.21-3.79m4.242-4.242l1.414-1.414a10.05 10.05 0 00-5.21-3.79m4.244 4.244L13.122 13.122a10.05 10.05 0 00-3.09-5.09"></path>';
+            } else {
+                input.type = 'password';
+                icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>';
+            }
+        }
+
+        // Update AI toggle visual state
+        function updateAIToggle() {
+            const toggle = document.getElementById('ai-toggle');
+            if (aiAgentEnabled) {
+                toggle.classList.add('active');
+            } else {
+                toggle.classList.remove('active');
+            }
+        }
+
+        // Update AI status display
+        function updateAIStatus() {
+            const statusElement = document.getElementById('ai-status');
+            const detailElement = document.getElementById('ai-status-detail');
+
+            if (aiAgentEnabled) {
+                statusElement.innerHTML = '<span class="status-dot status-dot-online"></span>Online';
+                detailElement.textContent = 'Active';
+            } else {
+                statusElement.innerHTML = '<span class="status-dot status-dot-offline"></span>Disabled';
+                detailElement.textContent = 'Disabled';
+            }
+        }
+
+        // Start resource monitoring
+        function startResourceMonitoring() {
+            updateResourceUsage();
+            resourceUpdateInterval = setInterval(updateResourceUsage, 30000);
+        }
+
+        // Update resource usage display
+        async function updateResourceUsage() {
+            try {
+                const response = await fetch('/api/system-stats');
+                const data = await response.json();
+
+                document.getElementById('cpu-usage').textContent =
+                    data.cpu_usage_percent ? `${data.cpu_usage_percent.toFixed(1)}%` : '--';
+                document.getElementById('memory-usage-pct').textContent =
+                    `${data.memory_usage.percent.toFixed(1)}%`;
+                document.getElementById('disk-usage-pct').textContent =
+                    `${data.disk_usage.percent.toFixed(1)}%`;
+                document.getElementById('temperature').textContent =
+                    data.temperature_celsius ? `${data.temperature_celsius.toFixed(1)}°C` : '--';
+
+            } catch (error) {
+                console.error('Failed to update resource usage:', error);
+            }
+        }
+
+        // Show toast notification
+        function showToast(message, type = 'info') {
+            const toast = document.createElement('div');
+            toast.className = `bg-gray-800 border rounded-lg p-4 shadow-lg max-w-sm transform transition-all duration-300 translate-x-full opacity-0`;
+
+            const colors = {
+                success: 'border-green-500 text-green-100',
+                error: 'border-red-500 text-red-100',
+                warning: 'border-yellow-500 text-yellow-100',
+                info: 'border-blue-500 text-blue-100'
+            };
+
+            toast.classList.add(...colors[type].split(' '));
+            toast.innerHTML = `
+                <div class="flex items-center justify-between">
+                    <span class="text-sm">${message}</span>
+                    <button onclick="this.parentElement.parentElement.remove()" class="ml-4 text-gray-400 hover:text-white">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
+                    </button>
+                </div>
+            `;
+
+            document.getElementById('toast-container').appendChild(toast);
+
+            // Animate in
+            setTimeout(() => {
+                toast.classList.remove('translate-x-full', 'opacity-0');
+            }, 100);
+
+            // Auto remove after 5 seconds
+            setTimeout(() => {
+                toast.classList.add('translate-x-full', 'opacity-0');
+                setTimeout(() => toast.remove(), 300);
+            }, 5000);
+        }
+
+        // Logout function
+        function logout() {
+            sessionStorage.removeItem("loggedIn");
+            window.location.href = "/login.html";
+        }
+
+        // MCP Services Management
+        async function loadMCPServices() {
+            try {
+                const response = await fetch('/api/mcp/services');
+                const data = await response.json();
+
+                if (data.success) {
+                    renderMCPServices(data.services);
+                    updateMCPResourceUsage();
+                } else {
+                    showToast('Failed to load MCP services', 'error');
+                }
+            } catch (error) {
+                showToast('Failed to load MCP services', 'error');
+            }
+        }
+
+        function renderMCPServices(services) {
+            const grid = document.getElementById('mcp-services-grid');
+            grid.innerHTML = '';
+
+            services.forEach(service => {
+                const card = createMCPServiceCard(service);
+                grid.appendChild(card);
+            });
+
+            // Update totals
+            document.getElementById('mcp-total-services').textContent = services.length;
+            document.getElementById('mcp-active-services').textContent =
+                services.filter(s => s.status === 'running').length;
+        }
+
+        function createMCPServiceCard(service) {
+            const card = document.createElement('div');
+            card.className = 'bg-gray-800 bg-opacity-60 border border-gray-600 rounded-lg p-4';
+
+            const statusColor = {
+                'running': 'text-green-400',
+                'stopped': 'text-gray-400',
+                'starting': 'text-yellow-400',
+                'error': 'text-red-400',
+                'unknown': 'text-gray-500'
+            }[service.status] || 'text-gray-400';
+
+            const statusDot = {
+                'running': 'bg-green-400 shadow-green-400/20',
+                'stopped': 'bg-gray-400 shadow-gray-400/20',
+                'starting': 'bg-yellow-400 shadow-yellow-400/20 animate-pulse',
+                'error': 'bg-red-400 shadow-red-400/20',
+                'unknown': 'bg-gray-500 shadow-gray-500/20'
+            }[service.status] || 'bg-gray-400 shadow-gray-400/20';
+
+            card.innerHTML = `
+                <div class="flex items-center justify-between mb-3">
+                    <div class="flex items-center">
+                        <span class="status-dot ${statusDot} mr-2"></span>
+                        <h3 class="text-white font-medium">${service.name}</h3>
+                    </div>
+                    <span class="text-xs ${statusColor} font-medium uppercase">${service.status}</span>
+                </div>
+
+                <p class="text-gray-400 text-sm mb-3 min-h-10">${service.description}</p>
+
+                <div class="grid grid-cols-2 gap-2 text-xs text-gray-500 mb-4">
+                    <div>Port: ${service.port}</div>
+                    <div>PID: ${service.pid || 'N/A'}</div>
+                    <div class="col-span-2">URL: <code class="text-cyan-400">${service.url}</code></div>
+                </div>
+
+                <div class="flex gap-2">
+                    <button onclick="startMCPService('${service.id}')"
+                            class="flex-1 px-3 py-1 bg-green-600 hover:bg-green-700 rounded text-white text-xs"
+                            ${service.status === 'running' ? 'disabled' : ''}>
+                        Start
+                    </button>
+                    <button onclick="stopMCPService('${service.id}')"
+                            class="flex-1 px-3 py-1 bg-red-600 hover:bg-red-700 rounded text-white text-xs"
+                            ${service.status === 'stopped' ? 'disabled' : ''}>
+                        Stop
+                    </button>
+                    <button onclick="restartMCPService('${service.id}')"
+                            class="flex-1 px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded text-white text-xs">
+                        Restart
+                    </button>
+                </div>
+            `;
+
+            return card;
+        }
+
+        async function startMCPService(serviceId) {
+            await mcpServiceAction(serviceId, 'start');
+        }
+
+        async function stopMCPService(serviceId) {
+            await mcpServiceAction(serviceId, 'stop');
+        }
+
+        async function restartMCPService(serviceId) {
+            await mcpServiceAction(serviceId, 'restart');
+        }
+
+        async function mcpServiceAction(serviceId, action) {
+            try {
+                const response = await fetch(`/api/mcp/services/${serviceId}/${action}`, {
+                    method: 'POST',
+                    headers: getAuthHeaders()
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    showToast(data.message || `Service ${action} successful`, 'success');
+                    setTimeout(() => loadMCPServices(), 1000);
+                } else {
+                    showToast(data.error || `Failed to ${action} service`, 'error');
+                }
+            } catch (error) {
+                showToast(`Failed to ${action} service`, 'error');
+            }
+        }
+
+        async function bulkMCPAction(action) {
+            try {
+                const services = await fetch('/api/mcp/services').then(r => r.json());
+                if (!services.success) return;
+
+                const serviceIds = services.services.map(s => s.id);
+
+                const response = await fetch('/api/mcp/services/bulk', {
+                    method: 'POST',
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify({action, service_ids: serviceIds})
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    const successCount = Object.values(data.results).filter(r => r.success).length;
+                    showToast(`${action} action completed: ${successCount}/${serviceIds.length} services`, 'success');
+                    setTimeout(() => loadMCPServices(), 2000);
+                } else {
+                    showToast(data.error || `Bulk ${action} failed`, 'error');
+                }
+            } catch (error) {
+                showToast(`Bulk ${action} failed`, 'error');
+            }
+        }
+
+        async function refreshMCPServices() {
+            await loadMCPServices();
+            showToast('MCP services refreshed', 'info');
+        }
+
+        async function updateMCPResourceUsage() {
+            try {
+                const response = await fetch('/api/mcp/resource-usage');
+                const data = await response.json();
+
+                if (data.success) {
+                    document.getElementById('mcp-memory-usage').textContent = `${data.total_memory_mb} MB`;
+                    document.getElementById('mcp-active-services').textContent = data.active_services;
+                    document.getElementById('mcp-total-services').textContent = data.total_services;
+                }
+            } catch (error) {
+                console.error('Failed to update MCP resource usage:', error);
+            }
+        }
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', function() {
+            if (resourceUpdateInterval) {
+                clearInterval(resourceUpdateInterval);
+            }
+        });
+    </script>
+</body>
+</html>

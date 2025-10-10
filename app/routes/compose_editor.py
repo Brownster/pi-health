@@ -1,5 +1,6 @@
 import os
 import shutil
+import subprocess
 from datetime import datetime
 from flask import Blueprint, jsonify, request
 
@@ -61,9 +62,35 @@ def compose_up():
         # Backup the docker-compose.yml file
         backup_compose_file()
 
-        # Run 'docker compose up -d'
-        os.system('docker compose up -d')
-        return jsonify({"status": "Compose updated successfully!"})
+        # Run 'docker compose up -d' with proper error handling
+        result = subprocess.run(
+            ['docker', 'compose', 'up', '-d'],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=300  # 5 minute timeout
+        )
+
+        return jsonify({
+            "status": "Compose updated successfully!",
+            "stdout": result.stdout,
+            "stderr": result.stderr
+        })
+
+    except subprocess.CalledProcessError as e:
+        return jsonify({
+            "error": f"Docker compose command failed with exit code {e.returncode}",
+            "stdout": e.stdout,
+            "stderr": e.stderr
+        }), 500
+    except subprocess.TimeoutExpired:
+        return jsonify({
+            "error": "Docker compose command timed out after 5 minutes"
+        }), 500
+    except FileNotFoundError:
+        return jsonify({
+            "error": "Docker compose command not found. Please ensure Docker is installed."
+        }), 500
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

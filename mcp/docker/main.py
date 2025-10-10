@@ -49,7 +49,7 @@ class ComposeActionRequest(BaseModel):
 
     class Config:
         anystr_strip_whitespace = True
-        extra = "forbid"
+        extra = "allow"
 
     @root_validator(pre=True)
     def populate_service(cls, values: Dict[str, Any]) -> Dict[str, Any]:
@@ -153,6 +153,12 @@ def compose_stop(body: ComposeActionRequest) -> ComposeActionResponse:
 
 
 if __name__ == "__main__":
+    import argparse
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=8080)
+    parser = argparse.ArgumentParser(description="Docker MCP Service")
+    parser.add_argument("--port", type=int, default=8080, help="Port to run on")
+    parser.add_argument("--host", default="0.0.0.0", help="Host to bind to")
+    args = parser.parse_args()
+
+    uvicorn.run(app, host=args.host, port=args.port)
