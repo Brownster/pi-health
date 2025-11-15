@@ -96,20 +96,20 @@
     </main>
 
     <script>
-        // Map container names to their ports and icons
-        const webUIPorts = {
-            transmission: { port: 9091, icon: "transfer", name: "Transmission" },
-            jackett: { port: 9117, icon: "search", name: "Jackett" },
-            sonarr: { port: 8989, icon: "tv", name: "Sonarr" },
-            radarr: { port: 7878, icon: "film", name: "Radarr" },
-            nzbget: { port: 6789, icon: "download", name: "NZBGet" },
-            jellyfin: { port: 8096, icon: "collection", name: "Jellyfin" },
-            get_iplayer: { port: 1935, icon: "play", name: "Get iPlayer" },
-            rtdclient: { port: 6500, icon: "cloud-download", name: "RTD Client" },
-            'airsonic-advanced': { port: 4040, icon: "music", name: "Airsonic" },
-            rdtclient: { port: 6500, icon: "cloud-download", name: "RDT Client" },
-            lidarr: { port: 8686, icon: "music", name: "Lidarr" },
-            audiobookshelf: { port: 13378, icon: "book", name: "Audiobookshelf" },
+        // Optional overrides for icons and friendly names
+        const serviceOverrides = {
+            transmission: { icon: "transfer", name: "Transmission" },
+            jackett: { icon: "search", name: "Jackett" },
+            sonarr: { icon: "tv", name: "Sonarr" },
+            radarr: { icon: "film", name: "Radarr" },
+            nzbget: { icon: "download", name: "NZBGet" },
+            jellyfin: { icon: "collection", name: "Jellyfin" },
+            get_iplayer: { icon: "play", name: "Get iPlayer" },
+            rtdclient: { icon: "cloud-download", name: "RTD Client" },
+            'airsonic-advanced': { icon: "music", name: "Airsonic" },
+            rdtclient: { icon: "cloud-download", name: "RDT Client" },
+            lidarr: { icon: "music", name: "Lidarr" },
+            audiobookshelf: { icon: "book", name: "Audiobookshelf" },
         };
 
         // Icon mapping - Coraline-themed with button eyes style
@@ -129,7 +129,7 @@
 
         // Get icon for container
         function getIcon(containerName) {
-            const service = webUIPorts[containerName];
+            const service = serviceOverrides[containerName];
             if (service && service.icon && iconSVGs[service.icon]) {
                 return iconSVGs[service.icon];
             }
@@ -138,7 +138,7 @@
 
         // Get friendly name for container
         function getFriendlyName(containerName) {
-            const service = webUIPorts[containerName];
+            const service = serviceOverrides[containerName];
             if (service && service.name) {
                 return service.name;
             }
@@ -169,21 +169,47 @@
             return gradients[Math.abs(hash) % gradients.length];
         }
 
+        function getWebUIPort(container) {
+            if (!container.ports || container.ports.length === 0) {
+                return null;
+            }
+
+            const tcpPorts = container.ports.filter(port => port.protocol !== 'udp');
+
+            const hostTcp = tcpPorts.find(port => port.host_port);
+            if (hostTcp) {
+                return hostTcp.host_port;
+            }
+
+            const anyHost = container.ports.find(port => port.host_port);
+            if (anyHost) {
+                return anyHost.host_port;
+            }
+
+            const tcpContainer = tcpPorts.find(port => port.container_port);
+            if (tcpContainer) {
+                return tcpContainer.container_port;
+            }
+
+            const fallback = container.ports.find(port => port.container_port);
+            return fallback ? fallback.container_port : null;
+        }
+
         // Fetch Docker containers and create service cards
         async function fetchDockerWebServices() {
             const serviceGrid = document.getElementById('service-grid');
-            
+
             try {
                 const response = await fetch('/api/containers');
                 const containers = await response.json();
-                
+
                 // Clear loading message
                 serviceGrid.innerHTML = '';
-                
+
                 // Filter to only running containers with web UIs
-                const webServices = containers.filter(container => 
-                    container.status === 'running' && 
-                    webUIPorts[container.name]
+                const webServices = containers.filter(container =>
+                    container.status === 'running' &&
+                    getWebUIPort(container)
                 );
                 
                 if (webServices.length === 0) {
@@ -203,7 +229,7 @@
                 
                 // Create a card for each web service
                 webServices.forEach(container => {
-                    const port = webUIPorts[container.name].port;
+                    const port = getWebUIPort(container);
                     const icon = getIcon(container.name);
                     const friendlyName = getFriendlyName(container.name);
                     const gradient = getBackgroundGradient(container.name);

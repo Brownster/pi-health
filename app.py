@@ -24,6 +24,163 @@ app.register_blueprint(compose_editor)
 container_updates = {}
 
 
+def parse_port_key(port_key):
+    """Split Docker's port key (e.g. '8080/tcp') into structured parts."""
+    if not port_key:
+        return None, None
+    if isinstance(port_key, int):
+        return port_key, 'tcp'
+
+    try:
+        port_str, protocol = port_key.split('/')
+    except ValueError:
+        port_str, protocol = port_key, 'tcp'
+
+    try:
+        port_num = int(port_str)
+    except ValueError:
+        port_num = None
+
+    return port_num, protocol
+
+
+def get_container_ports(container):
+    """Return a structured list of ports exposed/published by a container."""
+    ports = []
+    seen_ports = set()
+
+    try:
+        network_settings = container.attrs.get('NetworkSettings', {})
+        port_bindings = network_settings.get('Ports') or {}
+        config = container.attrs.get('Config', {})
+        exposed_ports = config.get('ExposedPorts') or {}
+    except Exception as e:
+        print(f"Error inspecting ports for container {container.name}: {e}")
+        return ports
+
+    # Ports published to the host
+    for container_port, bindings in port_bindings.items():
+        port_num, protocol = parse_port_key(container_port)
+        seen_ports.add((port_num, protocol))
+
+        if not bindings:
+            ports.append(
+                {
+                    "container_port": port_num,
+                    "protocol": protocol,
+                    "host_port": None,
+                    "host_ip": None,
+                }
+            )
+            continue
+
+        for binding in bindings:
+            host_port = binding.get("HostPort")
+            host_ip = binding.get("HostIp") or None
+            ports.append(
+                {
+                    "container_port": port_num,
+                    "protocol": protocol,
+                    "host_port": int(host_port) if host_port else None,
+                    "host_ip": host_ip if host_ip not in ("0.0.0.0", "") else None,
+                }
+            )
+
+    # Any remaining exposed ports (useful for network_mode=host/service)
+    for container_port in exposed_ports.keys():
+        port_num, protocol = parse_port_key(container_port)
+        if (port_num, protocol) in seen_ports:
+            continue
+        ports.append(
+            {
+                "container_port": port_num,
+                "protocol": protocol,
+                "host_port": None,
+                "host_ip": None,
+            }
+        )
+
+    return ports
+
+
+def get_container_ports_cached(container, port_cache):
+    """Return cached port metadata for a container to avoid repeated inspections."""
+    if container.id not in port_cache:
+        port_cache[container.id] = get_container_ports(container)
+    return port_cache[container.id]
+
+
+def inherit_ports_from_network_service(container, containers_by_name, port_cache):
+    """If a container shares another container's network stack, inherit its host bindings."""
+    host_config = container.attrs.get('HostConfig', {})
+    network_mode = host_config.get('NetworkMode') or ''
+
+    if not network_mode.startswith('service:'):
+        return []
+
+    service_name = network_mode.split(':', 1)[1]
+    if not service_name:
+        return []
+
+    service_container = containers_by_name.get(service_name)
+    if not service_container:
+        try:
+            service_container = docker_client.containers.get(service_name)
+        except Exception:
+            return []
+
+    service_ports = get_container_ports_cached(service_container, port_cache)
+    if not service_ports:
+        return []
+
+    exposed_ports = container.attrs.get('Config', {}).get('ExposedPorts') or {}
+    if not exposed_ports:
+        return []
+
+    # Group the service's host bindings by (container_port, protocol)
+    service_port_map = {}
+    for port in service_ports:
+        key = (port.get('container_port'), port.get('protocol'))
+        service_port_map.setdefault(key, []).append(port)
+
+    inherited_ports = []
+    for exposed_port in exposed_ports.keys():
+        port_num, protocol = parse_port_key(exposed_port)
+        if port_num is None:
+            continue
+
+        matches = service_port_map.get((port_num, protocol))
+        if not matches and protocol != 'tcp':
+            matches = service_port_map.get((port_num, 'tcp'))
+        if not matches:
+            matches = service_port_map.get((port_num, None))
+
+        if matches:
+            for match in matches:
+                inherited_ports.append(
+                    {
+                        "container_port": port_num,
+                        "protocol": protocol or match.get('protocol') or 'tcp',
+                        "host_port": match.get('host_port'),
+                        "host_ip": match.get('host_ip'),
+                        "via_service": service_name,
+                    }
+                )
+        else:
+            # No host binding available on the service container, but expose the port metadata
+            inherited_ports.append(
+                {
+                    "container_port": port_num,
+                    "protocol": protocol or 'tcp',
+                    "host_port": None,
+                    "host_ip": None,
+                    "via_service": service_name,
+                }
+            )
+
+    return inherited_ports
+
+
 def calculate_cpu_usage(cpu_line):
     """Calculate CPU usage based on /proc/stat values."""
     user, nice, system, idle, iowait, irq, softirq, steal = map(int, cpu_line[1:9])
@@ -109,21 +266,37 @@ def list_containers():
                 "name": "Docker Not Available",
                 "status": "unavailable",
                 "image": "N/A",
+                "ports": [],
             }
         ]
     
     try:
         containers = docker_client.containers.list(all=True)
-        return [
-            {
-                "id": container.id[:12],
-                "name": container.name,
-                "status": container.status,
-                "image": container.image.tags[0] if container.image.tags else "unknown",
-                "update_available": container_updates.get(container.id[:12], False),
-            }
-            for container in containers
-        ]
+        containers_by_name = {container.name: container for container in containers}
+        port_cache = {}
+        container_list = []
+        for container in containers:
+            try:
+                ports = [dict(port) for port in get_container_ports_cached(container, port_cache)]
+                if not ports:
+                    inherited = inherit_ports_from_network_service(container, containers_by_name, port_cache)
+                    if inherited:
+                        ports = inherited
+            except Exception:
+                ports = []
+
+            container_list.append(
+                {
+                    "id": container.id[:12],
+                    "name": container.name,
+                    "status": container.status,
+                    "image": container.image.tags[0] if container.image.tags else "unknown",
+                    "update_available": container_updates.get(container.id[:12], False),
+                    "ports": ports,
+                }
+            )
+
+        return container_list
     except Exception as e:
         print(f"Error listing containers: {e}")
         return [
@@ -132,6 +305,7 @@ def list_containers():
                 "name": "Error Listing Containers",
                 "status": "error",
                 "image": str(e)[:30] + "..." if len(str(e)) > 30 else str(e),
+                "ports": [],
             }
         ]
 

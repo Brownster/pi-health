@@ -217,21 +217,31 @@
         // Store the container list
         let containerList = [];
 
-        // Map container names to their ports
-        const webUIPorts = {
-            transmission: 9091,
-            jackett: 9117,
-            sonarr: 8989,
-            radarr: 7878,
-            nzbget: 6789,
-            jellyfin: 8096,
-            get_iplayer: 1935,
-            rtdclient: 6500,
-            'airsonic-advanced': 4040,
-            rdtclient: 6500,
-            lidarr: 8686,
-            audiobookshelf: 13378,
-        };
+        function getWebUIPort(container) {
+            if (!container.ports || container.ports.length === 0) {
+                return null;
+            }
+
+            const tcpPorts = container.ports.filter(port => port.protocol !== 'udp');
+
+            const hostTcp = tcpPorts.find(port => port.host_port);
+            if (hostTcp) {
+                return hostTcp.host_port;
+            }
+
+            const anyHost = container.ports.find(port => port.host_port);
+            if (anyHost) {
+                return anyHost.host_port;
+            }
+
+            const tcpContainer = tcpPorts.find(port => port.container_port);
+            if (tcpContainer) {
+                return tcpContainer.container_port;
+            }
+
+            const fallback = container.ports.find(port => port.container_port);
+            return fallback ? fallback.container_port : null;
+        }
 
         // Fetch Docker containers and update the table
         async function fetchDockerContainers() {
@@ -302,7 +312,7 @@
                     container.status === 'stopped' ? 'status-stopped' : 'status-other';
                 
                 // Determine if the container has a Web UI
-                const port = webUIPorts[container.name];
+                const port = getWebUIPort(container);
                 const webUILink = port
                     ? `<a href="http://${window.location.hostname}:${port}" target="_blank" class="text-blue-500 hover:text-blue-400 underline">Open</a>`
                     : 'N/A';
