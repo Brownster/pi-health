@@ -2,6 +2,8 @@ from flask import Flask, jsonify, send_from_directory, request
 import psutil
 import os
 import docker
+import subprocess
+from urllib import request as urlrequest
 from compose_editor import compose_editor
 
 # Initialize Flask
@@ -339,6 +341,66 @@ def update_container(container):
     except Exception as e:
         return {"error": str(e)}
 
+
+def get_container_logs(container_id, tail=200):
+    """Return the recent logs for a container."""
+    if not docker_available:
+        return {"error": "Docker is not available"}
+
+    try:
+        container = docker_client.containers.get(container_id)
+        logs = container.logs(tail=tail)
+        if isinstance(logs, bytes):
+            logs = logs.decode("utf-8", errors="replace")
+        return {"logs": logs, "container": container.name}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def run_network_test():
+    """Ping 8.8.8.8 and report local/public IP details."""
+    ping_output = ""
+    ping_success = False
+
+    try:
+        ping_result = subprocess.run(
+            ["ping", "-c", "4", "8.8.8.8"],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        ping_output = ping_result.stdout or ping_result.stderr or ""
+        ping_success = ping_result.returncode == 0
+    except FileNotFoundError:
+        ping_output = "Ping command not available in this container."
+    except subprocess.TimeoutExpired as exc:
+        ping_output = exc.stdout or exc.stderr or "Ping timed out."
+    except Exception as exc:
+        ping_output = str(exc)
+
+    local_ip = None
+    try:
+        hostname_result = subprocess.run(
+            ["hostname", "-I"], capture_output=True, text=True, timeout=5
+        )
+        local_ip = hostname_result.stdout.strip() or hostname_result.stderr.strip()
+    except Exception:
+        local_ip = None
+
+    public_ip = None
+    try:
+        with urlrequest.urlopen("https://api.ipify.org", timeout=10) as response:
+            public_ip = response.read().decode("utf-8").strip()
+    except Exception:
+        public_ip = None
+
+    return {
+        "ping_success": ping_success,
+        "ping_output": ping_output,
+        "local_ip": local_ip,
+        "public_ip": public_ip,
+    }
+
 def control_container(container_id, action):
     """Start, stop, or restart a container by ID."""
     if not docker_available:
@@ -436,6 +498,13 @@ def api_control_container(container_id, action):
     return jsonify(control_container(container_id, action))
 
 
+@app.route('/api/containers/<container_id>/logs', methods=['GET'])
+def api_container_logs(container_id):
+    """API endpoint to fetch container logs."""
+    tail = request.args.get('tail', default=200, type=int)
+    return jsonify(get_container_logs(container_id, tail=tail))
+
+
 @app.route('/api/shutdown', methods=['POST'])
 def api_shutdown():
     """API endpoint to shutdown the system."""
@@ -446,6 +515,12 @@ def api_shutdown():
 def api_reboot():
     """API endpoint to reboot the system."""
     return jsonify(system_action("reboot"))
+
+
+@app.route('/api/network-test', methods=['POST'])
+def api_network_test():
+    """API endpoint to run a network connectivity test."""
+    return jsonify(run_network_test())
 
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=8080)

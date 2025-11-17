@@ -134,6 +134,37 @@
                 </svg>
                 Refresh
             </button>
+            <button id="network-test-button" class="flex items-center px-4 py-2 rounded-md bg-blue-800 text-blue-100 font-medium border border-blue-400">
+                Network Test
+            </button>
+        </div>
+
+        <div id="network-test-card" class="hidden mb-6 bg-gray-800 rounded-lg shadow-lg p-4 border border-blue-900">
+            <div class="flex justify-between items-center mb-3">
+                <div>
+                    <h3 class="text-xl font-semibold">Network Diagnostics</h3>
+                    <p class="text-sm text-gray-400">Ping 8.8.8.8 and capture current IP details.</p>
+                </div>
+                <button id="hide-network-test" class="text-gray-400 hover:text-gray-200">Hide</button>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                <div>
+                    <span class="text-sm text-gray-400">Local IP</span>
+                    <p id="network-test-local" class="text-lg font-mono">-</p>
+                </div>
+                <div>
+                    <span class="text-sm text-gray-400">Public IP</span>
+                    <p id="network-test-public" class="text-lg font-mono">-</p>
+                </div>
+                <div>
+                    <span class="text-sm text-gray-400">Ping Status</span>
+                    <p id="network-test-status" class="text-lg">-</p>
+                </div>
+            </div>
+            <div>
+                <span class="text-sm text-gray-400">Ping Output</span>
+                <pre id="network-test-output" class="mt-2 bg-gray-900 rounded p-3 text-sm overflow-x-auto whitespace-pre-wrap">Run the test to view output.</pre>
+            </div>
         </div>
 
         <!-- Containers table -->
@@ -166,6 +197,19 @@
             </table>
         </div>
     </main>
+
+    <!-- Logs modal -->
+    <div id="logs-modal" class="hidden fixed inset-0 bg-black bg-opacity-70 z-50 items-center justify-center p-4">
+        <div class="bg-gray-900 w-full max-w-4xl rounded-lg shadow-xl border border-purple-900 flex flex-col" style="max-height: 80vh;">
+            <div class="flex justify-between items-center p-4 border-b border-purple-800">
+                <h3 id="logs-modal-title" class="text-xl font-semibold">Container Logs</h3>
+                <button id="logs-modal-close" class="text-gray-400 hover:text-gray-200">Close</button>
+            </div>
+            <div class="p-4 overflow-y-auto" style="max-height: calc(80vh - 64px);">
+                <pre id="logs-content" class="bg-gray-800 rounded p-3 text-sm whitespace-pre-wrap"></pre>
+            </div>
+        </div>
+    </div>
 
     <script>
         // Format timestamp
@@ -216,6 +260,14 @@
 
         // Store the container list
         let containerList = [];
+
+        function getContainerNameById(id) {
+            const cached = containerList.find(c => c.id === id);
+            if (cached) return cached.name;
+
+            const row = document.querySelector(`tr[data-container-id="${id}"]`);
+            return row ? row.getAttribute('data-container-name') : id;
+        }
 
         function getWebUIPort(container) {
             if (!container.ports || container.ports.length === 0) {
@@ -299,6 +351,7 @@
                             <button class="bg-gray-500 text-white font-bold py-1 px-2 rounded opacity-50 cursor-not-allowed" disabled>Start</button>
                             <button class="bg-gray-500 text-white font-bold py-1 px-2 rounded opacity-50 cursor-not-allowed" disabled>Stop</button>
                             <button class="bg-gray-500 text-white font-bold py-1 px-2 rounded opacity-50 cursor-not-allowed" disabled>Restart</button>
+                            <button class="bg-gray-500 text-white font-bold py-1 px-2 rounded opacity-50 cursor-not-allowed" disabled>Logs</button>
                         </td>
                     </tr>
                 `;
@@ -331,18 +384,20 @@
                         </td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm">${webUILink}</td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm">
-                            <button class="coraline-button text-blue-100 font-bold py-1 px-3 rounded button border border-green-800 ${container.status === 'running' ? 'opacity-50 cursor-not-allowed' : ''}"
+                            <button data-action="start" class="coraline-button text-blue-100 font-bold py-1 px-3 rounded button border border-green-800 ${container.status === 'running' ? 'opacity-50 cursor-not-allowed' : ''}"
                                     onclick="controlContainer('${container.id}', 'start')"
                                     ${container.status === 'running' ? 'disabled' : ''}>Start</button>
-                            <button class="coraline-button text-blue-100 font-bold py-1 px-3 rounded button border border-yellow-800 ${container.status === 'stopped' ? 'opacity-50 cursor-not-allowed' : ''}"
+                            <button data-action="stop" class="coraline-button text-blue-100 font-bold py-1 px-3 rounded button border border-yellow-800 ${container.status === 'stopped' ? 'opacity-50 cursor-not-allowed' : ''}"
                                     onclick="controlContainer('${container.id}', 'stop')"
                                     ${container.status === 'stopped' ? 'disabled' : ''}>Stop</button>
-                            <button class="coraline-button text-blue-100 font-bold py-1 px-3 rounded button border border-blue-800"
+                            <button data-action="restart" class="coraline-button text-blue-100 font-bold py-1 px-3 rounded button border border-blue-800"
                                     onclick="controlContainer('${container.id}', 'restart')">Restart</button>
-                            <button class="coraline-button text-blue-100 font-bold py-1 px-3 rounded button border border-purple-800"
+                            <button data-action="check_update" class="coraline-button text-blue-100 font-bold py-1 px-3 rounded button border border-purple-800"
                                     onclick="controlContainer('${container.id}', 'check_update')">Check</button>
-                            <button class="coraline-button text-blue-100 font-bold py-1 px-3 rounded button border border-red-800"
+                            <button data-action="update" class="coraline-button text-blue-100 font-bold py-1 px-3 rounded button border border-red-800"
                                     onclick="controlContainer('${container.id}', 'update')">Update</button>
+                            <button data-action="logs" class="coraline-button text-blue-100 font-bold py-1 px-3 rounded button border border-gray-500"
+                                    onclick="viewLogs('${container.id}')">Logs</button>
                         </td>
                     </tr>
                 `;
@@ -438,11 +493,11 @@
                         renderContainers();
                     } else {
                         // Just update button states
-                        const startButton = row.querySelector('button:nth-child(1)');
-                        const stopButton = row.querySelector('button:nth-child(2)');
-                        const restartButton = row.querySelector('button:nth-child(3)');
-                        const checkButton = row.querySelector('button:nth-child(4)');
-                        const updateButton = row.querySelector('button:nth-child(5)');
+                        const startButton = row.querySelector('button[data-action="start"]');
+                        const stopButton = row.querySelector('button[data-action="stop"]');
+                        const restartButton = row.querySelector('button[data-action="restart"]');
+                        const checkButton = row.querySelector('button[data-action="check_update"]');
+                        const updateButton = row.querySelector('button[data-action="update"]');
                         
                         if (startButton) {
                             startButton.disabled = container.status === 'running';
@@ -465,6 +520,94 @@
                 showNotification('Error updating container status', 'error');
             }
         }
+
+        async function viewLogs(id) {
+            const modal = document.getElementById('logs-modal');
+            const content = document.getElementById('logs-content');
+            const title = document.getElementById('logs-modal-title');
+            const containerName = getContainerNameById(id);
+
+            title.textContent = `Logs for ${containerName}`;
+            content.textContent = 'Loading logs...';
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+
+            try {
+                const response = await fetch(`/api/containers/${id}/logs`);
+                const result = await response.json();
+
+                if (result.error) {
+                    content.textContent = `Error: ${result.error}`;
+                } else {
+                    const nameFromServer = result.container || containerName;
+                    title.textContent = `Logs for ${nameFromServer}`;
+                    content.textContent = result.logs || 'No logs available.';
+                }
+            } catch (error) {
+                console.error('Error fetching logs:', error);
+                content.textContent = `Error loading logs: ${error.message}`;
+            }
+        }
+
+        function closeLogsModal() {
+            const modal = document.getElementById('logs-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        async function runNetworkTest() {
+            const card = document.getElementById('network-test-card');
+            const statusEl = document.getElementById('network-test-status');
+            const outputEl = document.getElementById('network-test-output');
+            const localEl = document.getElementById('network-test-local');
+            const publicEl = document.getElementById('network-test-public');
+
+            card.classList.remove('hidden');
+            statusEl.textContent = 'Running test...';
+            statusEl.classList.remove('text-green-400', 'text-red-400');
+            outputEl.textContent = 'Executing ping...';
+            localEl.textContent = '-';
+            publicEl.textContent = '-';
+
+            try {
+                const response = await fetch('/api/network-test', { method: 'POST' });
+                const result = await response.json();
+
+                statusEl.textContent = result.ping_success ? 'Ping successful' : 'Ping failed';
+                statusEl.classList.toggle('text-green-400', !!result.ping_success);
+                statusEl.classList.toggle('text-red-400', !result.ping_success);
+                outputEl.textContent = result.ping_output || 'No ping output returned.';
+                localEl.textContent = result.local_ip || 'Unavailable';
+                publicEl.textContent = result.public_ip || 'Unavailable';
+
+                showNotification('Network test complete', result.ping_success ? 'success' : 'info');
+            } catch (error) {
+                console.error('Network test error:', error);
+                statusEl.textContent = 'Network test failed';
+                statusEl.classList.add('text-red-400');
+                outputEl.textContent = error.message;
+                showNotification('Network test failed', 'error');
+            }
+        }
+
+        // Logs modal controls
+        document.getElementById('logs-modal-close').addEventListener('click', closeLogsModal);
+        document.getElementById('logs-modal').addEventListener('click', function(event) {
+            if (event.target === this) {
+                closeLogsModal();
+            }
+        });
+
+        // Network test controls
+        const networkTestButton = document.getElementById('network-test-button');
+        const hideNetworkTestButton = document.getElementById('hide-network-test');
+        networkTestButton.addEventListener('click', function() {
+            this.classList.add('animate-pulse');
+            runNetworkTest().finally(() => this.classList.remove('animate-pulse'));
+        });
+        hideNetworkTestButton.addEventListener('click', () => {
+            document.getElementById('network-test-card').classList.add('hidden');
+        });
 
         // Set up filter buttons
         document.getElementById('filter-all').addEventListener('click', function() {
