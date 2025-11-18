@@ -3,6 +3,7 @@ import psutil
 import os
 import docker
 import subprocess
+import socket
 from urllib import request as urlrequest
 from compose_editor import compose_editor
 
@@ -357,10 +358,20 @@ def get_container_logs(container_id, tail=200):
         return {"error": str(e)}
 
 
+def socket_probe(host="8.8.8.8", port=53, timeout=5):
+    """Attempt a TCP socket connection as a fallback network check."""
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True, f"Socket connection to {host}:{port} succeeded."
+    except OSError as exc:
+        return False, f"Socket connection to {host}:{port} failed: {exc}"
+
+
 def run_network_test():
     """Ping 8.8.8.8 and report local/public IP details."""
     ping_output = ""
     ping_success = False
+    probe_method = "ping"
 
     try:
         ping_result = subprocess.run(
@@ -372,7 +383,12 @@ def run_network_test():
         ping_output = ping_result.stdout or ping_result.stderr or ""
         ping_success = ping_result.returncode == 0
     except FileNotFoundError:
-        ping_output = "Ping command not available in this container."
+        probe_method = "socket"
+        socket_success, socket_message = socket_probe()
+        ping_success = socket_success
+        ping_output = (
+            "Ping command not available in this container.\n" + socket_message
+        )
     except subprocess.TimeoutExpired as exc:
         ping_output = exc.stdout or exc.stderr or "Ping timed out."
     except Exception as exc:
@@ -399,6 +415,195 @@ def run_network_test():
         "ping_output": ping_output,
         "local_ip": local_ip,
         "public_ip": public_ip,
+        "probe_method": probe_method,
+    }
+
+
+def command_missing(exit_code, output):
+    """Determine if a command failure was due to a missing binary."""
+    output = (output or "").lower()
+    return exit_code in (126, 127) or "not found" in output or "no such file" in output
+
+
+def exec_in_container(container, script):
+    """Execute a shell script inside a container and capture its output."""
+    try:
+        result = container.exec_run([
+            "/bin/sh",
+            "-c",
+            script,
+        ], stdout=True, stderr=True)
+    except FileNotFoundError:
+        # Some minimal containers might only have /bin/busybox
+        result = container.exec_run([
+            "sh",
+            "-c",
+            script,
+        ], stdout=True, stderr=True)
+
+    output = result.output
+    if isinstance(output, tuple):
+        stdout, stderr = output
+        decoded = ""
+        if stdout:
+            decoded += stdout.decode("utf-8", errors="replace")
+        if stderr:
+            decoded += stderr.decode("utf-8", errors="replace")
+        output_text = decoded
+    elif isinstance(output, (bytes, bytearray)):
+        output_text = output.decode("utf-8", errors="replace")
+    else:
+        output_text = str(output)
+
+    return result.exit_code, output_text.strip()
+
+
+def container_http_probe_script(tool_name):
+    """Return a shell snippet that ensures a tool exists before running it."""
+    commands = {
+        "curl": "curl -s --max-time 10 https://api.ipify.org",
+        "wget": "wget -qO- --timeout=10 https://api.ipify.org",
+        "busybox": "busybox wget -qO- https://api.ipify.org",
+    }
+    if tool_name == "python3":
+        python_script = (
+            "python3 - <<'PY'\n"
+            "import socket\n"
+            "sock = socket.create_connection(('8.8.8.8', 53), timeout=5)\n"
+            "print('Socket connection to 8.8.8.8:53 succeeded')\n"
+            "sock.close()\n"
+            "PY"
+        )
+        return (
+            "if command -v python3 >/dev/null 2>&1; then\n"
+            f"{python_script}\n"
+            "else\n"
+            "  exit 127\n"
+            "fi"
+        )
+
+    tool_command = commands.get(tool_name, "")
+    if not tool_command:
+        return "exit 127"
+
+    return (
+        f"if command -v {tool_name} >/dev/null 2>&1; then\n"
+        f"  {tool_command}\n"
+        "else\n"
+        "  exit 127\n"
+        "fi"
+    )
+
+
+def run_container_fallback_probe(container):
+    """Try alternative connectivity checks inside a container."""
+    probes = [
+        ("curl", True),
+        ("wget", True),
+        ("busybox", True),
+        ("python3", False),
+    ]
+
+    for tool, provides_public_ip in probes:
+        script = container_http_probe_script(tool)
+        exit_code, output = exec_in_container(container, script)
+        if exit_code == 0:
+            message = f"{tool} connectivity test succeeded."
+            if output:
+                message += f"\n{output}"
+            public_ip = output.strip() if provides_public_ip and output else None
+            return True, message, tool, public_ip
+
+        if command_missing(exit_code, output):
+            continue
+
+        message = output or f"{tool} connectivity test failed"
+        return False, message, tool, None
+
+    return (
+        False,
+        "No available networking tools (ping/curl/wget/python3) inside the container.",
+        "unavailable",
+        None,
+    )
+
+
+def get_container_local_ip(container):
+    """Retrieve the container's local IP address if possible."""
+    exit_code, output = exec_in_container(container, "hostname -I 2>/dev/null")
+    if exit_code == 0 and output:
+        return output.strip()
+    return None
+
+
+def get_container_public_ip(container):
+    """Try to fetch the container's public IP using available tools."""
+    script = (
+        "if command -v curl >/dev/null 2>&1; then\n"
+        "  curl -s --max-time 10 https://api.ipify.org\n"
+        "elif command -v wget >/dev/null 2>&1; then\n"
+        "  wget -qO- --timeout=10 https://api.ipify.org\n"
+        "elif command -v busybox >/dev/null 2>&1; then\n"
+        "  busybox wget -qO- https://api.ipify.org\n"
+        "else\n"
+        "  exit 127\n"
+        "fi"
+    )
+    exit_code, output = exec_in_container(container, script)
+    if exit_code == 0 and output:
+        return output.strip()
+    return None
+
+
+def run_container_network_test(container_id):
+    """Run a network diagnostic from inside a specific container."""
+    try:
+        container = docker_client.containers.get(container_id)
+    except Exception as exc:
+        return {"error": str(exc)}
+
+    ping_success = False
+    ping_output = ""
+    probe_method = "ping"
+
+    try:
+        exit_code, output = exec_in_container(container, "ping -c 4 8.8.8.8")
+        ping_output = output
+        if exit_code == 0:
+            ping_success = True
+        elif command_missing(exit_code, output):
+            probe_method = "fallback"
+            (
+                ping_success,
+                fallback_message,
+                fallback_tool,
+                public_ip_from_fallback,
+            ) = run_container_fallback_probe(container)
+            ping_output = ((ping_output + "\n\n") if ping_output else "") + fallback_message
+            if ping_success:
+                probe_method = fallback_tool
+            else:
+                probe_method = f"{fallback_tool}-failed"
+        else:
+            ping_success = False
+    except Exception as exc:
+        ping_output = str(exc)
+
+    local_ip = get_container_local_ip(container)
+    public_ip = get_container_public_ip(container)
+
+    # If fallback already determined public IP, prefer it
+    if 'public_ip_from_fallback' in locals() and public_ip_from_fallback:
+        public_ip = public_ip_from_fallback
+
+    return {
+        "container_id": container.id,
+        "container_name": container.name,
+        "ping_success": ping_success,
+        "ping_output": ping_output,
+        "local_ip": local_ip,
+        "public_ip": public_ip,
+        "probe_method": probe_method,
     }
 
 def control_container(container_id, action):
@@ -521,6 +726,14 @@ def api_reboot():
 def api_network_test():
     """API endpoint to run a network connectivity test."""
     return jsonify(run_network_test())
+
+
+@app.route('/api/containers/<container_id>/network-test', methods=['POST'])
+def api_container_network_test(container_id):
+    """API endpoint to run a network test from inside a specific container."""
+    if not docker_available:
+        return jsonify({"error": "Docker is not available"}), 503
+    return jsonify(run_container_network_test(container_id))
 
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=8080)

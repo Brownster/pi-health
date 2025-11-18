@@ -211,6 +211,40 @@
         </div>
     </div>
 
+    <!-- Container network modal -->
+    <div id="container-network-modal" class="hidden fixed inset-0 bg-black bg-opacity-70 z-50 items-center justify-center p-4">
+        <div class="bg-gray-900 w-full max-w-3xl rounded-lg shadow-xl border border-blue-900 flex flex-col" style="max-height: 85vh;">
+            <div class="flex justify-between items-center p-4 border-b border-blue-800">
+                <h3 id="container-network-title" class="text-xl font-semibold">Container Network Test</h3>
+                <button id="container-network-close" class="text-gray-400 hover:text-gray-200">Close</button>
+            </div>
+            <div class="p-4 space-y-4 overflow-y-auto" style="max-height: calc(85vh - 64px);">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                        <span class="text-sm text-gray-400">Status</span>
+                        <p id="container-network-status" class="text-lg font-semibold">-</p>
+                    </div>
+                    <div>
+                        <span class="text-sm text-gray-400">Local IP</span>
+                        <p id="container-network-local" class="text-lg font-mono">-</p>
+                    </div>
+                    <div>
+                        <span class="text-sm text-gray-400">Public IP</span>
+                        <p id="container-network-public" class="text-lg font-mono">-</p>
+                    </div>
+                </div>
+                <div>
+                    <span class="text-sm text-gray-400">Probe Method</span>
+                    <p id="container-network-method" class="text-lg font-mono">-</p>
+                </div>
+                <div>
+                    <span class="text-sm text-gray-400">Output</span>
+                    <pre id="container-network-output" class="mt-2 bg-gray-800 rounded p-3 text-sm whitespace-pre-wrap"></pre>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script>
         // Format timestamp
         function formatDateTime(date) {
@@ -398,6 +432,8 @@
                                     onclick="controlContainer('${container.id}', 'update')">Update</button>
                             <button data-action="logs" class="coraline-button text-blue-100 font-bold py-1 px-3 rounded button border border-gray-500"
                                     onclick="viewLogs('${container.id}')">Logs</button>
+                            <button data-action="network-test" class="coraline-button text-blue-100 font-bold py-1 px-3 rounded button border border-blue-500"
+                                    onclick="openContainerNetworkTest('${container.id}')">Net Test</button>
                         </td>
                     </tr>
                 `;
@@ -498,7 +534,9 @@
                         const restartButton = row.querySelector('button[data-action="restart"]');
                         const checkButton = row.querySelector('button[data-action="check_update"]');
                         const updateButton = row.querySelector('button[data-action="update"]');
-                        
+                        const logsButton = row.querySelector('button[data-action="logs"]');
+                        const networkButton = row.querySelector('button[data-action="network-test"]');
+
                         if (startButton) {
                             startButton.disabled = container.status === 'running';
                             startButton.classList.toggle('opacity-50', container.status === 'running');
@@ -511,8 +549,11 @@
                             stopButton.classList.toggle('cursor-not-allowed', container.status === 'stopped');
                         }
 
+                        if (restartButton) restartButton.disabled = false;
                         if (checkButton) checkButton.disabled = false;
                         if (updateButton) updateButton.disabled = false;
+                        if (logsButton) logsButton.disabled = false;
+                        if (networkButton) networkButton.disabled = false;
                     }
                 }
             } catch (error) {
@@ -555,6 +596,58 @@
             modal.classList.remove('flex');
         }
 
+        async function openContainerNetworkTest(id) {
+            const modal = document.getElementById('container-network-modal');
+            const title = document.getElementById('container-network-title');
+            const statusEl = document.getElementById('container-network-status');
+            const localEl = document.getElementById('container-network-local');
+            const publicEl = document.getElementById('container-network-public');
+            const outputEl = document.getElementById('container-network-output');
+            const methodEl = document.getElementById('container-network-method');
+
+            const containerName = getContainerNameById(id);
+            title.textContent = `Network Test: ${containerName}`;
+            statusEl.textContent = 'Running test...';
+            statusEl.classList.remove('text-green-400', 'text-red-400');
+            localEl.textContent = '-';
+            publicEl.textContent = '-';
+            methodEl.textContent = '-';
+            outputEl.textContent = 'Collecting diagnostics...';
+
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+
+            try {
+                const response = await fetch(`/api/containers/${id}/network-test`, { method: 'POST' });
+                const result = await response.json();
+
+                if (!response.ok || result.error) {
+                    const message = result.error || 'Unable to run network test.';
+                    statusEl.textContent = 'Error';
+                    statusEl.classList.add('text-red-400');
+                    outputEl.textContent = message;
+                    showNotification(message, 'error');
+                    return;
+                }
+
+                statusEl.textContent = result.ping_success ? 'Success' : 'Failed';
+                statusEl.classList.toggle('text-green-400', !!result.ping_success);
+                statusEl.classList.toggle('text-red-400', !result.ping_success);
+                localEl.textContent = result.local_ip || 'Unavailable';
+                publicEl.textContent = result.public_ip || 'Unavailable';
+                methodEl.textContent = result.probe_method || 'unknown';
+                outputEl.textContent = result.ping_output || 'No output provided.';
+
+                showNotification(`Network test ${result.ping_success ? 'passed' : 'completed'}`, result.ping_success ? 'success' : 'info');
+            } catch (error) {
+                console.error('Container network test failed:', error);
+                statusEl.textContent = 'Error';
+                statusEl.classList.add('text-red-400');
+                outputEl.textContent = error.message;
+                showNotification('Network test failed', 'error');
+            }
+        }
+
         async function runNetworkTest() {
             const card = document.getElementById('network-test-card');
             const statusEl = document.getElementById('network-test-status');
@@ -595,6 +688,19 @@
         document.getElementById('logs-modal').addEventListener('click', function(event) {
             if (event.target === this) {
                 closeLogsModal();
+            }
+        });
+
+        // Container network modal controls
+        document.getElementById('container-network-close').addEventListener('click', () => {
+            const modal = document.getElementById('container-network-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        });
+        document.getElementById('container-network-modal').addEventListener('click', function(event) {
+            if (event.target === this) {
+                this.classList.add('hidden');
+                this.classList.remove('flex');
             }
         });
 
