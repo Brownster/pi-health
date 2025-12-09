@@ -1,0 +1,55 @@
+{
+  "name": "professional",
+  "display_name": "Professional",
+  "title": "Pi-Health Dashboard",
+  "description": "Clean and professional dark theme with blue accents and minimal icons",
+  "icons": {
+    "style": "minimal",
+    "file": "icons.js"
+  },
+  "banner": {
+    "filename": "banner.jpg",
+    "alt_text": "Professional Dashboard"
+  },
+  "colors": {
+    "primary": "#2563eb",
+    "primary_light": "#3b82f6",
+    "primary_dark": "#1e40af",
+    "accent": "#0ea5e9",
+    "accent_light": "#38bdf8",
+    "background": "#0f172a",
+    "background_secondary": "#1e293b",
+    "text_primary": "#f1f5f9",
+    "text_secondary": "#cbd5e1",
+    "success": "#10b981",
+    "warning": "#f59e0b",
+    "error": "#ef4444",
+    "info": "#3b82f6"
+  },
+  "gradients": {
+    "header": "from-slate-900 to-blue-900",
+    "button": "from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800",
+    "card_options": [
+      "from-slate-800 to-blue-900",
+      "from-blue-800 to-slate-900",
+      "from-slate-800 to-cyan-900",
+      "from-cyan-800 to-blue-900",
+      "from-blue-900 to-slate-800",
+      "from-slate-900 to-cyan-900"
+    ]
+  },
+  "effects": {
+    "card_glow": "0 0 20px rgba(37, 99, 235, 0.3)",
+    "card_hover_glow": "0 0 30px rgba(37, 99, 235, 0.5)",
+    "text_shadow": "2px 2px 4px rgba(0, 0, 0, 0.5)"
+  },
+  "status_colors": {
+    "running": "#10b981",
+    "exited": "#ef4444",
+    "paused": "#f59e0b",
+    "restarting": "#3b82f6",
+    "created": "#6366f1",
+    "removing": "#f97316",
+    "dead": "#991b1b"
+  }
+}

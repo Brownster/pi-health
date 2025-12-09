@@ -1,0 +1,55 @@
+{
+  "name": "coraline",
+  "display_name": "Coraline",
+  "title": "Coraline's Pi-Health Dashboard",
+  "description": "Dark purple theme inspired by the Coraline movie with button-eyed icons",
+  "icons": {
+    "style": "button-eyed",
+    "file": "icons.js"
+  },
+  "banner": {
+    "filename": "banner.jpg",
+    "alt_text": "Coraline"
+  },
+  "colors": {
+    "primary": "#5f4b8b",
+    "primary_light": "#6f58a3",
+    "primary_dark": "#372b53",
+    "accent": "#8a6cbd",
+    "accent_light": "#c9b6e6",
+    "background": "#111827",
+    "background_secondary": "#1f2937",
+    "text_primary": "#dbeafe",
+    "text_secondary": "#93c5fd",
+    "success": "#10b981",
+    "warning": "#f59e0b",
+    "error": "#ef4444",
+    "info": "#3b82f6"
+  },
+  "gradients": {
+    "header": "from-purple-900 to-blue-900",
+    "button": "from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700",
+    "card_options": [
+      "from-purple-800 to-indigo-900",
+      "from-indigo-800 to-purple-900",
+      "from-blue-800 to-purple-900",
+      "from-purple-900 to-blue-800",
+      "from-indigo-900 to-blue-900",
+      "from-blue-900 to-indigo-900"
+    ]
+  },
+  "effects": {
+    "card_glow": "0 0 20px rgba(139, 92, 246, 0.3)",
+    "card_hover_glow": "0 0 30px rgba(139, 92, 246, 0.5)",
+    "text_shadow": "2px 2px 4px rgba(0, 0, 0, 0.5)"
+  },
+  "status_colors": {
+    "running": "#10b981",
+    "exited": "#ef4444",
+    "paused": "#f59e0b",
+    "restarting": "#3b82f6",
+    "created": "#6366f1",
+    "removing": "#f97316",
+    "dead": "#991b1b"
+  }
+}

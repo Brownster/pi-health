@@ -5,3 +5,7 @@ services:
       - "8080:8080"
     restart: unless-stopped
     container_name: pi-health-dashboard
+    environment:
+      # Theme selection: coraline, professional, arthur-christmas, or custom theme name
+      # To change the theme, update the value below and restart the container
+      - THEME=coraline

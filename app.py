@@ -4,11 +4,44 @@ import os
 import docker
 import subprocess
 import socket
+import json
 from urllib import request as urlrequest
 from compose_editor import compose_editor
 
 # Initialize Flask
 app = Flask(__name__, static_folder='static')
+
+# Load theme configuration
+THEME_NAME = os.getenv('THEME', 'coraline')
+THEME_PATH = os.path.join('themes', THEME_NAME)
+THEME_CONFIG_PATH = os.path.join(THEME_PATH, 'theme.json')
+
+def load_theme_config():
+    """Load the theme configuration from JSON file."""
+    try:
+        with open(THEME_CONFIG_PATH, 'r') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        print(f"Warning: Theme '{THEME_NAME}' not found at {THEME_CONFIG_PATH}")
+        print("Falling back to default 'coraline' theme")
+        fallback_path = os.path.join('themes', 'coraline', 'theme.json')
+        with open(fallback_path, 'r') as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"Error loading theme config: {e}")
+        # Return minimal default theme
+        return {
+            "name": "default",
+            "display_name": "Default",
+            "title": "Pi-Health Dashboard",
+            "colors": {
+                "primary": "#5f4b8b",
+                "background": "#111827"
+            }
+        }
+
+theme_config = load_theme_config()
+print(f"Loaded theme: {theme_config.get('display_name', 'Unknown')} ({THEME_NAME})")
 
 # Initialize Docker client with graceful fallback
 try:
@@ -681,8 +714,33 @@ def serve_login():
 
 @app.route('/coraline-banner.jpg')
 def serve_banner():
-    """Serve the Coraline banner image."""
+    """Serve the Coraline banner image (legacy route for backwards compatibility)."""
     return send_from_directory(app.static_folder, 'coraline-banner.jpg')
+
+
+@app.route('/api/theme', methods=['GET'])
+def api_theme():
+    """API endpoint to return current theme configuration."""
+    return jsonify(theme_config)
+
+
+@app.route('/theme-banner')
+def serve_theme_banner():
+    """Serve the current theme's banner image."""
+    banner_filename = theme_config.get('banner', {}).get('filename', 'banner.jpg')
+    return send_from_directory(THEME_PATH, banner_filename)
+
+
+@app.route('/themes/<theme_name>/<filename>')
+def serve_theme_file(theme_name, filename):
+    """Serve theme-specific files (icons.js, etc.)."""
+    theme_path = os.path.join('themes', theme_name)
+    # Security: only allow specific file extensions
+    allowed_extensions = ['.js', '.json', '.css']
+    if any(filename.endswith(ext) for ext in allowed_extensions):
+        return send_from_directory(theme_path, filename)
+    else:
+        return jsonify({"error": "File type not allowed"}), 403
 
 
 @app.route('/api/stats', methods=['GET'])

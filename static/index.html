@@ -11,6 +11,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Pi-Health Dashboard</title>
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <script src="/theme.js"></script>
     <style>
         .status-running { background-color: #38a169; }
         .status-stopped { background-color: #e53e3e; }
@@ -57,10 +58,10 @@
 <body class="bg-gray-900 text-blue-100 font-sans min-h-screen">
     <header class="bg-gradient-to-r from-purple-900 to-blue-900 shadow-lg relative overflow-hidden">
         <div class="absolute inset-0 overflow-hidden">
-            <img src="/coraline-banner.jpg" alt="Coraline" class="w-full h-full object-cover opacity-40 blur-sm">
+            <img src="/theme-banner" alt="Dashboard" class="w-full h-full object-cover opacity-40 blur-sm">
         </div>
         <div class="container mx-auto p-8 relative">
-            <h1 class="text-4xl font-bold text-center text-blue-200 font-serif" style="text-shadow: 2px 2px 4px rgba(0,0,0,0.8);">Coraline's Pi-Health Dashboard</h1>
+            <h1 class="text-4xl font-bold text-center text-blue-200 font-serif" style="text-shadow: 2px 2px 4px rgba(0,0,0,0.8);">Pi-Health Dashboard</h1>
         </div>
     </header>
 
@@ -112,28 +113,33 @@
             audiobookshelf: { icon: "book", name: "Audiobookshelf" },
         };
 
-        // Icon mapping - Coraline-themed with button eyes style
-        const iconSVGs = {
-            transfer: '<svg class="w-10 h-10" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="10" fill="#5f4b8b" stroke="#8a6cbd" stroke-width="1.5"/><path d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" stroke="#c9b6e6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-            search: '<svg class="w-10 h-10" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="10" fill="#5f4b8b" stroke="#8a6cbd" stroke-width="1.5"/><path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" stroke="#c9b6e6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-            tv: '<svg class="w-10 h-10" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="10" fill="#5f4b8b" stroke="#8a6cbd" stroke-width="1.5"/><path d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" stroke="#c9b6e6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-            film: '<svg class="w-10 h-10" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="10" fill="#5f4b8b" stroke="#8a6cbd" stroke-width="1.5"/><path d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z" stroke="#c9b6e6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-            download: '<svg class="w-10 h-10" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="10" fill="#5f4b8b" stroke="#8a6cbd" stroke-width="1.5"/><path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" stroke="#c9b6e6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-            collection: '<svg class="w-10 h-10" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="10" fill="#5f4b8b" stroke="#8a6cbd" stroke-width="1.5"/><path d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" stroke="#c9b6e6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-            play: '<svg class="w-10 h-10" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="10" fill="#5f4b8b" stroke="#8a6cbd" stroke-width="1.5"/><path d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" stroke="#c9b6e6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-            'cloud-download': '<svg class="w-10 h-10" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="10" fill="#5f4b8b" stroke="#8a6cbd" stroke-width="1.5"/><path d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10" stroke="#c9b6e6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-            music: '<svg class="w-10 h-10" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="10" fill="#5f4b8b" stroke="#8a6cbd" stroke-width="1.5"/><path d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" stroke="#c9b6e6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-            book: '<svg class="w-10 h-10" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="10" fill="#5f4b8b" stroke="#8a6cbd" stroke-width="1.5"/><path d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" stroke="#c9b6e6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-            default: '<svg class="w-10 h-10" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="10" fill="#5f4b8b" stroke="#8a6cbd" stroke-width="1.5"/><path d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" stroke="#c9b6e6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
-        };
-
-        // Get icon for container
+        // Get icon for container - uses theme-specific icons if loaded
         function getIcon(containerName) {
+            // Use theme-specific icons if available
+            const iconSVGs = window.ThemeIcons || getDefaultIcons();
+
             const service = serviceOverrides[containerName];
             if (service && service.icon && iconSVGs[service.icon]) {
                 return iconSVGs[service.icon];
             }
             return iconSVGs.default;
+        }
+
+        // Default fallback icons (simple, neutral design)
+        function getDefaultIcons() {
+            return {
+                transfer: '<svg class="w-10 h-10" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="9" stroke="#6b7280" stroke-width="2" fill="#374151"/><path d="M8 15V9m0 0L5 12m3-3l3 3m5-3v6m0 0l3-3m-3 3l-3-3" stroke="#9ca3af" stroke-width="2" stroke-linecap="round"/></svg>',
+                search: '<svg class="w-10 h-10" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="9" stroke="#6b7280" stroke-width="2" fill="#374151"/><circle cx="10.5" cy="10.5" r="3" stroke="#9ca3af" stroke-width="2"/><path d="M12.5 12.5l4 4" stroke="#9ca3af" stroke-width="2" stroke-linecap="round"/></svg>',
+                tv: '<svg class="w-10 h-10" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="9" stroke="#6b7280" stroke-width="2" fill="#374151"/><rect x="7" y="8" width="10" height="6" rx="1" stroke="#9ca3af" stroke-width="1.5"/></svg>',
+                film: '<svg class="w-10 h-10" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="9" stroke="#6b7280" stroke-width="2" fill="#374151"/><rect x="7" y="7" width="10" height="10" rx="1" stroke="#9ca3af" stroke-width="1.5"/></svg>',
+                download: '<svg class="w-10 h-10" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="9" stroke="#6b7280" stroke-width="2" fill="#374151"/><path d="M12 7v8m0 0l-3-3m3 3l3-3" stroke="#9ca3af" stroke-width="2" stroke-linecap="round"/></svg>',
+                collection: '<svg class="w-10 h-10" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="9" stroke="#6b7280" stroke-width="2" fill="#374151"/><rect x="7" y="8" width="10" height="3" rx="0.5" stroke="#9ca3af" stroke-width="1.5"/><rect x="7" y="13" width="10" height="3" rx="0.5" stroke="#9ca3af" stroke-width="1.5"/></svg>',
+                play: '<svg class="w-10 h-10" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="9" stroke="#6b7280" stroke-width="2" fill="#374151"/><path d="M10 8l6 4-6 4V8z" fill="#9ca3af"/></svg>',
+                'cloud-download': '<svg class="w-10 h-10" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="9" stroke="#6b7280" stroke-width="2" fill="#374151"/><path d="M8 11a3 3 0 016 0h2c1 0 2 1 2 2s-1 2-2 2H8c-1 0-2-1-2-2s1-2 2-2z" stroke="#9ca3af" stroke-width="1.5"/></svg>',
+                music: '<svg class="w-10 h-10" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="9" stroke="#6b7280" stroke-width="2" fill="#374151"/><path d="M9 15V9l6-2v8" stroke="#9ca3af" stroke-width="1.5" stroke-linecap="round"/></svg>',
+                book: '<svg class="w-10 h-10" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="9" stroke="#6b7280" stroke-width="2" fill="#374151"/><path d="M12 8v8M12 8c-1-1-2-1-3-1M12 8c1-1 2-1 3-1" stroke="#9ca3af" stroke-width="1.5" stroke-linecap="round"/></svg>',
+                default: '<svg class="w-10 h-10" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="9" stroke="#6b7280" stroke-width="2" fill="#374151"/><rect x="7" y="10" width="10" height="4" rx="0.5" stroke="#9ca3af" stroke-width="1.5"/></svg>'
+            };
         }
 
         // Get friendly name for container
@@ -150,8 +156,8 @@
 
         // Get background color gradient based on container name
         function getBackgroundGradient(containerName) {
-            // Use Coraline-themed gradients instead of random ones
-            const gradients = [
+            // Use theme gradients (loaded dynamically from theme.js)
+            const gradients = window.ThemeLoader ? window.ThemeLoader.getThemeGradients() : [
                 'from-purple-800 to-indigo-900',
                 'from-indigo-800 to-purple-900',
                 'from-blue-800 to-purple-900',
@@ -159,13 +165,13 @@
                 'from-indigo-900 to-blue-900',
                 'from-blue-900 to-indigo-900'
             ];
-            
+
             // Generate a pseudorandom but consistent color based on the container name
             let hash = 0;
             for (let i = 0; i < containerName.length; i++) {
                 hash = containerName.charCodeAt(i) + ((hash << 5) - hash);
             }
-            
+
             return gradients[Math.abs(hash) % gradients.length];
         }
 

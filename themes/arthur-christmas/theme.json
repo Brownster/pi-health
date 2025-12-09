@@ -1,0 +1,55 @@
+{
+  "name": "arthur-christmas",
+  "display_name": "Arthur Christmas",
+  "title": "Arthur's Pi-Health Dashboard",
+  "description": "Festive theme inspired by Arthur Christmas with warm reds, greens, and holiday icons",
+  "icons": {
+    "style": "festive",
+    "file": "icons.js"
+  },
+  "banner": {
+    "filename": "banner.jpg",
+    "alt_text": "Arthur Christmas"
+  },
+  "colors": {
+    "primary": "#dc2626",
+    "primary_light": "#ef4444",
+    "primary_dark": "#991b1b",
+    "accent": "#16a34a",
+    "accent_light": "#22c55e",
+    "background": "#0f1419",
+    "background_secondary": "#1c2127",
+    "text_primary": "#fef3c7",
+    "text_secondary": "#fde68a",
+    "success": "#16a34a",
+    "warning": "#f59e0b",
+    "error": "#dc2626",
+    "info": "#3b82f6"
+  },
+  "gradients": {
+    "header": "from-red-900 to-green-900",
+    "button": "from-red-600 to-green-600 hover:from-red-700 hover:to-green-700",
+    "card_options": [
+      "from-red-800 to-green-900",
+      "from-green-800 to-red-900",
+      "from-red-800 to-amber-900",
+      "from-amber-800 to-red-900",
+      "from-green-900 to-amber-800",
+      "from-amber-900 to-green-800"
+    ]
+  },
+  "effects": {
+    "card_glow": "0 0 20px rgba(220, 38, 38, 0.3)",
+    "card_hover_glow": "0 0 30px rgba(220, 38, 38, 0.5)",
+    "text_shadow": "2px 2px 4px rgba(0, 0, 0, 0.8)"
+  },
+  "status_colors": {
+    "running": "#16a34a",
+    "exited": "#dc2626",
+    "paused": "#f59e0b",
+    "restarting": "#3b82f6",
+    "created": "#6366f1",
+    "removing": "#f97316",
+    "dead": "#7f1d1d"
+  }
+}
