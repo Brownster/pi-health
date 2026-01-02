@@ -1,15 +1,50 @@
-from flask import Flask, jsonify, send_from_directory, request
+from flask import Flask, jsonify, send_from_directory, request, session
 import psutil
 import os
 import docker
 import subprocess
 import socket
 import json
+import secrets
+import hashlib
 from urllib import request as urlrequest
 from compose_editor import compose_editor
+from stack_manager import stack_manager
+from auth_utils import login_required
 
 # Initialize Flask
 app = Flask(__name__, static_folder='static')
+
+# Configure session
+app.secret_key = os.getenv('SECRET_KEY', secrets.token_hex(32))
+
+# Authentication configuration - supports multiple users via environment variables
+# Format: PIHEALTH_USERS=user1:password1,user2:password2
+def load_users():
+    """Load users from environment variable or use default."""
+    users_env = os.getenv('PIHEALTH_USERS', '')
+    users = {}
+    if users_env:
+        for user_pass in users_env.split(','):
+            if ':' in user_pass:
+                username, password = user_pass.split(':', 1)
+                users[username.strip()] = password.strip()
+    # Fallback to legacy single user config or default
+    if not users:
+        default_user = os.getenv('PIHEALTH_USER', 'admin')
+        default_pass = os.getenv('PIHEALTH_PASSWORD', 'pihealth')
+        users[default_user] = default_pass
+    return users
+
+AUTH_USERS = load_users()
+print(f"Loaded {len(AUTH_USERS)} user(s) for authentication")
+
+
+def verify_credentials(username, password):
+    """Verify username and password against configured users."""
+    if username in AUTH_USERS:
+        return AUTH_USERS[username] == password
+    return False
 
 # Load theme configuration
 THEME_NAME = os.getenv('THEME', 'coraline')
@@ -55,6 +90,7 @@ except Exception as e:
 
 # Register the compose editor blueprint
 app.register_blueprint(compose_editor)
+app.register_blueprint(stack_manager)
 
 # Track update status for containers
 container_updates = {}
@@ -368,7 +404,6 @@ def update_container(container):
             return {"error": "Container image has no tag"}
         tag = container.image.tags[0]
         docker_client.images.pull(tag)
-        import subprocess
         subprocess.run(["docker", "compose", "up", "-d", container.name], check=False)
         container_updates[container.id[:12]] = False
         return {"status": "Container updated"}
@@ -667,13 +702,9 @@ def system_action(action):
     """Perform system actions like shutdown or reboot."""
     try:
         if action == "shutdown":
-            # Use subprocess to run shutdown command
-            import subprocess
             subprocess.Popen(['sudo', 'shutdown', '-h', 'now'])
             return {"status": "Shutdown initiated"}
         elif action == "reboot":
-            # Use subprocess to run reboot command
-            import subprocess
             subprocess.Popen(['sudo', 'reboot'])
             return {"status": "Reboot initiated"}
         else:
@@ -706,10 +737,52 @@ def serve_edit():
     return send_from_directory(app.static_folder, 'edit.html')
 
 
+@app.route('/stacks.html')
+def serve_stacks():
+    """Serve the stacks management page."""
+    return send_from_directory(app.static_folder, 'stacks.html')
+
+
 @app.route('/login.html')
 def serve_login():
     """Serve the login page."""
     return send_from_directory(app.static_folder, 'login.html')
+
+
+@app.route('/api/login', methods=['POST'])
+def api_login():
+    """API endpoint for user authentication."""
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
+    username = data.get('username', '').strip()
+    password = data.get('password', '')
+
+    if verify_credentials(username, password):
+        session['authenticated'] = True
+        session['username'] = username
+        return jsonify({'status': 'success', 'username': username})
+    else:
+        return jsonify({'error': 'Invalid credentials'}), 401
+
+
+@app.route('/api/logout', methods=['POST'])
+def api_logout():
+    """API endpoint for user logout."""
+    session.clear()
+    return jsonify({'status': 'logged out'})
+
+
+@app.route('/api/auth/check', methods=['GET'])
+def api_auth_check():
+    """API endpoint to check authentication status."""
+    if session.get('authenticated'):
+        return jsonify({
+            'authenticated': True,
+            'username': session.get('username', 'unknown')
+        })
+    return jsonify({'authenticated': False}), 401
 
 
 @app.route('/coraline-banner.jpg')
@@ -744,24 +817,28 @@ def serve_theme_file(theme_name, filename):
 
 
 @app.route('/api/stats', methods=['GET'])
+@login_required
 def api_stats():
     """API endpoint to return system stats as JSON."""
     return jsonify(get_system_stats())
 
 
 @app.route('/api/containers', methods=['GET'])
+@login_required
 def api_list_containers():
     """API endpoint to list all Docker containers."""
     return jsonify(list_containers())
 
 
 @app.route('/api/containers/<container_id>/<action>', methods=['POST'])
+@login_required
 def api_control_container(container_id, action):
     """API endpoint to control a Docker container."""
     return jsonify(control_container(container_id, action))
 
 
 @app.route('/api/containers/<container_id>/logs', methods=['GET'])
+@login_required
 def api_container_logs(container_id):
     """API endpoint to fetch container logs."""
     tail = request.args.get('tail', default=200, type=int)
@@ -769,24 +846,28 @@ def api_container_logs(container_id):
 
 
 @app.route('/api/shutdown', methods=['POST'])
+@login_required
 def api_shutdown():
     """API endpoint to shutdown the system."""
     return jsonify(system_action("shutdown"))
 
 
 @app.route('/api/reboot', methods=['POST'])
+@login_required
 def api_reboot():
     """API endpoint to reboot the system."""
     return jsonify(system_action("reboot"))
 
 
 @app.route('/api/network-test', methods=['POST'])
+@login_required
 def api_network_test():
     """API endpoint to run a network connectivity test."""
     return jsonify(run_network_test())
 
 
 @app.route('/api/containers/<container_id>/network-test', methods=['POST'])
+@login_required
 def api_container_network_test(container_id):
     """API endpoint to run a network test from inside a specific container."""
     if not docker_available:

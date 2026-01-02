@@ -1,8 +1,13 @@
 import os
+import shutil
+from datetime import datetime
 from flask import Blueprint, jsonify, request
+from auth_utils import login_required
+import yaml
 
 # Create a Blueprint for the compose editor
 compose_editor = Blueprint('compose_editor', __name__)
+
 
 # Paths to docker-compose.yml and .env files
 DOCKER_COMPOSE_PATH = os.getenv('DOCKER_COMPOSE_PATH', './docker-compose.yml')
@@ -44,7 +49,17 @@ def save_file(file_path, content):
         return f"Error saving file: {str(e)}"
 
 
+def validate_compose_yaml(content):
+    """Validate compose YAML and return an error message or None."""
+    try:
+        yaml.safe_load(content)
+    except yaml.YAMLError as exc:
+        return str(exc)
+    return None
+
+
 @compose_editor.route('/api/compose', methods=['GET'])
+@login_required
 def get_docker_compose():
     """API endpoint to fetch the docker-compose.yml content."""
     content = read_file(DOCKER_COMPOSE_PATH)
@@ -52,7 +67,9 @@ def get_docker_compose():
         return jsonify({"error": content}), 500
     return jsonify({"content": content})
 
+
 @compose_editor.route('/api/compose/up', methods=['POST'])
+@login_required
 def compose_up():
     """Run 'docker compose up' to apply changes."""
     try:
@@ -67,9 +84,13 @@ def compose_up():
 
 
 @compose_editor.route('/api/compose', methods=['POST'])
+@login_required
 def save_docker_compose():
     """API endpoint to save updates to docker-compose.yml."""
     content = request.json.get('content', '')
+    error = validate_compose_yaml(content)
+    if error:
+        return jsonify({"error": f"Compose YAML invalid: {error}"}), 400
     result = save_file(DOCKER_COMPOSE_PATH, content)
     if result is True:
         return jsonify({"status": "success"})
@@ -77,6 +98,7 @@ def save_docker_compose():
 
 
 @compose_editor.route('/api/env', methods=['GET'])
+@login_required
 def get_env_file():
     """API endpoint to fetch the .env content."""
     content = read_file(ENV_FILE_PATH)
@@ -86,6 +108,7 @@ def get_env_file():
 
 
 @compose_editor.route('/api/env', methods=['POST'])
+@login_required
 def save_env_file():
     """API endpoint to save updates to .env."""
     content = request.json.get('content', '')

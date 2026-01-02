@@ -1,0 +1,939 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script>
+        // Redirect to login if not logged in
+        if (!sessionStorage.getItem("loggedIn")) {
+            window.location.href = "/login.html";
+        }
+
+        // Display logged-in user
+        const username = sessionStorage.getItem("username");
+        if (username) {
+            document.addEventListener('DOMContentLoaded', () => {
+                const userEl = document.getElementById('logged-in-user');
+                if (userEl) userEl.textContent = username;
+            });
+        }
+
+        // Logout function
+        async function logout() {
+            try {
+                await fetch('/api/logout', { method: 'POST' });
+            } catch (e) {
+                // Ignore errors
+            }
+            sessionStorage.clear();
+            window.location.href = '/login.html';
+        }
+    </script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stacks - Pi-Health Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/lib/codemirror.css">
+    <script src="/theme.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/lib/codemirror.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/yaml/yaml.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
+    <style>
+        .status-running { background-color: #38a169; }
+        .status-stopped { background-color: #e53e3e; }
+        .status-partial { background-color: #dd6b20; }
+        .status-unknown { background-color: #718096; }
+
+        .coraline-button {
+            background: linear-gradient(to bottom, #5f4b8b, #372b53);
+            border: 1px solid #8a6cbd;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.25);
+            transition: all 0.3s ease;
+        }
+
+        .coraline-button:hover:not(:disabled) {
+            background: linear-gradient(to bottom, #6f58a3, #413162);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 10px rgba(0, 0, 0, 0.3);
+        }
+
+        .coraline-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .terminal-output {
+            background-color: #1a1a2e;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            line-height: 1.4;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        .modal-backdrop {
+            background-color: rgba(0, 0, 0, 0.7);
+        }
+
+        .compose-editor {
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            line-height: 1.5;
+            tab-size: 2;
+        }
+
+        .editor-error {
+            border-color: #f56565;
+            box-shadow: 0 0 0 1px rgba(245, 101, 101, 0.6);
+        }
+
+        .error-banner {
+            background-color: rgba(245, 101, 101, 0.15);
+            border: 1px solid rgba(245, 101, 101, 0.6);
+            color: #feb2b2;
+        }
+
+        .stack-card {
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            border: 2px solid rgba(95, 75, 139, 0.3);
+        }
+
+        .stack-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 15px -3px rgba(138, 43, 226, 0.3);
+            border-color: rgba(138, 43, 226, 0.5);
+        }
+
+        .CodeMirror {
+            height: 360px;
+            background-color: #2d3748;
+            color: #e2e8f0;
+            border-radius: 0.375rem;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .animate-pulse {
+            animation: pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-blue-100 font-sans min-h-screen">
+    <header class="bg-gradient-to-r from-purple-900 to-blue-900 shadow-lg relative overflow-hidden">
+        <div class="absolute inset-0 overflow-hidden">
+            <img src="/theme-banner" alt="Dashboard" class="w-full h-full object-cover opacity-40 blur-sm">
+        </div>
+        <div class="container mx-auto p-8 relative">
+            <h1 class="text-4xl font-bold text-center text-blue-200 font-serif" style="text-shadow: 2px 2px 4px rgba(0,0,0,0.8);">Pi-Health Dashboard</h1>
+        </div>
+    </header>
+
+    <!-- Navigation bar -->
+    <nav class="bg-purple-900 shadow-md">
+        <div class="container mx-auto px-4">
+            <div class="flex items-center justify-between h-16">
+                <div class="flex space-x-4">
+                    <a href="/" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Home</a>
+                    <a href="/system.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">System Health</a>
+                    <a href="/containers.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Containers</a>
+                    <a href="/stacks.html" class="px-3 py-2 rounded-md text-white bg-blue-800 font-medium border border-blue-400">Stacks</a>
+                    <a href="/edit.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Edit Config</a>
+                </div>
+                <div class="flex items-center space-x-3">
+                    <span id="logged-in-user" class="text-blue-200 text-sm"></span>
+                    <button onclick="logout()" class="px-3 py-2 rounded-md text-red-300 hover:bg-red-800 hover:text-white font-medium text-sm">Logout</button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Notification area -->
+    <div id="notification-area" class="fixed top-4 right-4 z-50 w-80 flex flex-col items-end"></div>
+
+    <!-- Main content -->
+    <main class="container mx-auto p-6">
+        <!-- Header with actions -->
+        <div class="flex justify-between items-center mb-6">
+            <h2 class="text-2xl font-semibold">Docker Stacks</h2>
+            <div class="flex space-x-2">
+                <button id="refresh-btn" onclick="loadStacks()" class="coraline-button text-blue-100 font-bold py-2 px-4 rounded flex items-center">
+                    <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                    </svg>
+                    Refresh
+                </button>
+                <button onclick="showCreateStackModal()" class="coraline-button text-blue-100 font-bold py-2 px-4 rounded flex items-center">
+                    <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                    </svg>
+                    New Stack
+                </button>
+            </div>
+        </div>
+
+        <!-- Stacks path info -->
+        <div class="mb-4 text-sm text-gray-400">
+            <span id="stacks-path">Stacks directory: /opt/stacks</span>
+            <span id="last-updated" class="ml-4"></span>
+        </div>
+
+        <!-- Stacks grid -->
+        <div id="stacks-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <!-- Stack cards will be inserted here -->
+            <div class="col-span-full text-center py-10">
+                <div class="inline-block animate-pulse">
+                    <svg class="w-10 h-10 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                    </svg>
+                </div>
+                <p class="mt-2 text-xl">Loading stacks...</p>
+            </div>
+        </div>
+    </main>
+
+    <!-- Create Stack Modal -->
+    <div id="create-modal" class="fixed inset-0 z-50 hidden">
+        <div class="modal-backdrop absolute inset-0" onclick="hideCreateStackModal()"></div>
+        <div class="absolute inset-0 flex items-center justify-center p-4">
+            <div class="bg-gray-800 rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-hidden relative">
+                <div class="p-4 border-b border-gray-700 flex justify-between items-center">
+                    <h3 class="text-xl font-semibold">Create New Stack</h3>
+                    <button onclick="hideCreateStackModal()" class="text-gray-400 hover:text-white">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
+                    </button>
+                </div>
+                <div class="p-4 overflow-y-auto" style="max-height: calc(90vh - 140px);">
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium mb-2">Stack Name</label>
+                        <input type="text" id="new-stack-name" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-purple-500" placeholder="my-stack">
+                        <p class="text-sm text-gray-400 mt-1">Lowercase letters, numbers, dots, underscores, and hyphens only</p>
+                    </div>
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium mb-2">compose.yaml</label>
+                        <div id="new-compose-error-banner" class="error-banner hidden rounded px-3 py-2 text-sm mb-2">
+                            Compose validation error: <span id="new-compose-error-text"></span>
+                        </div>
+                        <textarea id="new-stack-compose" class="compose-editor w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-purple-500" rows="12" placeholder="services:
+  app:
+    image: nginx:latest
+    ports:
+      - '8080:80'"></textarea>
+                    </div>
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium mb-2">.env (optional)</label>
+                        <textarea id="new-stack-env" class="compose-editor w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-purple-500" rows="4" placeholder="# Environment variables
+# KEY=value"></textarea>
+                    </div>
+                </div>
+                <div class="p-4 border-t border-gray-700 flex justify-end space-x-2">
+                    <button onclick="hideCreateStackModal()" class="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-500">Cancel</button>
+                    <button onclick="createStack()" class="coraline-button px-4 py-2 text-white rounded">Create Stack</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Stack Detail/Edit Modal -->
+    <div id="stack-modal" class="fixed inset-0 z-50 hidden">
+        <div class="modal-backdrop absolute inset-0" onclick="hideStackModal()"></div>
+        <div class="absolute inset-0 flex items-center justify-center p-4">
+            <div class="bg-gray-800 rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] overflow-hidden relative">
+                <div class="p-4 border-b border-gray-700 flex justify-between items-center">
+                    <h3 class="text-xl font-semibold">
+                        <span id="modal-stack-name">Stack</span>
+                        <span id="modal-stack-status" class="ml-2 px-2 py-1 text-xs rounded"></span>
+                    </h3>
+                    <button onclick="hideStackModal()" class="text-gray-400 hover:text-white">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
+                    </button>
+                </div>
+
+                <!-- Tabs -->
+                <div class="border-b border-gray-700">
+                    <nav class="flex space-x-4 px-4">
+                        <button onclick="showTab('compose')" class="tab-btn py-2 px-3 border-b-2 border-purple-500 text-purple-400" data-tab="compose">Compose</button>
+                        <button onclick="showTab('env')" class="tab-btn py-2 px-3 border-b-2 border-transparent text-gray-400 hover:text-white" data-tab="env">Environment</button>
+                        <button onclick="showTab('logs')" class="tab-btn py-2 px-3 border-b-2 border-transparent text-gray-400 hover:text-white" data-tab="logs">Logs</button>
+                        <button onclick="showTab('terminal')" class="tab-btn py-2 px-3 border-b-2 border-transparent text-gray-400 hover:text-white" data-tab="terminal">Terminal</button>
+                    </nav>
+                </div>
+
+                <div class="p-4 overflow-y-auto" style="max-height: calc(90vh - 200px);">
+                    <!-- Compose Tab -->
+                    <div id="tab-compose" class="tab-content">
+                        <div id="compose-error-banner" class="error-banner hidden rounded px-3 py-2 text-sm mb-2">
+                            Compose validation error: <span id="compose-error-text"></span>
+                        </div>
+                        <textarea id="edit-compose" class="compose-editor w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-purple-500" rows="16"></textarea>
+                        <div class="mt-2 flex justify-end space-x-2">
+                            <button onclick="saveCompose()" class="coraline-button px-4 py-2 text-white rounded">Save</button>
+                            <button onclick="deployStack()" class="coraline-button px-4 py-2 text-white rounded bg-green-700 border-green-600">Save & Deploy</button>
+                        </div>
+                        <div class="mt-4 border-t border-gray-700 pt-4">
+                            <div class="flex items-center justify-between mb-2">
+                                <span class="text-sm text-gray-300">Backups</span>
+                                <button onclick="refreshBackups()" class="text-sm text-blue-300 hover:text-blue-200">Refresh</button>
+                            </div>
+                            <div class="flex flex-col md:flex-row gap-2">
+                                <select id="backup-select" class="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-sm flex-1">
+                                    <option value="">No backups available</option>
+                                </select>
+                                <button onclick="loadBackup()" class="coraline-button px-3 py-1 text-sm rounded">Load</button>
+                                <button onclick="restoreBackup()" class="px-3 py-1 text-sm rounded bg-red-700 hover:bg-red-600 text-white">Restore</button>
+                            </div>
+                            <p class="text-xs text-gray-400 mt-2">Load inserts a backup into the editor. Restore overwrites the stack compose file.</p>
+                        </div>
+                    </div>
+
+                    <!-- Env Tab -->
+                    <div id="tab-env" class="tab-content hidden">
+                        <textarea id="edit-env" class="compose-editor w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-purple-500" rows="12" placeholder="# No .env file exists yet"></textarea>
+                        <div class="mt-2 flex justify-end">
+                            <button onclick="saveEnv()" class="coraline-button px-4 py-2 text-white rounded">Save .env</button>
+                        </div>
+                    </div>
+
+                    <!-- Logs Tab -->
+                    <div id="tab-logs" class="tab-content hidden">
+                        <div class="flex justify-between items-center mb-2">
+                            <select id="log-service" class="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-sm">
+                                <option value="">All Services</option>
+                            </select>
+                            <button onclick="loadStackLogs()" class="coraline-button px-3 py-1 text-sm rounded">Refresh Logs</button>
+                        </div>
+                        <div id="logs-output" class="terminal-output h-80 p-3 rounded border border-gray-700">
+                            Click "Refresh Logs" to load logs...
+                        </div>
+                    </div>
+
+                    <!-- Terminal Tab -->
+                    <div id="tab-terminal" class="tab-content hidden">
+                        <div id="terminal-output" class="terminal-output h-80 p-3 rounded border border-gray-700">
+                            Run commands to see output here...
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Action buttons -->
+                <div class="p-4 border-t border-gray-700 flex justify-between">
+                    <div class="space-x-2">
+                        <button onclick="stackAction('up')" class="coraline-button px-3 py-2 text-sm rounded border-green-600">
+                            <span class="mr-1">&#9654;</span> Start
+                        </button>
+                        <button onclick="stackAction('down')" class="coraline-button px-3 py-2 text-sm rounded border-red-600">
+                            <span class="mr-1">&#9632;</span> Stop
+                        </button>
+                        <button onclick="stackAction('restart')" class="coraline-button px-3 py-2 text-sm rounded border-yellow-600">
+                            <span class="mr-1">&#8635;</span> Restart
+                        </button>
+                        <button onclick="stackAction('pull')" class="coraline-button px-3 py-2 text-sm rounded border-blue-600">
+                            <span class="mr-1">&#8595;</span> Pull
+                        </button>
+                    </div>
+                    <button onclick="confirmDeleteStack()" class="px-3 py-2 bg-red-700 text-white rounded hover:bg-red-600 text-sm">
+                        Delete Stack
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let stacks = [];
+        let currentStack = null;
+        let eventSource = null;
+        let editComposeEditor = null;
+        let newComposeEditor = null;
+        let composeValid = true;
+        let newComposeValid = true;
+
+        // ========== Notifications ==========
+        function showNotification(message, type = 'info') {
+            const area = document.getElementById('notification-area');
+            const notification = document.createElement('div');
+            const colors = {
+                success: 'bg-green-600',
+                error: 'bg-red-600',
+                info: 'bg-blue-600',
+                warning: 'bg-yellow-600'
+            };
+
+            notification.className = `${colors[type] || colors.info} text-white px-4 py-3 rounded shadow-lg mb-2 transform transition-all duration-300`;
+            notification.innerHTML = `
+                <div class="flex items-center justify-between">
+                    <span>${message}</span>
+                    <button onclick="this.parentElement.parentElement.remove()" class="ml-4 text-white hover:text-gray-200">&times;</button>
+                </div>
+            `;
+
+            area.appendChild(notification);
+            setTimeout(() => {
+                notification.style.opacity = '0';
+                setTimeout(() => notification.remove(), 300);
+            }, 5000);
+        }
+
+        // ========== Stack Loading ==========
+        async function loadStacks() {
+            const grid = document.getElementById('stacks-grid');
+            const refreshBtn = document.getElementById('refresh-btn');
+            refreshBtn.classList.add('animate-pulse');
+
+            try {
+                const response = await fetch('/api/stacks?status=true');
+                const data = await response.json();
+
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+
+                stacks = data.stacks || [];
+                renderStacks();
+
+                document.getElementById('last-updated').textContent =
+                    `Last updated: ${new Date().toLocaleTimeString()}`;
+
+            } catch (error) {
+                console.error('Error loading stacks:', error);
+                grid.innerHTML = `
+                    <div class="col-span-full text-center py-10">
+                        <p class="text-red-400">Error loading stacks: ${error.message}</p>
+                        <p class="text-gray-400 mt-2">Make sure STACKS_PATH is configured and accessible.</p>
+                    </div>
+                `;
+            } finally {
+                refreshBtn.classList.remove('animate-pulse');
+            }
+        }
+
+        function renderStacks() {
+            const grid = document.getElementById('stacks-grid');
+
+            if (stacks.length === 0) {
+                grid.innerHTML = `
+                    <div class="col-span-full text-center py-10">
+                        <svg class="w-16 h-16 mx-auto text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"></path>
+                        </svg>
+                        <p class="mt-4 text-xl">No stacks found</p>
+                        <p class="text-gray-400 mt-2">Create a new stack or check your STACKS_PATH configuration.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            grid.innerHTML = stacks.map(stack => {
+                const statusClass = `status-${stack.status || 'unknown'}`;
+                const statusText = stack.status || 'unknown';
+                const containerInfo = stack.container_count
+                    ? `${stack.running_count}/${stack.container_count} running`
+                    : '';
+
+                return `
+                    <div class="stack-card bg-gray-800 rounded-lg p-4 cursor-pointer" onclick="openStack('${stack.name}')">
+                        <div class="flex justify-between items-start mb-3">
+                            <h3 class="text-lg font-semibold">${stack.name}</h3>
+                            <span class="px-2 py-1 text-xs rounded text-white ${statusClass}">${statusText}</span>
+                        </div>
+                        <div class="text-sm text-gray-400 mb-3">
+                            <div>${stack.compose_file}</div>
+                            ${containerInfo ? `<div class="mt-1">${containerInfo}</div>` : ''}
+                        </div>
+                        <div class="flex space-x-2">
+                            <button onclick="event.stopPropagation(); quickAction('${stack.name}', 'up')"
+                                class="flex-1 py-1 px-2 bg-green-700 hover:bg-green-600 rounded text-sm text-center"
+                                ${stack.status === 'running' ? 'disabled style="opacity:0.5"' : ''}>
+                                Start
+                            </button>
+                            <button onclick="event.stopPropagation(); quickAction('${stack.name}', 'down')"
+                                class="flex-1 py-1 px-2 bg-red-700 hover:bg-red-600 rounded text-sm text-center"
+                                ${stack.status === 'stopped' ? 'disabled style="opacity:0.5"' : ''}>
+                                Stop
+                            </button>
+                            <button onclick="event.stopPropagation(); quickAction('${stack.name}', 'restart')"
+                                class="flex-1 py-1 px-2 bg-yellow-700 hover:bg-yellow-600 rounded text-sm text-center">
+                                Restart
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // ========== Quick Actions ==========
+        async function quickAction(stackName, action) {
+            showNotification(`Running ${action} on ${stackName}...`, 'info');
+
+            try {
+                const response = await fetch(`/api/stacks/${stackName}/${action}`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+
+                if (data.success) {
+                    showNotification(`${action} completed on ${stackName}`, 'success');
+                } else {
+                    showNotification(`${action} failed: ${data.stderr || data.error}`, 'error');
+                }
+
+                // Reload stacks to update status
+                setTimeout(loadStacks, 1000);
+
+            } catch (error) {
+                showNotification(`Error: ${error.message}`, 'error');
+            }
+        }
+
+        // ========== Stack Detail Modal ==========
+        async function openStack(stackName) {
+            currentStack = stackName;
+
+            try {
+                const response = await fetch(`/api/stacks/${stackName}`);
+                const data = await response.json();
+
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+
+                document.getElementById('modal-stack-name').textContent = stackName;
+
+                const statusEl = document.getElementById('modal-stack-status');
+                const status = data.status?.status || 'unknown';
+                statusEl.textContent = status;
+                statusEl.className = `ml-2 px-2 py-1 text-xs rounded text-white status-${status}`;
+
+                setComposeValue(editComposeEditor, 'edit-compose', data.compose_content || '');
+                validateComposeEditor(editComposeEditor, 'edit-compose', 'compose-error-banner', 'compose-error-text', true);
+                document.getElementById('edit-env').value = data.env_content || '';
+
+                // Populate service dropdown for logs
+                const serviceSelect = document.getElementById('log-service');
+                serviceSelect.innerHTML = '<option value="">All Services</option>';
+                if (data.status?.containers) {
+                    data.status.containers.forEach(c => {
+                        serviceSelect.innerHTML += `<option value="${c.service}">${c.service}</option>`;
+                    });
+                }
+
+                showTab('compose');
+                refreshBackups();
+                document.getElementById('stack-modal').classList.remove('hidden');
+
+            } catch (error) {
+                showNotification(`Error loading stack: ${error.message}`, 'error');
+            }
+        }
+
+        function hideStackModal() {
+            document.getElementById('stack-modal').classList.add('hidden');
+            currentStack = null;
+            if (eventSource) {
+                eventSource.close();
+                eventSource = null;
+            }
+        }
+
+        function showTab(tabName) {
+            // Update tab buttons
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                if (btn.dataset.tab === tabName) {
+                    btn.classList.add('border-purple-500', 'text-purple-400');
+                    btn.classList.remove('border-transparent', 'text-gray-400');
+                } else {
+                    btn.classList.remove('border-purple-500', 'text-purple-400');
+                    btn.classList.add('border-transparent', 'text-gray-400');
+                }
+            });
+
+            // Show/hide content
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.add('hidden');
+            });
+            document.getElementById(`tab-${tabName}`).classList.remove('hidden');
+        }
+
+        // ========== Stack Actions with Streaming ==========
+        async function stackAction(action) {
+            if (!currentStack) return;
+
+            const terminal = document.getElementById('terminal-output');
+            terminal.textContent = `Running ${action}...\n`;
+            showTab('terminal');
+
+            // Use SSE streaming
+            if (eventSource) {
+                eventSource.close();
+            }
+
+            eventSource = new EventSource(`/api/stacks/${currentStack}/${action}/stream`);
+
+            eventSource.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data.line) {
+                        terminal.textContent += data.line + '\n';
+                        terminal.scrollTop = terminal.scrollHeight;
+                    }
+                    if (data.done) {
+                        terminal.textContent += `\n--- Command completed (exit code: ${data.returncode}) ---\n`;
+                        eventSource.close();
+                        eventSource = null;
+
+                        if (data.returncode === 0) {
+                            showNotification(`${action} completed successfully`, 'success');
+                        } else {
+                            showNotification(`${action} completed with errors`, 'warning');
+                        }
+
+                        // Refresh status
+                        setTimeout(() => {
+                            loadStacks();
+                            if (currentStack) openStack(currentStack);
+                        }, 1000);
+                    }
+                    if (data.error) {
+                        terminal.textContent += `Error: ${data.error}\n`;
+                        eventSource.close();
+                        eventSource = null;
+                    }
+                } catch (e) {
+                    terminal.textContent += event.data + '\n';
+                }
+            };
+
+            eventSource.onerror = () => {
+                terminal.textContent += '\n--- Connection closed ---\n';
+                eventSource.close();
+                eventSource = null;
+            };
+        }
+
+        // ========== Save Functions ==========
+        async function saveCompose() {
+            if (!currentStack) return;
+
+            const content = getComposeValue(editComposeEditor, 'edit-compose');
+            if (!validateComposeEditor(editComposeEditor, 'edit-compose', 'compose-error-banner', 'compose-error-text')) {
+                showNotification('Fix compose validation errors before saving', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/stacks/${currentStack}/compose`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ content })
+                });
+                const data = await response.json();
+
+                if (data.status === 'saved') {
+                    showNotification('Compose file saved', 'success');
+                } else {
+                    throw new Error(data.error);
+                }
+            } catch (error) {
+                showNotification(`Error saving: ${error.message}`, 'error');
+            }
+        }
+
+        async function saveEnv() {
+            if (!currentStack) return;
+
+            const content = document.getElementById('edit-env').value;
+
+            try {
+                const response = await fetch(`/api/stacks/${currentStack}/env`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ content })
+                });
+                const data = await response.json();
+
+                if (data.status === 'saved') {
+                    showNotification('.env file saved', 'success');
+                } else {
+                    throw new Error(data.error);
+                }
+            } catch (error) {
+                showNotification(`Error saving: ${error.message}`, 'error');
+            }
+        }
+
+        async function deployStack() {
+            if (!validateComposeEditor(editComposeEditor, 'edit-compose', 'compose-error-banner', 'compose-error-text')) {
+                showNotification('Fix compose validation errors before deploying', 'error');
+                return;
+            }
+            await saveCompose();
+            await stackAction('up');
+        }
+
+        // ========== Logs ==========
+        async function loadStackLogs() {
+            if (!currentStack) return;
+
+            const service = document.getElementById('log-service').value;
+            const logsEl = document.getElementById('logs-output');
+            logsEl.textContent = 'Loading logs...';
+
+            try {
+                const url = `/api/stacks/${currentStack}/logs?tail=200${service ? `&service=${service}` : ''}`;
+                const response = await fetch(url);
+                const data = await response.json();
+
+                logsEl.textContent = data.logs || 'No logs available';
+                logsEl.scrollTop = logsEl.scrollHeight;
+
+            } catch (error) {
+                logsEl.textContent = `Error loading logs: ${error.message}`;
+            }
+        }
+
+        // ========== Create Stack ==========
+        function showCreateStackModal() {
+            document.getElementById('new-stack-name').value = '';
+            setComposeValue(newComposeEditor, 'new-stack-compose', `services:
+  app:
+    image: nginx:latest
+    ports:
+      - "8080:80"
+`);
+            document.getElementById('new-stack-env').value = '';
+            validateComposeEditor(newComposeEditor, 'new-stack-compose', 'new-compose-error-banner', 'new-compose-error-text', true);
+            document.getElementById('create-modal').classList.remove('hidden');
+        }
+
+        function hideCreateStackModal() {
+            document.getElementById('create-modal').classList.add('hidden');
+        }
+
+        async function createStack() {
+            const name = document.getElementById('new-stack-name').value.trim().toLowerCase();
+            const compose = getComposeValue(newComposeEditor, 'new-stack-compose');
+            const env = document.getElementById('new-stack-env').value;
+
+            if (!name) {
+                showNotification('Please enter a stack name', 'error');
+                return;
+            }
+            if (!validateComposeEditor(newComposeEditor, 'new-stack-compose', 'new-compose-error-banner', 'new-compose-error-text')) {
+                showNotification('Fix compose validation errors before creating', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/stacks/${name}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        compose_content: compose,
+                        env_content: env
+                    })
+                });
+                const data = await response.json();
+
+                if (data.status === 'created') {
+                    showNotification(`Stack "${name}" created successfully`, 'success');
+                    hideCreateStackModal();
+                    loadStacks();
+                } else {
+                    throw new Error(data.error);
+                }
+            } catch (error) {
+                showNotification(`Error creating stack: ${error.message}`, 'error');
+            }
+        }
+
+        // ========== Delete Stack ==========
+        async function confirmDeleteStack() {
+            if (!currentStack) return;
+
+            if (!confirm(`Are you sure you want to delete "${currentStack}"?\n\nThis will stop all containers and remove the stack directory.`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/stacks/${currentStack}`, {
+                    method: 'DELETE'
+                });
+                const data = await response.json();
+
+                if (data.status === 'deleted') {
+                    showNotification(`Stack "${currentStack}" deleted`, 'success');
+                    hideStackModal();
+                    loadStacks();
+                } else {
+                    throw new Error(data.error);
+                }
+            } catch (error) {
+                showNotification(`Error deleting stack: ${error.message}`, 'error');
+            }
+        }
+
+        // ========== Initialize ==========
+        document.addEventListener('DOMContentLoaded', () => {
+            initEditors();
+            loadStacks();
+        });
+
+        // Auto-refresh every 30 seconds
+        setInterval(loadStacks, 30000);
+
+        function initEditors() {
+            if (window.CodeMirror) {
+                const editTextarea = document.getElementById('edit-compose');
+                editComposeEditor = CodeMirror.fromTextArea(editTextarea, {
+                    mode: 'yaml',
+                    lineNumbers: true,
+                    lineWrapping: true,
+                    indentUnit: 2,
+                    tabSize: 2,
+                    theme: 'default'
+                });
+                editComposeEditor.on('change', () => {
+                    validateComposeEditor(editComposeEditor, 'edit-compose', 'compose-error-banner', 'compose-error-text', true);
+                });
+
+                const newTextarea = document.getElementById('new-stack-compose');
+                newComposeEditor = CodeMirror.fromTextArea(newTextarea, {
+                    mode: 'yaml',
+                    lineNumbers: true,
+                    lineWrapping: true,
+                    indentUnit: 2,
+                    tabSize: 2,
+                    theme: 'default'
+                });
+                newComposeEditor.on('change', () => {
+                    validateComposeEditor(newComposeEditor, 'new-stack-compose', 'new-compose-error-banner', 'new-compose-error-text', true);
+                });
+            }
+        }
+
+        function getComposeValue(editor, textareaId) {
+            if (editor) {
+                return editor.getValue();
+            }
+            return document.getElementById(textareaId).value;
+        }
+
+        function setComposeValue(editor, textareaId, value) {
+            if (editor) {
+                editor.setValue(value || '');
+                return;
+            }
+            document.getElementById(textareaId).value = value || '';
+        }
+
+        function validateComposeEditor(editor, textareaId, bannerId, textId, soft = false) {
+            const banner = document.getElementById(bannerId);
+            const textEl = document.getElementById(textId);
+            const content = getComposeValue(editor, textareaId);
+
+            if (!window.jsyaml) {
+                banner.classList.add('hidden');
+                return true;
+            }
+
+            try {
+                window.jsyaml.load(content || '');
+                banner.classList.add('hidden');
+                if (editor) {
+                    editor.getWrapperElement().classList.remove('editor-error');
+                } else {
+                    document.getElementById(textareaId).classList.remove('editor-error');
+                }
+                if (textareaId === 'edit-compose') composeValid = true;
+                if (textareaId === 'new-stack-compose') newComposeValid = true;
+                return true;
+            } catch (err) {
+                textEl.textContent = err.message || String(err);
+                banner.classList.remove('hidden');
+                if (editor) {
+                    editor.getWrapperElement().classList.add('editor-error');
+                } else {
+                    document.getElementById(textareaId).classList.add('editor-error');
+                }
+                if (textareaId === 'edit-compose') composeValid = false;
+                if (textareaId === 'new-stack-compose') newComposeValid = false;
+                return soft ? false : false;
+            }
+        }
+
+        async function refreshBackups() {
+            if (!currentStack) return;
+            const select = document.getElementById('backup-select');
+            select.innerHTML = '<option value="">Loading...</option>';
+
+            try {
+                const response = await fetch(`/api/stacks/${currentStack}/backups`);
+                const data = await response.json();
+                const backups = data.backups || [];
+
+                if (!backups.length) {
+                    select.innerHTML = '<option value="">No backups available</option>';
+                    return;
+                }
+
+                select.innerHTML = backups.map(name => `<option value="${name}">${name}</option>`).join('');
+            } catch (error) {
+                select.innerHTML = '<option value="">Error loading backups</option>';
+            }
+        }
+
+        async function loadBackup() {
+            if (!currentStack) return;
+            const select = document.getElementById('backup-select');
+            const backup = select.value;
+            if (!backup) return;
+
+            try {
+                const response = await fetch(`/api/stacks/${currentStack}/backups/${backup}`);
+                const data = await response.json();
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                setComposeValue(editComposeEditor, 'edit-compose', data.content || '');
+                validateComposeEditor(editComposeEditor, 'edit-compose', 'compose-error-banner', 'compose-error-text', true);
+                showNotification(`Loaded backup ${backup} into editor`, 'info');
+            } catch (error) {
+                showNotification(`Error loading backup: ${error.message}`, 'error');
+            }
+        }
+
+        async function restoreBackup() {
+            if (!currentStack) return;
+            const select = document.getElementById('backup-select');
+            const backup = select.value;
+            if (!backup) return;
+
+            if (!confirm(`Restore backup "${backup}"? This will overwrite the current compose file.`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/stacks/${currentStack}/restore`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ backup })
+                });
+                const data = await response.json();
+                if (data.status === 'restored') {
+                    showNotification(`Restored backup ${backup}`, 'success');
+                    openStack(currentStack);
+                } else {
+                    throw new Error(data.error);
+                }
+            } catch (error) {
+                showNotification(`Error restoring backup: ${error.message}`, 'error');
+            }
+        }
+    </script>
+</body>
+</html>
