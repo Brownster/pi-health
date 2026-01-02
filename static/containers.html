@@ -6,6 +6,26 @@
         if (!sessionStorage.getItem("loggedIn")) {
             window.location.href = "/login.html";
         }
+
+        // Display logged-in user
+        const username = sessionStorage.getItem("username");
+        if (username) {
+            document.addEventListener('DOMContentLoaded', () => {
+                const userEl = document.getElementById('logged-in-user');
+                if (userEl) userEl.textContent = username;
+            });
+        }
+
+        // Logout function
+        async function logout() {
+            try {
+                await fetch('/api/logout', { method: 'POST' });
+            } catch (e) {
+                // Ignore errors
+            }
+            sessionStorage.clear();
+            window.location.href = '/login.html';
+        }
     </script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -101,7 +121,12 @@
                     <a href="/" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Home</a>
                     <a href="/system.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">System Health</a>
                     <a href="/containers.html" class="px-3 py-2 rounded-md text-white bg-blue-800 font-medium border border-blue-400">Containers</a>
+                    <a href="/stacks.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Stacks</a>
                     <a href="/edit.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Edit Config</a>
+                </div>
+                <div class="flex items-center space-x-3">
+                    <span id="logged-in-user" class="text-blue-200 text-sm"></span>
+                    <button onclick="logout()" class="px-3 py-2 rounded-md text-red-300 hover:bg-red-800 hover:text-white font-medium text-sm">Logout</button>
                 </div>
             </div>
         </div>
@@ -296,6 +321,9 @@
         // Store the container list
         let containerList = [];
 
+        // Track if initial load has completed
+        let initialLoadComplete = false;
+
         function getContainerNameById(id) {
             const cached = containerList.find(c => c.id === id);
             if (cached) return cached.name;
@@ -331,26 +359,97 @@
         }
 
         // Fetch Docker containers and update the table
-        async function fetchDockerContainers() {
+        async function fetchDockerContainers(forceFullRender = false) {
             const containerListEl = document.getElementById('container-list');
             const lastUpdatedEl = document.getElementById('last-updated');
-            containerListEl.innerHTML = '<tr><td colspan="5" class="text-center py-4">Loading...</td></tr>';
+
+            // Only show loading indicator on initial load
+            if (!initialLoadComplete) {
+                containerListEl.innerHTML = '<tr><td colspan="5" class="text-center py-4">Loading...</td></tr>';
+            }
 
             try {
                 const response = await fetch('/api/containers');
-                containerList = await response.json();
-                
+                const newContainerList = await response.json();
+
                 // Update last updated timestamp
                 const now = new Date();
                 lastUpdatedEl.textContent = `Last updated: ${formatDateTime(now)}`;
-                
-                // Render the filtered containers
-                renderContainers();
+
+                // Check if we need a full re-render or can do smart update
+                const needsFullRender = forceFullRender ||
+                    !initialLoadComplete ||
+                    hasContainerListChanged(containerList, newContainerList);
+
+                containerList = newContainerList;
+
+                if (needsFullRender) {
+                    renderContainers();
+                } else {
+                    updateContainerRows();
+                }
+
+                initialLoadComplete = true;
             } catch (error) {
                 console.error('Error fetching Docker containers:', error);
-                containerListEl.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-red-500">Error loading containers</td></tr>';
+                if (!initialLoadComplete) {
+                    containerListEl.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-red-500">Error loading containers</td></tr>';
+                }
                 showNotification('Error fetching containers', 'error');
             }
+        }
+
+        // Check if container list has structurally changed (added/removed containers)
+        function hasContainerListChanged(oldList, newList) {
+            if (oldList.length !== newList.length) return true;
+            const oldIds = new Set(oldList.map(c => c.id));
+            const newIds = new Set(newList.map(c => c.id));
+            for (const id of newIds) {
+                if (!oldIds.has(id)) return true;
+            }
+            return false;
+        }
+
+        // Update existing rows in-place without destroying DOM
+        function updateContainerRows() {
+            containerList.forEach(container => {
+                const row = document.querySelector(`tr[data-container-id="${container.id}"]`);
+                if (!row) return;
+
+                // Update status badge
+                const statusCell = row.querySelector('td:nth-child(3)');
+                if (statusCell) {
+                    const statusClass = container.status === 'running' ? 'status-running' :
+                        container.status === 'stopped' ? 'status-stopped' : 'status-other';
+                    statusCell.innerHTML = `
+                        <span class="px-2 py-1 text-white rounded ${statusClass}">
+                            ${container.status}
+                        </span>
+                    `;
+                }
+
+                // Update name cell (for update indicator)
+                const nameCell = row.querySelector('td:nth-child(1)');
+                if (nameCell) {
+                    nameCell.innerHTML = `${container.name}${container.update_available ? '<span class="ml-1 text-yellow-400" title="Update available">&#x21bb;</span>' : ''}`;
+                }
+
+                // Update button states
+                const startBtn = row.querySelector('button[data-action="start"]');
+                const stopBtn = row.querySelector('button[data-action="stop"]');
+
+                if (startBtn) {
+                    startBtn.disabled = container.status === 'running';
+                    startBtn.classList.toggle('opacity-50', container.status === 'running');
+                    startBtn.classList.toggle('cursor-not-allowed', container.status === 'running');
+                }
+
+                if (stopBtn) {
+                    stopBtn.disabled = container.status === 'stopped';
+                    stopBtn.classList.toggle('opacity-50', container.status === 'stopped');
+                    stopBtn.classList.toggle('cursor-not-allowed', container.status === 'stopped');
+                }
+            });
         }
 
         // Render containers based on filter
@@ -751,7 +850,7 @@
         // Set up refresh button
         document.getElementById('refresh-button').addEventListener('click', function() {
             this.classList.add('animate-pulse');
-            fetchDockerContainers().then(() => {
+            fetchDockerContainers(true).then(() => {
                 this.classList.remove('animate-pulse');
             });
         });

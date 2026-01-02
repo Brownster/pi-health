@@ -48,6 +48,20 @@
         .shake-animation {
             animation: shake 0.5s cubic-bezier(.36,.07,.19,.97) both;
         }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 1rem;
+            height: 1rem;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body class="bg-pattern flex items-center justify-center h-screen">
@@ -105,45 +119,83 @@
         <div id="login-error" class="mt-6 hidden text-center">
             <div class="p-4 bg-red-500 bg-opacity-20 border border-red-500 rounded-lg">
                 <div class="flex items-center">
-                    <svg class="h-5 w-5 text-red-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <svg class="h-5 w-5 text-red-500 mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                     </svg>
-                    <p class="text-red-300">Invalid username or password. Please try again.</p>
+                    <p id="login-error-text" class="text-red-300">Invalid username or password. Please try again.</p>
                 </div>
             </div>
         </div>
     </div>
 
     <script>
-        // Simple credentials for demonstration
-        const USERNAME = "holly";
-        const PASSWORD = "pass123";
+        // Check if already logged in
+        async function checkAuth() {
+            try {
+                const response = await fetch('/api/auth/check');
+                if (response.ok) {
+                    window.location.href = '/';
+                }
+            } catch (e) {
+                // Not logged in, stay on login page
+            }
+        }
+        checkAuth();
 
-        function validateLogin() {
+        async function validateLogin() {
             const username = document.getElementById("username").value.trim();
-            const password = document.getElementById("password").value.trim();
+            const password = document.getElementById("password").value;
             const errorEl = document.getElementById("login-error");
+            const errorText = document.getElementById("login-error-text");
             const loginCard = document.querySelector(".login-card");
+            const loginButton = document.querySelector(".login-button");
 
-            if (username === USERNAME && password === PASSWORD) {
-                // Store login status in session storage
-                sessionStorage.setItem("loggedIn", "true");
-                // Redirect to the dashboard root
-                window.location.href = "/";
-            } else {
-                // Show error message and shake animation
+            // Disable button during request
+            loginButton.disabled = true;
+            loginButton.innerHTML = '<span class="loading-spinner mr-2"></span>Logging in...';
+
+            try {
+                const response = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    // Store login status for client-side route protection
+                    sessionStorage.setItem("loggedIn", "true");
+                    sessionStorage.setItem("username", data.username);
+                    window.location.href = "/";
+                } else {
+                    // Show error message
+                    errorText.textContent = data.error || 'Invalid username or password';
+                    errorEl.classList.remove("hidden");
+                    loginCard.classList.add("shake-animation");
+
+                    setTimeout(() => {
+                        loginCard.classList.remove("shake-animation");
+                    }, 500);
+
+                    setTimeout(() => {
+                        errorEl.classList.add("hidden");
+                    }, 5000);
+                }
+            } catch (error) {
+                errorText.textContent = 'Connection error. Please try again.';
                 errorEl.classList.remove("hidden");
                 loginCard.classList.add("shake-animation");
-                
-                // Remove shake animation after it completes
-                setTimeout(() => {
-                    loginCard.classList.remove("shake-animation");
-                }, 500);
-                
-                // Hide error after 5 seconds
-                setTimeout(() => {
-                    errorEl.classList.add("hidden");
-                }, 5000);
+                setTimeout(() => loginCard.classList.remove("shake-animation"), 500);
+            } finally {
+                // Re-enable button
+                loginButton.disabled = false;
+                loginButton.innerHTML = `
+                    <span>Login</span>
+                    <svg class="ml-2 h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 9l3 3m0 0l-3 3m3-3H8m13 0a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                `;
             }
         }
     </script>

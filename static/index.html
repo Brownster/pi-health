@@ -6,6 +6,26 @@
         if (!sessionStorage.getItem("loggedIn")) {
             window.location.href = "/login.html";
         }
+
+        // Display logged-in user
+        const username = sessionStorage.getItem("username");
+        if (username) {
+            document.addEventListener('DOMContentLoaded', () => {
+                const userEl = document.getElementById('logged-in-user');
+                if (userEl) userEl.textContent = username;
+            });
+        }
+
+        // Logout function
+        async function logout() {
+            try {
+                await fetch('/api/logout', { method: 'POST' });
+            } catch (e) {
+                // Ignore errors
+            }
+            sessionStorage.clear();
+            window.location.href = '/login.html';
+        }
     </script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -73,7 +93,12 @@
                     <a href="/" class="px-3 py-2 rounded-md text-white bg-blue-800 font-medium border border-blue-400">Home</a>
                     <a href="/system.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">System Health</a>
                     <a href="/containers.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Containers</a>
+                    <a href="/stacks.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Stacks</a>
                     <a href="/edit.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Edit Config</a>
+                </div>
+                <div class="flex items-center space-x-3">
+                    <span id="logged-in-user" class="text-blue-200 text-sm"></span>
+                    <button onclick="logout()" class="px-3 py-2 rounded-md text-red-300 hover:bg-red-800 hover:text-white font-medium text-sm">Logout</button>
                 </div>
             </div>
         </div>
