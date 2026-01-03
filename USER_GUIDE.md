@@ -7,22 +7,23 @@ This guide will walk you through setting up and using all the features of your P
 ## Table of Contents
 
 1.  [Initial Setup](#1-initial-setup)
-2.  [First-Time Login & User Management](#2-first-time-login--user-management)
-3.  [Networking: VPN & Tailscale](#3-networking-vpn--tailscale)
-4.  [Docker & Stacks Management](#4-docker--stacks-management)
+2.  [First Boot Checklist](#2-first-boot-checklist)
+3.  [First-Time Login & User Management](#3-first-time-login--user-management)
+4.  [Networking: VPN & Tailscale](#4-networking-vpn--tailscale)
+5.  [Docker & Stacks Management](#5-docker--stacks-management)
     *   [Understanding Stacks](#understanding-stacks)
     *   [Creating a New Stack](#creating-a-new-stack)
     *   [Managing Existing Stacks](#managing-existing-stacks)
-5.  [App Catalog](#5-app-catalog)
-6.  [Updating Containers](#6-updating-containers)
-7.  [Disk Management](#7-disk-management)
+6.  [App Catalog](#6-app-catalog)
+7.  [Updating Containers](#7-updating-containers)
+8.  [Disk Management](#8-disk-management)
     *   [Viewing and Identifying Disks](#viewing-and-identifying-disks)
     *   [Mounting and Unmounting Disks](#mounting-and-unmounting-disks)
     *   [Auto-mounting on Boot (`fstab`)](#auto-mounting-on-boot-fstab)
-8.  [Storage Pooling with MergerFS](#8-storage-pooling-with-mergerfs)
+9.  [Storage Pooling with MergerFS](#9-storage-pooling-with-mergerfs)
     *   [What is MergerFS?](#what-is-mergerfs)
     *   [Creating a Storage Pool](#creating-a-storage-pool)
-9.  [Parity Protection with SnapRAID](#9-parity-protection-with-snapraid)
+10. [Parity Protection with SnapRAID](#10-parity-protection-with-snapraid)
     *   [What is SnapRAID?](#what-is-snapraid)
     *   [Configuring SnapRAID](#configuring-snapraid)
     *   [Running Sync and Scrub](#running-sync-and-scrub)
@@ -95,7 +96,18 @@ services:
 
 Run `docker-compose up -d` in the same directory as your `docker-compose.yml` file to start the application.
 
-### 2. First-Time Login & User Management
+### 2. First Boot Checklist
+
+Run these quick checks before you move the Pi to its final home.
+
+1.  **Services running:** `systemctl status pi-health` and `systemctl status pihealth-helper`
+2.  **Port 80 free:** Make sure nothing else is bound to port 80.
+3.  **Docker group:** Log out/in if you were just added to the `docker` group.
+4.  **Stacks path:** Confirm `STACKS_PATH` in `/etc/pi-health.env` if you changed it.
+5.  **Mounts ready:** Use **Disks** to mount drives, then click **Regenerate Startup Service**.
+6.  **VPN/Tailscale:** Use **Settings > Setup** or confirm they are installed.
+
+### 3. First-Time Login & User Management
 
 Once Pi-Health is running, open your web browser and navigate to `http://<your-server-ip>:80`.
 
@@ -110,7 +122,7 @@ Once Pi-Health is running, open your web browser and navigate to `http://<your-s
     ```
     If you update this variable, you will need to restart the Pi-Health container for the changes to take effect.
 
-### 3. Networking: VPN & Tailscale
+### 4. Networking: VPN & Tailscale
 
 Pi-Health can bootstrap Tailscale and VPN setup from the **Settings > Setup** card. This keeps setup simple while still allowing manual installs if you prefer.
 
@@ -123,7 +135,7 @@ Pi-Health can bootstrap Tailscale and VPN setup from the **Settings > Setup** ca
 
 This setup ensures that your server management interface is not exposed to the public internet, but is easily accessible to you from anywhere.
 
-### 4. Docker & Stacks Management
+### 5. Docker & Stacks Management
 
 Pi-Health provides a powerful interface for managing your Docker containers, organized into "Stacks".
 
@@ -169,7 +181,7 @@ On the "Stacks" page, you will see a card for each stack you've created.
     *   **Terminal:** This tab shows the real-time output of Docker Compose commands like `up`, `down`, `pull`, and `restart`. This is crucial for debugging.
     *   **Backups:** View and restore from automatic backups of your `compose.yaml` file. Pi-Health creates a backup every time you save changes.
 
-### 5. App Catalog
+### 6. App Catalog
 
 The "Apps" page provides templates to quickly deploy popular self-hosted applications.
 
@@ -179,7 +191,7 @@ The "Apps" page provides templates to quickly deploy popular self-hosted applica
 4.  Pi-Health will automatically pre-fill a new stack with a tested `compose.yaml`. It will also intelligently suggest paths for configuration and media volumes based on your disk setup (see [Disk Management](#7-disk-management)).
 5.  Review the configuration, make any desired changes, and click **"Create Stack"**.
 
-### 6. Updating Containers
+### 7. Updating Containers
 
 Pi-Health helps you keep your applications up-to-date.
 
@@ -193,7 +205,7 @@ Pi-Health helps you keep your applications up-to-date.
     *   Click the **"Pull"** button to pull the latest images for all services in the stack.
     *   Click the **"Restart"** button to recreate the services with the newly pulled images.
 
-### 7. Disk Management
+### 8. Disk Management
 
 The "Disks" page is the central hub for managing your server's storage.
 
@@ -220,7 +232,7 @@ To ensure your drives are available after a reboot, you need to configure them t
 4.  A backup of `/etc/fstab` is automatically created before any changes are made.
 5.  If you changed mount points, click **"Regenerate Startup Service"** to ensure Docker waits for mounts on boot.
 
-### 8. Storage Pooling with MergerFS
+### 9. Storage Pooling with MergerFS
 
 This feature is for users with multiple physical data disks who want to present them as a single, large virtual drive. This corresponds to your "Setup 2".
 
@@ -238,7 +250,7 @@ MergerFS "merges" several filesystems into one. If you have `/mnt/disk1` (1TB) a
 4.  Click **"Save Config"**, then **"Apply Config"**.
 5.  You can now point your applications (e.g., Plex, Sonarr) to this single pool directory.
 
-### 9. Parity Protection with SnapRAID
+### 10. Parity Protection with SnapRAID
 
 SnapRAID provides parity-based backup and recovery for your data pool. It's a perfect companion to MergerFS.
 
