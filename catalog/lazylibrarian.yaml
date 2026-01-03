@@ -1,0 +1,43 @@
+id: lazylibrarian
+name: LazyLibrarian
+description: Book manager and downloader
+requires: []
+disabled_by_default: true
+fields:
+  - key: TZ
+    label: Timezone
+    default: "Europe/London"
+  - key: PUID
+    label: User ID (PUID)
+    default: "1000"
+  - key: PGID
+    label: Group ID (PGID)
+    default: "1000"
+  - key: CONFIG_DIR
+    label: Config root directory
+    default: "/home/pi/docker"
+  - key: STORAGE_DIR
+    label: Storage mount
+    default: "/mnt/storage"
+  - key: DOWNLOADS_DIR
+    label: Downloads directory
+    default: "/mnt/downloads/transmission/books"
+  - key: PORT
+    label: Web UI port
+    default: "5299"
+service:
+  image: linuxserver/lazylibrarian:latest
+  container_name: lazylibrarian
+  network_mode: bridge
+  environment:
+    - TZ={{TZ}}
+    - PUID={{PUID}}
+    - PGID={{PGID}}
+  volumes:
+    - "{{CONFIG_DIR}}/lazylibrarian:/config"
+    - "{{STORAGE_DIR}}/books:/books"
+    - "{{STORAGE_DIR}}/audiobooks:/audiobooks"
+    - "{{DOWNLOADS_DIR}}:/downloads"
+  ports:
+    - "{{PORT}}:5299"
+  restart: unless-stopped

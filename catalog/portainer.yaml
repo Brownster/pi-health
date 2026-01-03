@@ -1,0 +1,22 @@
+id: portainer
+name: Portainer
+description: Docker management UI
+requires: []
+disabled_by_default: false
+fields:
+  - key: CONFIG_DIR
+    label: Config root directory
+    default: "/home/pi/docker"
+  - key: PORTAINER_PORT
+    label: Web UI port
+    default: "9000"
+service:
+  image: portainer/portainer-ce:latest
+  container_name: portainer
+  environment: []
+  volumes:
+    - /var/run/docker.sock:/var/run/docker.sock
+    - "{{CONFIG_DIR}}/portainer:/data"
+  ports:
+    - "{{PORTAINER_PORT}}:9000"
+  restart: unless-stopped

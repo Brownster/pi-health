@@ -1,0 +1,105 @@
+version: "3.8"
+services:
+  vpn:
+    image: qmcgaw/gluetun:latest
+    container_name: vpn
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    volumes:
+      - "${HOME}/docker/vpn:/gluetun"
+    env_file:
+      - "${HOME}/docker/vpn/.env"
+    healthcheck:
+      test: ["CMD-SHELL", "test -e /dev/net/tun && ip a show tun0 | grep -q inet"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    ports:
+      - 9117:9117
+      - 8989:8989
+      - 7878:7878
+      - 9091:9091
+      - 6789:6789
+      - 6500:6500
+      - 8686:8686
+      - 8080:8080
+      - 51413:51413
+    networks:
+      - vpn_network
+
+  jackett:
+    image: linuxserver/jackett:latest
+    container_name: jackett
+    network_mode: "service:vpn"
+    environment:
+      - TZ=${TZ}
+      - PUID=${PUID}
+      - PGID=${PGID}
+    volumes:
+      - "${HOME}/docker/jackett:/config"
+      - /mnt/downloads:/downloads/completed/
+    restart: unless-stopped
+
+  sonarr:
+    image: linuxserver/sonarr:latest
+    container_name: sonarr
+    network_mode: "service:vpn"
+    environment:
+      - TZ=${TZ}
+      - PUID=${PUID}
+      - PGID=${PGID}
+    volumes:
+      - "${HOME}/docker/sonarr:/config"
+      - /mnt/storage/tv:/tv
+      - /mnt/downloads:/downloads
+      - /mnt/downloads/completed/transmission/iplayar:/downloads/iplayar
+    restart: unless-stopped
+
+  radarr:
+    image: linuxserver/radarr:latest
+    container_name: radarr
+    network_mode: "service:vpn"
+    environment:
+      - TZ=${TZ}
+      - PUID=${PUID}
+      - PGID=${PGID}
+    volumes:
+      - "${HOME}/docker/radarr:/config"
+      - /mnt/storage/Movies:/movies
+      - /mnt/downloads:/downloads
+    restart: unless-stopped
+
+  transmission:
+    image: linuxserver/transmission:latest
+    container_name: transmission
+    network_mode: "service:vpn"
+    environment:
+      - TZ=${TZ}
+      - PUID=${PUID}
+      - PGID=${PGID}
+    volumes:
+      - "${HOME}/docker/transmission:/config"
+      - /mnt/downloads:/downloads
+    restart: unless-stopped
+
+  sabnzbd:
+    image: lscr.io/linuxserver/sabnzbd:latest
+    container_name: sabnzbd
+    network_mode: "service:vpn"
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    volumes:
+      - "${HOME}/docker/sabnzbd/config:/config"
+      - /mnt/downloads/sabdnzbd.incomplete:/incomplete-downloads
+      - /mnt/downloads:/downloads
+    restart: unless-stopped
+
+networks:
+  vpn_network:
+    driver: bridge

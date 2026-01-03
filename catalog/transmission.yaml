@@ -1,0 +1,36 @@
+id: transmission
+name: Transmission
+description: Lightweight torrent client
+requires: ["vpn"]
+disabled_by_default: false
+fields:
+  - key: TZ
+    label: Timezone
+    default: "Europe/London"
+  - key: PUID
+    label: User ID (PUID)
+    default: "1000"
+  - key: PGID
+    label: Group ID (PGID)
+    default: "1000"
+  - key: CONFIG_DIR
+    label: Config root directory
+    default: "/home/pi/docker"
+  - key: DOWNLOADS_DIR
+    label: Downloads directory
+    default: "/mnt/downloads"
+service:
+  image: linuxserver/transmission:latest
+  container_name: transmission
+  network_mode: "service:vpn"
+  environment:
+    - TZ={{TZ}}
+    - PUID={{PUID}}
+    - PGID={{PGID}}
+  volumes:
+    - "{{CONFIG_DIR}}/transmission:/config"
+    - "{{DOWNLOADS_DIR}}:/downloads"
+  restart: unless-stopped
+  depends_on:
+    vpn:
+      condition: service_healthy

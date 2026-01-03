@@ -1,0 +1,45 @@
+id: audiobookrequest
+name: Audiobook Request
+description: Request portal for audiobooks and ebooks
+requires: []
+disabled_by_default: false
+fields:
+  - key: PORT
+    label: Web UI port
+    default: "9001"
+  - key: CONFIG_DIR
+    label: Config root directory
+    default: "/home/pi/docker"
+  - key: SEEDBOX_DIR
+    label: Seedbox downloads directory
+    default: "/mnt/seedbox"
+  - key: PROCESSING_DIR
+    label: Processing directory
+    default: "/home/pi/docker/audiobookrequest/processing"
+  - key: STORAGE_DIR
+    label: Storage mount
+    default: "/mnt/storage"
+  - key: ABR_BASE_URL
+    label: Base URL (optional)
+    default: ""
+    required: false
+service:
+  image: ghcr.io/brownster/audiobookrequest:latest
+  container_name: audiobookrequest
+  restart: unless-stopped
+  ports:
+    - "{{PORT}}:8000"
+  environment:
+    - ABR_APP__PORT=8000
+    - ABR_APP__BASE_URL={{ABR_BASE_URL}}
+    - ABR_APP__DOWNLOAD_DIR=/audiobooks
+    - ABR_APP__BOOK_DIR=/books
+    - ABR_APP__CONFIG_DIR=/config
+    - ABR_INDEXERS__MYANONAMOUSE_DOWNLOAD_CLIENT=qbittorrent
+  volumes:
+    - "{{CONFIG_DIR}}/audiobookrequest/config:/config"
+    - "{{CONFIG_DIR}}/audiobookrequest/database:/config/database"
+    - "{{SEEDBOX_DIR}}:/downloads"
+    - "{{PROCESSING_DIR}}:/processing"
+    - "{{STORAGE_DIR}}/audiobooks:/audiobooks"
+    - "{{STORAGE_DIR}}/books:/books"

@@ -1,0 +1,23 @@
+id: watchtower
+name: Watchtower
+description: Container auto-updater
+requires: []
+disabled_by_default: true
+fields:
+  - key: INCLUDE_LIST
+    label: Include list (comma-separated)
+    default: ""
+    required: false
+  - key: POLL_INTERVAL
+    label: Poll interval (seconds)
+    default: "3600"
+service:
+  image: containrrr/watchtower:latest
+  container_name: watchtower
+  volumes:
+    - /var/run/docker.sock:/var/run/docker.sock
+  environment:
+    - WATCHTOWER_CLEANUP=true
+    - WATCHTOWER_POLL_INTERVAL={{POLL_INTERVAL}}
+    - WATCHTOWER_INCLUDE={{INCLUDE_LIST}}
+  restart: unless-stopped

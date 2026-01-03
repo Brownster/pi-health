@@ -1,0 +1,48 @@
+id: navidrome
+name: Navidrome
+description: Music server
+requires: []
+disabled_by_default: false
+fields:
+  - key: TZ
+    label: Timezone
+    default: "Europe/London"
+  - key: PUID
+    label: User ID (PUID)
+    default: "1000"
+  - key: PGID
+    label: Group ID (PGID)
+    default: "1000"
+  - key: CONFIG_DIR
+    label: Config root directory
+    default: "/home/pi/docker"
+  - key: STORAGE_DIR
+    label: Storage mount
+    default: "/mnt/storage"
+  - key: PORT
+    label: Web UI port
+    default: "4533"
+  - key: LASTFM_APIKEY
+    label: Last.fm API key (optional)
+    default: ""
+    required: false
+  - key: LASTFM_SECRET
+    label: Last.fm secret (optional)
+    default: ""
+    required: false
+service:
+  image: deluan/navidrome:latest
+  container_name: navidrome
+  network_mode: bridge
+  environment:
+    - TZ={{TZ}}
+    - PUID={{PUID}}
+    - PGID={{PGID}}
+    - ND_LASTFM_APIKEY={{LASTFM_APIKEY}}
+    - ND_LASTFM_SECRET={{LASTFM_SECRET}}
+  volumes:
+    - "{{CONFIG_DIR}}/navidrome:/data"
+    - "{{STORAGE_DIR}}/music:/music:ro"
+  ports:
+    - "{{PORT}}:4533"
+  restart: unless-stopped

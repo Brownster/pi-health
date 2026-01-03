@@ -1,0 +1,53 @@
+id: yt-to-jellyfin
+name: YT to Jellyfin
+description: YouTube ingest with Jellyfin integration
+requires: []
+disabled_by_default: false
+fields:
+  - key: CONFIG_DIR
+    label: Config directory
+    default: "/home/pi/docker"
+  - key: STORAGE_DIR
+    label: Storage mount
+    default: "/mnt/storage"
+  - key: DOWNLOADS_DIR
+    label: Downloads mount
+    default: "/mnt/downloads"
+  - key: PORT
+    label: Web UI port
+    default: "8009"
+  - key: JELLYFIN_API_KEY
+    label: Jellyfin API key (optional)
+    default: ""
+    required: false
+service:
+  image: ghcr.io/brownster/yt-to-jellyfin:latest
+  container_name: yt-to-jellyfin
+  user: "1000:1000"
+  volumes:
+    - "{{STORAGE_DIR}}/tv:/mnt/storage/tv"
+    - "{{STORAGE_DIR}}/movies:/mnt/storage/movies"
+    - "{{STORAGE_DIR}}/music:/mnt/storage/music"
+    - "{{CONFIG_DIR}}/config:/app/config"
+    - "{{DOWNLOADS_DIR}}/transmission:/mnt/blackhole"
+  ports:
+    - "{{PORT}}:8000"
+  environment:
+    - OUTPUT_DIR=/mnt/storage/tv
+    - SONARR_BLACKHOLE_PATH=/mnt/blackhole/sonarr
+    - RADARR_BLACKHOLE_PATH=/mnt/blackhole/radarr
+    - VIDEO_QUALITY=1080
+    - USE_H265=true
+    - CRF=28
+    - CLEAN_FILENAMES=true
+    - WEB_ENABLED=true
+    - WEB_PORT=8000
+    - WEB_HOST=0.0.0.0
+    - JELLYFIN_ENABLED=true
+    - JELLYFIN_TV_PATH=/mnt/storage/tv
+    - JELLYFIN_HOST=localhost
+    - JELLYFIN_PORT=8096
+    - JELLYFIN_API_KEY={{JELLYFIN_API_KEY}}
+    - COOKIES_PATH=/app/config/cookies.txt
+  command: --web-only
+  restart: unless-stopped

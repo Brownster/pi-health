@@ -1,0 +1,123 @@
+version: "3.8"
+services:
+  jellyseerr:
+    image: fallenbagel/jellyseerr:latest
+    container_name: jellyseerr
+    network_mode: bridge
+    environment:
+      - LOG_LEVEL=debug
+      - TZ=${TZ}
+    volumes:
+      - "${HOME}/docker/jellyseerr/config:/app/config"
+    ports:
+      - 5055:5055
+    healthcheck:
+      test: wget --no-verbose --tries=1 --spider http://localhost:5055/api/v1/status || exit 1
+      start_period: 20s
+      timeout: 3s
+      interval: 15s
+      retries: 3
+    restart: unless-stopped
+
+  audiobookrequest:
+    image: ghcr.io/brownster/audiobookrequest:latest
+    container_name: audiobookrequest
+    restart: unless-stopped
+    ports:
+      - "9001:8000"
+    environment:
+      - ABR_APP__PORT=8000
+      - ABR_APP__BASE_URL=
+      - ABR_APP__DOWNLOAD_DIR=/audiobooks
+      - ABR_APP__BOOK_DIR=/books
+      - ABR_APP__CONFIG_DIR=/config
+      - ABR_INDEXERS__MYANONAMOUSE_DOWNLOAD_CLIENT=qbittorrent
+    volumes:
+      - "${HOME}/docker/audiobookrequest/config:/config"
+      - "${HOME}/docker/audiobookrequest/database:/config/database"
+      - /mnt/seedbox:/downloads
+      - "${HOME}/docker/audiobookrequest/processing:/processing"
+      - /mnt/storage/audiobooks:/audiobooks
+      - /mnt/storage/books:/books
+
+  audiobookshelf:
+    image: ghcr.io/advplyr/audiobookshelf:latest
+    container_name: audiobookshelf
+    network_mode: bridge
+    ports:
+      - 13378:80
+    volumes:
+      - /mnt/storage/audiobooks:/audiobooks
+      - /mnt/storage/podcasts:/podcasts
+      - /mnt/storage/books:/books
+      - "${HOME}/docker/audiobookshelf/config:/config"
+      - "${HOME}/docker/audiobookshelf/metadata:/metadata"
+    environment:
+      - TZ=${TZ}
+      - PUID=${PUID}
+      - PGID=${PGID}
+
+  navidrome:
+    image: deluan/navidrome:latest
+    container_name: navidrome
+    network_mode: bridge
+    environment:
+      - TZ=${TZ}
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - ND_LASTFM_APIKEY=
+      - ND_LASTFM_SECRET=
+    volumes:
+      - "${HOME}/docker/navidrome:/data"
+      - /mnt/storage/music:/music:ro
+    ports:
+      - "4533:4533"
+    restart: unless-stopped
+
+  jellyfin:
+    image: linuxserver/jellyfin:latest
+    container_name: jellyfin
+    network_mode: bridge
+    environment:
+      - TZ=${TZ}
+      - PUID=${PUID}
+      - PGID=${PGID}
+    volumes:
+      - "${HOME}/docker/jellyfin:/config"
+      - /mnt/storage:/media
+    ports:
+      - 8096:8096
+      - 8920:8920
+    restart: unless-stopped
+
+  yt-to-jellyfin:
+    image: ghcr.io/brownster/yt-to-jellyfin:latest
+    container_name: yt-to-jellyfin
+    user: "${PUID}:${PGID}"
+    volumes:
+      - /mnt/storage/tv:/mnt/storage/tv
+      - /mnt/storage/movies:/mnt/storage/movies
+      - /mnt/storage/music:/mnt/storage/music
+      - "${HOME}/docker/config:/app/config"
+      - /mnt/downloads/transmission:/mnt/blackhole
+    ports:
+      - "8009:8000"
+    environment:
+      - OUTPUT_DIR=/mnt/storage/tv
+      - SONARR_BLACKHOLE_PATH=/mnt/blackhole/sonarr
+      - RADARR_BLACKHOLE_PATH=/mnt/blackhole/radarr
+      - VIDEO_QUALITY=1080
+      - USE_H265=true
+      - CRF=28
+      - CLEAN_FILENAMES=true
+      - WEB_ENABLED=true
+      - WEB_PORT=8000
+      - WEB_HOST=0.0.0.0
+      - JELLYFIN_ENABLED=true
+      - JELLYFIN_TV_PATH=/mnt/storage/tv
+      - JELLYFIN_HOST=localhost
+      - JELLYFIN_PORT=8096
+      - JELLYFIN_API_KEY=
+      - COOKIES_PATH=/app/config/cookies.txt
+    command: --web-only
+    restart: unless-stopped

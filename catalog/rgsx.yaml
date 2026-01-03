@@ -1,0 +1,38 @@
+id: rgsx
+name: RGSX
+description: Retro game server
+requires: []
+disabled_by_default: true
+fields:
+  - key: TZ
+    label: Timezone
+    default: "Europe/London"
+  - key: PUID
+    label: User ID (PUID)
+    default: "1000"
+  - key: PGID
+    label: Group ID (PGID)
+    default: "1000"
+  - key: CONFIG_DIR
+    label: Config root directory
+    default: "/home/pi/docker"
+  - key: STORAGE_DIR
+    label: Storage mount
+    default: "/mnt/storage"
+  - key: PORT
+    label: Web UI port
+    default: "8181"
+service:
+  image: ghcr.io/brownster/rgsx-docker:latest
+  container_name: rgsx
+  network_mode: bridge
+  environment:
+    - TZ={{TZ}}
+    - PUID={{PUID}}
+    - PGID={{PGID}}
+  ports:
+    - "{{PORT}}:8080"
+  volumes:
+    - "{{CONFIG_DIR}}/rgsx/saves:/saves"
+    - "{{STORAGE_DIR}}/roms:/roms"
+  restart: unless-stopped

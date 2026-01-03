@@ -1,0 +1,32 @@
+id: prowlarr
+name: Prowlarr
+description: Indexer manager for Sonarr/Radarr
+requires: ["vpn"]
+disabled_by_default: false
+fields:
+  - key: TZ
+    label: Timezone
+    default: "Europe/London"
+  - key: PUID
+    label: User ID (PUID)
+    default: "1000"
+  - key: PGID
+    label: Group ID (PGID)
+    default: "1000"
+  - key: CONFIG_DIR
+    label: Config root directory
+    default: "/home/pi/docker"
+service:
+  image: linuxserver/prowlarr:latest
+  container_name: prowlarr
+  network_mode: "service:vpn"
+  environment:
+    - TZ={{TZ}}
+    - PUID={{PUID}}
+    - PGID={{PGID}}
+  volumes:
+    - "{{CONFIG_DIR}}/prowlarr:/config"
+  restart: unless-stopped
+  depends_on:
+    vpn:
+      condition: service_healthy

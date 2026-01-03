@@ -1,0 +1,44 @@
+id: sonarr
+name: Sonarr
+description: TV show manager and downloader
+requires: ["vpn"]
+disabled_by_default: false
+fields:
+  - key: TZ
+    label: Timezone
+    default: "Europe/London"
+  - key: PUID
+    label: User ID (PUID)
+    default: "1000"
+  - key: PGID
+    label: Group ID (PGID)
+    default: "1000"
+  - key: CONFIG_DIR
+    label: Config root directory
+    default: "/home/pi/docker"
+  - key: MEDIA_DIR
+    label: Media directory (TV shows)
+    default: "/mnt/storage/tv"
+  - key: DOWNLOADS_DIR
+    label: Downloads directory
+    default: "/mnt/downloads"
+  - key: IPLAYER_DIR
+    label: iPlayer completed directory
+    default: "/mnt/downloads/completed/transmission/iplayar"
+service:
+  image: linuxserver/sonarr:latest
+  container_name: sonarr
+  network_mode: "service:vpn"
+  environment:
+    - TZ={{TZ}}
+    - PUID={{PUID}}
+    - PGID={{PGID}}
+  volumes:
+    - "{{CONFIG_DIR}}/sonarr:/config"
+    - "{{MEDIA_DIR}}:/tv"
+    - "{{DOWNLOADS_DIR}}:/downloads"
+    - "{{IPLAYER_DIR}}:/downloads/iplayar"
+  restart: unless-stopped
+  depends_on:
+    vpn:
+      condition: service_healthy

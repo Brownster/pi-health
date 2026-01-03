@@ -1,0 +1,40 @@
+id: lidarr
+name: Lidarr
+description: Music manager and downloader
+requires: ["vpn"]
+disabled_by_default: true
+fields:
+  - key: TZ
+    label: Timezone
+    default: "Europe/London"
+  - key: PUID
+    label: User ID (PUID)
+    default: "1000"
+  - key: PGID
+    label: Group ID (PGID)
+    default: "1000"
+  - key: CONFIG_DIR
+    label: Config root directory
+    default: "/home/pi/docker"
+  - key: MEDIA_DIR
+    label: Media directory (Music)
+    default: "/mnt/storage/music"
+  - key: DOWNLOADS_DIR
+    label: Downloads directory
+    default: "/mnt/downloads"
+service:
+  image: lscr.io/linuxserver/lidarr:latest
+  container_name: lidarr
+  network_mode: "service:vpn"
+  environment:
+    - TZ={{TZ}}
+    - PUID={{PUID}}
+    - PGID={{PGID}}
+  volumes:
+    - "{{CONFIG_DIR}}/lidarr:/config"
+    - "{{MEDIA_DIR}}:/music"
+    - "{{DOWNLOADS_DIR}}:/downloads"
+  restart: unless-stopped
+  depends_on:
+    vpn:
+      condition: service_healthy

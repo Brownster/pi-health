@@ -1,0 +1,44 @@
+id: get_iplayer
+name: Get iPlayer
+description: BBC iPlayer downloader
+requires: []
+disabled_by_default: true
+fields:
+  - key: TZ
+    label: Timezone
+    default: "Europe/London"
+  - key: PUID
+    label: User ID (PUID)
+    default: "1000"
+  - key: PGID
+    label: Group ID (PGID)
+    default: "1000"
+  - key: CONFIG_DIR
+    label: Config root directory
+    default: "/home/pi/docker"
+  - key: INCOMPLETE_DIR
+    label: Incomplete downloads directory
+    default: "/mnt/downloads/getiplayer"
+  - key: COMPLETE_DIR
+    label: Completed iPlayer directory
+    default: "/mnt/downloads/completed/transmission/iplayar"
+  - key: PORT
+    label: Web UI port
+    default: "1935"
+service:
+  image: ghcr.io/thespad/get_iplayer:latest
+  container_name: get_iplayer
+  network_mode: bridge
+  environment:
+    - TZ={{TZ}}
+    - PUID={{PUID}}
+    - PGID={{PGID}}
+    - INCLUDERADIO=false
+    - ENABLEIMPORT=true
+  volumes:
+    - "{{CONFIG_DIR}}/get_iplayer/config:/config"
+    - "{{INCOMPLETE_DIR}}:/downloads/incomplete"
+    - "{{COMPLETE_DIR}}:/downloads/iplayar"
+  ports:
+    - "{{PORT}}:1935"
+  restart: unless-stopped

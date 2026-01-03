@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "enabled": true,
+  "schedule_preset": "daily_4am",
+  "excluded_stacks": [],
+  "notify_on_update": true,
+  "last_run": null,
+  "last_run_result": null
+}

@@ -1,0 +1,42 @@
+id: jellyfin
+name: Jellyfin
+description: Media server
+requires: []
+disabled_by_default: false
+fields:
+  - key: TZ
+    label: Timezone
+    default: "Europe/London"
+  - key: PUID
+    label: User ID (PUID)
+    default: "1000"
+  - key: PGID
+    label: Group ID (PGID)
+    default: "1000"
+  - key: CONFIG_DIR
+    label: Config root directory
+    default: "/home/pi/docker"
+  - key: STORAGE_DIR
+    label: Storage mount
+    default: "/mnt/storage"
+  - key: PORT
+    label: HTTP port
+    default: "8096"
+  - key: HTTPS_PORT
+    label: HTTPS port
+    default: "8920"
+service:
+  image: linuxserver/jellyfin:latest
+  container_name: jellyfin
+  network_mode: bridge
+  environment:
+    - TZ={{TZ}}
+    - PUID={{PUID}}
+    - PGID={{PGID}}
+  volumes:
+    - "{{CONFIG_DIR}}/jellyfin:/config"
+    - "{{STORAGE_DIR}}:/media"
+  ports:
+    - "{{PORT}}:8096"
+    - "{{HTTPS_PORT}}:8920"
+  restart: unless-stopped

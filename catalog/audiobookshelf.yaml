@@ -1,0 +1,40 @@
+id: audiobookshelf
+name: Audiobookshelf
+description: Audiobook server
+requires: []
+disabled_by_default: false
+fields:
+  - key: TZ
+    label: Timezone
+    default: "Europe/London"
+  - key: PUID
+    label: User ID (PUID)
+    default: "1000"
+  - key: PGID
+    label: Group ID (PGID)
+    default: "1000"
+  - key: CONFIG_DIR
+    label: Config root directory
+    default: "/home/pi/docker"
+  - key: STORAGE_DIR
+    label: Storage mount
+    default: "/mnt/storage"
+  - key: PORT
+    label: Web UI port
+    default: "13378"
+service:
+  image: ghcr.io/advplyr/audiobookshelf:latest
+  container_name: audiobookshelf
+  network_mode: bridge
+  ports:
+    - "{{PORT}}:80"
+  volumes:
+    - "{{STORAGE_DIR}}/audiobooks:/audiobooks"
+    - "{{STORAGE_DIR}}/podcasts:/podcasts"
+    - "{{STORAGE_DIR}}/books:/books"
+    - "{{CONFIG_DIR}}/audiobookshelf/config:/config"
+    - "{{CONFIG_DIR}}/audiobookshelf/metadata:/metadata"
+  environment:
+    - TZ={{TZ}}
+    - PUID={{PUID}}
+    - PGID={{PGID}}

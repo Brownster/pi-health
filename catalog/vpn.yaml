@@ -1,0 +1,45 @@
+id: vpn
+name: Gluetun VPN
+description: VPN gateway for dependent services (required for torrent/usenet apps)
+requires: []
+disabled_by_default: false
+fields:
+  - key: CONFIG_DIR
+    label: Config root directory
+    default: "/home/pi/docker"
+  - key: VPN_ENV_FILE
+    label: VPN env file path
+    default: "/home/pi/docker/vpn/.env"
+service:
+  image: qmcgaw/gluetun:latest
+  container_name: vpn
+  cap_add:
+    - NET_ADMIN
+  devices:
+    - /dev/net/tun:/dev/net/tun
+  volumes:
+    - "{{CONFIG_DIR}}/vpn:/gluetun"
+  env_file:
+    - "{{VPN_ENV_FILE}}"
+  healthcheck:
+    test: ["CMD-SHELL", "test -e /dev/net/tun && ip a show tun0 | grep -q inet"]
+    interval: 30s
+    timeout: 10s
+    retries: 3
+    start_period: 30s
+  restart: unless-stopped
+  ports:
+    - "9117:9117"
+    - "8989:8989"
+    - "7878:7878"
+    - "9091:9091"
+    - "6789:6789"
+    - "6500:6500"
+    - "8686:8686"
+    - "8080:8080"
+    - "51413:51413"
+  networks:
+    - vpn_network
+networks:
+  vpn_network:
+    driver: bridge

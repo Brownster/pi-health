@@ -1,0 +1,36 @@
+id: jackett
+name: Jackett
+description: Torrent indexer proxy
+requires: ["vpn"]
+disabled_by_default: false
+fields:
+  - key: TZ
+    label: Timezone
+    default: "Europe/London"
+  - key: PUID
+    label: User ID (PUID)
+    default: "1000"
+  - key: PGID
+    label: Group ID (PGID)
+    default: "1000"
+  - key: CONFIG_DIR
+    label: Config root directory
+    default: "/home/pi/docker"
+  - key: DOWNLOADS_DIR
+    label: Downloads directory
+    default: "/mnt/downloads"
+service:
+  image: linuxserver/jackett:latest
+  container_name: jackett
+  network_mode: "service:vpn"
+  environment:
+    - TZ={{TZ}}
+    - PUID={{PUID}}
+    - PGID={{PGID}}
+  volumes:
+    - "{{CONFIG_DIR}}/jackett:/config"
+    - "{{DOWNLOADS_DIR}}:/downloads/completed/"
+  restart: unless-stopped
+  depends_on:
+    vpn:
+      condition: service_healthy

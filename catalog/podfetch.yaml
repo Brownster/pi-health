@@ -1,0 +1,25 @@
+id: podfetch
+name: Podfetch
+description: Podcast manager
+requires: []
+disabled_by_default: true
+fields:
+  - key: PORT
+    label: Web UI port
+    default: "80"
+service:
+  image: samuel19982/podfetch:latest
+  user: "0:0"
+  network_mode: bridge
+  ports:
+    - "{{PORT}}:8000"
+  volumes:
+    - podfetch-podcasts:/app/podcasts
+    - podfetch-db:/app/db
+  environment:
+    - POLLING_INTERVAL=60
+    - SERVER_URL=http://localhost:{{PORT}}
+    - DATABASE_URL=sqlite:///app/db/podcast.db
+volumes:
+  podfetch-podcasts: {}
+  podfetch-db: {}

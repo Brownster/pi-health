@@ -1,0 +1,41 @@
+id: pi-health-dashboard
+name: Pi-Health Dashboard
+description: Pi-Health container (optional if running bare metal)
+requires: []
+disabled_by_default: true
+fields:
+  - key: TZ
+    label: Timezone
+    default: "Europe/London"
+  - key: PORT
+    label: Host port
+    default: "8100"
+  - key: CONFIG_DIR
+    label: Config directory
+    default: "/home/pi/docker"
+  - key: STORAGE_DIR
+    label: Storage mount
+    default: "/mnt/storage"
+  - key: DOWNLOADS_DIR
+    label: Downloads mount
+    default: "/mnt/downloads"
+service:
+  image: brownster/pi-health:latest
+  container_name: pi-health-dashboard
+  environment:
+    - TZ={{TZ}}
+    - DISK_PATH={{STORAGE_DIR}}
+    - DISK_PATH_2={{DOWNLOADS_DIR}}
+    - DOCKER_COMPOSE_PATH=/config/docker-compose.yml
+    - ENV_FILE_PATH=/config/.env
+    - BACKUP_DIR=/config/backups
+  ports:
+    - "{{PORT}}:8080"
+  volumes:
+    - /proc:/host_proc:ro
+    - /sys:/host_sys:ro
+    - /var/run/docker.sock:/var/run/docker.sock
+    - "{{CONFIG_DIR}}:/config"
+    - "{{STORAGE_DIR}}:{{STORAGE_DIR}}"
+    - "{{DOWNLOADS_DIR}}:{{DOWNLOADS_DIR}}"
+  restart: unless-stopped
