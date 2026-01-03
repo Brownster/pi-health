@@ -49,6 +49,10 @@ DEVICE_PATTERN = re.compile(r'^/dev/[a-zA-Z0-9_-]+$')
 UUID_PATTERN = re.compile(r'^[a-fA-F0-9-]+$')
 BACKUP_DEST_PATTERN = re.compile(r'^/(mnt|backups)(/[a-zA-Z0-9._-]+)*$')
 BACKUP_SOURCE_ALLOWED = ('/home/', '/opt/', '/etc/pi-health.env')
+SEEDBOX_MOUNT_POINT = '/mnt/seedbox'
+SEEDBOX_PASSFILE = '/etc/sshfs/seedbox.pass'
+SEEDBOX_MOUNT_UNIT = 'mnt-seedbox.mount'
+SEEDBOX_AUTOMOUNT_UNIT = 'mnt-seedbox.automount'
 
 
 def run_command(cmd, timeout=30):
@@ -695,6 +699,84 @@ def cmd_backup_restore(params):
     return {'success': True, 'archive': archive_path}
 
 
+def cmd_seedbox_configure(params):
+    """Configure the seedbox SSHFS mount."""
+    host = params.get('host', '').strip()
+    username = params.get('username', '').strip()
+    password = params.get('password', '')
+    remote_path = params.get('remote_path', '').strip()
+    port = str(params.get('port', '22')).strip()
+
+    if not host or not username or not remote_path:
+        return {'success': False, 'error': 'host, username, and remote_path required'}
+    if not remote_path.startswith('/'):
+        return {'success': False, 'error': 'remote_path must be absolute'}
+    if '..' in remote_path:
+        return {'success': False, 'error': 'remote_path invalid'}
+    if not port.isdigit() or not (1 <= int(port) <= 65535):
+        return {'success': False, 'error': 'Invalid port'}
+    if not password:
+        return {'success': False, 'error': 'Password required'}
+
+    os.makedirs(os.path.dirname(SEEDBOX_PASSFILE), exist_ok=True)
+    with open(SEEDBOX_PASSFILE, 'w') as f:
+        f.write(password)
+    os.chmod(SEEDBOX_PASSFILE, 0o600)
+
+    os.makedirs(SEEDBOX_MOUNT_POINT, exist_ok=True)
+
+    mount_unit = f"""[Unit]
+Description=Seedbox SFTP Mount
+After=network-online.target
+Wants=network-online.target
+
+[Mount]
+What=sshfs#{username}@{host}:{remote_path}
+Where={SEEDBOX_MOUNT_POINT}
+Type=fuse.sshfs
+Options=_netdev,users,allow_other,reconnect,ServerAliveInterval=15,ServerAliveCountMax=3,StrictHostKeyChecking=accept-new,ssh_command=sshpass -f {SEEDBOX_PASSFILE} ssh,port={port}
+TimeoutSec=30
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+    automount_unit = f"""[Unit]
+Description=Seedbox SFTP Automount
+After=network-online.target
+Wants=network-online.target
+
+[Automount]
+Where={SEEDBOX_MOUNT_POINT}
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+    try:
+        with open(f"/etc/systemd/system/{SEEDBOX_MOUNT_UNIT}", 'w') as f:
+            f.write(mount_unit)
+        with open(f"/etc/systemd/system/{SEEDBOX_AUTOMOUNT_UNIT}", 'w') as f:
+            f.write(automount_unit)
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
+
+    run_command(['systemctl', 'daemon-reload'])
+    enable_result = run_command(['systemctl', 'enable', '--now', SEEDBOX_AUTOMOUNT_UNIT])
+    if enable_result.get('returncode') != 0:
+        return {'success': False, 'error': enable_result.get('stderr', 'Failed to enable automount')}
+
+    return {'success': True}
+
+
+def cmd_seedbox_disable(params):
+    """Disable the seedbox SSHFS mount."""
+    run_command(['systemctl', 'disable', '--now', SEEDBOX_AUTOMOUNT_UNIT])
+    run_command(['systemctl', 'stop', SEEDBOX_MOUNT_UNIT])
+    run_command(['systemctl', 'daemon-reload'])
+    return {'success': True}
+
+
 # Command whitelist
 COMMANDS = {
     'lsblk': cmd_lsblk,
@@ -720,6 +802,8 @@ COMMANDS = {
     'write_vpn_env': cmd_write_vpn_env,
     'backup_create': cmd_backup_create,
     'backup_restore': cmd_backup_restore,
+    'seedbox_configure': cmd_seedbox_configure,
+    'seedbox_disable': cmd_seedbox_disable,
     'ping': lambda p: {'success': True, 'message': 'pong'}
 }
 

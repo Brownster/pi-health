@@ -19,6 +19,7 @@ ENABLE_VPN="${ENABLE_VPN:-0}"
 TAILSCALE_AUTH_KEY="${TAILSCALE_AUTH_KEY:-}"
 PIA_USERNAME="${PIA_USERNAME:-}"
 PIA_PASSWORD="${PIA_PASSWORD:-}"
+INSTALL_SSHFS="${INSTALL_SSHFS:-auto}"
 
 if [[ $EUID -ne 0 ]]; then
   echo "Please run as root (sudo)." >&2
@@ -98,6 +99,10 @@ fi
 
 if prompt_install "smartmontools" INSTALL_SMARTMONTOOLS "command -v smartctl >/dev/null 2>&1"; then
   apt-get install -y smartmontools
+fi
+
+if prompt_install "SSHFS (seedbox mounts)" INSTALL_SSHFS "command -v sshfs >/dev/null 2>&1"; then
+  apt-get install -y sshfs sshpass
 fi
 
 if [[ "$ENABLE_VPN" == "1" ]]; then
@@ -197,7 +202,7 @@ RestartSec=5
 NoNewPrivileges=false
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/etc/fstab /mnt /run/pihealth /var/log
+ReadWritePaths=/etc/fstab /etc/systemd/system /etc/sshfs /mnt /run/pihealth /var/log
 ReadWritePaths=/backups
 PrivateTmp=true
 

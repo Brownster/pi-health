@@ -59,6 +59,45 @@
         .mounted { color: #34d399; }
         .unmounted { color: #fbbf24; }
         .missing { color: #f87171; }
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 50px;
+            height: 26px;
+        }
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #4a5568;
+            transition: 0.3s;
+            border-radius: 26px;
+        }
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 20px;
+            width: 20px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: 0.3s;
+            border-radius: 50%;
+        }
+        input:checked + .toggle-slider {
+            background-color: #38a169;
+        }
+        input:checked + .toggle-slider:before {
+            transform: translateX(24px);
+        }
     </style>
 </head>
 <body class="bg-gray-900 text-blue-100 font-sans min-h-screen">
@@ -143,6 +182,50 @@
                     <label class="block text-sm text-gray-300 mb-1">Docker Config</label>
                     <input id="path-config" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm" placeholder="/home/pi/docker">
                 </div>
+            </div>
+        </section>
+
+        <!-- Remote Seedbox -->
+        <section class="mb-8 bg-gray-800 rounded-lg p-6 border border-purple-900/40">
+            <div class="flex justify-between items-center mb-4">
+                <div>
+                    <h3 class="text-lg font-semibold">Remote Seedbox (SFTP)</h3>
+                    <p class="text-gray-400 text-sm">Mount at <span class="text-blue-200">/mnt/seedbox</span> for Audiobookrequest downloads.</p>
+                </div>
+                <span id="seedbox-status" class="px-3 py-1 rounded-full text-sm bg-gray-600">Disabled</span>
+            </div>
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm text-gray-300 mb-1">Host</label>
+                    <input id="seedbox-host" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm" placeholder="seedbox.example.com">
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-300 mb-1">Port</label>
+                    <input id="seedbox-port" type="number" min="1" max="65535" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm" placeholder="22">
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-300 mb-1">Username</label>
+                    <input id="seedbox-user" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm" placeholder="seeduser">
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-300 mb-1">Remote Path</label>
+                    <input id="seedbox-path" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm" placeholder="/downloads">
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-300 mb-1">Password</label>
+                    <input id="seedbox-password" type="password" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm" placeholder="Required to enable">
+                </div>
+                <div class="flex items-end">
+                    <label class="toggle-switch mr-3">
+                        <input type="checkbox" id="seedbox-enabled">
+                        <span class="toggle-slider"></span>
+                    </label>
+                    <span class="text-sm text-gray-300">Enable mount</span>
+                </div>
+            </div>
+            <div class="flex flex-wrap gap-3 mt-4">
+                <button onclick="saveSeedbox()" class="coraline-button text-blue-100 py-2 px-4 rounded text-sm">Save Seedbox Mount</button>
+                <span id="seedbox-mounted" class="text-sm text-gray-400 self-center"></span>
             </div>
         </section>
 
@@ -438,6 +521,65 @@
             }
         }
 
+        async function loadSeedbox() {
+            try {
+                const response = await fetch('/api/disks/seedbox');
+                if (!response.ok) return;
+                const data = await response.json();
+                const config = data.config || {};
+                document.getElementById('seedbox-host').value = config.host || '';
+                document.getElementById('seedbox-user').value = config.username || '';
+                document.getElementById('seedbox-path').value = config.remote_path || '';
+                document.getElementById('seedbox-port').value = config.port || 22;
+                document.getElementById('seedbox-enabled').checked = !!config.enabled;
+
+                const badge = document.getElementById('seedbox-status');
+                if (config.enabled) {
+                    badge.textContent = 'Enabled';
+                    badge.className = 'px-3 py-1 rounded-full text-sm bg-green-600';
+                } else {
+                    badge.textContent = 'Disabled';
+                    badge.className = 'px-3 py-1 rounded-full text-sm bg-gray-600';
+                }
+
+                document.getElementById('seedbox-mounted').textContent = data.mounted ? 'Mounted' : 'Not mounted';
+            } catch (error) {
+                // ignore
+            }
+        }
+
+        async function saveSeedbox() {
+            const payload = {
+                enabled: document.getElementById('seedbox-enabled').checked,
+                host: document.getElementById('seedbox-host').value.trim(),
+                username: document.getElementById('seedbox-user').value.trim(),
+                remote_path: document.getElementById('seedbox-path').value.trim(),
+                port: document.getElementById('seedbox-port').value.trim(),
+                password: document.getElementById('seedbox-password').value
+            };
+
+            if (payload.enabled) {
+                if (!confirm('Enable seedbox mount? This will overwrite the /mnt/seedbox config.')) {
+                    return;
+                }
+            }
+
+            try {
+                const response = await fetch('/api/disks/seedbox', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error || 'Seedbox update failed');
+                document.getElementById('seedbox-password').value = '';
+                showNotification('Seedbox mount updated', 'success');
+                loadSeedbox();
+            } catch (error) {
+                showNotification(`Error: ${error.message}`, 'error');
+            }
+        }
+
         let currentMount = {};
 
         function openMountModal(device, uuid, fstype, suggestedMount = '') {
@@ -515,6 +657,7 @@
         document.addEventListener('DOMContentLoaded', () => {
             loadMediaPaths();
             loadDisks();
+            loadSeedbox();
         });
     </script>
 </body>

@@ -20,6 +20,12 @@ MEDIA_PATHS_CONFIG = os.path.join(
     'media_paths.json'
 )
 
+SEEDBOX_CONFIG = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    'config',
+    'seedbox_mount.json'
+)
+
 # Default media paths
 DEFAULT_MEDIA_PATHS = {
     'downloads': '/mnt/downloads',
@@ -31,6 +37,7 @@ DEFAULT_MEDIA_PATHS = {
 DOCKER_COMPOSE_PATH = os.getenv('DOCKER_COMPOSE_PATH', './docker-compose.yml')
 STARTUP_SERVICE_NAME = 'docker-compose-start.service'
 STARTUP_SCRIPT_PATH = '/usr/local/bin/check_mount_and_start.sh'
+SEEDBOX_MOUNT_POINT = '/mnt/seedbox'
 
 
 
@@ -55,6 +62,38 @@ def save_media_paths(paths):
     os.makedirs(os.path.dirname(MEDIA_PATHS_CONFIG), exist_ok=True)
     with open(MEDIA_PATHS_CONFIG, 'w') as f:
         json.dump(paths, f, indent=2)
+
+
+def load_seedbox_config():
+    """Load seedbox mount configuration."""
+    try:
+        if os.path.exists(SEEDBOX_CONFIG):
+            with open(SEEDBOX_CONFIG, 'r') as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {
+        'enabled': False,
+        'host': '',
+        'username': '',
+        'port': 22,
+        'remote_path': '',
+        'mount_point': SEEDBOX_MOUNT_POINT
+    }
+
+
+def save_seedbox_config(config):
+    """Save seedbox mount configuration."""
+    os.makedirs(os.path.dirname(SEEDBOX_CONFIG), exist_ok=True)
+    with open(SEEDBOX_CONFIG, 'w') as f:
+        json.dump(config, f, indent=2)
+
+
+def _seedbox_is_mounted():
+    try:
+        return os.path.ismount(SEEDBOX_MOUNT_POINT)
+    except Exception:
+        return False
 
 
 def _build_startup_script(paths):
@@ -202,6 +241,77 @@ def get_disk_inventory():
             result['disks'].append(disk)
 
     return result
+
+
+@disk_manager.route('/api/disks/seedbox', methods=['GET'])
+@login_required
+def api_seedbox_get():
+    config = load_seedbox_config()
+    return jsonify({
+        'config': config,
+        'mounted': _seedbox_is_mounted()
+    })
+
+
+@disk_manager.route('/api/disks/seedbox', methods=['POST'])
+@login_required
+def api_seedbox_set():
+    if not helper_available():
+        return jsonify({'error': 'Helper service unavailable'}), 503
+
+    data = request.get_json() or {}
+    enabled = bool(data.get('enabled', False))
+    host = str(data.get('host', '')).strip()
+    username = str(data.get('username', '')).strip()
+    remote_path = str(data.get('remote_path', '')).strip()
+    port = data.get('port', 22)
+    password = data.get('password', '')
+
+    try:
+        port = int(port)
+    except (TypeError, ValueError):
+        return jsonify({'error': 'Invalid port'}), 400
+
+    if enabled:
+        if not host or not username or not remote_path:
+            return jsonify({'error': 'host, username, and remote_path required'}), 400
+        if not remote_path.startswith('/') or '..' in remote_path:
+            return jsonify({'error': 'Invalid remote_path'}), 400
+        if not password:
+            return jsonify({'error': 'Password required'}), 400
+        if port < 1 or port > 65535:
+            return jsonify({'error': 'Invalid port'}), 400
+
+        try:
+            result = helper_call('seedbox_configure', {
+                'host': host,
+                'username': username,
+                'password': password,
+                'remote_path': remote_path,
+                'port': port
+            })
+            if not result.get('success'):
+                return jsonify({'error': result.get('error', 'Failed to configure seedbox')}), 500
+        except HelperError as exc:
+            return jsonify({'error': str(exc)}), 503
+    else:
+        try:
+            result = helper_call('seedbox_disable', {})
+            if not result.get('success'):
+                return jsonify({'error': result.get('error', 'Failed to disable seedbox')}), 500
+        except HelperError as exc:
+            return jsonify({'error': str(exc)}), 503
+
+    config = {
+        'enabled': enabled,
+        'host': host,
+        'username': username,
+        'port': port,
+        'remote_path': remote_path,
+        'mount_point': SEEDBOX_MOUNT_POINT
+    }
+    save_seedbox_config(config)
+    return jsonify({'status': 'ok', 'config': config, 'mounted': _seedbox_is_mounted()})
 
 
 def _process_device(device, blkid_map, mounts_map, fstab_map, fstab_uuid_map, df_map, parent=None):

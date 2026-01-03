@@ -173,6 +173,18 @@ class TestMediaPaths:
                               content_type='application/json')
         assert response.status_code == 401
 
+    def test_seedbox_requires_auth(self, client):
+        """Test that /api/disks/seedbox GET requires authentication."""
+        response = client.get('/api/disks/seedbox')
+        assert response.status_code == 401
+
+    def test_seedbox_set_requires_auth(self, client):
+        """Test that /api/disks/seedbox POST requires authentication."""
+        response = client.post('/api/disks/seedbox',
+                              data=json.dumps({'enabled': True}),
+                              content_type='application/json')
+        assert response.status_code == 401
+
     def test_startup_service_requires_auth(self, client):
         """Test that /api/disks/startup-service requires authentication."""
         response = client.post('/api/disks/startup-service')
@@ -217,6 +229,23 @@ class TestMediaPaths:
             assert 'error' in data
         finally:
             disk_manager.MEDIA_PATHS_CONFIG = original_config
+
+    def test_seedbox_unavailable(self, authenticated_client, temp_config_dir):
+        """Test seedbox returns 503 when helper unavailable."""
+        import disk_manager
+        original_config = disk_manager.SEEDBOX_CONFIG
+        original_helper_available = disk_manager.helper_available
+        disk_manager.SEEDBOX_CONFIG = os.path.join(temp_config_dir, 'seedbox_mount.json')
+
+        try:
+            disk_manager.helper_available = lambda: False
+            response = authenticated_client.post('/api/disks/seedbox',
+                                                 data=json.dumps({'enabled': True, 'host': 'x', 'username': 'u', 'remote_path': '/data', 'password': 'p'}),
+                                                 content_type='application/json')
+            assert response.status_code == 503
+        finally:
+            disk_manager.SEEDBOX_CONFIG = original_config
+            disk_manager.helper_available = original_helper_available
 
     def test_build_startup_script_includes_mounts(self):
         """Test startup script includes mount points."""
