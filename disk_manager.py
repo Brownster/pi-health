@@ -28,6 +28,10 @@ DEFAULT_MEDIA_PATHS = {
     'config': '/home/pi/docker'
 }
 
+DOCKER_COMPOSE_PATH = os.getenv('DOCKER_COMPOSE_PATH', './docker-compose.yml')
+STARTUP_SERVICE_NAME = 'docker-compose-start.service'
+STARTUP_SCRIPT_PATH = '/usr/local/bin/check_mount_and_start.sh'
+
 
 
 
@@ -51,6 +55,83 @@ def save_media_paths(paths):
     os.makedirs(os.path.dirname(MEDIA_PATHS_CONFIG), exist_ok=True)
     with open(MEDIA_PATHS_CONFIG, 'w') as f:
         json.dump(paths, f, indent=2)
+
+
+def _build_startup_script(paths):
+    mount_points = []
+    for key in ('storage', 'downloads', 'backup'):
+        value = paths.get(key)
+        if isinstance(value, str) and value.startswith('/mnt/'):
+            mount_points.append(value)
+
+    compose_path = os.path.abspath(DOCKER_COMPOSE_PATH)
+    mount_checks = "\n".join([f'  "{mp}"' for mp in mount_points])
+    mounts_array = f"({mount_checks})" if mount_points else "()"
+
+    script = f"""#!/bin/bash
+MOUNT_POINTS={mounts_array}
+DOCKER_COMPOSE_FILE="{compose_path}"
+
+if [ "${{#MOUNT_POINTS[@]}}" -gt 0 ]; then
+  while true; do
+    missing=0
+    for m in "${{MOUNT_POINTS[@]}}"; do
+      if ! mountpoint -q "$m"; then
+        missing=1
+      fi
+    done
+    if [ "$missing" -eq 0 ]; then
+      break
+    fi
+    sleep 5
+  done
+fi
+
+/usr/bin/docker compose -f "$DOCKER_COMPOSE_FILE" up -d
+"""
+    return script
+
+
+def _build_startup_service():
+    return """[Unit]
+Description=Ensure drives are mounted and start Docker containers
+Requires=local-fs.target
+After=local-fs.target docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/check_mount_and_start.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+
+def update_startup_service(paths):
+    if not helper_available():
+        return {'success': False, 'error': 'Helper service unavailable'}
+
+    script_content = _build_startup_script(paths)
+    service_content = _build_startup_service()
+
+    result = helper_call('write_startup_script', {
+        'path': STARTUP_SCRIPT_PATH,
+        'content': script_content
+    })
+    if not result.get('success'):
+        return result
+
+    result = helper_call('write_systemd_unit', {
+        'unit_name': STARTUP_SERVICE_NAME,
+        'content': service_content
+    })
+    if not result.get('success'):
+        return result
+
+    helper_call('systemctl', {'action': 'daemon-reload'})
+    helper_call('systemctl', {'action': 'enable', 'unit': STARTUP_SERVICE_NAME})
+    return {'success': True}
 
 
 def get_disk_inventory():
@@ -372,9 +453,24 @@ def api_set_media_paths():
 
     try:
         save_media_paths(paths)
-        return jsonify({'status': 'updated', 'paths': paths})
+        startup_result = update_startup_service(paths)
+        response = {'status': 'updated', 'paths': paths}
+        if not startup_result.get('success'):
+            response['startup_warning'] = startup_result.get('error', 'Startup service not updated')
+        return jsonify(response)
     except Exception as e:
         return jsonify({'error': f'Failed to save paths: {str(e)}'}), 500
+
+
+@disk_manager.route('/api/disks/startup-service', methods=['POST'])
+@login_required
+def api_regenerate_startup_service():
+    """Regenerate mount-wait startup service."""
+    paths = load_media_paths()
+    result = update_startup_service(paths)
+    if result.get('success'):
+        return jsonify({'status': 'updated'})
+    return jsonify({'error': result.get('error', 'Failed to update startup service')}), 503
 
 
 @disk_manager.route('/api/disks/suggested-mounts', methods=['GET'])

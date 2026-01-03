@@ -173,6 +173,11 @@ class TestMediaPaths:
                               content_type='application/json')
         assert response.status_code == 401
 
+    def test_startup_service_requires_auth(self, client):
+        """Test that /api/disks/startup-service requires authentication."""
+        response = client.post('/api/disks/startup-service')
+        assert response.status_code == 401
+
     def test_set_media_paths_with_auth(self, authenticated_client, temp_config_dir):
         """Test POST /api/disks/media-paths updates paths."""
         import disk_manager
@@ -196,6 +201,20 @@ class TestMediaPaths:
             with open(disk_manager.MEDIA_PATHS_CONFIG, 'r') as f:
                 saved = json.load(f)
             assert saved['downloads'] == '/mnt/downloads-new'
+        finally:
+            disk_manager.MEDIA_PATHS_CONFIG = original_config
+
+    def test_startup_service_unavailable(self, authenticated_client, temp_config_dir):
+        """Test startup service returns 503 when helper unavailable."""
+        import disk_manager
+        original_config = disk_manager.MEDIA_PATHS_CONFIG
+        disk_manager.MEDIA_PATHS_CONFIG = os.path.join(temp_config_dir, 'media_paths.json')
+
+        try:
+            response = authenticated_client.post('/api/disks/startup-service')
+            assert response.status_code == 503
+            data = json.loads(response.data)
+            assert 'error' in data
         finally:
             disk_manager.MEDIA_PATHS_CONFIG = original_config
 

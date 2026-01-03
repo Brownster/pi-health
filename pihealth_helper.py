@@ -434,7 +434,8 @@ def cmd_write_systemd_unit(params):
         'pihealth-snapraid-sync.service',
         'pihealth-snapraid-sync.timer',
         'pihealth-snapraid-scrub.service',
-        'pihealth-snapraid-scrub.timer'
+        'pihealth-snapraid-scrub.timer',
+        'docker-compose-start.service'
     }
 
     if unit_name not in allowed_units:
@@ -457,6 +458,30 @@ def cmd_write_systemd_unit(params):
         return {'success': False, 'error': str(e)}
 
 
+def cmd_write_startup_script(params):
+    """Write the mount-and-start script."""
+    path = params.get('path', '/usr/local/bin/check_mount_and_start.sh')
+    content = params.get('content', '')
+
+    if path != '/usr/local/bin/check_mount_and_start.sh':
+        return {'success': False, 'error': 'Path not allowed'}
+
+    try:
+        import shutil
+        from datetime import datetime
+        if os.path.exists(path):
+            backup = f"{path}.backup.{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            shutil.copy(path, backup)
+
+        with open(path, 'w') as f:
+            f.write(content)
+        os.chmod(path, 0o755)
+
+        return {'success': True, 'path': path}
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
+
+
 def cmd_systemctl(params):
     """Run systemctl commands for SnapRAID timers."""
     action = params.get('action', '')
@@ -465,7 +490,8 @@ def cmd_systemctl(params):
     allowed_actions = {'daemon-reload', 'enable', 'disable', 'start', 'stop'}
     allowed_units = {
         'pihealth-snapraid-sync.timer',
-        'pihealth-snapraid-scrub.timer'
+        'pihealth-snapraid-scrub.timer',
+        'docker-compose-start.service'
     }
 
     if action not in allowed_actions:
@@ -506,6 +532,7 @@ COMMANDS = {
     'mergerfs_umount': cmd_mergerfs_umount,
     'write_snapraid_conf': cmd_write_snapraid_conf,
     'write_systemd_unit': cmd_write_systemd_unit,
+    'write_startup_script': cmd_write_startup_script,
     'systemctl': cmd_systemctl,
     'ping': lambda p: {'success': True, 'message': 'pong'}
 }

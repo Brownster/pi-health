@@ -122,7 +122,10 @@
                     <h3 class="text-lg font-semibold">Media Paths</h3>
                     <p class="text-gray-400 text-sm">Default paths used by app templates</p>
                 </div>
-                <button onclick="saveMediaPaths()" class="coraline-button text-blue-100 py-2 px-4 rounded text-sm">Save Paths</button>
+                <div class="flex gap-2">
+                    <button onclick="saveMediaPaths()" class="coraline-button text-blue-100 py-2 px-4 rounded text-sm">Save Paths</button>
+                    <button onclick="regenerateStartupService()" class="coraline-button text-blue-100 py-2 px-4 rounded text-sm">Regenerate Startup Service</button>
+                </div>
             </div>
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div>
@@ -420,6 +423,17 @@
                 if (!response.ok) throw new Error(data.error);
                 showNotification('Media paths saved', 'success');
                 mediaPaths = data.paths;
+            } catch (error) {
+                showNotification(`Error: ${error.message}`, 'error');
+            }
+        }
+
+        async function regenerateStartupService() {
+            try {
+                const response = await fetch('/api/disks/startup-service', { method: 'POST' });
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error || 'Failed to update service');
+                showNotification('Startup service updated', 'success');
             } catch (error) {
                 showNotification(`Error: ${error.message}`, 'error');
             }
