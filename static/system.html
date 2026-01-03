@@ -87,7 +87,10 @@
                     <a href="/system.html" class="px-3 py-2 rounded-md text-white bg-blue-800 font-medium border border-blue-400">System Health</a>
                     <a href="/containers.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Containers</a>
                     <a href="/stacks.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Stacks</a>
+                    <a href="/apps.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Apps</a>
+                    <a href="/disks.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Disks</a>
                     <a href="/edit.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Edit Config</a>
+                    <a href="/settings.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Settings</a>
                 </div>
                 <div class="flex items-center space-x-3">
                     <span id="logged-in-user" class="text-blue-200 text-sm"></span>
@@ -211,6 +214,65 @@
             </div>
         </div>
 
+        <!-- Pi-Specific Metrics Section (shown only on Raspberry Pi) -->
+        <div id="pi-metrics-section" class="hidden mb-8">
+            <h2 class="text-2xl font-semibold mb-6">Raspberry Pi Metrics</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <!-- Throttling Status Card -->
+                <div class="bg-gray-800 rounded-lg shadow-lg overflow-hidden border-2 border-purple-900/30">
+                    <div class="p-6">
+                        <div class="flex justify-between items-center mb-2">
+                            <h3 class="text-xl font-semibold">Power Status</h3>
+                            <svg class="w-8 h-8" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <circle cx="12" cy="12" r="10" fill="#5f4b8b" stroke="#8a6cbd" stroke-width="1.5"/>
+                                <path stroke="#c9b6e6" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                            </svg>
+                        </div>
+                        <div id="throttle-status" class="space-y-1">
+                            <p class="text-gray-400">Loading...</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- CPU Frequency/Voltage Card -->
+                <div class="bg-gray-800 rounded-lg shadow-lg overflow-hidden border-2 border-purple-900/30">
+                    <div class="p-6">
+                        <div class="flex justify-between items-center mb-2">
+                            <h3 class="text-xl font-semibold">CPU Details</h3>
+                            <svg class="w-8 h-8" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <circle cx="12" cy="12" r="10" fill="#5f4b8b" stroke="#8a6cbd" stroke-width="1.5"/>
+                                <path stroke="#c9b6e6" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+                            </svg>
+                        </div>
+                        <div class="space-y-2">
+                            <p id="cpu-freq" class="text-xl">Frequency: <span class="text-blue-300">—</span></p>
+                            <p id="cpu-voltage" class="text-xl">Voltage: <span class="text-green-300">—</span></p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- WiFi Signal Card -->
+                <div id="wifi-card" class="bg-gray-800 rounded-lg shadow-lg overflow-hidden border-2 border-purple-900/30 hidden">
+                    <div class="p-6">
+                        <div class="flex justify-between items-center mb-2">
+                            <h3 class="text-xl font-semibold">WiFi Signal</h3>
+                            <svg class="w-8 h-8" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <circle cx="12" cy="12" r="10" fill="#5f4b8b" stroke="#8a6cbd" stroke-width="1.5"/>
+                                <path stroke="#c9b6e6" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.14 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"></path>
+                            </svg>
+                        </div>
+                        <div class="space-y-2">
+                            <p id="wifi-interface" class="text-sm text-gray-400">Interface: —</p>
+                            <p id="wifi-signal" class="text-2xl font-bold">—</p>
+                            <div class="w-full bg-gray-700 rounded-full h-4 overflow-hidden">
+                                <div id="wifi-bar" class="progress-bar bg-blue-500 h-4 rounded-full" style="width: 0%"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- System Actions Section -->
         <section id="actions" class="mt-8">
             <h2 class="text-2xl font-semibold mb-6">System Actions</h2>
@@ -299,6 +361,73 @@
             }, 3000);
         }
 
+        // Update Pi-specific metrics section
+        function updatePiMetrics(data) {
+            const piSection = document.getElementById('pi-metrics-section');
+            const throttleStatus = document.getElementById('throttle-status');
+            const cpuFreqEl = document.getElementById('cpu-freq');
+            const cpuVoltageEl = document.getElementById('cpu-voltage');
+            const wifiCard = document.getElementById('wifi-card');
+            const wifiInterface = document.getElementById('wifi-interface');
+            const wifiSignal = document.getElementById('wifi-signal');
+            const wifiBar = document.getElementById('wifi-bar');
+
+            // Show/hide Pi section based on detection
+            if (data.is_raspberry_pi) {
+                piSection.classList.remove('hidden');
+            } else {
+                piSection.classList.add('hidden');
+                return;
+            }
+
+            // Update throttling status
+            if (data.throttling) {
+                const t = data.throttling;
+                let statusHtml = '';
+
+                if (t.has_issues) {
+                    if (t.under_voltage_now) statusHtml += '<p class="text-red-400">⚠️ Under-voltage detected!</p>';
+                    if (t.throttled_now) statusHtml += '<p class="text-red-400">⚠️ CPU throttled!</p>';
+                    if (t.freq_capped_now) statusHtml += '<p class="text-yellow-400">⚡ Frequency capped</p>';
+                    if (t.soft_temp_limit_now) statusHtml += '<p class="text-yellow-400">🌡️ Soft temp limit</p>';
+                } else {
+                    statusHtml = '<p class="text-green-400">✓ All OK</p>';
+                }
+
+                if (t.has_historical_issues && !t.has_issues) {
+                    statusHtml += '<p class="text-gray-400 text-sm mt-2">Historical issues detected (since boot)</p>';
+                }
+
+                throttleStatus.innerHTML = statusHtml;
+            } else {
+                throttleStatus.innerHTML = '<p class="text-gray-400">N/A</p>';
+            }
+
+            // Update CPU frequency/voltage
+            if (data.cpu_freq_mhz) {
+                cpuFreqEl.innerHTML = `Frequency: <span class="text-blue-300">${data.cpu_freq_mhz} MHz</span>`;
+            } else {
+                cpuFreqEl.innerHTML = 'Frequency: <span class="text-gray-400">—</span>';
+            }
+
+            if (data.cpu_voltage) {
+                cpuVoltageEl.innerHTML = `Voltage: <span class="text-green-300">${data.cpu_voltage.toFixed(4)} V</span>`;
+            } else {
+                cpuVoltageEl.innerHTML = 'Voltage: <span class="text-gray-400">—</span>';
+            }
+
+            // Update WiFi signal
+            if (data.wifi_signal) {
+                wifiCard.classList.remove('hidden');
+                const w = data.wifi_signal;
+                wifiInterface.textContent = `Interface: ${w.interface}`;
+                wifiSignal.innerHTML = `<span class="${getColorClass(100 - w.signal_percent)}">${w.signal_level} dBm (${w.signal_percent}%)</span>`;
+                wifiBar.style.width = `${w.signal_percent}%`;
+            } else {
+                wifiCard.classList.add('hidden');
+            }
+        }
+
         // Fetch system metrics and update the dashboard
         async function fetchSystemMetrics() {
             const cpuUsageEl = document.getElementById('cpu-usage');
@@ -364,6 +493,9 @@
                 // Update network usage
                 networkRecvEl.textContent = `Received: ${formatBytes(data.network_usage.bytes_recv)}`;
                 networkSentEl.textContent = `Sent: ${formatBytes(data.network_usage.bytes_sent)}`;
+
+                // Update Pi-specific metrics
+                updatePiMetrics(data);
 
                 // Update last updated timestamp
                 const now = new Date();

@@ -2,3 +2,4 @@ flask
 psutil
 docker
 pyyaml
+apscheduler>=3.10.0

@@ -11,6 +11,10 @@ from urllib import request as urlrequest
 from compose_editor import compose_editor
 from stack_manager import stack_manager
 from auth_utils import login_required
+from catalog_manager import catalog_manager
+from pi_monitor import get_pi_metrics
+from update_scheduler import update_scheduler, init_scheduler
+from disk_manager import disk_manager
 
 # Initialize Flask
 app = Flask(__name__, static_folder='static')
@@ -47,7 +51,7 @@ def verify_credentials(username, password):
     return False
 
 # Load theme configuration
-THEME_NAME = os.getenv('THEME', 'coraline')
+THEME_NAME = os.getenv('THEME', 'professional')
 THEME_PATH = os.path.join('themes', THEME_NAME)
 THEME_CONFIG_PATH = os.path.join(THEME_PATH, 'theme.json')
 
@@ -58,8 +62,8 @@ def load_theme_config():
             return json.load(f)
     except FileNotFoundError:
         print(f"Warning: Theme '{THEME_NAME}' not found at {THEME_CONFIG_PATH}")
-        print("Falling back to default 'coraline' theme")
-        fallback_path = os.path.join('themes', 'coraline', 'theme.json')
+        print("Falling back to default 'professional' theme")
+        fallback_path = os.path.join('themes', 'professional', 'theme.json')
         with open(fallback_path, 'r') as f:
             return json.load(f)
     except Exception as e:
@@ -91,9 +95,21 @@ except Exception as e:
 # Register the compose editor blueprint
 app.register_blueprint(compose_editor)
 app.register_blueprint(stack_manager)
+app.register_blueprint(catalog_manager)
+app.register_blueprint(update_scheduler)
+app.register_blueprint(disk_manager)
+
+# Initialize the auto-update scheduler
+init_scheduler(app)
 
 # Track update status for containers
 container_updates = {}
+
+# Container stats cache with TTL
+import time
+_container_stats_cache = {}
+_container_stats_timestamps = {}
+CONTAINER_STATS_TTL = 5  # seconds
 
 
 def parse_port_key(port_key):
@@ -318,6 +334,9 @@ def get_system_stats():
         "bytes_recv": net_io.bytes_recv,
     }
 
+    # Get Pi-specific metrics
+    pi_metrics = get_pi_metrics()
+
     # Combine all stats
     return {
         "cpu_usage_percent": cpu_usage,
@@ -326,7 +345,103 @@ def get_system_stats():
         "disk_usage_2": disk_usage_2,
         "temperature_celsius": temperature,
         "network_usage": network_usage,
+        "throttling": pi_metrics.get('throttling'),
+        "cpu_freq_mhz": pi_metrics.get('cpu_freq_mhz'),
+        "cpu_voltage": pi_metrics.get('cpu_voltage'),
+        "wifi_signal": pi_metrics.get('wifi_signal'),
+        "is_raspberry_pi": pi_metrics.get('is_raspberry_pi', False),
     }
+
+
+def calculate_container_cpu_percent(stats):
+    """Calculate CPU percentage from Docker stats."""
+    try:
+        cpu_stats = stats.get('cpu_stats', {})
+        precpu_stats = stats.get('precpu_stats', {})
+
+        cpu_usage = cpu_stats.get('cpu_usage', {})
+        precpu_usage = precpu_stats.get('cpu_usage', {})
+
+        cpu_delta = cpu_usage.get('total_usage', 0) - precpu_usage.get('total_usage', 0)
+        system_delta = cpu_stats.get('system_cpu_usage', 0) - precpu_stats.get('system_cpu_usage', 0)
+
+        if system_delta > 0 and cpu_delta > 0:
+            num_cpus = cpu_stats.get('online_cpus', 1) or len(cpu_usage.get('percpu_usage', [1]))
+            cpu_percent = (cpu_delta / system_delta) * num_cpus * 100.0
+            return round(cpu_percent, 1)
+    except Exception:
+        pass
+    return None
+
+
+def calculate_container_memory_stats(stats):
+    """Extract memory usage stats from Docker stats."""
+    try:
+        memory_stats = stats.get('memory_stats', {})
+        usage = memory_stats.get('usage', 0)
+        limit = memory_stats.get('limit', 0)
+
+        # Subtract cache for more accurate "real" memory usage
+        cache = memory_stats.get('stats', {}).get('cache', 0)
+        actual_usage = usage - cache if cache else usage
+
+        if limit > 0:
+            percent = round((actual_usage / limit) * 100, 1)
+        else:
+            percent = None
+
+        return {
+            'used': actual_usage,
+            'limit': limit,
+            'percent': percent
+        }
+    except Exception:
+        return {'used': None, 'limit': None, 'percent': None}
+
+
+def calculate_container_network_stats(stats):
+    """Sum network rx/tx bytes across all interfaces."""
+    try:
+        networks = stats.get('networks', {})
+        rx_bytes = 0
+        tx_bytes = 0
+        for iface_stats in networks.values():
+            rx_bytes += iface_stats.get('rx_bytes', 0)
+            tx_bytes += iface_stats.get('tx_bytes', 0)
+        return {'rx': rx_bytes, 'tx': tx_bytes}
+    except Exception:
+        return {'rx': None, 'tx': None}
+
+
+def get_container_stats_cached(container_id):
+    """Fetch container stats with TTL caching."""
+    now = time.time()
+
+    # Check cache
+    if container_id in _container_stats_cache:
+        cached_time = _container_stats_timestamps.get(container_id, 0)
+        if (now - cached_time) < CONTAINER_STATS_TTL:
+            return _container_stats_cache[container_id]
+
+    # Fetch fresh stats
+    try:
+        container = docker_client.containers.get(container_id)
+        if container.status != 'running':
+            return None
+
+        stats = container.stats(stream=False, decode=True)
+
+        result = {
+            'cpu_percent': calculate_container_cpu_percent(stats),
+            'memory': calculate_container_memory_stats(stats),
+            'network': calculate_container_network_stats(stats)
+        }
+
+        _container_stats_cache[container_id] = result
+        _container_stats_timestamps[container_id] = now
+        return result
+    except Exception:
+        return None
 
 
 def list_containers():
@@ -357,16 +472,37 @@ def list_containers():
             except Exception:
                 ports = []
 
-            container_list.append(
-                {
-                    "id": container.id[:12],
-                    "name": container.name,
-                    "status": container.status,
-                    "image": container.image.tags[0] if container.image.tags else "unknown",
-                    "update_available": container_updates.get(container.id[:12], False),
-                    "ports": ports,
-                }
-            )
+            # Fetch resource stats for running containers
+            stats = None
+            if container.status == 'running':
+                stats = get_container_stats_cached(container.id)
+
+            container_data = {
+                "id": container.id[:12],
+                "name": container.name,
+                "status": container.status,
+                "image": container.image.tags[0] if container.image.tags else "unknown",
+                "update_available": container_updates.get(container.id[:12], False),
+                "ports": ports,
+                "cpu_percent": None,
+                "memory_percent": None,
+                "memory_used": None,
+                "memory_limit": None,
+                "net_rx": None,
+                "net_tx": None,
+            }
+
+            if stats:
+                container_data["cpu_percent"] = stats.get('cpu_percent')
+                memory = stats.get('memory', {})
+                container_data["memory_percent"] = memory.get('percent')
+                container_data["memory_used"] = memory.get('used')
+                container_data["memory_limit"] = memory.get('limit')
+                network = stats.get('network', {})
+                container_data["net_rx"] = network.get('rx')
+                container_data["net_tx"] = network.get('tx')
+
+            container_list.append(container_data)
 
         return container_list
     except Exception as e:
@@ -736,11 +872,28 @@ def serve_edit():
     """Serve the edit configuration page."""
     return send_from_directory(app.static_folder, 'edit.html')
 
+@app.route('/apps.html')
+def serve_apps():
+    """Serve the app catalog page."""
+    return send_from_directory(app.static_folder, 'apps.html')
+
 
 @app.route('/stacks.html')
 def serve_stacks():
     """Serve the stacks management page."""
     return send_from_directory(app.static_folder, 'stacks.html')
+
+
+@app.route('/settings.html')
+def serve_settings():
+    """Serve the settings page."""
+    return send_from_directory(app.static_folder, 'settings.html')
+
+
+@app.route('/disks.html')
+def serve_disks():
+    """Serve the disk management page."""
+    return send_from_directory(app.static_folder, 'disks.html')
 
 
 @app.route('/login.html')

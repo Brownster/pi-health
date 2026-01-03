@@ -122,7 +122,10 @@
                     <a href="/system.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">System Health</a>
                     <a href="/containers.html" class="px-3 py-2 rounded-md text-white bg-blue-800 font-medium border border-blue-400">Containers</a>
                     <a href="/stacks.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Stacks</a>
+                    <a href="/apps.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Apps</a>
+                    <a href="/disks.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Disks</a>
                     <a href="/edit.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Edit Config</a>
+                    <a href="/settings.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Settings</a>
                 </div>
                 <div class="flex items-center space-x-3">
                     <span id="logged-in-user" class="text-blue-200 text-sm"></span>
@@ -207,6 +210,15 @@
                         <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
                             Status
                         </th>
+                        <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
+                            CPU
+                        </th>
+                        <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
+                            Memory
+                        </th>
+                        <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
+                            Network
+                        </th>
                         <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
                             Web UI
                         </th>
@@ -217,7 +229,7 @@
                 </thead>
                 <tbody id="container-list" class="bg-gray-800 divide-y divide-gray-700">
                     <tr>
-                        <td colspan="5" class="text-center py-4">Loading...</td>
+                        <td colspan="8" class="text-center py-4">Loading...</td>
                     </tr>
                 </tbody>
             </table>
@@ -280,6 +292,83 @@
             return `${hours}:${minutes}:${seconds}`;
         }
 
+        // Format bytes to human readable
+        function formatBytes(bytes) {
+            if (bytes === null || bytes === undefined) return '—';
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+        }
+
+        // Get color class based on percentage
+        function getStatColorClass(percent) {
+            if (percent === null || percent === undefined) return 'text-gray-500';
+            if (percent < 50) return 'text-green-400';
+            if (percent < 80) return 'text-yellow-400';
+            return 'text-red-400';
+        }
+
+        // Format stats display with mini progress bars
+        function formatCpuCell(cpuPercent) {
+            if (cpuPercent === null || cpuPercent === undefined) return '<span class="text-gray-500">—</span>';
+            const colorClass = getStatColorClass(cpuPercent);
+            const barColor = cpuPercent < 50 ? 'bg-green-500' : cpuPercent < 80 ? 'bg-yellow-500' : 'bg-red-500';
+            return `
+                <span class="${colorClass} text-sm">${cpuPercent.toFixed(1)}%</span>
+                <div class="w-full bg-gray-700 rounded-full h-1.5 mt-1">
+                    <div class="${barColor} h-1.5 rounded-full" style="width: ${Math.min(cpuPercent, 100)}%"></div>
+                </div>`;
+        }
+
+        function formatMemoryCell(memPercent, memUsed, memLimit) {
+            if (memPercent === null || memPercent === undefined) return '<span class="text-gray-500">—</span>';
+            const colorClass = getStatColorClass(memPercent);
+            const barColor = memPercent < 50 ? 'bg-green-500' : memPercent < 80 ? 'bg-yellow-500' : 'bg-red-500';
+            return `
+                <span class="${colorClass} text-sm">${memPercent.toFixed(1)}%</span>
+                <div class="text-xs text-gray-400">${formatBytes(memUsed)} / ${formatBytes(memLimit)}</div>
+                <div class="w-full bg-gray-700 rounded-full h-1.5 mt-1">
+                    <div class="${barColor} h-1.5 rounded-full" style="width: ${Math.min(memPercent, 100)}%"></div>
+                </div>`;
+        }
+
+        // Calculate network rate (bytes/sec) from cumulative values
+        function calculateNetworkRate(containerId, currentRx, currentTx) {
+            const now = Date.now();
+            const prev = previousNetworkStats[containerId];
+
+            if (!prev || !lastFetchTime) {
+                // First fetch - store values and return null (will show cumulative)
+                previousNetworkStats[containerId] = { rx: currentRx, tx: currentTx };
+                return null;
+            }
+
+            const timeDelta = (now - lastFetchTime) / 1000; // seconds
+            if (timeDelta <= 0) return null;
+
+            const rxRate = Math.max(0, (currentRx - prev.rx) / timeDelta);
+            const txRate = Math.max(0, (currentTx - prev.tx) / timeDelta);
+
+            // Update stored values
+            previousNetworkStats[containerId] = { rx: currentRx, tx: currentTx };
+
+            return { rxRate, txRate };
+        }
+
+        function formatNetworkCell(rx, tx, containerId) {
+            if (rx === null || rx === undefined) return '<span class="text-gray-500">—</span>';
+
+            const rates = containerId ? calculateNetworkRate(containerId, rx, tx) : null;
+
+            if (rates) {
+                return `<span class="text-blue-300">↓${formatBytes(rates.rxRate)}/s</span><br><span class="text-green-300">↑${formatBytes(rates.txRate)}/s</span>`;
+            }
+            // First fetch - show cumulative with indicator
+            return `<span class="text-blue-300">↓${formatBytes(rx)}</span><br><span class="text-green-300">↑${formatBytes(tx)}</span>`;
+        }
+
         // Show notification function
         function showNotification(message, type = 'info') {
             const notificationArea = document.getElementById('notification-area');
@@ -323,6 +412,10 @@
 
         // Track if initial load has completed
         let initialLoadComplete = false;
+
+        // Track previous network stats for rate calculation
+        let previousNetworkStats = {};
+        let lastFetchTime = null;
 
         function getContainerNameById(id) {
             const cached = containerList.find(c => c.id === id);
@@ -371,6 +464,9 @@
             try {
                 const response = await fetch('/api/containers');
                 const newContainerList = await response.json();
+
+                // Update timestamp for network rate calculation
+                lastFetchTime = Date.now();
 
                 // Update last updated timestamp
                 const now = new Date();
@@ -434,6 +530,22 @@
                     nameCell.innerHTML = `${container.name}${container.update_available ? '<span class="ml-1 text-yellow-400" title="Update available">&#x21bb;</span>' : ''}`;
                 }
 
+                // Update stats cells
+                const cpuCell = row.querySelector('td[data-stat="cpu"]');
+                if (cpuCell) {
+                    cpuCell.innerHTML = formatCpuCell(container.cpu_percent);
+                }
+
+                const memoryCell = row.querySelector('td[data-stat="memory"]');
+                if (memoryCell) {
+                    memoryCell.innerHTML = formatMemoryCell(container.memory_percent, container.memory_used, container.memory_limit);
+                }
+
+                const networkCell = row.querySelector('td[data-stat="network"]');
+                if (networkCell) {
+                    networkCell.innerHTML = formatNetworkCell(container.net_rx, container.net_tx, container.id);
+                }
+
                 // Update button states
                 const startBtn = row.querySelector('button[data-action="start"]');
                 const stopBtn = row.querySelector('button[data-action="stop"]');
@@ -464,12 +576,12 @@
             });
             
             if (filteredContainers.length === 0) {
-                containerListEl.innerHTML = `<tr><td colspan="5" class="text-center py-4">No ${currentFilter} containers found</td></tr>`;
+                containerListEl.innerHTML = `<tr><td colspan="8" class="text-center py-4">No ${currentFilter} containers found</td></tr>`;
                 return;
             }
             
             // Special case for when Docker is not available
-            if (filteredContainers.length === 1 && 
+            if (filteredContainers.length === 1 &&
                 (filteredContainers[0].status === 'unavailable' || filteredContainers[0].status === 'error')) {
                 const row = `
                     <tr data-container-id="${filteredContainers[0].id}" data-container-name="${filteredContainers[0].name}">
@@ -480,6 +592,9 @@
                                 ${filteredContainers[0].status}
                             </span>
                         </td>
+                        <td class="px-4 py-4 whitespace-nowrap text-sm text-gray-500">—</td>
+                        <td class="px-4 py-4 whitespace-nowrap text-sm text-gray-500">—</td>
+                        <td class="px-4 py-4 whitespace-nowrap text-sm text-gray-500">—</td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm">N/A</td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm">
                             <button class="bg-gray-500 text-white font-bold py-1 px-2 rounded opacity-50 cursor-not-allowed" disabled>Start</button>
@@ -516,6 +631,9 @@
                                 ${container.status}
                             </span>
                         </td>
+                        <td class="px-4 py-4 whitespace-nowrap text-sm" data-stat="cpu">${formatCpuCell(container.cpu_percent)}</td>
+                        <td class="px-4 py-4 whitespace-nowrap text-sm" data-stat="memory">${formatMemoryCell(container.memory_percent, container.memory_used, container.memory_limit)}</td>
+                        <td class="px-4 py-4 whitespace-nowrap text-sm" data-stat="network">${formatNetworkCell(container.net_rx, container.net_tx, container.id)}</td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm">${webUILink}</td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm">
                             <button data-action="start" class="coraline-button text-blue-100 font-bold py-1 px-3 rounded button border border-green-800 ${container.status === 'running' ? 'opacity-50 cursor-not-allowed' : ''}"
@@ -598,6 +716,7 @@
             try {
                 const response = await fetch('/api/containers');
                 const containers = await response.json();
+                lastFetchTime = Date.now();
                 const container = containers.find(c => c.id === id);
                 
                 if (container && document.querySelector(`tr[data-container-id="${id}"]`)) {
@@ -615,7 +734,17 @@
                             ${container.status}
                         </span>
                     `;
-                    
+
+                    // Update stats cells
+                    const cpuCell = row.querySelector('td[data-stat="cpu"]');
+                    if (cpuCell) cpuCell.innerHTML = formatCpuCell(container.cpu_percent);
+
+                    const memoryCell = row.querySelector('td[data-stat="memory"]');
+                    if (memoryCell) memoryCell.innerHTML = formatMemoryCell(container.memory_percent, container.memory_used, container.memory_limit);
+
+                    const networkCell = row.querySelector('td[data-stat="network"]');
+                    if (networkCell) networkCell.innerHTML = formatNetworkCell(container.net_rx, container.net_tx, container.id);
+
                     // Update the container in our cached list
                     for (let i = 0; i < containerList.length; i++) {
                         if (containerList[i].id === id) {
