@@ -613,8 +613,11 @@
                     const sizeMb = (item.size / (1024 * 1024)).toFixed(1);
                     const date = new Date(item.mtime * 1000).toLocaleString();
                     return `<div class="flex justify-between bg-gray-900/40 border border-gray-700 rounded px-3 py-2">
-                        <span>${item.name}</span>
-                        <span>${sizeMb} MB · ${date}</span>
+                        <div>
+                            <div class="text-blue-100">${item.name}</div>
+                            <div class="text-xs text-gray-500">${sizeMb} MB · ${date}</div>
+                        </div>
+                        <button onclick="restoreBackup('${item.name}')" class="px-3 py-1 bg-red-700/70 hover:bg-red-700 text-white rounded text-xs">Restore</button>
                     </div>`;
                 }).join('');
             } catch (error) {
@@ -630,6 +633,24 @@
                 showNotification('Backup completed', 'success');
                 loadBackupList();
                 loadBackupStatus();
+            } catch (error) {
+                showNotification(`Error: ${error.message}`, 'error');
+            }
+        }
+
+        async function restoreBackup(archiveName) {
+            if (!confirm(`Restore backup ${archiveName}? This will overwrite existing files in config and stacks.`)) {
+                return;
+            }
+            try {
+                const response = await fetch('/api/backups/restore', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ archive_name: archiveName, stop_stacks: true, start_stacks: true })
+                });
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error || 'Restore failed');
+                showNotification('Restore completed', 'success');
             } catch (error) {
                 showNotification(`Error: ${error.message}`, 'error');
             }

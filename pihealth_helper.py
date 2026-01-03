@@ -670,6 +670,31 @@ def cmd_backup_create(params):
     return {'success': True, 'archive': archive_path}
 
 
+def cmd_backup_restore(params):
+    """Restore from a compressed backup archive."""
+    archive_path = params.get('archive_path', '').strip()
+
+    if not archive_path or '..' in archive_path:
+        return {'success': False, 'error': 'Invalid archive path'}
+    if not (archive_path.endswith('.tar.zst') or archive_path.endswith('.tar.gz')):
+        return {'success': False, 'error': 'Invalid archive type'}
+    if not (archive_path.startswith('/mnt/') or archive_path.startswith('/backups/')):
+        return {'success': False, 'error': 'Archive path not allowed'}
+    if not os.path.exists(archive_path):
+        return {'success': False, 'error': 'Archive not found'}
+
+    if archive_path.endswith('.tar.zst'):
+        cmd = ['tar', '-I', 'zstd', '-x', '--overwrite', '-f', archive_path, '-C', '/']
+    else:
+        cmd = ['tar', '-x', '--overwrite', '-zf', archive_path, '-C', '/']
+
+    result = run_command(cmd, timeout=3600)
+    if result.get('returncode') != 0:
+        return {'success': False, 'error': result.get('stderr', 'Restore failed')}
+
+    return {'success': True, 'archive': archive_path}
+
+
 # Command whitelist
 COMMANDS = {
     'lsblk': cmd_lsblk,
@@ -694,6 +719,7 @@ COMMANDS = {
     'docker_network_create': cmd_docker_network_create,
     'write_vpn_env': cmd_write_vpn_env,
     'backup_create': cmd_backup_create,
+    'backup_restore': cmd_backup_restore,
     'ping': lambda p: {'success': True, 'message': 'pong'}
 }
 

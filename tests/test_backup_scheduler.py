@@ -7,6 +7,7 @@ import os
 import sys
 import tempfile
 import shutil
+from unittest.mock import patch
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -103,6 +104,57 @@ class TestBackupEndpoints:
             data = response.get_json()
             assert 'dest_dir' in data
             assert 'retention_count' in data
+        finally:
+            backup_scheduler.CONFIG_DIR = original_config_dir
+            backup_scheduler.CONFIG_FILE = original_config_file
+
+    def test_restore_requires_auth(self, client):
+        response = client.post('/api/backups/restore', data=json.dumps({}),
+                               content_type='application/json')
+        assert response.status_code == 401
+
+    def test_restore_invalid_payload(self, authenticated_client, temp_config_dir):
+        import backup_scheduler
+        original_config_dir = backup_scheduler.CONFIG_DIR
+        original_config_file = backup_scheduler.CONFIG_FILE
+
+        backup_scheduler.CONFIG_DIR = temp_config_dir
+        backup_scheduler.CONFIG_FILE = os.path.join(temp_config_dir, 'backup_config.json')
+
+        try:
+            response = authenticated_client.post('/api/backups/restore',
+                                                 data=json.dumps({'archive_name': '../bad.tar.gz'}),
+                                                 content_type='application/json')
+            assert response.status_code == 400
+        finally:
+            backup_scheduler.CONFIG_DIR = original_config_dir
+            backup_scheduler.CONFIG_FILE = original_config_file
+
+    def test_restore_helper_unavailable(self, authenticated_client, temp_config_dir):
+        import backup_scheduler
+        original_config_dir = backup_scheduler.CONFIG_DIR
+        original_config_file = backup_scheduler.CONFIG_FILE
+
+        backup_scheduler.CONFIG_DIR = temp_config_dir
+        backup_scheduler.CONFIG_FILE = os.path.join(temp_config_dir, 'backup_config.json')
+
+        dest_dir = os.path.join(temp_config_dir, 'backups')
+        os.makedirs(dest_dir, exist_ok=True)
+        archive_name = 'pi-health-backup-20240101_000000.tar.zst'
+        archive_path = os.path.join(dest_dir, archive_name)
+        with open(archive_path, 'w') as f:
+            f.write('test')
+
+        try:
+            config = backup_scheduler.load_config()
+            config['dest_dir'] = dest_dir
+            backup_scheduler.save_config(config)
+
+            with patch('backup_scheduler.helper_available', return_value=False):
+                response = authenticated_client.post('/api/backups/restore',
+                                                     data=json.dumps({'archive_name': archive_name}),
+                                                     content_type='application/json')
+                assert response.status_code == 503
         finally:
             backup_scheduler.CONFIG_DIR = original_config_dir
             backup_scheduler.CONFIG_FILE = original_config_file

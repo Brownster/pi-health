@@ -35,7 +35,9 @@ DEFAULT_CONFIG = {
     'include_env': True,
     'compression': 'zst',
     'last_run': None,
-    'last_run_result': None
+    'last_run_result': None,
+    'last_restore': None,
+    'last_restore_result': None
 }
 
 SCHEDULE_PRESETS = {
@@ -270,3 +272,69 @@ def api_backup_list():
     config = load_config()
     dest_dir = config.get('dest_dir')
     return jsonify({'backups': list_backups(dest_dir)})
+
+
+@backup_scheduler.route('/api/backups/restore', methods=['POST'])
+@login_required
+def api_backup_restore():
+    data = request.get_json() or {}
+    archive_name = data.get('archive_name', '').strip()
+    stop_stacks = bool(data.get('stop_stacks', True))
+    start_stacks = bool(data.get('start_stacks', True))
+
+    if not archive_name or '/' in archive_name or '..' in archive_name:
+        return jsonify({'error': 'Invalid archive name'}), 400
+
+    config = load_config()
+    dest_dir = config.get('dest_dir', '')
+    archive_path = os.path.join(dest_dir, archive_name)
+
+    if not os.path.exists(archive_path):
+        return jsonify({'error': 'Backup not found'}), 404
+
+    if not helper_available():
+        return jsonify({'error': 'Helper service unavailable'}), 503
+
+    stacks_stopped = []
+    stacks_started = []
+    try:
+        if stop_stacks:
+            from stack_manager import list_stacks, run_compose_command
+            stacks, err = list_stacks()
+            if err:
+                return jsonify({'error': err}), 500
+            for stack in stacks:
+                name = stack.get('name')
+                if not name:
+                    continue
+                result = run_compose_command(name, 'stop')
+                if result and result.get('success'):
+                    stacks_stopped.append(name)
+
+        restore_result = helper_call('backup_restore', {
+            'archive_path': archive_path
+        })
+        if not restore_result.get('success'):
+            return jsonify({'error': restore_result.get('error', 'Restore failed')}), 500
+
+        if start_stacks and stacks_stopped:
+            from stack_manager import run_compose_command
+            for name in stacks_stopped:
+                result = run_compose_command(name, 'up')
+                if result and result.get('success'):
+                    stacks_started.append(name)
+
+        config['last_restore'] = datetime.now(timezone.utc).isoformat()
+        config['last_restore_result'] = {
+            'restore': restore_result,
+            'stopped': stacks_stopped,
+            'started': stacks_started
+        }
+        save_config(config)
+
+        return jsonify({
+            'status': 'ok',
+            'result': config['last_restore_result']
+        })
+    except HelperError as exc:
+        return jsonify({'error': str(exc)}), 503

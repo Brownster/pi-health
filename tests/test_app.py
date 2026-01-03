@@ -229,6 +229,7 @@ class TestStaticPages:
         assert 'backup-retention' in body
         assert 'backup-include-env' in body
         assert 'backup-run-now' in body
+        assert 'backup-list' in body
 
 
 
