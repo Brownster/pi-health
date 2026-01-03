@@ -133,6 +133,20 @@ A **Stack** is simply a directory containing a `compose.yaml` or `docker-compose
 
 This approach is much cleaner than managing one giant `docker-compose.yml` file. Your stacks are located in the directory defined by `STACKS_PATH` (default: `/opt/stacks`).
 
+#### Example: Split VPN and Non-VPN Stacks
+
+Services using `network_mode: "service:vpn"` must be in the same stack as the `vpn` container. A clean split is:
+
+- **VPN stack**: `vpn` + vpn-bound services (sonarr/radarr/jackett/transmission/sabnzbd)
+- **Media stack**: services that can run without VPN (jellyfin, jellyseerr, audiobookshelf, navidrome, yt-to-jellyfin)
+
+We ship example stacks here:
+
+- `examples/stacks/vpn-stack/docker-compose.yml`
+- `examples/stacks/media-stack/docker-compose.yml`
+
+Copy `examples/stacks/.env.example` to each stack directory as `.env` and set `HOME=/home/pi`.
+
 #### Creating a New Stack
 
 1.  Navigate to the **"Stacks"** page from the main navigation.

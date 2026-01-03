@@ -614,8 +614,8 @@ class SnapRAIDPlugin(StoragePlugin):
             )
 
             output = result.stdout
-            removed_match = re.search(r"(\\d+)\\s+removed", output)
-            updated_match = re.search(r"(\\d+)\\s+updated", output)
+            removed_match = re.search(r"(\d+)\s+removed", output)
+            updated_match = re.search(r"(\d+)\s+updated", output)
 
             removed = int(removed_match.group(1)) if removed_match else 0
             updated = int(updated_match.group(1)) if updated_match else 0
@@ -673,7 +673,7 @@ class SnapRAIDPlugin(StoragePlugin):
             }
 
             for key in summary:
-                match = re.search(rf"(\\d+)\\s+{key}", result.stdout)
+                match = re.search(rf"(\d+)\s+{key}", result.stdout)
                 if match:
                     summary[key] = int(match.group(1))
 

@@ -212,6 +212,17 @@ class TestStaticPages:
         assert 'snapraid-modal-name' in body
         assert 'mergerfs-modal-name' in body
 
+    def test_settings_page_setup_hooks(self, client):
+        """Test settings page has setup hooks."""
+        response = client.get('/settings.html')
+        assert response.status_code == 200
+        body = response.data.decode('utf-8')
+        assert 'tailscale-authkey' in body
+        assert 'vpn-config-dir' in body
+        assert 'vpn-username' in body
+        assert 'vpn-password' in body
+        assert 'vpn-network-name' in body
+
 
 class TestComposeEditorProtection:
     """Test compose editor endpoints require authentication."""

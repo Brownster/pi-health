@@ -218,6 +218,24 @@ class TestMediaPaths:
         finally:
             disk_manager.MEDIA_PATHS_CONFIG = original_config
 
+    def test_build_startup_script_includes_mounts(self):
+        """Test startup script includes mount points."""
+        import disk_manager
+        script = disk_manager._build_startup_script({
+            'storage': '/mnt/storage',
+            'downloads': '/mnt/downloads',
+            'backup': '/mnt/backup'
+        })
+        assert '/mnt/storage' in script
+        assert '/mnt/downloads' in script
+        assert '/mnt/backup' in script
+
+    def test_build_startup_service(self):
+        """Test startup service contents."""
+        import disk_manager
+        content = disk_manager._build_startup_service()
+        assert 'ExecStart=/usr/local/bin/check_mount_and_start.sh' in content
+
     def test_set_media_paths_invalid_path(self, authenticated_client, temp_config_dir):
         """Test POST with invalid path returns error."""
         import disk_manager

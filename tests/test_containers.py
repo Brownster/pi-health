@@ -330,5 +330,96 @@ class TestCPUCalculation:
             pass
 
 
+class TestContainerStats:
+    """Test container stats calculation functions."""
+
+    def test_calculate_container_cpu_percent_valid(self):
+        """Test CPU percentage calculation with valid stats."""
+        from app import calculate_container_cpu_percent
+
+        stats = {
+            'cpu_stats': {
+                'cpu_usage': {'total_usage': 1000000000},
+                'system_cpu_usage': 10000000000,
+                'online_cpus': 4
+            },
+            'precpu_stats': {
+                'cpu_usage': {'total_usage': 900000000},
+                'system_cpu_usage': 9000000000
+            }
+        }
+        result = calculate_container_cpu_percent(stats)
+
+        assert result is not None
+        assert isinstance(result, float)
+        assert 0 <= result <= 100
+
+    def test_calculate_container_cpu_percent_empty(self):
+        """Test CPU calculation with empty stats."""
+        from app import calculate_container_cpu_percent
+
+        result = calculate_container_cpu_percent({})
+        assert result is None
+
+    def test_calculate_container_memory_stats_valid(self):
+        """Test memory stats extraction with valid data."""
+        from app import calculate_container_memory_stats
+
+        stats = {
+            'memory_stats': {
+                'usage': 104857600,  # 100 MB
+                'limit': 1073741824,  # 1 GB
+                'stats': {'cache': 10485760}  # 10 MB cache
+            }
+        }
+        result = calculate_container_memory_stats(stats)
+
+        assert result['used'] == 94371840  # 100 MB - 10 MB cache
+        assert result['limit'] == 1073741824
+        assert result['percent'] is not None
+        assert 0 <= result['percent'] <= 100
+
+    def test_calculate_container_memory_stats_empty(self):
+        """Test memory calculation with empty stats."""
+        from app import calculate_container_memory_stats
+
+        result = calculate_container_memory_stats({})
+        # Empty stats return 0 for used/limit, None for percent
+        assert result['used'] == 0
+        assert result['limit'] == 0
+        assert result['percent'] is None
+
+    def test_calculate_container_network_stats_valid(self):
+        """Test network stats extraction with valid data."""
+        from app import calculate_container_network_stats
+
+        stats = {
+            'networks': {
+                'eth0': {'rx_bytes': 1000000, 'tx_bytes': 500000},
+                'bridge': {'rx_bytes': 200000, 'tx_bytes': 100000}
+            }
+        }
+        result = calculate_container_network_stats(stats)
+
+        assert result['rx'] == 1200000  # Sum of rx
+        assert result['tx'] == 600000   # Sum of tx
+
+    def test_calculate_container_network_stats_empty(self):
+        """Test network calculation with empty stats."""
+        from app import calculate_container_network_stats
+
+        result = calculate_container_network_stats({})
+        assert result['rx'] == 0
+        assert result['tx'] == 0
+
+    def test_calculate_container_network_stats_no_networks(self):
+        """Test network calculation with no networks key."""
+        from app import calculate_container_network_stats
+
+        result = calculate_container_network_stats({'networks': {}})
+        assert result['rx'] == 0
+        assert result['tx'] == 0
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
