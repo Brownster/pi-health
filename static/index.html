@@ -80,15 +80,14 @@
         <div class="absolute inset-0 overflow-hidden">
             <img src="/theme-banner" alt="Dashboard" class="w-full h-full object-cover opacity-40 blur-sm">
         </div>
-        <div class="container mx-auto p-8 relative">
-            <h1 class="text-4xl font-bold text-center text-blue-200 font-serif" style="text-shadow: 2px 2px 4px rgba(0,0,0,0.8);">Pi-Health Dashboard</h1>
+        <div class="container mx-auto px-8 py-12 relative">
         </div>
     </header>
 
     <!-- Navigation bar -->
     <nav class="bg-purple-900 shadow-md">
         <div class="container mx-auto px-4">
-            <div class="flex items-center justify-between h-16">
+            <div class="flex items-center justify-between h-12">
                 <div class="flex space-x-4">
                     <a href="/" class="px-3 py-2 rounded-md text-white bg-blue-800 font-medium border border-blue-400">Home</a>
                     <a href="/system.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">System Health</a>
@@ -96,6 +95,7 @@
                     <a href="/stacks.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Stacks</a>
                     <a href="/apps.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Apps</a>
                     <a href="/disks.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Disks</a>
+                    <a href="/storage.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Storage</a>
                     <a href="/edit.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Edit Config</a>
                     <a href="/settings.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Settings</a>
                 </div>
@@ -249,7 +249,7 @@
                 if (webServices.length === 0) {
                     serviceGrid.innerHTML = `
                         <div class="col-span-full text-center py-10">
-                            <svg class="w-16 h-16 mx-auto text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <svg class="w-16 h-12 mx-auto text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                             </svg>
                             <p class="mt-4 text-xl">No running web services found</p>
@@ -292,7 +292,7 @@
                 console.error('Error fetching Docker services:', error);
                 serviceGrid.innerHTML = `
                     <div class="col-span-full text-center py-10">
-                        <svg class="w-16 h-16 mx-auto text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <svg class="w-16 h-12 mx-auto text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                         </svg>
                         <p class="mt-4 text-xl">Error loading services</p>

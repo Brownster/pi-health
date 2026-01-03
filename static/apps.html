@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script>
+        if (!sessionStorage.getItem("loggedIn")) {
+            window.location.href = "/login.html";
+        }
+
+        const username = sessionStorage.getItem("username");
+        if (username) {
+            document.addEventListener('DOMContentLoaded', () => {
+                const userEl = document.getElementById('logged-in-user');
+                if (userEl) userEl.textContent = username;
+            });
+        }
+
+        async function logout() {
+            try {
+                await fetch('/api/logout', { method: 'POST' });
+            } catch (e) {
+            }
+            sessionStorage.clear();
+            window.location.href = '/login.html';
+        }
+    </script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Apps - Pi-Health Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <script src="/theme.js"></script>
+    <style>
+        .coraline-button {
+            background: linear-gradient(to bottom, #5f4b8b, #372b53);
+            border: 1px solid #8a6cbd;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.25);
+            transition: all 0.3s ease;
+        }
+
+        .coraline-button:hover {
+            background: linear-gradient(to bottom, #6f58a3, #413162);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 10px rgba(0, 0, 0, 0.3);
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-blue-100 font-sans min-h-screen">
+    <header class="bg-gradient-to-r from-purple-900 to-blue-900 shadow-lg relative overflow-hidden">
+        <div class="absolute inset-0 overflow-hidden">
+            <img src="/theme-banner" alt="Dashboard" class="w-full h-full object-cover opacity-40 blur-sm">
+        </div>
+        <div class="container mx-auto px-8 py-12 relative">
+        </div>
+    </header>
+
+    <nav class="bg-purple-900 shadow-md">
+        <div class="container mx-auto px-4">
+            <div class="flex items-center justify-between h-12">
+                <div class="flex space-x-4">
+                    <a href="/" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Home</a>
+                    <a href="/system.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">System Health</a>
+                    <a href="/containers.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Containers</a>
+                    <a href="/stacks.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Stacks</a>
+                    <a href="/apps.html" class="px-3 py-2 rounded-md text-white bg-blue-800 font-medium border border-blue-400">Apps</a>
+                    <a href="/disks.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Disks</a>
+                    <a href="/storage.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Storage</a>
+                    <a href="/edit.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Edit Config</a>
+                    <a href="/settings.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Settings</a>
+                </div>
+                <div class="flex items-center space-x-3">
+                    <span id="logged-in-user" class="text-blue-200 text-sm"></span>
+                    <button onclick="logout()" class="px-3 py-2 rounded-md text-red-300 hover:bg-red-800 hover:text-white font-medium text-sm">Logout</button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <div id="notification-area" class="fixed top-4 right-4 z-50 w-72 flex flex-col items-end"></div>
+
+    <main class="container mx-auto p-6">
+        <div class="mb-6 flex justify-between items-center">
+            <h2 class="text-2xl font-semibold">App Catalog</h2>
+            <button onclick="loadCatalog()" class="coraline-button text-blue-100 font-bold py-2 px-4 rounded">Refresh</button>
+        </div>
+
+        <div id="catalog-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div class="col-span-full text-center py-10 text-gray-400">Loading catalog...</div>
+        </div>
+    </main>
+
+    <div id="install-modal" class="hidden fixed inset-0 bg-black bg-opacity-60 z-50 items-center justify-center p-4">
+        <div class="bg-gray-900 w-full max-w-2xl rounded-lg shadow-xl border border-purple-900 flex flex-col">
+            <div class="flex justify-between items-center p-4 border-b border-purple-800">
+                <h3 id="install-title" class="text-xl font-semibold">Install App</h3>
+                <button onclick="closeInstallModal()" class="text-gray-400 hover:text-gray-200">Close</button>
+            </div>
+            <div class="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
+                <div id="install-description" class="text-sm text-gray-300"></div>
+                <div id="install-fields" class="space-y-3"></div>
+            </div>
+            <div class="p-4 border-t border-purple-800 flex justify-end space-x-2">
+                <button onclick="closeInstallModal()" class="px-4 py-2 bg-gray-700 text-white rounded">Cancel</button>
+                <button onclick="submitInstall()" class="coraline-button px-4 py-2 text-white rounded">Install</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let catalogItems = [];
+        let installedServices = [];
+        let activeInstall = null;
+
+        function showNotification(message, type = 'info') {
+            const notificationArea = document.getElementById('notification-area');
+            const notification = document.createElement('div');
+            notification.className = `notification ${type} bg-opacity-90 p-3 mb-2 rounded shadow-lg transform transition-all duration-500 opacity-0`;
+            if (type === 'success') notification.classList.add('bg-green-600');
+            else if (type === 'error') notification.classList.add('bg-red-600');
+            else notification.classList.add('bg-blue-600');
+
+            notification.innerHTML = message;
+            notificationArea.appendChild(notification);
+            setTimeout(() => notification.classList.replace('opacity-0', 'opacity-100'), 10);
+            setTimeout(() => {
+                notification.classList.replace('opacity-100', 'opacity-0');
+                setTimeout(() => notification.remove(), 300);
+            }, 3000);
+        }
+
+        async function loadCatalog() {
+            const grid = document.getElementById('catalog-grid');
+            grid.innerHTML = '<div class="col-span-full text-center py-10 text-gray-400">Loading catalog...</div>';
+
+            try {
+                const [catalogRes, statusRes] = await Promise.all([
+                    fetch('/api/catalog'),
+                    fetch('/api/catalog/status')
+                ]);
+                const catalogData = await catalogRes.json();
+                const statusData = await statusRes.json();
+
+                catalogItems = catalogData.items || [];
+                installedServices = statusData.services || [];
+                renderCatalog();
+            } catch (error) {
+                grid.innerHTML = '<div class="col-span-full text-center py-10 text-red-400">Failed to load catalog.</div>';
+            }
+        }
+
+        function escapeHtml(value) {
+            return String(value)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function renderCatalog() {
+            const grid = document.getElementById('catalog-grid');
+            if (!catalogItems.length) {
+                grid.innerHTML = '<div class="col-span-full text-center py-10 text-gray-400">No catalog items found. Add templates under catalog/.</div>';
+                return;
+            }
+
+            grid.innerHTML = catalogItems.map(item => {
+                const installed = installedServices.includes(item.id);
+                const name = escapeHtml(item.name || item.id);
+                const description = escapeHtml(item.description || 'No description');
+                const requires = item.requires && item.requires.length
+                    ? `<p class="text-xs text-yellow-300 mt-2">Requires: ${escapeHtml(item.requires.join(', '))}</p>`
+                    : '';
+                return `
+                    <div class="bg-gray-800 rounded-lg shadow-lg p-4 border border-purple-900/40">
+                        <div class="flex justify-between items-start">
+                            <h3 class="text-lg font-semibold">${name}</h3>
+                            ${installed ? '<span class="text-green-400 text-xs">Installed</span>' : ''}
+                        </div>
+                        <p class="text-sm text-gray-400 mt-2">${description}</p>
+                        ${requires}
+                        <div class="mt-4 flex space-x-2">
+                            ${installed
+                                ? `<button onclick="removeApp('${item.id}')" class="px-3 py-1 text-sm rounded bg-red-700 hover:bg-red-600 text-white">Remove</button>`
+                                : `<button onclick="openInstallModal('${item.id}')" class="coraline-button px-3 py-1 text-sm rounded text-white">Install</button>`
+                            }
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function openInstallModal(id) {
+            const modal = document.getElementById('install-modal');
+            const title = document.getElementById('install-title');
+            const description = document.getElementById('install-description');
+            const fieldsEl = document.getElementById('install-fields');
+
+            try {
+                const response = await fetch(`/api/catalog/${id}?apply_media_paths=true`);
+                const data = await response.json();
+                if (data.error) throw new Error(data.error);
+
+                activeInstall = data.item;
+                title.textContent = `Install ${activeInstall.name || activeInstall.id}`;
+                description.textContent = activeInstall.description || '';
+                fieldsEl.innerHTML = '';
+
+                const fields = activeInstall.fields || [];
+                if (!fields.length) {
+                    fieldsEl.innerHTML = '<p class="text-sm text-gray-400">No configuration fields for this app.</p>';
+                } else {
+                    fields.forEach(field => {
+                        const inputId = `field-${field.key}`;
+                        fieldsEl.innerHTML += `
+                            <div>
+                                <label class="block text-sm text-gray-300 mb-1">${field.label || field.key}</label>
+                                <input id="${inputId}" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white" value="${field.default || ''}">
+                            </div>
+                        `;
+                    });
+                }
+
+                modal.classList.remove('hidden');
+                modal.classList.add('flex');
+            } catch (error) {
+                showNotification(`Error: ${error.message}`, 'error');
+            }
+        }
+
+        function closeInstallModal() {
+            const modal = document.getElementById('install-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+            activeInstall = null;
+        }
+
+        async function submitInstall() {
+            if (!activeInstall) return;
+            const values = {};
+            (activeInstall.fields || []).forEach(field => {
+                const input = document.getElementById(`field-${field.key}`);
+                if (input) values[field.key] = input.value;
+            });
+
+            try {
+                const response = await fetch('/api/catalog/install', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: activeInstall.id, values, start_service: true })
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    // Check for missing dependencies
+                    if (data.missing_dependencies && data.missing_dependencies.length > 0) {
+                        const deps = data.missing_dependencies.join(', ');
+                        if (confirm(`This app requires: ${deps}\n\nWould you like to install ${deps} first?`)) {
+                            closeInstallModal();
+                            // Open install modal for the first missing dependency
+                            openInstallModal(data.missing_dependencies[0]);
+                            return;
+                        }
+                    }
+                    throw new Error(data.error || 'Install failed');
+                }
+                const msg = data.started ? `${data.name} installed and started` : `${data.name} installed`;
+                showNotification(msg, 'success');
+                closeInstallModal();
+                loadCatalog();
+            } catch (error) {
+                showNotification(`Error: ${error.message}`, 'error');
+            }
+        }
+
+        async function removeApp(id) {
+            if (!confirm(`Are you sure you want to remove ${id}? This will stop the container and remove it from compose.`)) {
+                return;
+            }
+            try {
+                const response = await fetch('/api/catalog/remove', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id, stop_service: true })
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    // Check for dependent services
+                    if (data.dependents && data.dependents.length > 0) {
+                        const deps = data.dependents.join(', ');
+                        showNotification(`Cannot remove: ${deps} depend on this app. Remove them first.`, 'error');
+                        return;
+                    }
+                    throw new Error(data.error || 'Remove failed');
+                }
+                showNotification(`${id} removed successfully`, 'success');
+                loadCatalog();
+            } catch (error) {
+                showNotification(`Error: ${error.message}`, 'error');
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            loadCatalog();
+        });
+    </script>
+</body>
+</html>

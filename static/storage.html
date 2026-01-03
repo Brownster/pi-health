@@ -59,14 +59,13 @@
         <div class="absolute inset-0 overflow-hidden">
             <img src="/theme-banner" alt="Dashboard" class="w-full h-full object-cover opacity-40 blur-sm">
         </div>
-        <div class="container mx-auto p-8 relative">
-            <h1 class="text-4xl font-bold text-center text-blue-200 font-serif" style="text-shadow: 2px 2px 4px rgba(0,0,0,0.8);">Pi-Health Dashboard</h1>
+        <div class="container mx-auto px-8 py-12 relative">
         </div>
     </header>
 
     <nav class="bg-purple-900 shadow-md">
         <div class="container mx-auto px-4">
-            <div class="flex items-center justify-between h-16">
+            <div class="flex items-center justify-between h-12">
                 <div class="flex space-x-4">
                     <a href="/" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Home</a>
                     <a href="/system.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">System Health</a>
@@ -1025,7 +1024,29 @@
 
         function collectMergerfsConfig() {
             const config = { ...(mergerfsConfig || {}) };
-            config.pools = (mergerfsConfig && mergerfsConfig.pools) || [];
+            const rows = document.querySelectorAll('.mergerfs-pool-row');
+            const pools = [];
+            rows.forEach((row, index) => {
+                const name = row.querySelector('.mergerfs-name').value.trim();
+                const mount_point = row.querySelector('.mergerfs-mount').value.trim();
+                const create_policy = row.querySelector('.mergerfs-policy').value;
+                const min_free_space = row.querySelector('.mergerfs-minfree').value.trim() || '4G';
+                const branchesRaw = row.querySelector('.mergerfs-branches').value || '';
+                const branches = branchesRaw.split('\n').map(b => b.trim()).filter(Boolean);
+                const options = row.querySelector('.mergerfs-options').value.trim();
+                const enabled = row.querySelector('.mergerfs-enabled').checked;
+                pools.push({
+                    id: name || `pool${index + 1}`,
+                    name: name || `pool${index + 1}`,
+                    mount_point,
+                    create_policy,
+                    min_free_space,
+                    branches,
+                    options,
+                    enabled
+                });
+            });
+            config.pools = pools;
             return config;
         }
 
