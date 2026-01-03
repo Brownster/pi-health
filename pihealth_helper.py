@@ -331,6 +331,164 @@ def cmd_df(params):
     return {'success': False, 'error': result.get('stderr', 'df failed')}
 
 
+def cmd_snapraid(params):
+    """Run snapraid command."""
+    allowed_cmds = ['status', 'diff', 'sync', 'scrub', 'check', 'fix']
+    cmd = params.get('command', '')
+
+    if cmd not in allowed_cmds:
+        return {'success': False, 'error': f'Command not allowed: {cmd}'}
+
+    args = ['snapraid', cmd]
+    if cmd == 'scrub' and 'percent' in params:
+        args.extend(['-p', str(params['percent'])])
+
+    result = run_command(args, timeout=3600)
+    return {
+        'success': result.get('returncode') == 0,
+        'stdout': result.get('stdout', ''),
+        'stderr': result.get('stderr', ''),
+        'returncode': result.get('returncode')
+    }
+
+
+def _validate_branches(branches):
+    for branch in branches:
+        if not branch or not branch.startswith('/mnt/') or '..' in branch:
+            return False
+    return True
+
+
+def cmd_mergerfs_mount(params):
+    """Mount a MergerFS pool."""
+    branches = params.get('branches', '')
+    mount_point = params.get('mount_point', '')
+    options = params.get('options', '')
+
+    if not branches or not mount_point:
+        return {'success': False, 'error': 'branches and mount_point required'}
+
+    if not MOUNT_POINT_PATTERN.match(mount_point) or '..' in mount_point:
+        return {'success': False, 'error': 'Invalid mount point'}
+
+    branch_list = [b for b in branches.split(':') if b]
+    if not branch_list or not _validate_branches(branch_list):
+        return {'success': False, 'error': 'Invalid branches'}
+
+    safe_options = re.sub(r'[^a-zA-Z0-9,_=:-]', '', options)
+
+    os.makedirs(mount_point, exist_ok=True)
+    cmd = ['mergerfs', '-o', safe_options, ':'.join(branch_list), mount_point]
+    result = run_command(cmd)
+
+    return {
+        'success': result.get('returncode') == 0,
+        'error': result.get('stderr', '') if result.get('returncode') != 0 else None
+    }
+
+
+def cmd_mergerfs_umount(params):
+    """Unmount a MergerFS pool."""
+    mount_point = params.get('mount_point', '')
+
+    if not mount_point or not MOUNT_POINT_PATTERN.match(mount_point) or '..' in mount_point:
+        return {'success': False, 'error': 'Invalid mount point'}
+
+    result = run_command(['umount', mount_point])
+    return {
+        'success': result.get('returncode') == 0,
+        'error': result.get('stderr', '') if result.get('returncode') != 0 else None
+    }
+
+
+def cmd_write_snapraid_conf(params):
+    """Write snapraid.conf file."""
+    content = params.get('content', '')
+    path = params.get('path', '/etc/snapraid.conf')
+
+    allowed_paths = ['/etc/snapraid.conf', '/etc/snapraid-diff.conf']
+    if path not in allowed_paths:
+        return {'success': False, 'error': 'Path not allowed'}
+
+    try:
+        import shutil
+        from datetime import datetime
+        if os.path.exists(path):
+            backup = f"{path}.backup.{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            shutil.copy(path, backup)
+
+        with open(path, 'w') as f:
+            f.write(content)
+
+        return {'success': True, 'path': path}
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
+
+
+def cmd_write_systemd_unit(params):
+    """Write a systemd unit file for SnapRAID timers."""
+    unit_name = params.get('unit_name', '')
+    content = params.get('content', '')
+
+    allowed_units = {
+        'pihealth-snapraid-sync.service',
+        'pihealth-snapraid-sync.timer',
+        'pihealth-snapraid-scrub.service',
+        'pihealth-snapraid-scrub.timer'
+    }
+
+    if unit_name not in allowed_units:
+        return {'success': False, 'error': 'Unit not allowed'}
+
+    path = f"/etc/systemd/system/{unit_name}"
+
+    try:
+        import shutil
+        from datetime import datetime
+        if os.path.exists(path):
+            backup = f"{path}.backup.{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            shutil.copy(path, backup)
+
+        with open(path, 'w') as f:
+            f.write(content)
+
+        return {'success': True, 'path': path}
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
+
+
+def cmd_systemctl(params):
+    """Run systemctl commands for SnapRAID timers."""
+    action = params.get('action', '')
+    unit = params.get('unit', '')
+
+    allowed_actions = {'daemon-reload', 'enable', 'disable', 'start', 'stop'}
+    allowed_units = {
+        'pihealth-snapraid-sync.timer',
+        'pihealth-snapraid-scrub.timer'
+    }
+
+    if action not in allowed_actions:
+        return {'success': False, 'error': 'Action not allowed'}
+
+    if action != 'daemon-reload' and unit not in allowed_units:
+        return {'success': False, 'error': 'Unit not allowed'}
+
+    cmd = ['systemctl', action]
+    if unit:
+        cmd.append(unit)
+    if action in ('enable', 'disable'):
+        cmd.append('--now')
+
+    result = run_command(cmd, timeout=60)
+    return {
+        'success': result.get('returncode') == 0,
+        'stdout': result.get('stdout', ''),
+        'stderr': result.get('stderr', ''),
+        'returncode': result.get('returncode')
+    }
+
+
 # Command whitelist
 COMMANDS = {
     'lsblk': cmd_lsblk,
@@ -343,6 +501,12 @@ COMMANDS = {
     'umount': cmd_umount,
     'smart_info': cmd_smart_info,
     'df': cmd_df,
+    'snapraid': cmd_snapraid,
+    'mergerfs_mount': cmd_mergerfs_mount,
+    'mergerfs_umount': cmd_mergerfs_umount,
+    'write_snapraid_conf': cmd_write_snapraid_conf,
+    'write_systemd_unit': cmd_write_systemd_unit,
+    'systemctl': cmd_systemctl,
     'ping': lambda p: {'success': True, 'message': 'pong'}
 }
 

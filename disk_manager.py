@@ -7,14 +7,11 @@ Communicates with the privileged helper service over Unix socket.
 
 import os
 import json
-import socket
 from flask import Blueprint, jsonify, request
 from auth_utils import login_required
+from helper_client import helper_call, helper_available, HelperError, HELPER_SOCKET
 
 disk_manager = Blueprint('disk_manager', __name__)
-
-# Helper socket path
-HELPER_SOCKET = os.getenv('PIHEALTH_HELPER_SOCKET', '/run/pihealth/helper.sock')
 
 # Media paths config file
 MEDIA_PATHS_CONFIG = os.path.join(
@@ -32,65 +29,6 @@ DEFAULT_MEDIA_PATHS = {
 }
 
 
-class HelperError(Exception):
-    """Error communicating with helper service."""
-    pass
-
-
-def helper_call(command, params=None):
-    """
-    Call the privileged helper service.
-
-    Args:
-        command: Command name (must be whitelisted in helper)
-        params: Optional dict of parameters
-
-    Returns:
-        Response dict from helper
-
-    Raises:
-        HelperError: If communication fails
-    """
-    if not os.path.exists(HELPER_SOCKET):
-        raise HelperError('Helper service not running (socket not found)')
-
-    request_data = {
-        'command': command,
-        'params': params or {}
-    }
-
-    try:
-        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        sock.settimeout(30)
-        sock.connect(HELPER_SOCKET)
-        sock.sendall(json.dumps(request_data).encode('utf-8'))
-
-        # Receive response
-        chunks = []
-        while True:
-            chunk = sock.recv(65536)
-            if not chunk:
-                break
-            chunks.append(chunk)
-        sock.close()
-
-        response = json.loads(b''.join(chunks).decode('utf-8'))
-        return response
-    except socket.timeout:
-        raise HelperError('Helper request timed out')
-    except socket.error as e:
-        raise HelperError(f'Socket error: {e}')
-    except json.JSONDecodeError:
-        raise HelperError('Invalid response from helper')
-
-
-def helper_available():
-    """Check if the helper service is available."""
-    try:
-        result = helper_call('ping')
-        return result.get('success', False)
-    except HelperError:
-        return False
 
 
 def load_media_paths():

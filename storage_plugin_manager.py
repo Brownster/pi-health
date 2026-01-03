@@ -1,0 +1,1 @@
+from storage_plugins import storage_bp as storage_plugin_manager

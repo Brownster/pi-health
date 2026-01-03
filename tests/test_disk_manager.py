@@ -312,14 +312,15 @@ class TestHelperFunctions:
     def test_helper_available_false(self):
         """Test helper_available returns False when socket doesn't exist."""
         import disk_manager
-        original_socket = disk_manager.HELPER_SOCKET
-        disk_manager.HELPER_SOCKET = '/tmp/nonexistent.sock'
+        import helper_client
+        original_socket = helper_client.HELPER_SOCKET
+        helper_client.HELPER_SOCKET = '/tmp/nonexistent.sock'
 
         try:
             result = disk_manager.helper_available()
             assert result is False
         finally:
-            disk_manager.HELPER_SOCKET = original_socket
+            helper_client.HELPER_SOCKET = original_socket
 
     def test_parse_size_to_gb(self):
         """Test size string parsing."""

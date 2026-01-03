@@ -12,12 +12,21 @@ from compose_editor import compose_editor
 from stack_manager import stack_manager
 from auth_utils import login_required
 from catalog_manager import catalog_manager
+from storage_plugin_manager import storage_plugin_manager
+from storage_plugins.registry import init_plugins
 from pi_monitor import get_pi_metrics
 from update_scheduler import update_scheduler, init_scheduler
 from disk_manager import disk_manager
 
 # Initialize Flask
 app = Flask(__name__, static_folder='static')
+
+# Storage plugin configuration directory
+STORAGE_PLUGIN_CONFIG_DIR = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "config",
+    "storage_plugins"
+)
 
 # Configure session
 app.secret_key = os.getenv('SECRET_KEY', secrets.token_hex(32))
@@ -96,8 +105,12 @@ except Exception as e:
 app.register_blueprint(compose_editor)
 app.register_blueprint(stack_manager)
 app.register_blueprint(catalog_manager)
+app.register_blueprint(storage_plugin_manager)
 app.register_blueprint(update_scheduler)
 app.register_blueprint(disk_manager)
+
+# Initialize storage plugins
+init_plugins(STORAGE_PLUGIN_CONFIG_DIR)
 
 # Initialize the auto-update scheduler
 init_scheduler(app)
@@ -888,6 +901,11 @@ def serve_stacks():
 def serve_settings():
     """Serve the settings page."""
     return send_from_directory(app.static_folder, 'settings.html')
+
+@app.route('/storage.html')
+def serve_storage():
+    """Serve the storage plugins page."""
+    return send_from_directory(app.static_folder, 'storage.html')
 
 
 @app.route('/disks.html')

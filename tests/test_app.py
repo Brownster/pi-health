@@ -191,6 +191,27 @@ class TestStaticPages:
         response = client.get('/login.html')
         assert response.status_code == 200
 
+    def test_storage_page(self, client):
+        """Test storage page loads and contains key sections."""
+        response = client.get('/storage.html')
+        assert response.status_code == 200
+        body = response.data.decode('utf-8')
+        assert 'Storage' in body
+        assert 'tab-snapraid' in body
+        assert 'tab-mergerfs' in body
+        assert 'tab-schedules' in body
+        assert 'tab-tools' in body
+        assert 'tab-recovery' in body
+        assert 'snapraid-drives' in body
+        assert 'snapraid-excludes' in body
+        assert 'mergerfs-pools' in body
+        assert 'schedule-sync-cron' in body
+        assert 'snapraid-output' in body
+        assert 'snapraid-modal' in body
+        assert 'mergerfs-modal' in body
+        assert 'snapraid-modal-name' in body
+        assert 'mergerfs-modal-name' in body
+
 
 class TestComposeEditorProtection:
     """Test compose editor endpoints require authentication."""

@@ -1,0 +1,1112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script>
+        if (!sessionStorage.getItem("loggedIn")) {
+            window.location.href = "/login.html";
+        }
+
+        const username = sessionStorage.getItem("username");
+        if (username) {
+            document.addEventListener('DOMContentLoaded', () => {
+                const userEl = document.getElementById('logged-in-user');
+                if (userEl) userEl.textContent = username;
+            });
+        }
+
+        async function logout() {
+            try {
+                await fetch('/api/logout', { method: 'POST' });
+            } catch (e) {}
+            sessionStorage.clear();
+            window.location.href = '/login.html';
+        }
+    </script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Storage - Pi-Health Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <script src="/theme.js"></script>
+    <style>
+        .coraline-button {
+            background: linear-gradient(to bottom, #5f4b8b, #372b53);
+            border: 1px solid #8a6cbd;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.25);
+            transition: all 0.3s ease;
+        }
+        .coraline-button:hover {
+            background: linear-gradient(to bottom, #6f58a3, #413162);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 10px rgba(0, 0, 0, 0.3);
+        }
+        .tab-button.active {
+            border-bottom: 2px solid #8a6cbd;
+            color: #c4b5fd;
+        }
+        .status-pill {
+            font-size: 0.75rem;
+            padding: 0.2rem 0.6rem;
+            border-radius: 9999px;
+        }
+        .status-healthy { background: rgba(16, 185, 129, 0.2); color: #6ee7b7; }
+        .status-degraded { background: rgba(245, 158, 11, 0.2); color: #fcd34d; }
+        .status-error { background: rgba(239, 68, 68, 0.2); color: #fca5a5; }
+        .status-unconfigured { background: rgba(107, 114, 128, 0.2); color: #9ca3af; }
+    </style>
+</head>
+<body class="bg-gray-900 text-blue-100 font-sans min-h-screen">
+    <header class="bg-gradient-to-r from-purple-900 to-blue-900 shadow-lg relative overflow-hidden">
+        <div class="absolute inset-0 overflow-hidden">
+            <img src="/theme-banner" alt="Dashboard" class="w-full h-full object-cover opacity-40 blur-sm">
+        </div>
+        <div class="container mx-auto p-8 relative">
+            <h1 class="text-4xl font-bold text-center text-blue-200 font-serif" style="text-shadow: 2px 2px 4px rgba(0,0,0,0.8);">Pi-Health Dashboard</h1>
+        </div>
+    </header>
+
+    <nav class="bg-purple-900 shadow-md">
+        <div class="container mx-auto px-4">
+            <div class="flex items-center justify-between h-16">
+                <div class="flex space-x-4">
+                    <a href="/" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Home</a>
+                    <a href="/system.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">System Health</a>
+                    <a href="/containers.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Containers</a>
+                    <a href="/stacks.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Stacks</a>
+                    <a href="/apps.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Apps</a>
+                    <a href="/disks.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Disks</a>
+                    <a href="/storage.html" class="px-3 py-2 rounded-md text-white bg-blue-800 font-medium border border-blue-400">Storage</a>
+                    <a href="/edit.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Edit Config</a>
+                    <a href="/settings.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Settings</a>
+                </div>
+                <div class="flex items-center space-x-3">
+                    <span id="logged-in-user" class="text-blue-200 text-sm"></span>
+                    <button onclick="logout()" class="px-3 py-2 rounded-md text-red-300 hover:bg-red-800 hover:text-white font-medium text-sm">Logout</button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <div id="notification-area" class="fixed top-4 right-4 z-50 w-72 flex flex-col items-end"></div>
+
+    <main class="container mx-auto p-6">
+        <div class="mb-4 flex items-center justify-between">
+            <div>
+                <h2 class="text-2xl font-semibold">Storage</h2>
+                <p class="text-sm text-gray-400">Manage SnapRAID and MergerFS with the same look and feel as the rest of Pi-Health.</p>
+            </div>
+            <button onclick="refreshAll()" class="coraline-button text-blue-100 font-bold py-2 px-4 rounded">Refresh</button>
+        </div>
+
+        <div id="helper-status" class="mb-6 bg-gray-800 border border-purple-900/40 rounded-lg p-3 text-sm text-gray-300">Checking helper status...</div>
+
+        <section class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8" id="plugin-cards"></section>
+
+        <div class="bg-gray-800 rounded-lg shadow-lg p-4 border border-purple-900/40 mb-6">
+            <div class="flex space-x-6 border-b border-gray-700 mb-4">
+                <button class="tab-button active pb-2" data-tab="snapraid" onclick="setTab('snapraid')">SnapRAID</button>
+                <button class="tab-button pb-2 text-gray-400" data-tab="mergerfs" onclick="setTab('mergerfs')">MergerFS</button>
+                <button class="tab-button pb-2 text-gray-400" data-tab="schedules" onclick="setTab('schedules')">Schedules</button>
+                <button class="tab-button pb-2 text-gray-400" data-tab="tools" onclick="setTab('tools')">Tools</button>
+                <button class="tab-button pb-2 text-gray-400" data-tab="recovery" onclick="setTab('recovery')">Recovery</button>
+            </div>
+
+            <div id="tab-snapraid" class="tab-content">
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <div class="bg-gray-900/60 border border-gray-700 rounded-lg p-4">
+                        <h3 class="text-lg font-semibold mb-2">SnapRAID Status</h3>
+                        <div id="snapraid-status" class="text-sm text-gray-400">Loading...</div>
+                        <div class="mt-3 flex gap-2">
+                            <button onclick="runSnapraidCommand('status')" class="coraline-button text-blue-100 text-sm font-semibold py-2 px-3 rounded">Run Status</button>
+                            <button onclick="applySnapraidConfig()" class="coraline-button text-blue-100 text-sm font-semibold py-2 px-3 rounded">Apply Config</button>
+                        </div>
+                    </div>
+                    <div class="bg-gray-900/60 border border-gray-700 rounded-lg p-4">
+                        <div class="flex items-center justify-between mb-2">
+                            <h3 class="text-lg font-semibold">SnapRAID Configuration</h3>
+                            <button onclick="openSnapraidModal()" class="coraline-button text-blue-100 text-xs font-semibold py-1 px-2 rounded">Add Drive</button>
+                        </div>
+                        <div id="snapraid-errors" class="hidden mb-3 text-sm text-red-300"></div>
+                        <div id="snapraid-drives" class="space-y-2"></div>
+                        <div class="mt-4">
+                            <label class="block text-sm text-gray-300">Exclude Patterns (one per line)</label>
+                            <textarea id="snapraid-excludes" class="w-full h-24 bg-gray-900 text-blue-100 border border-gray-700 rounded p-2 text-xs"></textarea>
+                        </div>
+                        <div class="mt-4 grid grid-cols-2 gap-3 text-sm">
+                            <div>
+                                <label class="block text-gray-300">Blocksize (KB)</label>
+                                <input id="snapraid-blocksize" class="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm" type="number">
+                            </div>
+                            <div>
+                                <label class="block text-gray-300">Hashsize (bytes)</label>
+                                <input id="snapraid-hashsize" class="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm" type="number">
+                            </div>
+                            <div>
+                                <label class="block text-gray-300">Autosave (GB)</label>
+                                <input id="snapraid-autosave" class="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm" type="number">
+                            </div>
+                            <div class="flex items-center gap-2 mt-6">
+                                <input id="snapraid-nohidden" type="checkbox">
+                                <label class="text-gray-300">No hidden files</label>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <input id="snapraid-prehash" type="checkbox">
+                                <label class="text-gray-300">Prehash</label>
+                            </div>
+                        </div>
+                        <div class="mt-3 flex gap-2">
+                            <button onclick="saveSnapraidConfig()" class="coraline-button text-blue-100 text-sm font-semibold py-2 px-3 rounded">Save Config</button>
+                            <button onclick="loadSnapraidConfig()" class="coraline-button text-blue-100 text-sm font-semibold py-2 px-3 rounded">Reload</button>
+                            <button onclick="toggleSnapraidJson()" class="coraline-button text-blue-100 text-sm font-semibold py-2 px-3 rounded">Toggle JSON</button>
+                        </div>
+                        <div id="snapraid-json-wrapper" class="mt-3 hidden">
+                            <textarea id="snapraid-config" class="w-full h-40 bg-gray-900 text-blue-100 border border-gray-700 rounded p-2 text-xs"></textarea>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="tab-mergerfs" class="tab-content hidden">
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <div class="bg-gray-900/60 border border-gray-700 rounded-lg p-4">
+                        <h3 class="text-lg font-semibold mb-2">MergerFS Status</h3>
+                        <div id="mergerfs-status" class="text-sm text-gray-400">Loading...</div>
+                        <div class="mt-3 flex gap-2">
+                            <button onclick="runMergerfsCommand('status')" class="coraline-button text-blue-100 text-sm font-semibold py-2 px-3 rounded">Run Status</button>
+                            <button onclick="applyMergerfsConfig()" class="coraline-button text-blue-100 text-sm font-semibold py-2 px-3 rounded">Apply Config</button>
+                        </div>
+                    </div>
+                    <div class="bg-gray-900/60 border border-gray-700 rounded-lg p-4">
+                        <div class="flex items-center justify-between mb-2">
+                            <h3 class="text-lg font-semibold">MergerFS Pools</h3>
+                            <button onclick="openMergerfsModal()" class="coraline-button text-blue-100 text-xs font-semibold py-1 px-2 rounded">Add Pool</button>
+                        </div>
+                        <div id="mergerfs-errors" class="hidden mb-3 text-sm text-red-300"></div>
+                        <div id="mergerfs-pools" class="space-y-3"></div>
+                        <div class="mt-3 flex gap-2">
+                            <button onclick="saveMergerfsConfig()" class="coraline-button text-blue-100 text-sm font-semibold py-2 px-3 rounded">Save Config</button>
+                            <button onclick="loadMergerfsConfig()" class="coraline-button text-blue-100 text-sm font-semibold py-2 px-3 rounded">Reload</button>
+                            <button onclick="toggleMergerfsJson()" class="coraline-button text-blue-100 text-sm font-semibold py-2 px-3 rounded">Toggle JSON</button>
+                        </div>
+                        <div id="mergerfs-json-wrapper" class="mt-3 hidden">
+                            <textarea id="mergerfs-config" class="w-full h-40 bg-gray-900 text-blue-100 border border-gray-700 rounded p-2 text-xs"></textarea>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="tab-schedules" class="tab-content hidden">
+                <div class="bg-gray-900/60 border border-gray-700 rounded-lg p-4">
+                    <h3 class="text-lg font-semibold mb-4">SnapRAID Schedule</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm text-gray-300">Sync Enabled</label>
+                            <input type="checkbox" id="schedule-sync-enabled" class="mt-2">
+                            <label class="block text-sm text-gray-300 mt-3">Sync Cron</label>
+                            <input id="schedule-sync-cron" class="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm" placeholder="0 3 * * *">
+                        </div>
+                        <div>
+                            <label class="block text-sm text-gray-300">Scrub Enabled</label>
+                            <input type="checkbox" id="schedule-scrub-enabled" class="mt-2">
+                            <label class="block text-sm text-gray-300 mt-3">Scrub Cron</label>
+                            <input id="schedule-scrub-cron" class="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm" placeholder="0 4 * * 0">
+                        </div>
+                    </div>
+                    <div class="mt-4 flex gap-2">
+                        <button onclick="saveSnapraidSchedule()" class="coraline-button text-blue-100 text-sm font-semibold py-2 px-3 rounded">Save Schedule</button>
+                        <button onclick="loadSnapraidConfig()" class="coraline-button text-blue-100 text-sm font-semibold py-2 px-3 rounded">Reload</button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="tab-tools" class="tab-content hidden">
+                <div class="bg-gray-900/60 border border-gray-700 rounded-lg p-4">
+                    <h3 class="text-lg font-semibold mb-3">SnapRAID Tools</h3>
+                    <div class="flex flex-wrap gap-2 mb-4">
+                        <button onclick="runSnapraidCommand('diff')" class="coraline-button text-blue-100 text-sm font-semibold py-2 px-3 rounded">Diff</button>
+                        <button onclick="runSnapraidCommand('sync')" class="coraline-button text-blue-100 text-sm font-semibold py-2 px-3 rounded">Sync</button>
+                        <button onclick="runSnapraidCommand('scrub')" class="coraline-button text-blue-100 text-sm font-semibold py-2 px-3 rounded">Scrub</button>
+                        <button onclick="runSnapraidCommand('check')" class="coraline-button text-blue-100 text-sm font-semibold py-2 px-3 rounded">Check</button>
+                        <button onclick="runSnapraidCommand('fix')" class="coraline-button text-blue-100 text-sm font-semibold py-2 px-3 rounded">Fix</button>
+                    </div>
+                    <pre id="snapraid-output" class="bg-gray-900 border border-gray-700 rounded p-3 text-xs h-48 overflow-auto text-blue-100"></pre>
+                </div>
+            </div>
+
+            <div id="tab-recovery" class="tab-content hidden">
+                <div class="bg-gray-900/60 border border-gray-700 rounded-lg p-4">
+                    <h3 class="text-lg font-semibold mb-2">Recovery Status</h3>
+                    <div id="snapraid-recovery" class="text-sm text-gray-400">Loading...</div>
+                    <div class="mt-3 text-sm text-gray-400">Use the Tools tab to run SnapRAID fix commands.</div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <div id="snapraid-modal" class="fixed inset-0 bg-black/60 hidden items-center justify-center z-50">
+        <div class="bg-gray-900 border border-purple-900/40 rounded-lg p-5 w-full max-w-lg">
+            <h3 class="text-lg font-semibold mb-4">SnapRAID Drive</h3>
+            <div class="grid grid-cols-2 gap-3 text-sm">
+                <div>
+                    <label class="text-gray-300">Name</label>
+                    <input id="snapraid-modal-name" class="w-full bg-gray-900 border border-gray-700 rounded p-2">
+                </div>
+                <div>
+                    <label class="text-gray-300">Path</label>
+                    <input id="snapraid-modal-path" class="w-full bg-gray-900 border border-gray-700 rounded p-2" placeholder="/mnt/disk1">
+                </div>
+                <div>
+                    <label class="text-gray-300">Role</label>
+                    <select id="snapraid-modal-role" class="w-full bg-gray-900 border border-gray-700 rounded p-2">
+                        <option value="data">Data</option>
+                        <option value="parity">Parity</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="text-gray-300">Parity Level</label>
+                    <input id="snapraid-modal-parity" class="w-full bg-gray-900 border border-gray-700 rounded p-2" type="number" value="1">
+                </div>
+                <div class="col-span-2 flex items-center gap-2">
+                    <input id="snapraid-modal-content" type="checkbox" checked>
+                    <label class="text-gray-300">Store content file</label>
+                </div>
+            </div>
+            <div class="mt-4 flex justify-end gap-2">
+                <button onclick="closeSnapraidModal()" class="px-3 py-2 rounded-md text-gray-300 hover:bg-gray-800">Cancel</button>
+                <button onclick="saveSnapraidModal()" class="coraline-button text-blue-100 text-sm font-semibold py-2 px-3 rounded">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="mergerfs-modal" class="fixed inset-0 bg-black/60 hidden items-center justify-center z-50">
+        <div class="bg-gray-900 border border-purple-900/40 rounded-lg p-5 w-full max-w-lg">
+            <h3 class="text-lg font-semibold mb-4">MergerFS Pool</h3>
+            <div class="grid grid-cols-2 gap-3 text-sm">
+                <div>
+                    <label class="text-gray-300">Pool Name</label>
+                    <input id="mergerfs-modal-name" class="w-full bg-gray-900 border border-gray-700 rounded p-2">
+                </div>
+                <div>
+                    <label class="text-gray-300">Mount Point</label>
+                    <input id="mergerfs-modal-mount" class="w-full bg-gray-900 border border-gray-700 rounded p-2" placeholder="/mnt/storage">
+                </div>
+                <div>
+                    <label class="text-gray-300">Create Policy</label>
+                    <select id="mergerfs-modal-policy" class="w-full bg-gray-900 border border-gray-700 rounded p-2"></select>
+                </div>
+                <div>
+                    <label class="text-gray-300">Min Free Space</label>
+                    <input id="mergerfs-modal-minfree" class="w-full bg-gray-900 border border-gray-700 rounded p-2" value="4G">
+                </div>
+            </div>
+            <div class="mt-3">
+                <label class="text-gray-300 text-sm">Branches (one per line)</label>
+                <textarea id="mergerfs-modal-branches" class="w-full h-24 bg-gray-900 border border-gray-700 rounded p-2 text-xs"></textarea>
+            </div>
+            <div class="mt-3">
+                <label class="text-gray-300 text-sm">Options (comma-separated)</label>
+                <input id="mergerfs-modal-options" class="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm">
+            </div>
+            <div class="mt-3 flex items-center gap-2 text-sm text-gray-300">
+                <input id="mergerfs-modal-enabled" type="checkbox" checked>
+                <label>Enabled</label>
+            </div>
+            <div class="mt-4 flex justify-end gap-2">
+                <button onclick="closeMergerfsModal()" class="px-3 py-2 rounded-md text-gray-300 hover:bg-gray-800">Cancel</button>
+                <button onclick="saveMergerfsModal()" class="coraline-button text-blue-100 text-sm font-semibold py-2 px-3 rounded">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let snapraidConfig = null;
+        let mergerfsConfig = null;
+        let snapraidEditIndex = null;
+        let mergerfsEditIndex = null;
+        const MERGERFS_POLICIES = [
+            { value: 'epmfs', label: 'Existing path, most free space' },
+            { value: 'eplfs', label: 'Existing path, least free space' },
+            { value: 'eplus', label: 'Existing path, least used space' },
+            { value: 'mfs', label: 'Most free space' },
+            { value: 'lfs', label: 'Least free space' },
+            { value: 'lus', label: 'Least used space' },
+            { value: 'rand', label: 'Random' },
+            { value: 'pfrd', label: 'Percent free random' },
+            { value: 'ff', label: 'First found' }
+        ];
+
+        function showNotification(message, type = 'info') {
+            const notificationArea = document.getElementById('notification-area');
+            const notification = document.createElement('div');
+            notification.className = `notification ${type} bg-opacity-90 p-3 mb-2 rounded shadow-lg transform transition-all duration-500 opacity-0`;
+            if (type === 'success') notification.classList.add('bg-green-600');
+            else if (type === 'error') notification.classList.add('bg-red-600');
+            else notification.classList.add('bg-blue-600');
+            notification.innerHTML = message;
+            notificationArea.appendChild(notification);
+            setTimeout(() => notification.classList.replace('opacity-0', 'opacity-100'), 10);
+            setTimeout(() => {
+                notification.classList.replace('opacity-100', 'opacity-0');
+                setTimeout(() => notification.remove(), 300);
+            }, 3000);
+        }
+
+        function setTab(tab) {
+            document.querySelectorAll('.tab-button').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.tab === tab);
+                btn.classList.toggle('text-gray-400', btn.dataset.tab !== tab);
+            });
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+            const active = document.getElementById(`tab-${tab}`);
+            if (active) active.classList.remove('hidden');
+        }
+
+        function statusClass(status) {
+            return `status-pill status-${status || 'unconfigured'}`;
+        }
+
+        async function refreshAll() {
+            await Promise.all([
+                loadHelperStatus(),
+                loadPluginCards(),
+                loadSnapraidConfig(),
+                loadMergerfsConfig(),
+                loadSnapraidStatus(),
+                loadMergerfsStatus(),
+                loadRecoveryStatus()
+            ]);
+        }
+
+        async function loadHelperStatus() {
+            const el = document.getElementById('helper-status');
+            try {
+                const response = await fetch('/api/disks/helper-status');
+                const data = await response.json();
+                if (data.available) {
+                    el.textContent = `Helper service: online (${data.socket_path})`;
+                    el.className = 'mb-6 bg-green-900/30 border border-green-700 rounded-lg p-3 text-sm text-green-200';
+                } else {
+                    el.textContent = 'Helper service: unavailable (privileged actions disabled)';
+                    el.className = 'mb-6 bg-yellow-900/30 border border-yellow-700 rounded-lg p-3 text-sm text-yellow-200';
+                }
+            } catch (error) {
+                el.textContent = 'Helper service: error checking status';
+                el.className = 'mb-6 bg-red-900/30 border border-red-700 rounded-lg p-3 text-sm text-red-200';
+            }
+        }
+
+        async function loadPluginCards() {
+            const container = document.getElementById('plugin-cards');
+            container.innerHTML = '<div class="text-gray-400">Loading plugins...</div>';
+            try {
+                const response = await fetch('/api/storage/plugins');
+                const data = await response.json();
+                const plugins = data.plugins || [];
+                if (!plugins.length) {
+                    container.innerHTML = '<div class="text-gray-400">No storage plugins detected.</div>';
+                    return;
+                }
+                container.innerHTML = plugins.map(plugin => `
+                    <div class="bg-gray-800 border border-purple-900/40 rounded-lg p-4">
+                        <div class="flex justify-between items-center mb-2">
+                            <h3 class="text-lg font-semibold">${plugin.name}</h3>
+                            <span class="${statusClass(plugin.status)}">${plugin.status}</span>
+                        </div>
+                        <p class="text-sm text-gray-400 mb-3">${plugin.description || ''}</p>
+                        <div class="text-xs text-gray-400">Version ${plugin.version || '1.0.0'}</div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                container.innerHTML = '<div class="text-red-400">Failed to load plugins.</div>';
+            }
+        }
+
+        async function loadSnapraidConfig() {
+            try {
+                const response = await fetch('/api/storage/plugins/snapraid');
+                const data = await response.json();
+                snapraidConfig = data.config || {};
+                updateSnapraidJson();
+                renderSnapraidForm();
+                populateScheduleFromConfig(snapraidConfig);
+            } catch (error) {
+                showNotification('Failed to load SnapRAID config', 'error');
+            }
+        }
+
+        async function loadMergerfsConfig() {
+            try {
+                const response = await fetch('/api/storage/plugins/mergerfs');
+                const data = await response.json();
+                mergerfsConfig = data.config || {};
+                updateMergerfsJson();
+                renderMergerfsForm();
+            } catch (error) {
+                showNotification('Failed to load MergerFS config', 'error');
+            }
+        }
+
+        function populateScheduleFromConfig(config) {
+            const schedule = (config && config.schedule) || {};
+            document.getElementById('schedule-sync-enabled').checked = !!schedule.sync_enabled;
+            document.getElementById('schedule-sync-cron').value = schedule.sync_cron || '0 3 * * *';
+            document.getElementById('schedule-scrub-enabled').checked = !!schedule.scrub_enabled;
+            document.getElementById('schedule-scrub-cron').value = schedule.scrub_cron || '0 4 * * 0';
+        }
+
+        async function saveSnapraidConfig() {
+            const config = collectSnapraidConfig();
+            const errors = validateSnapraidConfig(config);
+            renderSnapraidErrors(errors);
+            if (errors.length) {
+                showNotification('Fix SnapRAID validation errors', 'error');
+                return;
+            }
+            const response = await fetch('/api/storage/plugins/snapraid/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(config)
+            });
+            if (response.ok) {
+                showNotification('SnapRAID config saved', 'success');
+                snapraidConfig = config;
+                updateSnapraidJson();
+            } else {
+                const data = await response.json();
+                showNotification(data.error || 'Failed to save config', 'error');
+            }
+        }
+
+        async function saveMergerfsConfig() {
+            const config = collectMergerfsConfig();
+            const errors = validateMergerfsConfig(config);
+            renderMergerfsErrors(errors);
+            if (errors.length) {
+                showNotification('Fix MergerFS validation errors', 'error');
+                return;
+            }
+            const response = await fetch('/api/storage/plugins/mergerfs/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(config)
+            });
+            if (response.ok) {
+                showNotification('MergerFS config saved', 'success');
+                mergerfsConfig = config;
+                updateMergerfsJson();
+            } else {
+                const data = await response.json();
+                showNotification(data.error || 'Failed to save config', 'error');
+            }
+        }
+
+        async function applySnapraidConfig() {
+            const response = await fetch('/api/storage/plugins/snapraid/apply', { method: 'POST' });
+            if (response.ok) {
+                showNotification('SnapRAID config applied', 'success');
+            } else {
+                const data = await response.json();
+                showNotification(data.error || 'Failed to apply config', 'error');
+            }
+        }
+
+        async function applyMergerfsConfig() {
+            const response = await fetch('/api/storage/plugins/mergerfs/apply', { method: 'POST' });
+            if (response.ok) {
+                showNotification('MergerFS config applied', 'success');
+            } else {
+                const data = await response.json();
+                showNotification(data.error || 'Failed to apply config', 'error');
+            }
+        }
+
+        async function loadSnapraidStatus() {
+            try {
+                const response = await fetch('/api/storage/plugins/snapraid/status');
+                const data = await response.json();
+                const el = document.getElementById('snapraid-status');
+                el.innerHTML = `<div class="mb-1">Status: <span class="${statusClass(data.status)}">${data.status}</span></div>` +
+                    `<div class="text-xs text-gray-400">${data.message || ''}</div>`;
+            } catch (error) {
+                document.getElementById('snapraid-status').textContent = 'Unable to load status.';
+            }
+        }
+
+        async function loadMergerfsStatus() {
+            try {
+                const response = await fetch('/api/storage/plugins/mergerfs/status');
+                const data = await response.json();
+                const el = document.getElementById('mergerfs-status');
+                el.innerHTML = `<div class="mb-1">Status: <span class="${statusClass(data.status)}">${data.status}</span></div>` +
+                    `<div class="text-xs text-gray-400">${data.message || ''}</div>`;
+            } catch (error) {
+                document.getElementById('mergerfs-status').textContent = 'Unable to load status.';
+            }
+        }
+
+        async function saveSnapraidSchedule() {
+            if (!snapraidConfig) {
+                showNotification('Load SnapRAID config first', 'error');
+                return;
+            }
+            const schedule = {
+                sync_enabled: document.getElementById('schedule-sync-enabled').checked,
+                sync_cron: document.getElementById('schedule-sync-cron').value || '0 3 * * *',
+                scrub_enabled: document.getElementById('schedule-scrub-enabled').checked,
+                scrub_cron: document.getElementById('schedule-scrub-cron').value || '0 4 * * 0'
+            };
+            const updated = { ...collectSnapraidConfig(), schedule };
+            const response = await fetch('/api/storage/plugins/snapraid/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(updated)
+            });
+            if (response.ok) {
+                showNotification('Schedule saved (apply config to update timers)', 'success');
+                snapraidConfig = updated;
+            } else {
+                const data = await response.json();
+                showNotification(data.error || 'Failed to save schedule', 'error');
+            }
+        }
+
+        async function runSnapraidCommand(command) {
+            const output = document.getElementById('snapraid-output');
+            output.textContent = '';
+            try {
+                const response = await fetch(`/api/storage/plugins/snapraid/commands/${command}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({})
+                });
+                if (!response.ok) {
+                    const data = await response.json();
+                    showNotification(data.error || 'Command failed', 'error');
+                    return;
+                }
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+                    buffer += decoder.decode(value, { stream: true });
+                    const parts = buffer.split('\n\n');
+                    buffer = parts.pop();
+                    for (const part of parts) {
+                        if (!part.startsWith('data:')) continue;
+                        const payload = JSON.parse(part.replace('data: ', ''));
+                        if (payload.type === 'output') {
+                            output.textContent += payload.line + '\n';
+                        }
+                    }
+                }
+            } catch (error) {
+                showNotification('Failed to run command', 'error');
+            }
+        }
+
+        async function runMergerfsCommand(command) {
+            try {
+                const response = await fetch(`/api/storage/plugins/mergerfs/commands/${command}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({})
+                });
+                if (response.ok) {
+                    showNotification('MergerFS command started', 'success');
+                } else {
+                    const data = await response.json();
+                    showNotification(data.error || 'Command failed', 'error');
+                }
+            } catch (error) {
+                showNotification('Failed to run MergerFS command', 'error');
+            }
+        }
+
+        async function loadRecoveryStatus() {
+            const el = document.getElementById('snapraid-recovery');
+            try {
+                const response = await fetch('/api/storage/plugins/snapraid/recovery');
+                const data = await response.json();
+                if (data.error) {
+                    el.textContent = data.error;
+                    return;
+                }
+                el.innerHTML = `
+                    <div>Recoverable: ${data.recoverable ? 'Yes' : 'No'}</div>
+                    <div>Missing files: ${data.missing_files}</div>
+                    <div>Damaged files: ${data.damaged_files}</div>
+                    <div>Failed drives: ${(data.failed_drives || []).join(', ') || 'None'}</div>
+                `;
+            } catch (error) {
+                el.textContent = 'Failed to load recovery status.';
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            loadMergerfsPolicies();
+            refreshAll();
+        });
+
+        function updateSnapraidJson() {
+            const area = document.getElementById('snapraid-config');
+            if (area) {
+                area.value = JSON.stringify(snapraidConfig || {}, null, 2);
+            }
+        }
+
+        function updateMergerfsJson() {
+            const area = document.getElementById('mergerfs-config');
+            if (area) {
+                area.value = JSON.stringify(mergerfsConfig || {}, null, 2);
+            }
+        }
+
+        function toggleSnapraidJson() {
+            document.getElementById('snapraid-json-wrapper').classList.toggle('hidden');
+        }
+
+        function toggleMergerfsJson() {
+            document.getElementById('mergerfs-json-wrapper').classList.toggle('hidden');
+        }
+
+        function renderSnapraidForm() {
+            const container = document.getElementById('snapraid-drives');
+            const drives = (snapraidConfig && snapraidConfig.drives) || [];
+            container.innerHTML = drives.map((drive, index) => {
+                const role = drive.role || 'data';
+                const content = drive.content !== false;
+                const parityLevel = drive.parity_level || 1;
+                return `
+                    <div class="border border-gray-700 rounded p-3 snapraid-drive-row" data-index="${index}">
+                        <div class="grid grid-cols-2 gap-2 text-sm">
+                            <div>
+                                <label class="text-gray-300">Name</label>
+                                <input class="snapraid-name w-full bg-gray-900 border border-gray-700 rounded p-2" value="${drive.name || ''}">
+                            </div>
+                            <div>
+                                <label class="text-gray-300">Path</label>
+                                <input class="snapraid-path w-full bg-gray-900 border border-gray-700 rounded p-2" value="${drive.path || ''}">
+                            </div>
+                            <div>
+                                <label class="text-gray-300">Role</label>
+                                <select class="snapraid-role w-full bg-gray-900 border border-gray-700 rounded p-2">
+                                    <option value="data" ${role === 'data' ? 'selected' : ''}>Data</option>
+                                    <option value="parity" ${role === 'parity' ? 'selected' : ''}>Parity</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="text-gray-300">Parity Level</label>
+                                <input class="snapraid-parity w-full bg-gray-900 border border-gray-700 rounded p-2" type="number" value="${parityLevel}">
+                            </div>
+                        </div>
+                        <div class="mt-2 flex items-center justify-between text-sm text-gray-300">
+                            <label class="flex items-center gap-2">
+                                <input class="snapraid-content" type="checkbox" ${content ? 'checked' : ''}>
+                                Store content file
+                            </label>
+                            <div class="flex gap-3">
+                                <button onclick="openSnapraidModal(${index})" class="text-blue-300 hover:text-blue-400">Edit</button>
+                                <button onclick="removeSnapraidDrive(${index})" class="text-red-300 hover:text-red-400">Remove</button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            document.getElementById('snapraid-excludes').value = (snapraidConfig.excludes || []).join('\n');
+            const settings = snapraidConfig.settings || {};
+            document.getElementById('snapraid-blocksize').value = settings.blocksize ?? 256;
+            document.getElementById('snapraid-hashsize').value = settings.hashsize ?? 16;
+            document.getElementById('snapraid-autosave').value = settings.autosave ?? 500;
+            document.getElementById('snapraid-nohidden').checked = !!settings.nohidden;
+            document.getElementById('snapraid-prehash').checked = settings.prehash !== false;
+        }
+
+        function openSnapraidModal(index = null) {
+            snapraidEditIndex = index;
+            const modal = document.getElementById('snapraid-modal');
+            const drive = index === null ? {
+                name: '',
+                path: '',
+                role: 'data',
+                content: true,
+                parity_level: 1
+            } : (snapraidConfig.drives[index] || {});
+
+            document.getElementById('snapraid-modal-name').value = drive.name || '';
+            document.getElementById('snapraid-modal-path').value = drive.path || '';
+            document.getElementById('snapraid-modal-role').value = drive.role || 'data';
+            document.getElementById('snapraid-modal-parity').value = drive.parity_level || 1;
+            document.getElementById('snapraid-modal-content').checked = drive.content !== false;
+
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closeSnapraidModal() {
+            const modal = document.getElementById('snapraid-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+            snapraidEditIndex = null;
+        }
+
+        function saveSnapraidModal() {
+            if (!snapraidConfig) snapraidConfig = {};
+            if (!snapraidConfig.drives) snapraidConfig.drives = [];
+            const drive = {
+                name: document.getElementById('snapraid-modal-name').value.trim(),
+                path: document.getElementById('snapraid-modal-path').value.trim(),
+                role: document.getElementById('snapraid-modal-role').value,
+                content: document.getElementById('snapraid-modal-content').checked,
+                parity_level: parseInt(document.getElementById('snapraid-modal-parity').value || '1', 10)
+            };
+            drive.id = drive.name || `d${snapraidConfig.drives.length + 1}`;
+
+            if (snapraidEditIndex === null) {
+                snapraidConfig.drives.push(drive);
+            } else {
+                snapraidConfig.drives[snapraidEditIndex] = drive;
+            }
+            closeSnapraidModal();
+            renderSnapraidForm();
+        }
+
+        function removeSnapraidDrive(index) {
+            if (!snapraidConfig || !snapraidConfig.drives) return;
+            snapraidConfig.drives.splice(index, 1);
+            renderSnapraidForm();
+        }
+
+        function collectSnapraidConfig() {
+            const config = { ...(snapraidConfig || {}) };
+            const rows = document.querySelectorAll('.snapraid-drive-row');
+            const drives = [];
+            rows.forEach((row, index) => {
+                const name = row.querySelector('.snapraid-name').value.trim();
+                const path = row.querySelector('.snapraid-path').value.trim();
+                const role = row.querySelector('.snapraid-role').value;
+                const content = row.querySelector('.snapraid-content').checked;
+                const parityLevel = parseInt(row.querySelector('.snapraid-parity').value || '1', 10);
+                drives.push({
+                    id: name || `d${index + 1}`,
+                    name: name || `d${index + 1}`,
+                    path,
+                    role,
+                    content,
+                    parity_level: parityLevel
+                });
+            });
+
+            const excludesRaw = document.getElementById('snapraid-excludes').value || '';
+            const excludes = excludesRaw.split('\n').map(item => item.trim()).filter(Boolean);
+            const settings = {
+                blocksize: parseInt(document.getElementById('snapraid-blocksize').value || '256', 10),
+                hashsize: parseInt(document.getElementById('snapraid-hashsize').value || '16', 10),
+                autosave: parseInt(document.getElementById('snapraid-autosave').value || '0', 10),
+                nohidden: document.getElementById('snapraid-nohidden').checked,
+                prehash: document.getElementById('snapraid-prehash').checked
+            };
+
+            config.drives = drives;
+            config.excludes = excludes;
+            config.settings = settings;
+            config.enabled = config.enabled ?? true;
+            config.thresholds = config.thresholds || { delete_threshold: 50, update_threshold: 500 };
+            config.scrub = config.scrub || { enabled: true, percent: 12, age_days: 10 };
+            return config;
+        }
+
+        function validateSnapraidConfig(config) {
+            const errors = [];
+            const drives = config.drives || [];
+            if (!drives.length) {
+                errors.push('At least one drive is required.');
+                return errors;
+            }
+            const dataDrives = drives.filter(d => d.role === 'data');
+            const parityDrives = drives.filter(d => d.role === 'parity');
+            const contentDrives = drives.filter(d => d.content);
+            if (!dataDrives.length) errors.push('At least one data drive is required.');
+            if (!parityDrives.length) errors.push('At least one parity drive is required.');
+            if (!contentDrives.length) errors.push('At least one content drive is required.');
+
+            const names = drives.map(d => d.name).filter(Boolean);
+            if (names.length !== new Set(names).size) {
+                errors.push('Drive names must be unique.');
+            }
+
+            drives.forEach(drive => {
+                if (!drive.path || !drive.path.startsWith('/mnt/')) {
+                    errors.push(`Drive path must be under /mnt/: ${drive.name || 'unnamed'}`);
+                }
+            });
+
+            const parityLevels = parityDrives.map(d => d.parity_level || 1);
+            const uniqueLevels = [...new Set(parityLevels)].sort((a, b) => a - b);
+            uniqueLevels.forEach((level, idx) => {
+                if (level !== idx + 1) {
+                    errors.push('Parity levels must be contiguous starting at 1.');
+                }
+            });
+            markSnapraidFieldErrors(config, errors);
+            return errors;
+        }
+
+        function renderSnapraidErrors(errors) {
+            const container = document.getElementById('snapraid-errors');
+            if (!errors.length) {
+                container.classList.add('hidden');
+                container.innerHTML = '';
+                return;
+            }
+            container.classList.remove('hidden');
+            container.innerHTML = `<ul class="list-disc list-inside space-y-1">${errors.map(err => `<li>${err}</li>`).join('')}</ul>`;
+        }
+
+        function clearInputError(el) {
+            if (!el) return;
+            el.classList.remove('border-red-500');
+        }
+
+        function markInputError(el) {
+            if (!el) return;
+            el.classList.add('border-red-500');
+        }
+
+        function markSnapraidFieldErrors(config, errors = []) {
+            document.querySelectorAll('.snapraid-drive-row').forEach(row => {
+                row.querySelectorAll('input, select, textarea').forEach(clearInputError);
+            });
+
+            const drives = config.drives || [];
+            const nameCounts = {};
+            drives.forEach(drive => {
+                if (drive.name) {
+                    nameCounts[drive.name] = (nameCounts[drive.name] || 0) + 1;
+                }
+            });
+
+            document.querySelectorAll('.snapraid-drive-row').forEach((row, index) => {
+                const drive = drives[index] || {};
+                const nameEl = row.querySelector('.snapraid-name');
+                const pathEl = row.querySelector('.snapraid-path');
+                const parityEl = row.querySelector('.snapraid-parity');
+
+                if (!drive.name || (drive.name && nameCounts[drive.name] > 1)) {
+                    markInputError(nameEl);
+                }
+                if (!drive.path || !drive.path.startsWith('/mnt/')) {
+                    markInputError(pathEl);
+                }
+                if (drive.role === 'parity') {
+                    const level = drive.parity_level || 1;
+                    if (level < 1) {
+                        markInputError(parityEl);
+                    }
+                }
+            });
+        }
+
+        function renderMergerfsForm() {
+            const container = document.getElementById('mergerfs-pools');
+            const pools = (mergerfsConfig && mergerfsConfig.pools) || [];
+            container.innerHTML = pools.map((pool, index) => {
+                const options = MERGERFS_POLICIES.map(policy => {
+                    const selected = (pool.create_policy || 'epmfs') === policy.value ? 'selected' : '';
+                    return `<option value="${policy.value}" ${selected}>${policy.label}</option>`;
+                }).join('');
+                return `
+                    <div class="border border-gray-700 rounded p-3 mergerfs-pool-row" data-index="${index}">
+                        <div class="grid grid-cols-2 gap-2 text-sm">
+                            <div>
+                                <label class="text-gray-300">Pool Name</label>
+                                <input class="mergerfs-name w-full bg-gray-900 border border-gray-700 rounded p-2" value="${pool.name || ''}">
+                            </div>
+                            <div>
+                                <label class="text-gray-300">Mount Point</label>
+                                <input class="mergerfs-mount w-full bg-gray-900 border border-gray-700 rounded p-2" value="${pool.mount_point || ''}">
+                            </div>
+                            <div>
+                                <label class="text-gray-300">Create Policy</label>
+                                <select class="mergerfs-policy w-full bg-gray-900 border border-gray-700 rounded p-2">${options}</select>
+                            </div>
+                            <div>
+                                <label class="text-gray-300">Min Free Space</label>
+                                <input class="mergerfs-minfree w-full bg-gray-900 border border-gray-700 rounded p-2" value="${pool.min_free_space || '4G'}">
+                            </div>
+                        </div>
+                        <div class="mt-2">
+                            <label class="text-gray-300 text-sm">Branches (one per line)</label>
+                            <textarea class="mergerfs-branches w-full h-20 bg-gray-900 border border-gray-700 rounded p-2 text-xs">${(pool.branches || []).join('\\n')}</textarea>
+                        </div>
+                        <div class="mt-2">
+                            <label class="text-gray-300 text-sm">Options (comma-separated)</label>
+                            <input class="mergerfs-options w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm" value="${pool.options || ''}">
+                        </div>
+                        <div class="mt-2 flex items-center justify-between text-sm text-gray-300">
+                            <label class="flex items-center gap-2">
+                                <input class="mergerfs-enabled" type="checkbox" ${pool.enabled !== false ? 'checked' : ''}>
+                                Enabled
+                            </label>
+                            <div class="flex gap-3">
+                                <button onclick="openMergerfsModal(${index})" class="text-blue-300 hover:text-blue-400">Edit</button>
+                                <button onclick="removeMergerfsPool(${index})" class="text-red-300 hover:text-red-400">Remove</button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function openMergerfsModal(index = null) {
+            mergerfsEditIndex = index;
+            const modal = document.getElementById('mergerfs-modal');
+            const pool = index === null ? {
+                name: '',
+                branches: [],
+                mount_point: '',
+                create_policy: 'epmfs',
+                min_free_space: '4G',
+                options: '',
+                enabled: true
+            } : (mergerfsConfig.pools[index] || {});
+
+            document.getElementById('mergerfs-modal-name').value = pool.name || '';
+            document.getElementById('mergerfs-modal-mount').value = pool.mount_point || '';
+            document.getElementById('mergerfs-modal-policy').value = pool.create_policy || 'epmfs';
+            document.getElementById('mergerfs-modal-minfree').value = pool.min_free_space || '4G';
+            document.getElementById('mergerfs-modal-options').value = pool.options || '';
+            document.getElementById('mergerfs-modal-branches').value = (pool.branches || []).join('\n');
+            document.getElementById('mergerfs-modal-enabled').checked = pool.enabled !== false;
+
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closeMergerfsModal() {
+            const modal = document.getElementById('mergerfs-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+            mergerfsEditIndex = null;
+        }
+
+        function saveMergerfsModal() {
+            if (!mergerfsConfig) mergerfsConfig = {};
+            if (!mergerfsConfig.pools) mergerfsConfig.pools = [];
+            const branchesRaw = document.getElementById('mergerfs-modal-branches').value || '';
+            const branches = branchesRaw.split('\n').map(item => item.trim()).filter(Boolean);
+            const pool = {
+                name: document.getElementById('mergerfs-modal-name').value.trim(),
+                mount_point: document.getElementById('mergerfs-modal-mount').value.trim(),
+                create_policy: document.getElementById('mergerfs-modal-policy').value,
+                min_free_space: document.getElementById('mergerfs-modal-minfree').value.trim() || '4G',
+                options: document.getElementById('mergerfs-modal-options').value.trim(),
+                branches,
+                enabled: document.getElementById('mergerfs-modal-enabled').checked
+            };
+            pool.id = pool.name || `pool${mergerfsConfig.pools.length + 1}`;
+
+            if (mergerfsEditIndex === null) {
+                mergerfsConfig.pools.push(pool);
+            } else {
+                mergerfsConfig.pools[mergerfsEditIndex] = pool;
+            }
+            closeMergerfsModal();
+            renderMergerfsForm();
+        }
+
+        function removeMergerfsPool(index) {
+            if (!mergerfsConfig || !mergerfsConfig.pools) return;
+            mergerfsConfig.pools.splice(index, 1);
+            renderMergerfsForm();
+        }
+
+        function collectMergerfsConfig() {
+            const config = { ...(mergerfsConfig || {}) };
+            config.pools = (mergerfsConfig && mergerfsConfig.pools) || [];
+            return config;
+        }
+
+        function loadMergerfsPolicies() {
+            const select = document.getElementById('mergerfs-modal-policy');
+            if (!select) return;
+            select.innerHTML = MERGERFS_POLICIES.map(policy => (
+                `<option value="${policy.value}">${policy.label}</option>`
+            )).join('');
+        }
+
+        function validateMergerfsConfig(config) {
+            const errors = [];
+            const pools = config.pools || [];
+            const names = new Set();
+            const mountPoints = new Set();
+            const branchesSet = new Set();
+            pools.forEach(pool => {
+                if (names.has(pool.name)) errors.push(`Duplicate pool name: ${pool.name}`);
+                if (mountPoints.has(pool.mount_point)) errors.push(`Duplicate mount point: ${pool.mount_point}`);
+                names.add(pool.name);
+                mountPoints.add(pool.mount_point);
+
+                if (!pool.mount_point || !pool.mount_point.startsWith('/mnt/')) {
+                    errors.push(`Mount point must be under /mnt/: ${pool.name || 'pool'}`);
+                }
+                if (!pool.branches || pool.branches.length < 2) {
+                    errors.push(`Pool '${pool.name}' needs at least 2 branches.`);
+                }
+                (pool.branches || []).forEach(branch => {
+                    if (branchesSet.has(branch)) {
+                        errors.push(`Branch used in multiple pools: ${branch}`);
+                    }
+                    branchesSet.add(branch);
+                });
+            });
+            markMergerfsFieldErrors(config, errors);
+            return errors;
+        }
+
+        function renderMergerfsErrors(errors) {
+            const container = document.getElementById('mergerfs-errors');
+            if (!errors.length) {
+                container.classList.add('hidden');
+                container.innerHTML = '';
+                return;
+            }
+            container.classList.remove('hidden');
+            container.innerHTML = `<ul class="list-disc list-inside space-y-1">${errors.map(err => `<li>${err}</li>`).join('')}</ul>`;
+        }
+
+        function markMergerfsFieldErrors(config, errors = []) {
+            document.querySelectorAll('.mergerfs-pool-row').forEach(row => {
+                row.querySelectorAll('input, select, textarea').forEach(clearInputError);
+            });
+
+            const pools = config.pools || [];
+            const nameCounts = {};
+            const mountCounts = {};
+            pools.forEach(pool => {
+                if (pool.name) nameCounts[pool.name] = (nameCounts[pool.name] || 0) + 1;
+                if (pool.mount_point) mountCounts[pool.mount_point] = (mountCounts[pool.mount_point] || 0) + 1;
+            });
+
+            document.querySelectorAll('.mergerfs-pool-row').forEach((row, index) => {
+                const pool = pools[index] || {};
+                const nameEl = row.querySelector('.mergerfs-name');
+                const mountEl = row.querySelector('.mergerfs-mount');
+                const branchesEl = row.querySelector('.mergerfs-branches');
+
+                if (!pool.name || (pool.name && nameCounts[pool.name] > 1)) {
+                    markInputError(nameEl);
+                }
+                if (!pool.mount_point || !pool.mount_point.startsWith('/mnt/') || mountCounts[pool.mount_point] > 1) {
+                    markInputError(mountEl);
+                }
+                if (!pool.branches || pool.branches.length < 2) {
+                    markInputError(branchesEl);
+                }
+            });
+        }
+    </script>
+</body>
+</html>

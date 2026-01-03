@@ -1,0 +1,66 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "pools": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "description": "Pool name (used in mount path)"
+          },
+          "branches": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 2,
+            "description": "Source paths to merge"
+          },
+          "mount_point": {
+            "type": "string",
+            "pattern": "^/mnt/",
+            "description": "Where to mount the merged pool"
+          },
+          "create_policy": {
+            "type": "string",
+            "enum": [
+              "epmfs",
+              "eplfs",
+              "eplus",
+              "mfs",
+              "lfs",
+              "lus",
+              "rand",
+              "pfrd",
+              "ff"
+            ],
+            "default": "epmfs",
+            "description": "Policy for creating new files"
+          },
+          "min_free_space": {
+            "type": "string",
+            "default": "4G",
+            "description": "Minimum free space before skipping drive"
+          },
+          "options": {
+            "type": "string",
+            "default": "defaults,allow_other,cache.files=off,category.create=epmfs",
+            "description": "Additional mount options"
+          },
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          }
+        },
+        "required": ["id", "name", "branches", "mount_point"]
+      }
+    }
+  }
+}
