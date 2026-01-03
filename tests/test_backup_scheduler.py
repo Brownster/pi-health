@@ -163,3 +163,25 @@ class TestBackupEndpoints:
         finally:
             backup_scheduler.CONFIG_DIR = original_config_dir
             backup_scheduler.CONFIG_FILE = original_config_file
+
+    def test_restore_plugins_requires_auth(self, client):
+        response = client.post('/api/backups/restore-plugins', data=json.dumps({}),
+                               content_type='application/json')
+        assert response.status_code == 401
+
+    def test_restore_plugins_invalid(self, authenticated_client, temp_config_dir):
+        import backup_scheduler
+        original_config_dir = backup_scheduler.CONFIG_DIR
+        original_config_file = backup_scheduler.CONFIG_FILE
+
+        backup_scheduler.CONFIG_DIR = temp_config_dir
+        backup_scheduler.CONFIG_FILE = os.path.join(temp_config_dir, 'backup_config.json')
+
+        try:
+            response = authenticated_client.post('/api/backups/restore-plugins',
+                                                 data=json.dumps({'archive_name': 'pi-health-backup-20240101.tar.zst'}),
+                                                 content_type='application/json')
+            assert response.status_code == 400
+        finally:
+            backup_scheduler.CONFIG_DIR = original_config_dir
+            backup_scheduler.CONFIG_FILE = original_config_file

@@ -232,6 +232,7 @@ class TestStaticPages:
         assert 'backup-plugin-retention' in body
         assert 'backup-run-now' in body
         assert 'backup-list' in body
+        assert 'backup-plugins-list' in body
 
 
 

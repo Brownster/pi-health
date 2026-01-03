@@ -369,3 +369,40 @@ def api_backup_restore():
         })
     except HelperError as exc:
         return jsonify({'error': str(exc)}), 503
+
+
+@backup_scheduler.route('/api/backups/restore-plugins', methods=['POST'])
+@login_required
+def api_backup_restore_plugins():
+    data = request.get_json() or {}
+    archive_name = data.get('archive_name', '').strip()
+
+    if not archive_name or '/' in archive_name or '..' in archive_name:
+        return jsonify({'error': 'Invalid archive name'}), 400
+    if not archive_name.startswith('storage-plugins-'):
+        return jsonify({'error': 'Invalid plugin archive'}), 400
+
+    config = load_config()
+    dest_dir = config.get('dest_dir', '')
+    archive_path = os.path.join(dest_dir, archive_name)
+
+    if not os.path.exists(archive_path):
+        return jsonify({'error': 'Backup not found'}), 404
+
+    if not helper_available():
+        return jsonify({'error': 'Helper service unavailable'}), 503
+
+    try:
+        restore_result = helper_call('backup_restore', {
+            'archive_path': archive_path
+        })
+        if not restore_result.get('success'):
+            return jsonify({'error': restore_result.get('error', 'Restore failed')}), 500
+
+        config['last_plugin_backup'] = datetime.now(timezone.utc).isoformat()
+        config['last_plugin_backup_result'] = restore_result
+        save_config(config)
+
+        return jsonify({'status': 'ok', 'result': restore_result})
+    except HelperError as exc:
+        return jsonify({'error': str(exc)}), 503

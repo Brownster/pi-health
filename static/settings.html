@@ -324,6 +324,12 @@
                     <p>Loading backups...</p>
                 </div>
             </div>
+            <div class="mt-6">
+                <h4 class="text-sm font-semibold mb-2 text-gray-300">Storage Plugin Backups</h4>
+                <div id="backup-plugins-list" class="space-y-2 text-sm text-gray-400">
+                    <p>Loading plugin backups...</p>
+                </div>
+            </div>
         </section>
 
         <!-- Auto-Update Section -->
@@ -623,21 +629,42 @@
                 if (!response.ok) return;
                 const data = await response.json();
                 const list = document.getElementById('backup-list');
-                if (!data.backups || data.backups.length === 0) {
+                const pluginList = document.getElementById('backup-plugins-list');
+                const backups = data.backups || [];
+                const primary = backups.filter(item => item.name.startsWith('pi-health-backup-'));
+                const plugins = backups.filter(item => item.name.startsWith('storage-plugins-'));
+
+                if (primary.length === 0) {
                     list.innerHTML = '<p>No backups found</p>';
-                    return;
+                } else {
+                    list.innerHTML = primary.map(item => {
+                        const sizeMb = (item.size / (1024 * 1024)).toFixed(1);
+                        const date = new Date(item.mtime * 1000).toLocaleString();
+                        return `<div class="flex justify-between bg-gray-900/40 border border-gray-700 rounded px-3 py-2">
+                            <div>
+                                <div class="text-blue-100">${item.name}</div>
+                                <div class="text-xs text-gray-500">${sizeMb} MB · ${date}</div>
+                            </div>
+                            <button onclick="restoreBackup('${item.name}')" class="px-3 py-1 bg-red-700/70 hover:bg-red-700 text-white rounded text-xs">Restore</button>
+                        </div>`;
+                    }).join('');
                 }
-                list.innerHTML = data.backups.map(item => {
-                    const sizeMb = (item.size / (1024 * 1024)).toFixed(1);
-                    const date = new Date(item.mtime * 1000).toLocaleString();
-                    return `<div class="flex justify-between bg-gray-900/40 border border-gray-700 rounded px-3 py-2">
-                        <div>
-                            <div class="text-blue-100">${item.name}</div>
-                            <div class="text-xs text-gray-500">${sizeMb} MB · ${date}</div>
-                        </div>
-                        <button onclick="restoreBackup('${item.name}')" class="px-3 py-1 bg-red-700/70 hover:bg-red-700 text-white rounded text-xs">Restore</button>
-                    </div>`;
-                }).join('');
+
+                if (plugins.length === 0) {
+                    pluginList.innerHTML = '<p>No plugin backups found</p>';
+                } else {
+                    pluginList.innerHTML = plugins.map(item => {
+                        const sizeMb = (item.size / (1024 * 1024)).toFixed(1);
+                        const date = new Date(item.mtime * 1000).toLocaleString();
+                        return `<div class="flex justify-between bg-gray-900/40 border border-gray-700 rounded px-3 py-2">
+                            <div>
+                                <div class="text-blue-100">${item.name}</div>
+                                <div class="text-xs text-gray-500">${sizeMb} MB · ${date}</div>
+                            </div>
+                            <button onclick="restorePluginBackup('${item.name}')" class="px-3 py-1 bg-red-700/70 hover:bg-red-700 text-white rounded text-xs">Restore Plugins</button>
+                        </div>`;
+                    }).join('');
+                }
             } catch (error) {
                 // ignore
             }
@@ -669,6 +696,24 @@
                 const data = await response.json();
                 if (!response.ok) throw new Error(data.error || 'Restore failed');
                 showNotification('Restore completed', 'success');
+            } catch (error) {
+                showNotification(`Error: ${error.message}`, 'error');
+            }
+        }
+
+        async function restorePluginBackup(archiveName) {
+            if (!confirm(`Restore plugin backup ${archiveName}? This will overwrite storage plugin config files.`)) {
+                return;
+            }
+            try {
+                const response = await fetch('/api/backups/restore-plugins', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ archive_name: archiveName })
+                });
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error || 'Restore failed');
+                showNotification('Plugin restore completed', 'success');
             } catch (error) {
                 showNotification(`Error: ${error.message}`, 'error');
             }
