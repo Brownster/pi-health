@@ -12,7 +12,7 @@ from compose_editor import compose_editor
 from stack_manager import stack_manager
 from auth_utils import login_required
 from catalog_manager import catalog_manager
-from storage_plugin_manager import storage_plugin_manager
+from storage_plugins import storage_bp
 from storage_plugins.registry import init_plugins
 from pi_monitor import get_pi_metrics
 from update_scheduler import update_scheduler, init_scheduler
@@ -105,7 +105,7 @@ except Exception as e:
 app.register_blueprint(compose_editor)
 app.register_blueprint(stack_manager)
 app.register_blueprint(catalog_manager)
-app.register_blueprint(storage_plugin_manager)
+app.register_blueprint(storage_bp)
 app.register_blueprint(update_scheduler)
 app.register_blueprint(disk_manager)
 
@@ -1046,4 +1046,4 @@ def api_container_network_test(container_id):
     return jsonify(run_container_network_test(container_id))
 
 if __name__ == '__main__':
-    app.run(host="0.0.0.0", port=8080)
+    app.run(host="0.0.0.0", port=80)
