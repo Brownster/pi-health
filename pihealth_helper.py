@@ -604,6 +604,7 @@ def cmd_backup_create(params):
     dest_dir = params.get('dest_dir', '')
     retention_count = params.get('retention_count', 7)
     compression = params.get('compression', 'zst')
+    archive_prefix = params.get('archive_prefix', 'pi-health-backup')
 
     if not isinstance(sources, list) or not sources:
         return {'success': False, 'error': 'sources required'}
@@ -633,7 +634,8 @@ def cmd_backup_create(params):
 
     os.makedirs(dest_dir, exist_ok=True)
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    archive_name = f"pi-health-backup-{timestamp}.tar.zst" if compression == 'zst' else f"pi-health-backup-{timestamp}.tar.gz"
+    safe_prefix = re.sub(r'[^a-zA-Z0-9._-]', '', archive_prefix) or 'pi-health-backup'
+    archive_name = f"{safe_prefix}-{timestamp}.tar.zst" if compression == 'zst' else f"{safe_prefix}-{timestamp}.tar.gz"
     archive_path = os.path.join(dest_dir, archive_name)
 
     if compression == 'zst':
@@ -652,7 +654,7 @@ def cmd_backup_create(params):
     try:
         backups = []
         for name in os.listdir(dest_dir):
-            if not name.startswith('pi-health-backup-'):
+            if not name.startswith(f"{safe_prefix}-"):
                 continue
             if not (name.endswith('.tar.zst') or name.endswith('.tar.gz')):
                 continue

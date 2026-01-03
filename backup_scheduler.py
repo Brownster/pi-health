@@ -36,6 +36,10 @@ DEFAULT_CONFIG = {
     'compression': 'zst',
     'last_run': None,
     'last_run_result': None,
+    'plugin_backup_enabled': True,
+    'plugin_retention_count': 10,
+    'last_plugin_backup': None,
+    'last_plugin_backup_result': None,
     'last_restore': None,
     'last_restore_result': None
 }
@@ -136,21 +140,36 @@ def run_backup_job():
 
         if not helper_available():
             result = {'success': False, 'error': 'Helper service unavailable'}
+            plugin_result = {'success': False, 'error': 'Helper service unavailable'}
         else:
             try:
                 result = helper_call('backup_create', {
                     'sources': _get_sources(config),
                     'dest_dir': config.get('dest_dir'),
                     'retention_count': config.get('retention_count', 7),
-                    'compression': config.get('compression', 'zst')
+                    'compression': config.get('compression', 'zst'),
+                    'archive_prefix': 'pi-health-backup'
                 })
+                if config.get('plugin_backup_enabled', True):
+                    plugin_result = helper_call('backup_create', {
+                        'sources': [os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config', 'storage_plugins')],
+                        'dest_dir': config.get('dest_dir'),
+                        'retention_count': config.get('plugin_retention_count', 10),
+                        'compression': config.get('compression', 'zst'),
+                        'archive_prefix': 'storage-plugins'
+                    })
+                else:
+                    plugin_result = {'success': False, 'error': 'Plugin backup disabled'}
             except HelperError as exc:
                 result = {'success': False, 'error': str(exc)}
+                plugin_result = {'success': False, 'error': str(exc)}
 
         config['last_run'] = datetime.now(timezone.utc).isoformat()
         config['last_run_result'] = result
+        config['last_plugin_backup'] = datetime.now(timezone.utc).isoformat()
+        config['last_plugin_backup_result'] = plugin_result
         save_config(config)
-        return result
+        return {'primary': result, 'plugins': plugin_result}
     finally:
         _backup_running = False
         _backup_lock.release()
@@ -203,7 +222,8 @@ def api_backup_config_update():
     config = load_config()
 
     for key in ('enabled', 'schedule_preset', 'retention_count', 'dest_dir',
-                'config_dir', 'stacks_path', 'include_env'):
+                'config_dir', 'stacks_path', 'include_env', 'plugin_backup_enabled',
+                'plugin_retention_count'):
         if key in data:
             config[key] = data[key]
 
@@ -215,6 +235,15 @@ def api_backup_config_update():
     if retention < 1:
         return jsonify({'error': 'retention_count must be >= 1'}), 400
     config['retention_count'] = retention
+
+    plugin_retention = config.get('plugin_retention_count', 10)
+    try:
+        plugin_retention = int(plugin_retention)
+    except (TypeError, ValueError):
+        return jsonify({'error': 'Invalid plugin_retention_count'}), 400
+    if plugin_retention < 1:
+        return jsonify({'error': 'plugin_retention_count must be >= 1'}), 400
+    config['plugin_retention_count'] = plugin_retention
 
     dest_dir = str(config.get('dest_dir', '')).strip()
     if not dest_dir.startswith('/'):
@@ -253,7 +282,9 @@ def api_backup_status():
         'next_run': get_next_run_time(),
         'backup_running': _backup_running,
         'last_run': config.get('last_run'),
-        'last_run_result': config.get('last_run_result')
+        'last_run_result': config.get('last_run_result'),
+        'last_plugin_backup': config.get('last_plugin_backup'),
+        'last_plugin_backup_result': config.get('last_plugin_backup_result')
     })
 
 

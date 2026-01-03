@@ -67,19 +67,24 @@ class TestBackupConfig:
                 'enabled': True,
                 'schedule_preset': 'daily_2am',
                 'retention_count': 3,
+                'plugin_retention_count': 5,
+                'plugin_backup_enabled': True,
                 'dest_dir': '/mnt/backup',
                 'config_dir': '/home/pi/docker',
                 'stacks_path': '/opt/stacks',
                 'include_env': True,
                 'compression': 'zst',
                 'last_run': None,
-                'last_run_result': None
+                'last_run_result': None,
+                'last_plugin_backup': None,
+                'last_plugin_backup_result': None
             }
             backup_scheduler.save_config(config)
             loaded = backup_scheduler.load_config()
             assert loaded['enabled'] is True
             assert loaded['schedule_preset'] == 'daily_2am'
             assert loaded['retention_count'] == 3
+            assert loaded['plugin_retention_count'] == 5
         finally:
             backup_scheduler.CONFIG_DIR = original_config_dir
             backup_scheduler.CONFIG_FILE = original_config_file

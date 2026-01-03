@@ -269,13 +269,22 @@
                     <label class="block text-sm text-gray-300 mb-1">Retention (archives to keep)</label>
                     <input id="backup-retention" type="number" min="1" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm" placeholder="7">
 
-                    <div class="flex items-center mt-4">
-                        <label class="toggle-switch mr-3">
-                            <input type="checkbox" id="backup-include-env" checked onchange="saveBackupConfig({ include_env: this.checked })">
-                            <span class="toggle-slider"></span>
-                        </label>
-                        <span class="text-sm text-gray-300">Include /etc/pi-health.env</span>
-                    </div>
+                <div class="flex items-center mt-4">
+                    <label class="toggle-switch mr-3">
+                        <input type="checkbox" id="backup-include-env" checked onchange="saveBackupConfig({ include_env: this.checked })">
+                        <span class="toggle-slider"></span>
+                    </label>
+                    <span class="text-sm text-gray-300">Include /etc/pi-health.env</span>
+                </div>
+                <div class="flex items-center mt-4">
+                    <label class="toggle-switch mr-3">
+                        <input type="checkbox" id="backup-plugins-enabled" checked onchange="saveBackupConfig({ plugin_backup_enabled: this.checked })">
+                        <span class="toggle-slider"></span>
+                    </label>
+                    <span class="text-sm text-gray-300">Backup storage plugins separately</span>
+                </div>
+                <label class="block text-sm text-gray-300 mt-3 mb-1">Plugin retention (archives to keep)</label>
+                <input id="backup-plugin-retention" type="number" min="1" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm" placeholder="10">
 
                     <label class="block text-sm text-gray-300 mt-4 mb-2">Schedule</label>
                     <div class="flex flex-wrap gap-4">
@@ -492,6 +501,8 @@
             document.getElementById('backup-stacks-path').value = backupConfig.stacks_path || '/opt/stacks';
             document.getElementById('backup-retention').value = backupConfig.retention_count || 7;
             document.getElementById('backup-include-env').checked = backupConfig.include_env !== false;
+            document.getElementById('backup-plugins-enabled').checked = backupConfig.plugin_backup_enabled !== false;
+            document.getElementById('backup-plugin-retention').value = backupConfig.plugin_retention_count || 10;
 
             const badge = document.getElementById('backup-status-badge');
             if (backupConfig.enabled) {
@@ -523,6 +534,8 @@
                 config_dir: document.getElementById('backup-config-dir').value.trim(),
                 stacks_path: document.getElementById('backup-stacks-path').value.trim(),
                 retention_count: parseInt(document.getElementById('backup-retention').value || '7', 10),
+                plugin_backup_enabled: document.getElementById('backup-plugins-enabled').checked,
+                plugin_retention_count: parseInt(document.getElementById('backup-plugin-retention').value || '10', 10),
                 include_env: document.getElementById('backup-include-env').checked,
                 schedule_preset: backupConfig.schedule_preset || 'daily_2am'
             };
@@ -593,6 +606,11 @@
                     lastRunEl.textContent = `Last run: ${lastRun.toLocaleString()}`;
                 } else {
                     lastRunEl.textContent = 'No backups yet';
+                }
+
+                if (status.last_plugin_backup) {
+                    const lastPlugin = new Date(status.last_plugin_backup);
+                    lastRunEl.textContent += ` · plugins: ${lastPlugin.toLocaleString()}`;
                 }
             } catch (error) {
                 // ignore

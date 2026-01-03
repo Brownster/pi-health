@@ -228,6 +228,8 @@ class TestStaticPages:
         assert 'backup-stacks-path' in body
         assert 'backup-retention' in body
         assert 'backup-include-env' in body
+        assert 'backup-plugins-enabled' in body
+        assert 'backup-plugin-retention' in body
         assert 'backup-run-now' in body
         assert 'backup-list' in body
 
