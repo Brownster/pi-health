@@ -184,7 +184,7 @@ class TestStaticPages:
     def test_edit_page(self, client):
         """Test edit page loads."""
         response = client.get('/edit.html')
-        assert response.status_code == 200
+        assert response.status_code == 404
 
     def test_login_page(self, client):
         """Test login page loads."""
@@ -224,32 +224,6 @@ class TestStaticPages:
         assert 'vpn-network-name' in body
 
 
-class TestComposeEditorProtection:
-    """Test compose editor endpoints require authentication."""
-
-    def test_compose_get_requires_auth(self, client):
-        """Test that GET /api/compose requires authentication."""
-        response = client.get('/api/compose')
-        assert response.status_code == 401
-
-    def test_compose_post_requires_auth(self, client):
-        """Test that POST /api/compose requires authentication."""
-        response = client.post('/api/compose',
-            data=json.dumps({'content': 'test'}),
-            content_type='application/json')
-        assert response.status_code == 401
-
-    def test_env_get_requires_auth(self, client):
-        """Test that GET /api/env requires authentication."""
-        response = client.get('/api/env')
-        assert response.status_code == 401
-
-    def test_env_post_requires_auth(self, client):
-        """Test that POST /api/env requires authentication."""
-        response = client.post('/api/env',
-            data=json.dumps({'content': 'test'}),
-            content_type='application/json')
-        assert response.status_code == 401
 
 
 if __name__ == '__main__':

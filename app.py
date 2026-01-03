@@ -8,7 +8,6 @@ import json
 import secrets
 import hashlib
 from urllib import request as urlrequest
-from compose_editor import compose_editor
 from stack_manager import stack_manager
 from auth_utils import login_required
 from catalog_manager import catalog_manager
@@ -102,8 +101,6 @@ except Exception as e:
     docker_client = None
     docker_available = False
 
-# Register the compose editor blueprint
-app.register_blueprint(compose_editor)
 app.register_blueprint(stack_manager)
 app.register_blueprint(catalog_manager)
 app.register_blueprint(storage_bp)
@@ -882,10 +879,6 @@ def serve_containers():
     return send_from_directory(app.static_folder, 'containers.html')
 
 
-@app.route('/edit.html')
-def serve_edit():
-    """Serve the edit configuration page."""
-    return send_from_directory(app.static_folder, 'edit.html')
 
 @app.route('/apps.html')
 def serve_apps():
