@@ -515,6 +515,82 @@ def cmd_systemctl(params):
     }
 
 
+def cmd_tailscale_install(params):
+    """Install Tailscale using official script."""
+    cmd = ["/bin/sh", "-c", "curl -fsSL https://tailscale.com/install.sh | sh"]
+    result = run_command(cmd, timeout=600)
+    return {
+        'success': result.get('returncode') == 0,
+        'stdout': result.get('stdout', ''),
+        'stderr': result.get('stderr', ''),
+        'returncode': result.get('returncode')
+    }
+
+
+def cmd_tailscale_up(params):
+    """Start Tailscale and authenticate."""
+    auth_key = params.get('auth_key', '')
+    allowed_key = re.compile(r'^[A-Za-z0-9._-]+$')
+    cmd = ['tailscale', 'up', '--accept-routes=false']
+    if auth_key:
+        if not allowed_key.match(auth_key):
+            return {'success': False, 'error': 'Invalid auth key format'}
+        cmd.extend(['--authkey', auth_key])
+
+    result = run_command(cmd, timeout=120)
+    return {
+        'success': result.get('returncode') == 0,
+        'stdout': result.get('stdout', ''),
+        'stderr': result.get('stderr', ''),
+        'returncode': result.get('returncode')
+    }
+
+
+def cmd_docker_network_create(params):
+    """Create Docker network if missing."""
+    name = params.get('name', '').strip()
+    if not name:
+        return {'success': False, 'error': 'Network name required'}
+    if not re.match(r'^[a-zA-Z0-9_.-]+$', name):
+        return {'success': False, 'error': 'Invalid network name'}
+
+    list_result = run_command(['docker', 'network', 'ls', '--format', '{{.Name}}'])
+    if list_result.get('returncode') != 0:
+        return {'success': False, 'error': list_result.get('stderr', 'Failed to list networks')}
+    if name in list_result.get('stdout', '').splitlines():
+        return {'success': True, 'message': 'Network already exists'}
+
+    result = run_command(['docker', 'network', 'create', name])
+    return {
+        'success': result.get('returncode') == 0,
+        'stdout': result.get('stdout', ''),
+        'stderr': result.get('stderr', ''),
+        'returncode': result.get('returncode')
+    }
+
+
+def cmd_write_vpn_env(params):
+    """Write Gluetun VPN environment file."""
+    path = params.get('path', '').strip()
+    content = params.get('content', '')
+
+    if not path or '..' in path:
+        return {'success': False, 'error': 'Invalid path'}
+    if not path.endswith('/vpn/.env'):
+        return {'success': False, 'error': 'Path not allowed'}
+    if not path.startswith('/home/') and not path.startswith('/config/'):
+        return {'success': False, 'error': 'Path not allowed'}
+
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'w') as f:
+            f.write(content)
+        os.chmod(path, 0o600)
+        return {'success': True, 'path': path}
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
+
+
 # Command whitelist
 COMMANDS = {
     'lsblk': cmd_lsblk,
@@ -534,6 +610,10 @@ COMMANDS = {
     'write_systemd_unit': cmd_write_systemd_unit,
     'write_startup_script': cmd_write_startup_script,
     'systemctl': cmd_systemctl,
+    'tailscale_install': cmd_tailscale_install,
+    'tailscale_up': cmd_tailscale_up,
+    'docker_network_create': cmd_docker_network_create,
+    'write_vpn_env': cmd_write_vpn_env,
     'ping': lambda p: {'success': True, 'message': 'pong'}
 }
 

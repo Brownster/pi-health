@@ -17,6 +17,7 @@ from storage_plugins.registry import init_plugins
 from pi_monitor import get_pi_metrics
 from update_scheduler import update_scheduler, init_scheduler
 from disk_manager import disk_manager
+from setup_manager import setup_manager
 
 # Initialize Flask
 app = Flask(__name__, static_folder='static')
@@ -108,6 +109,7 @@ app.register_blueprint(catalog_manager)
 app.register_blueprint(storage_bp)
 app.register_blueprint(update_scheduler)
 app.register_blueprint(disk_manager)
+app.register_blueprint(setup_manager)
 
 # Initialize storage plugins
 init_plugins(STORAGE_PLUGIN_CONFIG_DIR)
