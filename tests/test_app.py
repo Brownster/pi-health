@@ -222,6 +222,13 @@ class TestStaticPages:
         assert 'vpn-username' in body
         assert 'vpn-password' in body
         assert 'vpn-network-name' in body
+        assert 'backup-enabled' in body
+        assert 'backup-dest-dir' in body
+        assert 'backup-config-dir' in body
+        assert 'backup-stacks-path' in body
+        assert 'backup-retention' in body
+        assert 'backup-include-env' in body
+        assert 'backup-run-now' in body
 
 
 

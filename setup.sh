@@ -55,7 +55,7 @@ echo ">>> Installing system dependencies..."
 apt-get update
 apt-get install -y \
   "${PYTHON_BIN}" python3-venv python3-pip \
-  git curl jq
+  git curl jq zstd
 
 if prompt_install "Docker" INSTALL_DOCKER "command -v docker >/dev/null 2>&1"; then
   echo ">>> Installing Docker CE from official repository..."
@@ -198,6 +198,7 @@ NoNewPrivileges=false
 ProtectSystem=strict
 ProtectHome=read-only
 ReadWritePaths=/etc/fstab /mnt /run/pihealth /var/log
+ReadWritePaths=/backups
 PrivateTmp=true
 
 # Socket permissions

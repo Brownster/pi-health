@@ -23,6 +23,7 @@ import re
 import logging
 import signal
 from pathlib import Path
+from datetime import datetime
 
 # Configuration
 SOCKET_PATH = '/run/pihealth/helper.sock'
@@ -46,6 +47,8 @@ MOUNT_POINT_PATTERN = re.compile(r'^/mnt(/[a-zA-Z0-9._-]+)+$')
 DEVICE_PATTERN = re.compile(r'^/dev/[a-zA-Z0-9_-]+$')
 # Valid UUID pattern
 UUID_PATTERN = re.compile(r'^[a-fA-F0-9-]+$')
+BACKUP_DEST_PATTERN = re.compile(r'^/(mnt|backups)(/[a-zA-Z0-9._-]+)*$')
+BACKUP_SOURCE_ALLOWED = ('/home/', '/opt/', '/etc/pi-health.env')
 
 
 def run_command(cmd, timeout=30):
@@ -588,7 +591,83 @@ def cmd_write_vpn_env(params):
         os.chmod(path, 0o600)
         return {'success': True, 'path': path}
     except Exception as e:
-        return {'success': False, 'error': str(e)}
+    return {'success': False, 'error': str(e)}
+
+
+def cmd_backup_create(params):
+    """Create a compressed backup archive."""
+    sources = params.get('sources', [])
+    dest_dir = params.get('dest_dir', '')
+    retention_count = params.get('retention_count', 7)
+    compression = params.get('compression', 'zst')
+
+    if not isinstance(sources, list) or not sources:
+        return {'success': False, 'error': 'sources required'}
+    if not dest_dir or not BACKUP_DEST_PATTERN.match(dest_dir) or '..' in dest_dir:
+        return {'success': False, 'error': 'Invalid dest_dir'}
+
+    try:
+        retention_count = int(retention_count)
+    except (TypeError, ValueError):
+        return {'success': False, 'error': 'Invalid retention_count'}
+    if retention_count < 1:
+        return {'success': False, 'error': 'retention_count must be >= 1'}
+
+    valid_sources = []
+    for source in sources:
+        if not isinstance(source, str) or not source.startswith('/'):
+            continue
+        if '..' in source:
+            continue
+        if not any(source.startswith(prefix) for prefix in BACKUP_SOURCE_ALLOWED):
+            continue
+        if os.path.exists(source):
+            valid_sources.append(source)
+
+    if not valid_sources:
+        return {'success': False, 'error': 'No valid sources found'}
+
+    os.makedirs(dest_dir, exist_ok=True)
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    archive_name = f"pi-health-backup-{timestamp}.tar.zst" if compression == 'zst' else f"pi-health-backup-{timestamp}.tar.gz"
+    archive_path = os.path.join(dest_dir, archive_name)
+
+    if compression == 'zst':
+        cmd = ['tar', '-I', 'zstd', '-cf', archive_path] + valid_sources
+    else:
+        cmd = ['tar', '-czf', archive_path] + valid_sources
+
+    result = run_command(cmd, timeout=3600)
+    if result.get('returncode') != 0:
+        return {
+            'success': False,
+            'error': result.get('stderr', 'Backup failed')
+        }
+
+    # Retention cleanup
+    try:
+        backups = []
+        for name in os.listdir(dest_dir):
+            if not name.startswith('pi-health-backup-'):
+                continue
+            if not (name.endswith('.tar.zst') or name.endswith('.tar.gz')):
+                continue
+            path = os.path.join(dest_dir, name)
+            try:
+                stat = os.stat(path)
+                backups.append((stat.st_mtime, path))
+            except OSError:
+                continue
+        backups.sort(reverse=True)
+        for _, path in backups[retention_count:]:
+            try:
+                os.remove(path)
+            except OSError:
+                continue
+    except Exception:
+        pass
+
+    return {'success': True, 'archive': archive_path}
 
 
 # Command whitelist
@@ -614,6 +693,7 @@ COMMANDS = {
     'tailscale_up': cmd_tailscale_up,
     'docker_network_create': cmd_docker_network_create,
     'write_vpn_env': cmd_write_vpn_env,
+    'backup_create': cmd_backup_create,
     'ping': lambda p: {'success': True, 'message': 'pong'}
 }
 

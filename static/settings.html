@@ -232,6 +232,91 @@
             </div>
         </section>
 
+        <!-- Backups Section -->
+        <section class="bg-gray-800 rounded-lg p-6 mb-6 border border-purple-800/30">
+            <div class="flex justify-between items-center mb-6">
+                <div>
+                    <h3 class="text-xl font-semibold flex items-center">
+                        <svg class="w-6 h-6 mr-2 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7V4a1 1 0 011-1h14a1 1 0 011 1v3M4 7h16M4 7v13a1 1 0 001 1h14a1 1 0 001-1V7M9 12h6m-6 4h6"></path>
+                        </svg>
+                        Backups
+                    </h3>
+                    <p class="text-gray-400 text-sm mt-1">Archive docker config + stacks to a USB backup drive.</p>
+                </div>
+                <div class="flex items-center">
+                    <span id="backup-status-badge" class="px-3 py-1 rounded-full text-sm mr-4 bg-gray-600">Disabled</span>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="backup-enabled" onchange="toggleBackup()">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div>
+                    <label class="block text-sm text-gray-300 mb-1">Destination (USB mount)</label>
+                    <input id="backup-dest-dir" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm" placeholder="/mnt/backup">
+
+                    <label class="block text-sm text-gray-300 mt-4 mb-1">Config directory</label>
+                    <input id="backup-config-dir" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm" placeholder="/home/pi/docker">
+
+                    <label class="block text-sm text-gray-300 mt-4 mb-1">Stacks path</label>
+                    <input id="backup-stacks-path" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm" placeholder="/opt/stacks">
+                </div>
+
+                <div>
+                    <label class="block text-sm text-gray-300 mb-1">Retention (archives to keep)</label>
+                    <input id="backup-retention" type="number" min="1" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm" placeholder="7">
+
+                    <div class="flex items-center mt-4">
+                        <label class="toggle-switch mr-3">
+                            <input type="checkbox" id="backup-include-env" checked onchange="saveBackupConfig({ include_env: this.checked })">
+                            <span class="toggle-slider"></span>
+                        </label>
+                        <span class="text-sm text-gray-300">Include /etc/pi-health.env</span>
+                    </div>
+
+                    <label class="block text-sm text-gray-300 mt-4 mb-2">Schedule</label>
+                    <div class="flex flex-wrap gap-4">
+                        <button id="backup-schedule-daily" onclick="setBackupSchedule('daily_2am')" class="schedule-btn" data-preset="daily_2am">
+                            <div class="font-medium">Daily</div>
+                            <div class="text-sm text-gray-400">2:00 AM</div>
+                        </button>
+                        <button id="backup-schedule-weekly" onclick="setBackupSchedule('weekly_sunday_2am')" class="schedule-btn" data-preset="weekly_sunday_2am">
+                            <div class="font-medium">Weekly</div>
+                            <div class="text-sm text-gray-400">Sunday 2:00 AM</div>
+                        </button>
+                    </div>
+                    <p id="backup-next-run" class="text-sm text-gray-400 mt-3"></p>
+                </div>
+            </div>
+
+            <div class="flex flex-wrap gap-4 mt-6 pt-4 border-t border-gray-700">
+                <button onclick="saveBackupConfig()" class="coraline-button px-4 py-2 text-white rounded flex items-center">
+                    <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                    </svg>
+                    Save Backup Settings
+                </button>
+                <button id="backup-run-now" onclick="runBackupNow()" class="coraline-button px-4 py-2 text-white rounded flex items-center">
+                    <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    Run Backup Now
+                </button>
+                <div id="backup-last-run" class="text-sm text-gray-400 flex items-center"></div>
+            </div>
+
+            <div class="mt-6">
+                <h4 class="text-sm font-semibold mb-2 text-gray-300">Recent Backups</h4>
+                <div id="backup-list" class="space-y-2 text-sm text-gray-400">
+                    <p>Loading backups...</p>
+                </div>
+            </div>
+        </section>
+
         <!-- Auto-Update Section -->
         <section class="bg-gray-800 rounded-lg p-6 mb-6 border border-purple-800/30">
             <div class="flex justify-between items-center mb-6">
@@ -314,6 +399,7 @@
 
     <script>
         let currentConfig = {};
+        let backupConfig = {};
         let logsVisible = false;
 
         // Notification system
@@ -382,6 +468,168 @@
                 const data = await response.json();
                 if (!response.ok) throw new Error(data.error || 'VPN setup failed');
                 showNotification('VPN setup complete', 'success');
+            } catch (error) {
+                showNotification(`Error: ${error.message}`, 'error');
+            }
+        }
+
+        async function loadBackupConfig() {
+            try {
+                const response = await fetch('/api/backups/config');
+                if (!response.ok) throw new Error('Failed to load backup config');
+                backupConfig = await response.json();
+                renderBackupConfig();
+            } catch (error) {
+                console.error('Error loading backup config:', error);
+                showNotification('Failed to load backup settings', 'error');
+            }
+        }
+
+        function renderBackupConfig() {
+            document.getElementById('backup-enabled').checked = !!backupConfig.enabled;
+            document.getElementById('backup-dest-dir').value = backupConfig.dest_dir || '/mnt/backup';
+            document.getElementById('backup-config-dir').value = backupConfig.config_dir || '/home/pi/docker';
+            document.getElementById('backup-stacks-path').value = backupConfig.stacks_path || '/opt/stacks';
+            document.getElementById('backup-retention').value = backupConfig.retention_count || 7;
+            document.getElementById('backup-include-env').checked = backupConfig.include_env !== false;
+
+            const badge = document.getElementById('backup-status-badge');
+            if (backupConfig.enabled) {
+                badge.textContent = 'Enabled';
+                badge.className = 'px-3 py-1 rounded-full text-sm mr-4 bg-green-600';
+            } else {
+                badge.textContent = 'Disabled';
+                badge.className = 'px-3 py-1 rounded-full text-sm mr-4 bg-gray-600';
+            }
+
+            const schedulePreset = backupConfig.schedule_preset || 'daily_2am';
+            backupConfig.schedule_preset = schedulePreset;
+            document.querySelectorAll('#backup-schedule-daily, #backup-schedule-weekly').forEach(btn => {
+                if (btn.dataset.preset === schedulePreset) {
+                    btn.classList.add('selected');
+                } else {
+                    btn.classList.remove('selected');
+                }
+            });
+
+            loadBackupStatus();
+            loadBackupList();
+        }
+
+        async function saveBackupConfig(overrides = null) {
+            const payload = {
+                enabled: document.getElementById('backup-enabled').checked,
+                dest_dir: document.getElementById('backup-dest-dir').value.trim(),
+                config_dir: document.getElementById('backup-config-dir').value.trim(),
+                stacks_path: document.getElementById('backup-stacks-path').value.trim(),
+                retention_count: parseInt(document.getElementById('backup-retention').value || '7', 10),
+                include_env: document.getElementById('backup-include-env').checked,
+                schedule_preset: backupConfig.schedule_preset || 'daily_2am'
+            };
+
+            if (overrides) {
+                Object.assign(payload, overrides);
+            }
+
+            try {
+                const response = await fetch('/api/backups/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error || 'Failed to save backup config');
+                backupConfig = data.config || payload;
+                renderBackupConfig();
+                showNotification('Backup settings saved', 'success');
+            } catch (error) {
+                showNotification(`Error: ${error.message}`, 'error');
+            }
+        }
+
+        async function toggleBackup() {
+            await saveBackupConfig({ enabled: document.getElementById('backup-enabled').checked });
+        }
+
+        async function setBackupSchedule(preset) {
+            backupConfig.schedule_preset = preset;
+            await saveBackupConfig({ schedule_preset: preset });
+        }
+
+        async function loadBackupStatus() {
+            try {
+                const response = await fetch('/api/backups/status');
+                if (!response.ok) return;
+                const status = await response.json();
+
+                const nextRunEl = document.getElementById('backup-next-run');
+                if (status.next_run) {
+                    const nextRun = new Date(status.next_run);
+                    nextRunEl.innerHTML = `<span class="text-purple-400">Next scheduled run:</span> ${nextRun.toLocaleString()}`;
+                } else if (backupConfig.enabled) {
+                    nextRunEl.textContent = 'Schedule will be set after saving';
+                } else {
+                    nextRunEl.textContent = '';
+                }
+
+                const runBtn = document.getElementById('backup-run-now');
+                if (status.backup_running) {
+                    runBtn.disabled = true;
+                    runBtn.innerHTML = '<div class="loading-spinner mr-2"></div> Backup in progress...';
+                } else {
+                    runBtn.disabled = false;
+                    runBtn.innerHTML = `
+                        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path>
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                        Run Backup Now
+                    `;
+                }
+
+                const lastRunEl = document.getElementById('backup-last-run');
+                if (status.last_run) {
+                    const lastRun = new Date(status.last_run);
+                    lastRunEl.textContent = `Last run: ${lastRun.toLocaleString()}`;
+                } else {
+                    lastRunEl.textContent = 'No backups yet';
+                }
+            } catch (error) {
+                // ignore
+            }
+        }
+
+        async function loadBackupList() {
+            try {
+                const response = await fetch('/api/backups/list');
+                if (!response.ok) return;
+                const data = await response.json();
+                const list = document.getElementById('backup-list');
+                if (!data.backups || data.backups.length === 0) {
+                    list.innerHTML = '<p>No backups found</p>';
+                    return;
+                }
+                list.innerHTML = data.backups.map(item => {
+                    const sizeMb = (item.size / (1024 * 1024)).toFixed(1);
+                    const date = new Date(item.mtime * 1000).toLocaleString();
+                    return `<div class="flex justify-between bg-gray-900/40 border border-gray-700 rounded px-3 py-2">
+                        <span>${item.name}</span>
+                        <span>${sizeMb} MB · ${date}</span>
+                    </div>`;
+                }).join('');
+            } catch (error) {
+                // ignore
+            }
+        }
+
+        async function runBackupNow() {
+            try {
+                const response = await fetch('/api/backups/run', { method: 'POST' });
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error || 'Backup failed');
+                showNotification('Backup completed', 'success');
+                loadBackupList();
+                loadBackupStatus();
             } catch (error) {
                 showNotification(`Error: ${error.message}`, 'error');
             }
@@ -695,11 +943,13 @@
 
         // Periodic status refresh
         setInterval(loadStatus, 30000);
+        setInterval(loadBackupStatus, 30000);
 
         // Initialize
         document.addEventListener('DOMContentLoaded', () => {
             loadSetupDefaults();
             loadConfig();
+            loadBackupConfig();
         });
     </script>
 </body>

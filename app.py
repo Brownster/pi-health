@@ -15,6 +15,7 @@ from storage_plugins import storage_bp
 from storage_plugins.registry import init_plugins
 from pi_monitor import get_pi_metrics
 from update_scheduler import update_scheduler, init_scheduler
+from backup_scheduler import backup_scheduler, init_backup_scheduler
 from disk_manager import disk_manager
 from setup_manager import setup_manager
 
@@ -105,6 +106,7 @@ app.register_blueprint(stack_manager)
 app.register_blueprint(catalog_manager)
 app.register_blueprint(storage_bp)
 app.register_blueprint(update_scheduler)
+app.register_blueprint(backup_scheduler)
 app.register_blueprint(disk_manager)
 app.register_blueprint(setup_manager)
 
@@ -113,6 +115,8 @@ init_plugins(STORAGE_PLUGIN_CONFIG_DIR)
 
 # Initialize the auto-update scheduler
 init_scheduler(app)
+# Initialize the backup scheduler
+init_backup_scheduler(app)
 
 # Track update status for containers
 container_updates = {}
