@@ -103,12 +103,33 @@
         </div>
     </div>
 
+    <div id="remove-modal" class="hidden fixed inset-0 bg-black bg-opacity-60 z-50 items-center justify-center p-4">
+        <div class="bg-gray-900 w-full max-w-lg rounded-lg shadow-xl border border-purple-900 flex flex-col">
+            <div class="flex justify-between items-center p-4 border-b border-purple-800">
+                <h3 id="remove-title" class="text-xl font-semibold">Remove App</h3>
+                <button onclick="closeRemoveModal()" class="text-gray-400 hover:text-gray-200">Close</button>
+            </div>
+            <div class="p-4 space-y-4">
+                <p class="text-sm text-gray-300">Choose which stack to remove this service from.</p>
+                <div>
+                    <label class="block text-sm text-gray-300 mb-1">Target stack</label>
+                    <select id="remove-stack-select" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white"></select>
+                </div>
+            </div>
+            <div class="p-4 border-t border-purple-800 flex justify-end space-x-2">
+                <button onclick="closeRemoveModal()" class="px-4 py-2 bg-gray-700 text-white rounded">Cancel</button>
+                <button onclick="submitRemove()" class="px-4 py-2 bg-red-700 hover:bg-red-600 text-white rounded">Remove</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         let catalogItems = [];
         let installedServices = [];
         let serviceStacks = {};
         let availableStacks = [];
         let activeInstall = null;
+        let activeRemove = null;
 
         function showNotification(message, type = 'info') {
             const notificationArea = document.getElementById('notification-area');
@@ -189,7 +210,7 @@
                         ${stackInfo}
                         <div class="mt-4 flex space-x-2">
                             ${installed
-                                ? `<button onclick="removeApp('${item.id}')" class="px-3 py-1 text-sm rounded bg-red-700 hover:bg-red-600 text-white">Remove</button>`
+                                ? `<button onclick="openRemoveModal('${item.id}')" class="px-3 py-1 text-sm rounded bg-red-700 hover:bg-red-600 text-white">Remove</button>`
                                 : `<button onclick="openInstallModal('${item.id}')" class="coraline-button px-3 py-1 text-sm rounded text-white">Install</button>`
                             }
                         </div>
@@ -283,6 +304,34 @@
             activeInstall = null;
         }
 
+        function openRemoveModal(id) {
+            const modal = document.getElementById('remove-modal');
+            const title = document.getElementById('remove-title');
+            const stackSelect = document.getElementById('remove-stack-select');
+            const stacks = serviceStacks[id] || [];
+            activeRemove = { id, stacks };
+
+            title.textContent = `Remove ${id}`;
+            stackSelect.innerHTML = stacks.map(name => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');
+
+            if (stacks.length <= 1) {
+                stackSelect.value = stacks[0] || '';
+                stackSelect.disabled = true;
+            } else {
+                stackSelect.disabled = false;
+            }
+
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closeRemoveModal() {
+            const modal = document.getElementById('remove-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+            activeRemove = null;
+        }
+
         async function submitInstall() {
             if (!activeInstall) return;
             const values = {};
@@ -330,14 +379,15 @@
             }
         }
 
-        async function removeApp(id) {
-            const stacks = serviceStacks[id] || [];
-            let target_stack = null;
-            if (stacks.length > 1) {
-                const choice = prompt(`Service "${id}" exists in multiple stacks (${stacks.join(', ')}). Which stack should be updated?`);
-                if (!choice) return;
-                target_stack = choice.trim();
-            }
+        async function submitRemove() {
+            if (!activeRemove) return;
+            const stackSelect = document.getElementById('remove-stack-select');
+            const targetStack = stackSelect ? stackSelect.value : null;
+            await removeApp(activeRemove.id, targetStack);
+            closeRemoveModal();
+        }
+
+        async function removeApp(id, targetStack) {
             if (!confirm(`Are you sure you want to remove ${id}? This will stop the container and remove it from the stack.`)) {
                 return;
             }
@@ -345,7 +395,7 @@
                 const response = await fetch('/api/catalog/remove', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id, stop_service: true, target_stack })
+                    body: JSON.stringify({ id, stop_service: true, target_stack: targetStack })
                 });
                 const data = await response.json();
                 if (!response.ok) {
