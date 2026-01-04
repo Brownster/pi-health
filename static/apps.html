@@ -106,6 +106,8 @@
     <script>
         let catalogItems = [];
         let installedServices = [];
+        let serviceStacks = {};
+        let availableStacks = [];
         let activeInstall = null;
 
         function showNotification(message, type = 'info') {
@@ -130,15 +132,19 @@
             grid.innerHTML = '<div class="col-span-full text-center py-10 text-gray-400">Loading catalog...</div>';
 
             try {
-                const [catalogRes, statusRes] = await Promise.all([
+                const [catalogRes, statusRes, stacksRes] = await Promise.all([
                     fetch('/api/catalog'),
-                    fetch('/api/catalog/status')
+                    fetch('/api/catalog/status'),
+                    fetch('/api/stacks')
                 ]);
                 const catalogData = await catalogRes.json();
                 const statusData = await statusRes.json();
+                const stacksData = await stacksRes.json();
 
                 catalogItems = catalogData.items || [];
                 installedServices = statusData.services || [];
+                serviceStacks = statusData.service_stacks || {};
+                availableStacks = (stacksData.stacks || []).map(stack => stack.name);
                 renderCatalog();
             } catch (error) {
                 grid.innerHTML = '<div class="col-span-full text-center py-10 text-red-400">Failed to load catalog.</div>';
@@ -163,10 +169,14 @@
 
             grid.innerHTML = catalogItems.map(item => {
                 const installed = installedServices.includes(item.id);
+                const stacks = serviceStacks[item.id] || [];
                 const name = escapeHtml(item.name || item.id);
                 const description = escapeHtml(item.description || 'No description');
                 const requires = item.requires && item.requires.length
                     ? `<p class="text-xs text-yellow-300 mt-2">Requires: ${escapeHtml(item.requires.join(', '))}</p>`
+                    : '';
+                const stackInfo = stacks.length
+                    ? `<p class="text-xs text-green-300 mt-1">Stack: ${escapeHtml(stacks.join(', '))}</p>`
                     : '';
                 return `
                     <div class="bg-gray-800 rounded-lg shadow-lg p-4 border border-purple-900/40">
@@ -176,6 +186,7 @@
                         </div>
                         <p class="text-sm text-gray-400 mt-2">${description}</p>
                         ${requires}
+                        ${stackInfo}
                         <div class="mt-4 flex space-x-2">
                             ${installed
                                 ? `<button onclick="removeApp('${item.id}')" class="px-3 py-1 text-sm rounded bg-red-700 hover:bg-red-600 text-white">Remove</button>`
@@ -217,12 +228,52 @@
                         `;
                     });
                 }
+                fieldsEl.innerHTML += renderStackSelector(activeInstall);
+                const stackSelect = document.getElementById('install-stack-select');
+                if (stackSelect && activeInstall.defaultStack) {
+                    stackSelect.value = activeInstall.defaultStack;
+                }
+                toggleStackName();
 
                 modal.classList.remove('hidden');
                 modal.classList.add('flex');
             } catch (error) {
                 showNotification(`Error: ${error.message}`, 'error');
             }
+        }
+
+        function renderStackSelector(item) {
+            const requires = item.requires || [];
+            let defaultStack = 'new';
+            if (requires.includes('vpn') && serviceStacks.vpn && serviceStacks.vpn.length) {
+                defaultStack = serviceStacks.vpn[0];
+            }
+            item.defaultStack = defaultStack;
+
+            const options = [
+                `<option value="new">Create new stack</option>`,
+                ...availableStacks.map(name => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`)
+            ].join('');
+
+            return `
+                <div class="mt-4 pt-4 border-t border-gray-700">
+                    <label class="block text-sm text-gray-300 mb-1">Target stack</label>
+                    <select id="install-stack-select" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white" onchange="toggleStackName()">
+                        ${options}
+                    </select>
+                    <div id="new-stack-name-field" class="mt-3">
+                        <label class="block text-sm text-gray-300 mb-1">New stack name</label>
+                        <input id="install-stack-name" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white" value="${escapeHtml(item.id || '')}">
+                    </div>
+                </div>
+            `;
+        }
+
+        function toggleStackName() {
+            const select = document.getElementById('install-stack-select');
+            const nameField = document.getElementById('new-stack-name-field');
+            if (!select || !nameField) return;
+            nameField.style.display = select.value === 'new' ? 'block' : 'none';
         }
 
         function closeInstallModal() {
@@ -239,12 +290,22 @@
                 const input = document.getElementById(`field-${field.key}`);
                 if (input) values[field.key] = input.value;
             });
+            const stackSelect = document.getElementById('install-stack-select');
+            const stackNameInput = document.getElementById('install-stack-name');
+            const target_stack = stackSelect ? stackSelect.value : 'new';
+            const stack_name = stackNameInput ? stackNameInput.value.trim() : '';
 
             try {
                 const response = await fetch('/api/catalog/install', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id: activeInstall.id, values, start_service: true })
+                    body: JSON.stringify({
+                        id: activeInstall.id,
+                        values,
+                        start_service: true,
+                        target_stack,
+                        stack_name
+                    })
                 });
                 const data = await response.json();
                 if (!response.ok) {
@@ -270,14 +331,21 @@
         }
 
         async function removeApp(id) {
-            if (!confirm(`Are you sure you want to remove ${id}? This will stop the container and remove it from compose.`)) {
+            const stacks = serviceStacks[id] || [];
+            let target_stack = null;
+            if (stacks.length > 1) {
+                const choice = prompt(`Service "${id}" exists in multiple stacks (${stacks.join(', ')}). Which stack should be updated?`);
+                if (!choice) return;
+                target_stack = choice.trim();
+            }
+            if (!confirm(`Are you sure you want to remove ${id}? This will stop the container and remove it from the stack.`)) {
                 return;
             }
             try {
                 const response = await fetch('/api/catalog/remove', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id, stop_service: true })
+                    body: JSON.stringify({ id, stop_service: true, target_stack })
                 });
                 const data = await response.json();
                 if (!response.ok) {

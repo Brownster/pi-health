@@ -13,6 +13,7 @@ import yaml
 from datetime import datetime
 from flask import Blueprint, jsonify, request
 from auth_utils import login_required
+from stack_manager import list_stacks, validate_stack_name, get_stack_path, find_compose_file, backup_stack, run_compose_command
 
 catalog_manager = Blueprint('catalog_manager', __name__)
 
@@ -42,8 +43,7 @@ def _load_media_paths():
     return defaults
 
 CATALOG_DIR = os.getenv('CATALOG_DIR', 'catalog')
-DOCKER_COMPOSE_PATH = os.getenv('DOCKER_COMPOSE_PATH', './docker-compose.yml')
-BACKUP_DIR = os.getenv('CATALOG_BACKUP_DIR', './backups')
+STACKS_PATH = os.getenv('STACKS_PATH', '/opt/stacks')
 
 # Template variable pattern: {{KEY}}
 TEMPLATE_VAR_PATTERN = re.compile(r'\{\{(\w+)\}\}')
@@ -104,77 +104,73 @@ def _summarize_item(item):
     }
 
 
-def _load_compose_file():
-    """Load the Docker Compose file as a dict."""
-    if not os.path.exists(DOCKER_COMPOSE_PATH):
-        return None
-
+def _load_stack_compose(stack_dir):
+    """Load a stack compose file as a dict."""
+    compose_path = find_compose_file(stack_dir)
+    if not compose_path or not os.path.exists(compose_path):
+        return None, None
     try:
-        with open(DOCKER_COMPOSE_PATH, 'r') as f:
+        with open(compose_path, 'r') as f:
             data = yaml.safe_load(f)
-        return data if isinstance(data, dict) else None
+        return (data if isinstance(data, dict) else None), compose_path
     except Exception:
-        return None
+        return None, compose_path
 
 
-def _load_compose_services():
-    """Get list of service names from compose file."""
-    data = _load_compose_file()
-    if not data:
-        return []
-
-    services = data.get('services', {})
-    if isinstance(services, dict):
-        return list(services.keys())
-    return []
-
-
-def _ensure_backup_directory():
-    """Ensure the backup directory exists."""
-    os.makedirs(BACKUP_DIR, exist_ok=True)
-
-
-def _backup_compose_file():
-    """Create a timestamped backup of the compose file."""
-    if not os.path.exists(DOCKER_COMPOSE_PATH):
-        return None
-
-    _ensure_backup_directory()
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    backup_file = os.path.join(BACKUP_DIR, f"docker-compose-{timestamp}.yml")
-    shutil.copy(DOCKER_COMPOSE_PATH, backup_file)
-
-    # Keep only the 10 most recent backups
-    backups = sorted([
-        f for f in os.listdir(BACKUP_DIR)
-        if f.startswith('docker-compose-') and f.endswith('.yml')
-    ])
-    if len(backups) > 10:
-        for old_backup in backups[:-10]:
-            try:
-                os.remove(os.path.join(BACKUP_DIR, old_backup))
-            except Exception:
-                pass
-
-    return backup_file
-
-
-def _save_compose_file(data):
-    """Save compose data to file with atomic write."""
-    # Ensure parent directory exists
-    compose_dir = os.path.dirname(os.path.abspath(DOCKER_COMPOSE_PATH))
+def _save_stack_compose(stack_dir, data, filename=None):
+    """Save compose data to a stack with atomic write."""
+    os.makedirs(stack_dir, exist_ok=True)
+    compose_path = filename or os.path.join(stack_dir, 'compose.yaml')
+    compose_dir = os.path.dirname(os.path.abspath(compose_path))
     os.makedirs(compose_dir, exist_ok=True)
-
-    # Atomic write: temp file + rename
     fd, temp_path = tempfile.mkstemp(dir=compose_dir, suffix='.yml')
     try:
         with os.fdopen(fd, 'w') as f:
             yaml.dump(data, f, default_flow_style=False, sort_keys=False)
-        os.replace(temp_path, DOCKER_COMPOSE_PATH)
+        os.replace(temp_path, compose_path)
     except Exception:
         if os.path.exists(temp_path):
             os.unlink(temp_path)
         raise
+    return compose_path
+
+
+def _list_stack_services(stack_name=None):
+    """Get service names across stacks or for a single stack."""
+    services = []
+    stacks, err = list_stacks()
+    if err:
+        return services
+    for stack in stacks:
+        name = stack.get('name')
+        if stack_name and name != stack_name:
+            continue
+        stack_dir = get_stack_path(name)
+        data, _ = _load_stack_compose(stack_dir)
+        if not data:
+            continue
+        stack_services = data.get('services', {})
+        if isinstance(stack_services, dict):
+            services.extend(stack_services.keys())
+    return services
+
+
+def _find_service_stacks(service_name):
+    """Find which stacks contain a given service."""
+    stacks, err = list_stacks()
+    if err:
+        return []
+    matches = []
+    for stack in stacks:
+        name = stack.get('name')
+        stack_dir = get_stack_path(name)
+        data, _ = _load_stack_compose(stack_dir)
+        if not data:
+            continue
+        services = data.get('services', {})
+        if isinstance(services, dict) and service_name in services:
+            matches.append(name)
+    return matches
 
 
 def _render_template(service_dict, values):
@@ -321,8 +317,12 @@ def api_catalog_get(item_id):
 @login_required
 def api_catalog_status():
     """Get list of installed services from compose file."""
-    services = _load_compose_services()
-    return jsonify({'services': services})
+    services = _list_stack_services()
+    service_map = {}
+    for svc in services:
+        service_map.setdefault(svc, [])
+        service_map[svc].extend(_find_service_stacks(svc))
+    return jsonify({'services': sorted(set(services)), 'service_stacks': service_map})
 
 
 @catalog_manager.route('/api/catalog/install', methods=['POST'])
@@ -339,6 +339,8 @@ def api_catalog_install():
             "CONFIG_DIR": "/home/pi/docker",
             ...
         },
+        "target_stack": "media" | "new",
+        "stack_name": "media",
         "skip_dependency_check": false,
         "start_service": true
     }
@@ -362,8 +364,28 @@ def api_catalog_install():
     if not valid:
         return jsonify({'error': error}), 400
 
-    # Check dependencies
-    installed_services = _load_compose_services()
+    target_stack = data.get('target_stack')
+    new_stack_name = data.get('stack_name') or item_id
+
+    if target_stack and target_stack != 'new':
+        valid, error = validate_stack_name(target_stack)
+        if not valid:
+            return jsonify({'error': error}), 400
+        stack_dir = get_stack_path(target_stack)
+        if not os.path.isdir(stack_dir):
+            return jsonify({'error': f'Stack not found: {target_stack}'}), 404
+        active_stack = target_stack
+    else:
+        valid, error = validate_stack_name(new_stack_name)
+        if not valid:
+            return jsonify({'error': error}), 400
+        stack_dir = get_stack_path(new_stack_name)
+        if os.path.exists(stack_dir):
+            return jsonify({'error': f'Stack already exists: {new_stack_name}'}), 409
+        active_stack = new_stack_name
+
+    # Check dependencies within target stack
+    installed_services = _list_stack_services(active_stack)
     skip_dep_check = data.get('skip_dependency_check', False)
 
     if not skip_dep_check:
@@ -372,12 +394,11 @@ def api_catalog_install():
             return jsonify({
                 'error': 'Missing dependencies',
                 'missing_dependencies': missing,
-                'message': f'Install these first: {", ".join(missing)}'
+                'message': f'Install these first in stack {active_stack}: {", ".join(missing)}'
             }), 400
 
-    # Check if already installed
     if item_id in installed_services:
-        return jsonify({'error': f'Service already installed: {item_id}'}), 409
+        return jsonify({'error': f'Service already installed in stack {active_stack}: {item_id}'}), 409
 
     # Render the service template
     service_template = item.get('service', {})
@@ -390,23 +411,21 @@ def api_catalog_install():
             'unresolved': unresolved
         }), 400
 
-    # Load or create compose file
-    compose_data = _load_compose_file()
+    # Load or create compose file in the stack
+    compose_data, compose_path = _load_stack_compose(stack_dir)
     if compose_data is None:
-        # Create new compose file structure
         compose_data = {
             'version': '3.8',
             'services': {}
         }
 
-    # Ensure services dict exists
     if 'services' not in compose_data:
         compose_data['services'] = {}
 
-    # Backup before modifying
-    backup_file = _backup_compose_file()
+    backup_file = None
+    if os.path.exists(stack_dir):
+        backup_file = backup_stack(active_stack)
 
-    # Add the new service
     compose_data['services'][item_id] = rendered_service
 
     # Merge required top-level sections
@@ -423,9 +442,8 @@ def api_catalog_install():
             }), 400
         _merge_compose_section(compose_data, section, rendered_section)
 
-    # Save compose file
     try:
-        _save_compose_file(compose_data)
+        _save_stack_compose(stack_dir, compose_data, compose_path)
     except Exception as e:
         return jsonify({
             'error': f'Failed to save compose file: {str(e)}',
@@ -436,28 +454,18 @@ def api_catalog_install():
         'status': 'installed',
         'id': item_id,
         'name': item.get('name', item_id),
-        'backup': backup_file
+        'backup': backup_file,
+        'stack': active_stack
     }
 
-    # Optionally start the service
     start_service = data.get('start_service', False)
     if start_service:
-        try:
-            import subprocess
-            compose_dir = os.path.dirname(os.path.abspath(DOCKER_COMPOSE_PATH))
-            proc = subprocess.run(
-                ['docker', 'compose', 'up', '-d', item_id],
-                cwd=compose_dir,
-                capture_output=True,
-                text=True,
-                timeout=120
-            )
-            result['started'] = proc.returncode == 0
-            if proc.returncode != 0:
-                result['start_error'] = proc.stderr
-        except Exception as e:
-            result['started'] = False
-            result['start_error'] = str(e)
+        start_result, start_error = run_compose_command(active_stack, 'up')
+        result['started'] = bool(start_result and start_result.get('success'))
+        if start_error:
+            result['start_error'] = start_error
+        elif start_result and not start_result.get('success'):
+            result['start_error'] = start_result.get('stderr', 'Failed to start service')
 
     return jsonify(result)
 
@@ -472,7 +480,8 @@ def api_catalog_remove():
     {
         "id": "sonarr",
         "stop_service": true,
-        "check_dependents": true
+        "check_dependents": true,
+        "target_stack": "media"
     }
     """
     data = request.get_json() or {}
@@ -481,20 +490,28 @@ def api_catalog_remove():
     if not item_id:
         return jsonify({'error': 'Missing app id'}), 400
 
-    # Check if service exists
-    installed_services = _load_compose_services()
-    if item_id not in installed_services:
+    target_stack = data.get('target_stack')
+    stacks_with_service = _find_service_stacks(item_id)
+    if not stacks_with_service:
         return jsonify({'error': f'Service not installed: {item_id}'}), 404
+    if target_stack:
+        if target_stack not in stacks_with_service:
+            return jsonify({'error': f'Service not found in stack: {target_stack}'}), 404
+        active_stack = target_stack
+    else:
+        if len(stacks_with_service) > 1:
+            return jsonify({'error': 'Service exists in multiple stacks', 'stacks': stacks_with_service}), 409
+        active_stack = stacks_with_service[0]
 
     # Check for dependent services (services that require this one)
     check_dependents = data.get('check_dependents', True)
     if check_dependents:
         dependents = []
         items = _load_catalog_items()
-        for installed_id in installed_services:
+        stack_services = _list_stack_services(active_stack)
+        for installed_id in stack_services:
             if installed_id == item_id:
                 continue
-            # Find the catalog item for this installed service
             for cat_item in items:
                 if cat_item.get('id') == installed_id:
                     requires = cat_item.get('requires', []) or []
@@ -509,8 +526,8 @@ def api_catalog_remove():
                 'message': f'Remove these first: {", ".join(dependents)}'
             }), 400
 
-    # Load compose file
-    compose_data = _load_compose_file()
+    stack_dir = get_stack_path(active_stack)
+    compose_data, compose_path = _load_stack_compose(stack_dir)
     if compose_data is None:
         return jsonify({'error': 'Compose file not found'}), 404
 
@@ -518,41 +535,19 @@ def api_catalog_remove():
     stop_service = data.get('stop_service', True)
     stop_result = None
     if stop_service:
-        try:
-            import subprocess
-            compose_dir = os.path.dirname(os.path.abspath(DOCKER_COMPOSE_PATH))
-            proc = subprocess.run(
-                ['docker', 'compose', 'stop', item_id],
-                cwd=compose_dir,
-                capture_output=True,
-                text=True,
-                timeout=60
-            )
-            stop_result = {
-                'stopped': proc.returncode == 0,
-                'output': proc.stdout if proc.returncode == 0 else proc.stderr
-            }
-            # Also remove the container
-            subprocess.run(
-                ['docker', 'compose', 'rm', '-f', item_id],
-                cwd=compose_dir,
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-        except Exception as e:
-            stop_result = {'stopped': False, 'error': str(e)}
+        stop_result, stop_error = run_compose_command(active_stack, 'stop')
+        if stop_error:
+            stop_result = {'stopped': False, 'error': stop_error}
 
     # Backup before modifying
-    backup_file = _backup_compose_file()
+    backup_file = backup_stack(active_stack)
 
     # Remove the service from compose
     if 'services' in compose_data and item_id in compose_data['services']:
         del compose_data['services'][item_id]
 
-    # Save compose file
     try:
-        _save_compose_file(compose_data)
+        _save_stack_compose(stack_dir, compose_data, compose_path)
     except Exception as e:
         return jsonify({
             'error': f'Failed to save compose file: {str(e)}',
@@ -562,7 +557,8 @@ def api_catalog_remove():
     result = {
         'status': 'removed',
         'id': item_id,
-        'backup': backup_file
+        'backup': backup_file,
+        'stack': active_stack
     }
 
     if stop_result:
@@ -579,7 +575,8 @@ def api_check_dependencies():
 
     Request body:
     {
-        "id": "sonarr"
+        "id": "sonarr",
+        "target_stack": "media"
     }
     """
     data = request.get_json() or {}
@@ -592,7 +589,11 @@ def api_check_dependencies():
     if not item:
         return jsonify({'error': f'Catalog item not found: {item_id}'}), 404
 
-    installed_services = _load_compose_services()
+    target_stack = data.get('target_stack')
+    if target_stack:
+        installed_services = _list_stack_services(target_stack)
+    else:
+        installed_services = _list_stack_services()
     satisfied, missing = _check_dependencies(item, installed_services)
 
     return jsonify({

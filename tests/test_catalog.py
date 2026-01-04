@@ -44,13 +44,11 @@ def temp_catalog_dir():
 
 
 @pytest.fixture
-def temp_compose_file():
-    """Create a temporary compose file for testing."""
-    fd, temp_path = tempfile.mkstemp(suffix='.yml')
-    os.close(fd)
-    yield temp_path
-    if os.path.exists(temp_path):
-        os.unlink(temp_path)
+def temp_stacks_dir():
+    """Create a temporary stacks directory for testing."""
+    temp_dir = tempfile.mkdtemp()
+    yield temp_dir
+    shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 @pytest.fixture
@@ -170,21 +168,19 @@ class TestCatalogEndpoints:
         response = client.get('/api/catalog/status')
         assert response.status_code == 401
 
-    def test_catalog_status_returns_services(self, authenticated_client, temp_compose_file):
+    def test_catalog_status_returns_services(self, authenticated_client, temp_stacks_dir):
         """Test GET /api/catalog/status returns installed services."""
         import catalog_manager
-        original_path = catalog_manager.DOCKER_COMPOSE_PATH
-        catalog_manager.DOCKER_COMPOSE_PATH = temp_compose_file
+        import stack_manager
+        original_stacks = stack_manager.STACKS_PATH
+        original_backup = stack_manager.BACKUP_DIR
+        stack_manager.STACKS_PATH = temp_stacks_dir
+        stack_manager.BACKUP_DIR = os.path.join(temp_stacks_dir, '.backups')
 
-        compose_data = {
-            'version': '3.8',
-            'services': {
-                'app1': {'image': 'test1'},
-                'app2': {'image': 'test2'}
-            }
-        }
-        with open(temp_compose_file, 'w') as f:
-            yaml.dump(compose_data, f)
+        stack_dir = os.path.join(temp_stacks_dir, 'media')
+        os.makedirs(stack_dir, exist_ok=True)
+        with open(os.path.join(stack_dir, 'compose.yaml'), 'w') as f:
+            yaml.dump({'version': '3.8', 'services': {'app1': {'image': 'test1'}, 'app2': {'image': 'test2'}}}, f)
 
         try:
             response = authenticated_client.get('/api/catalog/status')
@@ -194,7 +190,8 @@ class TestCatalogEndpoints:
             assert 'app1' in data['services']
             assert 'app2' in data['services']
         finally:
-            catalog_manager.DOCKER_COMPOSE_PATH = original_path
+            stack_manager.STACKS_PATH = original_stacks
+            stack_manager.BACKUP_DIR = original_backup
 
 
 class TestCatalogInstall:
@@ -231,24 +228,29 @@ class TestCatalogInstall:
             catalog_manager.CATALOG_DIR = original_dir
 
     def test_install_missing_dependency(self, authenticated_client, temp_catalog_dir,
-                                        temp_compose_file, vpn_dependent_item):
+                                        temp_stacks_dir, vpn_dependent_item):
         """Test install with missing dependency returns error."""
         import catalog_manager
+        import stack_manager
         original_dir = catalog_manager.CATALOG_DIR
-        original_path = catalog_manager.DOCKER_COMPOSE_PATH
         catalog_manager.CATALOG_DIR = temp_catalog_dir
-        catalog_manager.DOCKER_COMPOSE_PATH = temp_compose_file
+        original_stacks = stack_manager.STACKS_PATH
+        original_backup = stack_manager.BACKUP_DIR
+        stack_manager.STACKS_PATH = temp_stacks_dir
+        stack_manager.BACKUP_DIR = os.path.join(temp_stacks_dir, '.backups')
 
         with open(os.path.join(temp_catalog_dir, 'vpn-app.yaml'), 'w') as f:
             yaml.dump(vpn_dependent_item, f)
 
-        # Empty compose file - no VPN installed
-        with open(temp_compose_file, 'w') as f:
+        # Empty stack - no VPN installed
+        stack_dir = os.path.join(temp_stacks_dir, 'vpn-stack')
+        os.makedirs(stack_dir, exist_ok=True)
+        with open(os.path.join(stack_dir, 'compose.yaml'), 'w') as f:
             yaml.dump({'version': '3.8', 'services': {}}, f)
 
         try:
             response = authenticated_client.post('/api/catalog/install',
-                                                 data=json.dumps({'id': 'vpn-app'}),
+                                                 data=json.dumps({'id': 'vpn-app', 'target_stack': 'vpn-stack'}),
                                                  content_type='application/json')
             assert response.status_code == 400
             data = json.loads(response.data)
@@ -256,58 +258,61 @@ class TestCatalogInstall:
             assert 'vpn' in data['missing_dependencies']
         finally:
             catalog_manager.CATALOG_DIR = original_dir
-            catalog_manager.DOCKER_COMPOSE_PATH = original_path
+            stack_manager.STACKS_PATH = original_stacks
+            stack_manager.BACKUP_DIR = original_backup
 
     def test_install_already_installed(self, authenticated_client, temp_catalog_dir,
-                                       temp_compose_file, sample_catalog_item):
+                                       temp_stacks_dir, sample_catalog_item):
         """Test install of already installed app returns error."""
         import catalog_manager
+        import stack_manager
         original_dir = catalog_manager.CATALOG_DIR
-        original_path = catalog_manager.DOCKER_COMPOSE_PATH
         catalog_manager.CATALOG_DIR = temp_catalog_dir
-        catalog_manager.DOCKER_COMPOSE_PATH = temp_compose_file
+        original_stacks = stack_manager.STACKS_PATH
+        original_backup = stack_manager.BACKUP_DIR
+        stack_manager.STACKS_PATH = temp_stacks_dir
+        stack_manager.BACKUP_DIR = os.path.join(temp_stacks_dir, '.backups')
 
         with open(os.path.join(temp_catalog_dir, 'test-app.yaml'), 'w') as f:
             yaml.dump(sample_catalog_item, f)
 
-        # App already in compose file
-        with open(temp_compose_file, 'w') as f:
+        stack_dir = os.path.join(temp_stacks_dir, 'media')
+        os.makedirs(stack_dir, exist_ok=True)
+        with open(os.path.join(stack_dir, 'compose.yaml'), 'w') as f:
             yaml.dump({'version': '3.8', 'services': {'test-app': {'image': 'test'}}}, f)
 
         try:
             response = authenticated_client.post('/api/catalog/install',
-                                                 data=json.dumps({'id': 'test-app'}),
+                                                 data=json.dumps({'id': 'test-app', 'target_stack': 'media'}),
                                                  content_type='application/json')
             assert response.status_code == 409
             data = json.loads(response.data)
             assert 'already installed' in data['error'].lower()
         finally:
             catalog_manager.CATALOG_DIR = original_dir
-            catalog_manager.DOCKER_COMPOSE_PATH = original_path
+            stack_manager.STACKS_PATH = original_stacks
+            stack_manager.BACKUP_DIR = original_backup
 
     def test_install_success(self, authenticated_client, temp_catalog_dir,
-                            temp_compose_file, sample_catalog_item):
+                            temp_stacks_dir, sample_catalog_item):
         """Test successful install adds service to compose file."""
         import catalog_manager
+        import stack_manager
         original_dir = catalog_manager.CATALOG_DIR
-        original_path = catalog_manager.DOCKER_COMPOSE_PATH
-        original_backup = catalog_manager.BACKUP_DIR
-
-        temp_backup_dir = tempfile.mkdtemp()
+        original_stacks = stack_manager.STACKS_PATH
+        original_backup = stack_manager.BACKUP_DIR
         catalog_manager.CATALOG_DIR = temp_catalog_dir
-        catalog_manager.DOCKER_COMPOSE_PATH = temp_compose_file
-        catalog_manager.BACKUP_DIR = temp_backup_dir
+        stack_manager.STACKS_PATH = temp_stacks_dir
+        stack_manager.BACKUP_DIR = os.path.join(temp_stacks_dir, '.backups')
 
         with open(os.path.join(temp_catalog_dir, 'test-app.yaml'), 'w') as f:
             yaml.dump(sample_catalog_item, f)
-
-        with open(temp_compose_file, 'w') as f:
-            yaml.dump({'version': '3.8', 'services': {}}, f)
 
         try:
             response = authenticated_client.post('/api/catalog/install',
                                                  data=json.dumps({
                                                      'id': 'test-app',
+                                                     'stack_name': 'media',
                                                      'values': {
                                                          'CONFIG_DIR': '/custom/path',
                                                          'PORT': '9090'
@@ -320,7 +325,7 @@ class TestCatalogInstall:
             assert data['id'] == 'test-app'
 
             # Verify compose file was updated
-            with open(temp_compose_file, 'r') as f:
+            with open(os.path.join(temp_stacks_dir, 'media', 'compose.yaml'), 'r') as f:
                 compose_data = yaml.safe_load(f)
             assert 'test-app' in compose_data['services']
             service = compose_data['services']['test-app']
@@ -328,9 +333,8 @@ class TestCatalogInstall:
             assert '9090:8080' in service['ports']
         finally:
             catalog_manager.CATALOG_DIR = original_dir
-            catalog_manager.DOCKER_COMPOSE_PATH = original_path
-            catalog_manager.BACKUP_DIR = original_backup
-            shutil.rmtree(temp_backup_dir, ignore_errors=True)
+            stack_manager.STACKS_PATH = original_stacks
+            stack_manager.BACKUP_DIR = original_backup
 
 
 class TestCatalogRemove:
@@ -352,14 +356,14 @@ class TestCatalogRemove:
         data = json.loads(response.data)
         assert 'error' in data
 
-    def test_remove_not_installed(self, authenticated_client, temp_compose_file):
+    def test_remove_not_installed(self, authenticated_client, temp_stacks_dir):
         """Test remove of non-installed app returns error."""
         import catalog_manager
-        original_path = catalog_manager.DOCKER_COMPOSE_PATH
-        catalog_manager.DOCKER_COMPOSE_PATH = temp_compose_file
-
-        with open(temp_compose_file, 'w') as f:
-            yaml.dump({'version': '3.8', 'services': {}}, f)
+        import stack_manager
+        original_stacks = stack_manager.STACKS_PATH
+        original_backup = stack_manager.BACKUP_DIR
+        stack_manager.STACKS_PATH = temp_stacks_dir
+        stack_manager.BACKUP_DIR = os.path.join(temp_stacks_dir, '.backups')
 
         try:
             response = authenticated_client.post('/api/catalog/remove',
@@ -367,16 +371,20 @@ class TestCatalogRemove:
                                                  content_type='application/json')
             assert response.status_code == 404
         finally:
-            catalog_manager.DOCKER_COMPOSE_PATH = original_path
+            stack_manager.STACKS_PATH = original_stacks
+            stack_manager.BACKUP_DIR = original_backup
 
     def test_remove_with_dependents(self, authenticated_client, temp_catalog_dir,
-                                    temp_compose_file, vpn_dependent_item):
+                                    temp_stacks_dir, vpn_dependent_item):
         """Test remove of app with dependents returns error."""
         import catalog_manager
+        import stack_manager
         original_dir = catalog_manager.CATALOG_DIR
-        original_path = catalog_manager.DOCKER_COMPOSE_PATH
         catalog_manager.CATALOG_DIR = temp_catalog_dir
-        catalog_manager.DOCKER_COMPOSE_PATH = temp_compose_file
+        original_stacks = stack_manager.STACKS_PATH
+        original_backup = stack_manager.BACKUP_DIR
+        stack_manager.STACKS_PATH = temp_stacks_dir
+        stack_manager.BACKUP_DIR = os.path.join(temp_stacks_dir, '.backups')
 
         # Create VPN catalog item
         vpn_item = {
@@ -390,8 +398,9 @@ class TestCatalogRemove:
         with open(os.path.join(temp_catalog_dir, 'vpn-app.yaml'), 'w') as f:
             yaml.dump(vpn_dependent_item, f)
 
-        # Both vpn and vpn-app are installed
-        with open(temp_compose_file, 'w') as f:
+        stack_dir = os.path.join(temp_stacks_dir, 'vpn-stack')
+        os.makedirs(stack_dir, exist_ok=True)
+        with open(os.path.join(stack_dir, 'compose.yaml'), 'w') as f:
             yaml.dump({
                 'version': '3.8',
                 'services': {
@@ -402,7 +411,7 @@ class TestCatalogRemove:
 
         try:
             response = authenticated_client.post('/api/catalog/remove',
-                                                 data=json.dumps({'id': 'vpn', 'stop_service': False}),
+                                                 data=json.dumps({'id': 'vpn', 'stop_service': False, 'target_stack': 'vpn-stack'}),
                                                  content_type='application/json')
             assert response.status_code == 400
             data = json.loads(response.data)
@@ -410,28 +419,31 @@ class TestCatalogRemove:
             assert 'vpn-app' in data['dependents']
         finally:
             catalog_manager.CATALOG_DIR = original_dir
-            catalog_manager.DOCKER_COMPOSE_PATH = original_path
+            stack_manager.STACKS_PATH = original_stacks
+            stack_manager.BACKUP_DIR = original_backup
 
-    @patch('subprocess.run')
+    @patch('catalog_manager.run_compose_command')
     def test_remove_success(self, mock_run, authenticated_client, temp_catalog_dir,
-                           temp_compose_file, sample_catalog_item):
+                           temp_stacks_dir, sample_catalog_item):
         """Test successful remove deletes service from compose file."""
         import catalog_manager
+        import stack_manager
         original_dir = catalog_manager.CATALOG_DIR
-        original_path = catalog_manager.DOCKER_COMPOSE_PATH
-        original_backup = catalog_manager.BACKUP_DIR
+        original_stacks = stack_manager.STACKS_PATH
+        original_backup = stack_manager.BACKUP_DIR
 
-        temp_backup_dir = tempfile.mkdtemp()
         catalog_manager.CATALOG_DIR = temp_catalog_dir
-        catalog_manager.DOCKER_COMPOSE_PATH = temp_compose_file
-        catalog_manager.BACKUP_DIR = temp_backup_dir
+        stack_manager.STACKS_PATH = temp_stacks_dir
+        stack_manager.BACKUP_DIR = os.path.join(temp_stacks_dir, '.backups')
 
-        mock_run.return_value = Mock(returncode=0, stdout='Stopped', stderr='')
+        mock_run.return_value = ({'success': True, 'stdout': 'Stopped', 'stderr': ''}, None)
 
         with open(os.path.join(temp_catalog_dir, 'test-app.yaml'), 'w') as f:
             yaml.dump(sample_catalog_item, f)
 
-        with open(temp_compose_file, 'w') as f:
+        stack_dir = os.path.join(temp_stacks_dir, 'media')
+        os.makedirs(stack_dir, exist_ok=True)
+        with open(os.path.join(stack_dir, 'compose.yaml'), 'w') as f:
             yaml.dump({
                 'version': '3.8',
                 'services': {'test-app': {'image': 'test'}}
@@ -439,21 +451,20 @@ class TestCatalogRemove:
 
         try:
             response = authenticated_client.post('/api/catalog/remove',
-                                                 data=json.dumps({'id': 'test-app'}),
+                                                 data=json.dumps({'id': 'test-app', 'target_stack': 'media'}),
                                                  content_type='application/json')
             assert response.status_code == 200
             data = json.loads(response.data)
             assert data['status'] == 'removed'
 
             # Verify compose file was updated
-            with open(temp_compose_file, 'r') as f:
+            with open(os.path.join(temp_stacks_dir, 'media', 'compose.yaml'), 'r') as f:
                 compose_data = yaml.safe_load(f)
             assert 'test-app' not in compose_data['services']
         finally:
             catalog_manager.CATALOG_DIR = original_dir
-            catalog_manager.DOCKER_COMPOSE_PATH = original_path
-            catalog_manager.BACKUP_DIR = original_backup
-            shutil.rmtree(temp_backup_dir, ignore_errors=True)
+            stack_manager.STACKS_PATH = original_stacks
+            stack_manager.BACKUP_DIR = original_backup
 
 
 class TestTemplateRendering:
@@ -556,19 +567,19 @@ class TestCheckDependenciesEndpoint:
         assert response.status_code == 401
 
     def test_check_dependencies_endpoint_success(self, authenticated_client, temp_catalog_dir,
-                                                 temp_compose_file, vpn_dependent_item):
+                                                 temp_stacks_dir, vpn_dependent_item):
         """Test check-dependencies endpoint returns correct status."""
         import catalog_manager
+        import stack_manager
         original_dir = catalog_manager.CATALOG_DIR
-        original_path = catalog_manager.DOCKER_COMPOSE_PATH
         catalog_manager.CATALOG_DIR = temp_catalog_dir
-        catalog_manager.DOCKER_COMPOSE_PATH = temp_compose_file
+        original_stacks = stack_manager.STACKS_PATH
+        original_backup = stack_manager.BACKUP_DIR
+        stack_manager.STACKS_PATH = temp_stacks_dir
+        stack_manager.BACKUP_DIR = os.path.join(temp_stacks_dir, '.backups')
 
         with open(os.path.join(temp_catalog_dir, 'vpn-app.yaml'), 'w') as f:
             yaml.dump(vpn_dependent_item, f)
-
-        with open(temp_compose_file, 'w') as f:
-            yaml.dump({'version': '3.8', 'services': {}}, f)
 
         try:
             response = authenticated_client.post('/api/catalog/check-dependencies',
@@ -580,7 +591,8 @@ class TestCheckDependenciesEndpoint:
             assert 'vpn' in data['missing']
         finally:
             catalog_manager.CATALOG_DIR = original_dir
-            catalog_manager.DOCKER_COMPOSE_PATH = original_path
+            stack_manager.STACKS_PATH = original_stacks
+            stack_manager.BACKUP_DIR = original_backup
 
 
 class TestAppsPage:
