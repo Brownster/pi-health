@@ -72,7 +72,10 @@ def ensure_backup_directory():
 
 def list_stacks():
     """List all stacks in the stacks directory."""
-    ensure_stacks_directory()
+    try:
+        ensure_stacks_directory()
+    except Exception as e:
+        return [], str(e)
     stacks = []
 
     try:
@@ -288,7 +291,7 @@ def api_list_stacks():
     """List all stacks."""
     stacks, error = list_stacks()
     if error:
-        return jsonify({'error': error}), 500
+        return jsonify({'stacks': [], 'error': error}), 200
 
     # Optionally include status for each stack
     include_status = request.args.get('status', 'false').lower() == 'true'
