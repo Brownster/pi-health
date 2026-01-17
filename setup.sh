@@ -97,7 +97,8 @@ if prompt_install "SnapRAID" INSTALL_SNAPRAID "command -v snapraid >/dev/null 2>
 fi
 
 if prompt_install "MergerFS" INSTALL_MERGERFS "command -v mergerfs >/dev/null 2>&1"; then
-  apt-get install -y mergerfs mergerfs-tools
+  apt-get install -y mergerfs
+  apt-get install -y mergerfs-tools 2>/dev/null || echo ">>> mergerfs-tools not available (optional)"
 fi
 
 if prompt_install "smartmontools" INSTALL_SMARTMONTOOLS "command -v smartctl >/dev/null 2>&1"; then
