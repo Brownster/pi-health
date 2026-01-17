@@ -461,7 +461,7 @@ def get_container_stats_cached(container_id):
         return None
 
 
-def list_containers():
+def list_containers(include_stats=True):
     """List all Docker containers with their status."""
     if not docker_available:
         return [
@@ -489,9 +489,9 @@ def list_containers():
             except Exception:
                 ports = []
 
-            # Fetch resource stats for running containers
+            # Fetch resource stats for running containers (if requested)
             stats = None
-            if container.status == 'running':
+            if include_stats and container.status == 'running':
                 stats = get_container_stats_cached(container.id)
 
             container_data = {
@@ -998,7 +998,8 @@ def api_stats():
 @login_required
 def api_list_containers():
     """API endpoint to list all Docker containers."""
-    return jsonify(list_containers())
+    include_stats = request.args.get('stats', 'true').lower() != 'false'
+    return jsonify(list_containers(include_stats=include_stats))
 
 
 @app.route('/api/containers/<container_id>/<action>', methods=['POST'])

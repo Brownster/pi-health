@@ -233,7 +233,7 @@
             const serviceGrid = document.getElementById('service-grid');
 
             try {
-                const response = await fetch('/api/containers');
+                const response = await fetch('/api/containers?stats=false');
                 const containers = await response.json();
 
                 // Clear loading message
