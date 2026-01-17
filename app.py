@@ -445,7 +445,7 @@ def get_container_stats_cached(container_id):
         if container.status != 'running':
             return None
 
-        stats = container.stats(stream=False, decode=True)
+        stats = container.stats(stream=False)
 
         result = {
             'cpu_percent': calculate_container_cpu_percent(stats),
