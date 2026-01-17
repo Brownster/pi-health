@@ -456,7 +456,8 @@ def get_container_stats_cached(container_id):
         _container_stats_cache[container_id] = result
         _container_stats_timestamps[container_id] = now
         return result
-    except Exception:
+    except Exception as e:
+        print(f"Error fetching stats for {container_id}: {e}")
         return None
 
 
