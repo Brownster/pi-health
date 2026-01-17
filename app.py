@@ -1045,4 +1045,5 @@ def api_container_network_test(container_id):
     return jsonify(run_container_network_test(container_id))
 
 if __name__ == '__main__':
-    app.run(host="0.0.0.0", port=80)
+    port = int(os.environ.get('PORT', 8002))
+    app.run(host="0.0.0.0", port=port)

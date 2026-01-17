@@ -244,6 +244,6 @@ systemctl enable --now pi-health.service
 systemctl enable --now pihealth-helper.service
 
 echo ">>> Pi-Health is running."
-echo "Open: http://$(hostname -I | awk '{print $1}'):80"
+echo "Open: http://$(hostname -I | awk '{print $1}'):8002"
 echo "Optional config env: ${ENV_FILE}"
 echo "Helper service: pihealth-helper.service"
