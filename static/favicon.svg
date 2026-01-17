@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#8b5cf6;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#3b82f6;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <!-- Background circle -->
+  <circle cx="50" cy="50" r="48" fill="url(#grad)"/>
+  <!-- Heart shape -->
+  <path d="M50 80 C20 55 20 30 35 25 C45 22 50 32 50 32 C50 32 55 22 65 25 C80 30 80 55 50 80Z"
+        fill="#ffffff" opacity="0.9"/>
+  <!-- Pi symbol -->
+  <text x="50" y="58" font-family="serif" font-size="28" font-weight="bold"
+        fill="#8b5cf6" text-anchor="middle">π</text>
+</svg>

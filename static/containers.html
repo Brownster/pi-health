@@ -30,8 +30,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Containers - Pi-Health Dashboard</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
-    <script src="/theme.js"></script>
+    <script src="/js/api.js"></script>
     <style>
         .status-running { background-color: #38a169; }
         .status-stopped { background-color: #e53e3e; }
@@ -368,39 +369,9 @@
             return `<span class="text-blue-300">↓${formatBytes(rx)}</span><br><span class="text-green-300">↑${formatBytes(tx)}</span>`;
         }
 
-        // Show notification function
+        // Show notification function (uses shared toast system from api.js)
         function showNotification(message, type = 'info') {
-            const notificationArea = document.getElementById('notification-area');
-            const notification = document.createElement('div');
-            notification.className = `notification ${type} bg-opacity-90 p-3 mb-2 rounded shadow-lg transform transition-all duration-500 opacity-0`;
-            
-            // Set background color based on type
-            if (type === 'success') notification.classList.add('bg-green-600');
-            else if (type === 'error') notification.classList.add('bg-red-600');
-            else notification.classList.add('bg-blue-600');
-            
-            notification.innerHTML = message;
-            notificationArea.appendChild(notification);
-            
-            // Fade in
-            setTimeout(() => notification.classList.replace('opacity-0', 'opacity-100'), 10);
-            
-            // Remove after 3 seconds
-            setTimeout(() => {
-                notification.classList.replace('opacity-100', 'opacity-0');
-                notification.style.height = notification.offsetHeight + 'px';
-                notification.style.marginBottom = '0.5rem';
-                
-                setTimeout(() => {
-                    notification.style.height = '0';
-                    notification.style.marginBottom = '0';
-                    notification.style.padding = '0';
-                    
-                    setTimeout(() => {
-                        notification.remove();
-                    }, 300);
-                }, 300);
-            }, 3000);
+            showToast(message, type);
         }
 
         // Filter state
@@ -461,7 +432,7 @@
             }
 
             try {
-                const response = await fetch('/api/containers');
+                const response = await apiFetch('/api/containers');
                 const newContainerList = await response.json();
 
                 // Update timestamp for network rate calculation
@@ -713,7 +684,7 @@
         // Update a single container's status
         async function updateContainerStatus(id) {
             try {
-                const response = await fetch('/api/containers');
+                const response = await apiFetch('/api/containers');
                 const containers = await response.json();
                 lastFetchTime = Date.now();
                 const container = containers.find(c => c.id === id);

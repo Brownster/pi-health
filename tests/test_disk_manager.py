@@ -138,6 +138,111 @@ class TestDiskManagerEndpoints:
                                              content_type='application/json')
         assert response.status_code == 400
 
+    def test_mount_helper_error(self, authenticated_client):
+        """Test mount returns 503 when helper raises."""
+        import disk_manager
+        from helper_client import HelperError
+
+        with patch('disk_manager.helper_call', side_effect=HelperError("no helper")):
+            response = authenticated_client.post(
+                '/api/disks/mount',
+                data=json.dumps({'uuid': 'abc-123', 'mountpoint': '/mnt/test'}),
+                content_type='application/json'
+            )
+        assert response.status_code == 503
+
+    def test_mount_adds_fstab_and_mounts(self, authenticated_client):
+        """Test mount with fstab add and mount success."""
+        def helper_call_side_effect(command, params=None):
+            if command == 'fstab_add':
+                return {'success': True}
+            if command == 'mount':
+                return {'success': True}
+            return {'success': False, 'error': 'unexpected'}
+
+        with patch('disk_manager.helper_call', side_effect=helper_call_side_effect):
+            response = authenticated_client.post(
+                '/api/disks/mount',
+                data=json.dumps({
+                    'uuid': 'abc-123',
+                    'mountpoint': '/mnt/test',
+                    'fstype': 'ext4',
+                    'options': 'defaults',
+                    'add_to_fstab': True
+                }),
+                content_type='application/json'
+            )
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data['status'] == 'mounted'
+
+    def test_mount_without_fstab_resolves_device(self, authenticated_client):
+        """Test mount without fstab resolves device via blkid."""
+        def helper_call_side_effect(command, params=None):
+            if command == 'blkid':
+                return {'success': True, 'data': [{'UUID': 'abc-123', 'DEVNAME': '/dev/sda1'}]}
+            if command == 'mount':
+                return {'success': True}
+            return {'success': False}
+
+        with patch('disk_manager.helper_call', side_effect=helper_call_side_effect):
+            response = authenticated_client.post(
+                '/api/disks/mount',
+                data=json.dumps({
+                    'uuid': 'abc-123',
+                    'mountpoint': '/mnt/test',
+                    'add_to_fstab': False
+                }),
+                content_type='application/json'
+            )
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data['status'] == 'mounted'
+
+    def test_mount_without_fstab_device_not_found(self, authenticated_client):
+        """Test mount without fstab fails when device not found."""
+        with patch('disk_manager.helper_call', return_value={'success': True, 'data': []}):
+            response = authenticated_client.post(
+                '/api/disks/mount',
+                data=json.dumps({
+                    'uuid': 'abc-123',
+                    'mountpoint': '/mnt/test',
+                    'add_to_fstab': False
+                }),
+                content_type='application/json'
+            )
+        assert response.status_code == 400
+
+    def test_mount_fstab_add_failure(self, authenticated_client):
+        """Test mount returns error when fstab add fails."""
+        with patch('disk_manager.helper_call', return_value={'success': False, 'error': 'nope'}):
+            response = authenticated_client.post(
+                '/api/disks/mount',
+                data=json.dumps({'uuid': 'abc-123', 'mountpoint': '/mnt/test'}),
+                content_type='application/json'
+            )
+        assert response.status_code == 400
+
+    def test_unmount_remove_from_fstab_warning(self, authenticated_client):
+        """Test unmount warns when fstab removal fails."""
+        def helper_call_side_effect(command, params=None):
+            if command == 'umount':
+                return {'success': True}
+            if command == 'fstab_remove':
+                return {'success': False, 'error': 'failed'}
+            return {'success': False}
+
+        with patch('disk_manager.helper_call', side_effect=helper_call_side_effect):
+            response = authenticated_client.post(
+                '/api/disks/unmount',
+                data=json.dumps({'mountpoint': '/mnt/test', 'remove_from_fstab': True}),
+                content_type='application/json'
+            )
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data['status'] == 'unmounted'
+        assert 'warning' in data
+
 
 class TestMediaPaths:
     """Test media paths configuration."""
@@ -308,6 +413,38 @@ class TestSuggestedMounts:
         finally:
             disk_manager.HELPER_SOCKET = original_socket
 
+    def test_suggested_mounts_with_nvme(self, authenticated_client):
+        """Test suggested mounts include NVMe downloads suggestion."""
+        import disk_manager
+
+        inventory = {
+            'disks': [
+                {
+                    'name': 'nvme0n1',
+                    'transport': 'nvme',
+                    'size': '500G',
+                    'mounted': False,
+                    'uuid': 'abc',
+                    'fstype': 'ext4',
+                    'partitions': [
+                        {
+                            'path': '/dev/nvme0n1p1',
+                            'uuid': 'abc',
+                            'fstype': 'ext4',
+                            'size': '500G',
+                            'mounted': False
+                        }
+                    ]
+                }
+            ]
+        }
+
+        with patch('disk_manager.get_disk_inventory', return_value=inventory):
+            response = authenticated_client.get('/api/disks/suggested-mounts')
+            assert response.status_code == 200
+            data = json.loads(response.data)
+            assert data['suggestions'][0]['suggested_mount'] == '/mnt/downloads'
+
 
 class TestHelperFunctions:
     """Test helper utility functions."""
@@ -397,6 +534,57 @@ class TestHelperFunctions:
         assert _parse_size_to_gb('512M') == 0.5
         assert _parse_size_to_gb('') is None
         assert _parse_size_to_gb(None) is None
+
+    def test_build_startup_script_no_mounts(self):
+        """Test startup script when no /mnt mounts present."""
+        import disk_manager
+        script = disk_manager._build_startup_script({'config': '/home/pi/docker'})
+        assert "MOUNT_POINTS=()" in script
+
+    def test_seedbox_is_mounted_false(self):
+        """Test seedbox mount detection false path."""
+        import disk_manager
+        with patch('disk_manager.os.path.ismount', return_value=False):
+            assert disk_manager._seedbox_is_mounted() is False
+
+    def test_process_device_filters_loop(self):
+        """Test _process_device skips loop devices."""
+        import disk_manager
+        result = disk_manager._process_device(
+            {'name': 'loop0', 'type': 'loop'},
+            {}, {}, {}, {}, {}
+        )
+        assert result is None
+
+    def test_process_device_usage_from_df(self):
+        """Test _process_device includes usage when mounted."""
+        import disk_manager
+        device = {
+            'name': 'sda1',
+            'type': 'part',
+            'size': '1G',
+            'mountpoint': '/mnt/storage',
+            'fstype': 'ext4',
+            'children': []
+        }
+        mounts = {'/dev/sda1': {'mountpoint': '/mnt/storage', 'options': 'rw'}}
+        df_map = {'/mnt/storage': {'size': '100', 'used': '50', 'avail': '50', 'pcent': '50%'}}
+        result = disk_manager._process_device(device, {}, mounts, {}, {}, df_map)
+        assert result['usage']['percent'] == '50'
+
+    def test_get_disk_inventory_helper_unavailable(self):
+        """Test get_disk_inventory returns helper_available False."""
+        import disk_manager
+        with patch('disk_manager.helper_available', return_value=False):
+            result = disk_manager.get_disk_inventory()
+        assert result['helper_available'] is False
+
+    def test_update_startup_service_unavailable(self):
+        """Test update_startup_service returns error if helper missing."""
+        import disk_manager
+        with patch('disk_manager.helper_available', return_value=False):
+            result = disk_manager.update_startup_service({})
+        assert result['success'] is False
 
 
 class TestDisksPage:

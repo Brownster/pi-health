@@ -8,6 +8,7 @@ import os
 import sys
 import tempfile
 import shutil
+from unittest.mock import patch, MagicMock
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -16,6 +17,9 @@ from stack_manager import (
     validate_stack_name,
     find_compose_file,
     list_stacks,
+    get_stack_status,
+    run_compose_command,
+    stream_compose_command,
     STACK_FILENAMES
 )
 from app import app
@@ -196,6 +200,184 @@ class TestStacksPage:
         """Test that stacks page loads."""
         response = client.get('/stacks.html')
         assert response.status_code == 200
+
+
+class TestStackListing:
+    """Test stack listing and status parsing."""
+
+    def test_list_stacks_filters_and_sorts(self, temp_stacks_dir):
+        import stack_manager
+        original_path = stack_manager.STACKS_PATH
+        stack_manager.STACKS_PATH = temp_stacks_dir
+
+        try:
+            os.makedirs(os.path.join(temp_stacks_dir, "beta"), exist_ok=True)
+            os.makedirs(os.path.join(temp_stacks_dir, "alpha"), exist_ok=True)
+            os.makedirs(os.path.join(temp_stacks_dir, ".hidden"), exist_ok=True)
+
+            with open(os.path.join(temp_stacks_dir, "alpha", "compose.yaml"), "w") as f:
+                f.write("services: {}\n")
+            with open(os.path.join(temp_stacks_dir, "beta", "docker-compose.yml"), "w") as f:
+                f.write("services: {}\n")
+
+            stacks, error = list_stacks()
+            assert error is None
+            assert [stack["name"] for stack in stacks] == ["alpha", "beta"]
+        finally:
+            stack_manager.STACKS_PATH = original_path
+
+    def test_get_stack_status_parses_json(self, temp_stacks_dir):
+        import stack_manager
+        original_path = stack_manager.STACKS_PATH
+        stack_manager.STACKS_PATH = temp_stacks_dir
+
+        try:
+            stack_dir = os.path.join(temp_stacks_dir, "alpha")
+            os.makedirs(stack_dir, exist_ok=True)
+            with open(os.path.join(stack_dir, "compose.yaml"), "w") as f:
+                f.write("services: {}\n")
+
+            stdout = json.dumps({
+                "Name": "alpha_web_1",
+                "Service": "web",
+                "State": "running",
+                "Health": "healthy",
+                "Publishers": []
+            })
+            mock_run = MagicMock(returncode=0, stdout=stdout, stderr="")
+            with patch("stack_manager.subprocess.run", return_value=mock_run):
+                status, error = get_stack_status("alpha")
+
+            assert error is None
+            assert status["status"] == "running"
+            assert status["container_count"] == 1
+        finally:
+            stack_manager.STACKS_PATH = original_path
+
+    def test_get_stack_status_parses_json_lines(self, temp_stacks_dir):
+        import stack_manager
+        original_path = stack_manager.STACKS_PATH
+        stack_manager.STACKS_PATH = temp_stacks_dir
+
+        try:
+            stack_dir = os.path.join(temp_stacks_dir, "alpha")
+            os.makedirs(stack_dir, exist_ok=True)
+            with open(os.path.join(stack_dir, "compose.yaml"), "w") as f:
+                f.write("services: {}\n")
+
+            stdout = "\n".join([
+                json.dumps({"Name": "c1", "Service": "web", "State": "running"}),
+                json.dumps({"Name": "c2", "Service": "db", "State": "exited"}),
+            ])
+            mock_run = MagicMock(returncode=0, stdout=stdout, stderr="")
+            with patch("stack_manager.subprocess.run", return_value=mock_run):
+                status, error = get_stack_status("alpha")
+
+            assert error is None
+            assert status["status"] == "partial"
+            assert status["container_count"] == 2
+        finally:
+            stack_manager.STACKS_PATH = original_path
+
+
+class TestComposeCommands:
+    """Test compose command execution mapping."""
+
+    def test_run_compose_command_unknown(self, temp_stacks_dir):
+        import stack_manager
+        original_path = stack_manager.STACKS_PATH
+        stack_manager.STACKS_PATH = temp_stacks_dir
+
+        try:
+            stack_dir = os.path.join(temp_stacks_dir, "alpha")
+            os.makedirs(stack_dir, exist_ok=True)
+            with open(os.path.join(stack_dir, "compose.yaml"), "w") as f:
+                f.write("services: {}\n")
+
+            result, error = run_compose_command("alpha", "unknown")
+            assert result is None
+            assert "Unknown command" in error
+        finally:
+            stack_manager.STACKS_PATH = original_path
+
+
+class TestComposeStreaming:
+    """Test SSE streaming command output."""
+
+    def test_stream_compose_command_stack_not_found(self, temp_stacks_dir):
+        import stack_manager
+        original_path = stack_manager.STACKS_PATH
+        stack_manager.STACKS_PATH = temp_stacks_dir
+
+        try:
+            events = list(stream_compose_command("missing", "up"))
+            assert "Stack not found" in events[0]
+        finally:
+            stack_manager.STACKS_PATH = original_path
+
+    def test_stream_compose_command_unknown(self, temp_stacks_dir):
+        import stack_manager
+        original_path = stack_manager.STACKS_PATH
+        stack_manager.STACKS_PATH = temp_stacks_dir
+
+        try:
+            stack_dir = os.path.join(temp_stacks_dir, "alpha")
+            os.makedirs(stack_dir, exist_ok=True)
+            with open(os.path.join(stack_dir, "compose.yaml"), "w") as f:
+                f.write("services: {}\n")
+
+            events = list(stream_compose_command("alpha", "nope"))
+            assert "Unknown command" in events[0]
+        finally:
+            stack_manager.STACKS_PATH = original_path
+
+    def test_stream_compose_command_success(self, temp_stacks_dir):
+        import stack_manager
+        original_path = stack_manager.STACKS_PATH
+        stack_manager.STACKS_PATH = temp_stacks_dir
+
+        try:
+            stack_dir = os.path.join(temp_stacks_dir, "alpha")
+            os.makedirs(stack_dir, exist_ok=True)
+            with open(os.path.join(stack_dir, "compose.yaml"), "w") as f:
+                f.write("services: {}\n")
+
+            fake_proc = MagicMock()
+            fake_proc.stdout.readline.side_effect = ["line one\n", "line two\n", ""]
+            fake_proc.wait.return_value = 0
+            fake_proc.returncode = 0
+
+            with patch("stack_manager.subprocess.Popen", return_value=fake_proc):
+                events = list(stream_compose_command("alpha", "up"))
+
+            assert any("line one" in event for event in events)
+            assert any('"done": true' in event for event in events)
+        finally:
+            stack_manager.STACKS_PATH = original_path
+
+    def test_run_compose_command_builds_args(self, temp_stacks_dir):
+        import stack_manager
+        original_path = stack_manager.STACKS_PATH
+        stack_manager.STACKS_PATH = temp_stacks_dir
+
+        try:
+            stack_dir = os.path.join(temp_stacks_dir, "alpha")
+            os.makedirs(stack_dir, exist_ok=True)
+            with open(os.path.join(stack_dir, "compose.yaml"), "w") as f:
+                f.write("services: {}\n")
+
+            mock_run = MagicMock(returncode=0, stdout="ok", stderr="")
+            with patch("stack_manager.subprocess.run", return_value=mock_run) as run_mock:
+                result, error = run_compose_command("alpha", "up")
+
+            assert error is None
+            assert result["success"] is True
+            run_mock.assert_called_once()
+            args, kwargs = run_mock.call_args
+            assert args[0][:3] == ["docker", "compose", "-f"]
+            assert kwargs["cwd"] == stack_dir
+        finally:
+            stack_manager.STACKS_PATH = original_path
 
 
 class TestStackFilenames:

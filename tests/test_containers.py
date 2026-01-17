@@ -118,6 +118,24 @@ class TestContainerLogs:
         data = json.loads(response.data)
         assert 'logs' in data or 'error' in data
 
+    def test_logs_success(self, authenticated_client):
+        """Test logs endpoint returns decoded logs."""
+        import app as app_module
+        fake_container = Mock()
+        fake_container.logs.return_value = b"hello\n"
+        fake_container.name = "test"
+
+        fake_client = Mock()
+        fake_client.containers.get.return_value = fake_container
+
+        with patch.object(app_module, "docker_client", fake_client):
+            with patch.object(app_module, "docker_available", True):
+                response = authenticated_client.get('/api/containers/test-container/logs')
+
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data["logs"].strip() == "hello"
+
 
 class TestContainerUpdate:
     """Test container update functionality."""
@@ -136,6 +154,35 @@ class TestContainerUpdate:
         assert response.status_code == 200
         data = json.loads(response.data)
         assert 'status' in data or 'error' in data
+
+
+class TestContainerActions:
+    """Test container action helpers with mocked docker client."""
+
+    def test_control_container_invalid_action(self):
+        from app import control_container
+        result = control_container("id", "nope")
+        assert "error" in result
+
+    def test_control_container_docker_unavailable(self):
+        from app import control_container
+        with patch("app.docker_available", False):
+            result = control_container("id", "start")
+        assert "error" in result
+
+    def test_check_container_update_no_tag(self):
+        from app import check_container_update
+        fake_container = Mock()
+        fake_container.image.tags = []
+        result = check_container_update(fake_container)
+        assert "error" in result
+
+    def test_update_container_no_tag(self):
+        from app import update_container
+        fake_container = Mock()
+        fake_container.image.tags = []
+        result = update_container(fake_container)
+        assert "error" in result
 
 
 class TestContainerNetworkTest:

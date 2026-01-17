@@ -30,9 +30,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Stacks - Pi-Health Dashboard</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/lib/codemirror.css">
-    <script src="/theme.js"></script>
+    <script src="/js/api.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/lib/codemirror.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/yaml/yaml.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
@@ -385,30 +386,9 @@
         let composeValid = true;
         let newComposeValid = true;
 
-        // ========== Notifications ==========
+        // ========== Notifications (uses shared toast system from api.js) ==========
         function showNotification(message, type = 'info') {
-            const area = document.getElementById('notification-area');
-            const notification = document.createElement('div');
-            const colors = {
-                success: 'bg-green-600',
-                error: 'bg-red-600',
-                info: 'bg-blue-600',
-                warning: 'bg-yellow-600'
-            };
-
-            notification.className = `${colors[type] || colors.info} text-white px-4 py-3 rounded shadow-lg mb-2 transform transition-all duration-300`;
-            notification.innerHTML = `
-                <div class="flex items-center justify-between">
-                    <span>${message}</span>
-                    <button onclick="this.parentElement.parentElement.remove()" class="ml-4 text-white hover:text-gray-200">&times;</button>
-                </div>
-            `;
-
-            area.appendChild(notification);
-            setTimeout(() => {
-                notification.style.opacity = '0';
-                setTimeout(() => notification.remove(), 300);
-            }, 5000);
+            showToast(message, type);
         }
 
         // ========== Stack Loading ==========
@@ -418,7 +398,7 @@
             refreshBtn.classList.add('animate-pulse');
 
             try {
-                const response = await fetch('/api/stacks?status=true');
+                const response = await apiFetch('/api/stacks?status=true');
                 const data = await response.json();
 
                 if (data.error) {
