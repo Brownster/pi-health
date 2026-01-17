@@ -234,10 +234,10 @@ Phase 3 (Long Term)
 - [x] App catalog
 
 ### In Progress
-- [ ] Phase 1: Bug fixes & polish
-
-### Up Next
 - [ ] Phase 2: SSHFS + SMART
+
+### Completed
+- [x] Phase 1: Bug fixes & polish (401 handling, favicon, toast notifications, loading spinners)
 
 ---
 
