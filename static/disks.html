@@ -320,23 +320,23 @@
     </div>
 
     <!-- SMART Detail Modal -->
-    <div id="smart-modal" class="hidden fixed inset-0 bg-black bg-opacity-60 z-50 items-center justify-center p-4">
-        <div class="bg-gray-900 w-full max-w-2xl rounded-lg shadow-xl border border-purple-900 flex flex-col max-h-[90vh]">
-            <div class="flex justify-between items-center p-4 border-b border-purple-800">
+    <div id="smart-modal" class="hidden fixed inset-0 bg-black bg-opacity-60 z-50 items-center justify-center p-4 overflow-hidden" onclick="if(event.target === this) closeSmartModal()">
+        <div class="bg-gray-900 w-full max-w-2xl rounded-lg shadow-xl border border-purple-900 flex flex-col max-h-[90vh]" onclick="event.stopPropagation()">
+            <div class="flex justify-between items-center p-4 border-b border-purple-800 flex-shrink-0">
                 <h3 id="smart-modal-title" class="text-xl font-semibold">SMART Details</h3>
-                <button onclick="closeSmartModal()" class="text-gray-400 hover:text-gray-200">Close</button>
+                <button onclick="closeSmartModal()" class="text-gray-400 hover:text-white text-2xl font-bold leading-none">&times;</button>
             </div>
-            <div class="p-4 overflow-y-auto flex-1">
+            <div class="p-4 overflow-y-auto flex-1 min-h-0">
                 <div id="smart-modal-content">
                     <!-- Filled by JS -->
                 </div>
             </div>
-            <div class="p-4 border-t border-purple-800 flex justify-between items-center">
+            <div class="p-4 border-t border-purple-800 flex justify-between items-center flex-shrink-0">
                 <div class="flex gap-2">
                     <button onclick="runSmartTest('short')" class="coraline-button px-3 py-2 text-sm rounded text-white">Short Test</button>
                     <button onclick="runSmartTest('long')" class="coraline-button px-3 py-2 text-sm rounded text-white">Long Test</button>
                 </div>
-                <button onclick="closeSmartModal()" class="px-4 py-2 bg-gray-700 text-white rounded">Close</button>
+                <button onclick="closeSmartModal()" class="px-4 py-2 bg-gray-700 text-white rounded hover:bg-gray-600">Close</button>
             </div>
         </div>
     </div>
