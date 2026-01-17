@@ -81,7 +81,7 @@ ENABLE_TAILSCALE=1 ./start.sh
 ENABLE_VPN=1 PIA_USERNAME=your_user PIA_PASSWORD=your_pass ./start.sh
 ```
 
-Access the dashboard at `http://<pi-ip>:80`
+Access the dashboard at `http://<pi-ip>:8002`
 
 ### Example: Split VPN and Non-VPN Stacks
 
@@ -318,6 +318,23 @@ sudo mount -a
 # View mount errors
 dmesg | tail -20
 ```
+
+### Container Memory Stats Not Showing
+
+On Raspberry Pi OS, cgroup memory accounting is disabled by default. Container CPU and network stats will work, but memory will show as "—".
+
+To enable memory stats, add these parameters to your kernel command line:
+
+```bash
+sudo nano /boot/firmware/cmdline.txt
+```
+
+Add to the **end** of the existing line (keep it all on one line):
+```
+cgroup_enable=memory cgroup_memory=1
+```
+
+Then reboot. Note: This uses slightly more RAM for memory tracking.
 
 ## License
 
