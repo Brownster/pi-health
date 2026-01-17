@@ -987,6 +987,18 @@ def serve_theme_file(theme_name, filename):
         return jsonify({"error": "File type not allowed"}), 403
 
 
+@app.route('/js/<path:path>')
+def serve_js(path):
+    return send_from_directory(os.path.join(app.static_folder, 'js'), path)
+
+@app.route('/css/<path:path>')
+def serve_css(path):
+    return send_from_directory(os.path.join(app.static_folder, 'css'), path)
+
+@app.route('/favicon.svg')
+def serve_favicon():
+    return send_from_directory(app.static_folder, 'favicon.svg')
+
 @app.route('/api/stats', methods=['GET'])
 @login_required
 def api_stats():

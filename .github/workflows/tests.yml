@@ -1,0 +1,51 @@
+name: Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+
+    - name: Install test runner
+      run: |
+        python -m pip install --upgrade pip
+        pip install tox
+
+    - name: Run Unit Tests
+      run: tox -e unit
+
+    - name: Start Application
+      env:
+        PORT: 8002
+        PIHEALTH_USER: admin
+        PIHEALTH_PASSWORD: password
+      run: |
+        # Start app in background
+        python app.py &
+        # Wait for it to be ready
+        sleep 5
+
+    - name: Run UI Tests
+      env:
+        BASE_URL: http://localhost:8002
+        PIHEALTH_USER: admin
+        PIHEALTH_PASSWORD: password
+      run: tox -e e2e
+
+    - name: Upload Test Artifacts
+      if: failure()
+      uses: actions/upload-artifact@v3
+      with:
+        name: test-results
+        path: test-results/

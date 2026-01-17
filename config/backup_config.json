@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "enabled": false,
+  "schedule_preset": "disabled",
+  "retention_count": 7,
+  "dest_dir": "/mnt/backup",
+  "config_dir": "/home/pi/docker",
+  "stacks_path": "/opt/stacks",
+  "include_env": true,
+  "compression": "zst",
+  "last_run": null,
+  "last_run_result": null,
+  "plugin_backup_enabled": true,
+  "plugin_retention_count": 10,
+  "last_plugin_backup": null,
+  "last_plugin_backup_result": null,
+  "last_restore": null,
+  "last_restore_result": null
+}

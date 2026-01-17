@@ -299,8 +299,9 @@ def cmd_umount(params):
 
 
 def cmd_smart_info(params):
-    """Get SMART health info for a device."""
+    """Get full SMART info for a device (with USB drive support)."""
     device = params.get('device', '')
+    use_sat = params.get('use_sat', False)
 
     if not device or not DEVICE_PATTERN.match(device):
         return {'success': False, 'error': 'Invalid device path'}
@@ -310,13 +311,93 @@ def cmd_smart_info(params):
     if result.get('returncode') != 0:
         return {'success': False, 'error': 'smartctl not installed'}
 
-    result = run_command(['smartctl', '-H', '-j', device])
-    if result.get('returncode') in [0, 4]:  # 4 = SMART health check failed but command succeeded
+    # Build command - use -a for full attributes, -j for JSON
+    cmd = ['smartctl', '-a', '-j']
+    if use_sat:
+        cmd.extend(['-d', 'sat'])
+    cmd.append(device)
+
+    result = run_command(cmd)
+    # smartctl returns various codes, but if we have stdout try to parse it
+    if result.get('stdout'):
         try:
-            return {'success': True, 'data': json.loads(result['stdout'])}
+            data = json.loads(result['stdout'])
+            return {'success': True, 'data': data}
         except json.JSONDecodeError:
-            return {'success': False, 'error': 'Failed to parse smartctl output'}
+            pass
+
+    # If no SAT and failed, retry with SAT for USB drives
+    if not use_sat and result.get('returncode') not in [0, 4]:
+        return cmd_smart_info({'device': device, 'use_sat': True})
+
     return {'success': False, 'error': result.get('stderr', 'smartctl failed')}
+
+
+def cmd_smart_test(params):
+    """Run a SMART self-test on a device."""
+    device = params.get('device', '')
+    test_type = params.get('test_type', 'short')  # short, long, conveyance
+    use_sat = params.get('use_sat', False)
+
+    if not device or not DEVICE_PATTERN.match(device):
+        return {'success': False, 'error': 'Invalid device path'}
+
+    if test_type not in ['short', 'long', 'conveyance']:
+        return {'success': False, 'error': 'Invalid test type. Use: short, long, or conveyance'}
+
+    # Check if smartctl is available
+    result = run_command(['which', 'smartctl'])
+    if result.get('returncode') != 0:
+        return {'success': False, 'error': 'smartctl not installed'}
+
+    # Build command
+    cmd = ['smartctl', '-t', test_type]
+    if use_sat:
+        cmd.extend(['-d', 'sat'])
+    cmd.append(device)
+
+    result = run_command(cmd)
+    if result.get('returncode') == 0:
+        return {'success': True, 'message': f'{test_type.capitalize()} test started on {device}'}
+
+    # Retry with SAT if needed
+    if not use_sat:
+        return cmd_smart_test({'device': device, 'test_type': test_type, 'use_sat': True})
+
+    return {'success': False, 'error': result.get('stderr', 'Failed to start test')}
+
+
+def cmd_smart_all_devices(params):
+    """Get SMART info for all disk devices."""
+    # Get list of block devices
+    result = run_command(['lsblk', '-d', '-n', '-o', 'NAME,TYPE'])
+    if result.get('returncode') != 0:
+        return {'success': False, 'error': 'Failed to list devices'}
+
+    devices = []
+    for line in result.get('stdout', '').strip().split('\n'):
+        if not line:
+            continue
+        parts = line.split()
+        if len(parts) >= 2 and parts[1] == 'disk':
+            devices.append(f"/dev/{parts[0]}")
+
+    # Get SMART info for each device
+    results = []
+    for device in devices:
+        smart_result = cmd_smart_info({'device': device})
+        if smart_result.get('success'):
+            results.append({
+                'device': device,
+                'data': smart_result.get('data')
+            })
+        else:
+            results.append({
+                'device': device,
+                'error': smart_result.get('error')
+            })
+
+    return {'success': True, 'devices': results}
 
 
 def cmd_df(params):
@@ -790,6 +871,8 @@ COMMANDS = {
     'mount': cmd_mount,
     'umount': cmd_umount,
     'smart_info': cmd_smart_info,
+    'smart_test': cmd_smart_test,
+    'smart_all_devices': cmd_smart_all_devices,
     'df': cmd_df,
     'snapraid': cmd_snapraid,
     'mergerfs_mount': cmd_mergerfs_mount,

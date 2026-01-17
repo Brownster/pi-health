@@ -279,6 +279,19 @@ pip install -r requirements.txt
 # Run tests
 pytest tests/ -v
 
+# Run E2E UI tests (Playwright)
+# Requires: pip install playwright pytest-playwright
+# Then install browsers: playwright install
+BASE_URL=http://localhost:8002 pytest -m e2e tests/e2e/ -v
+
+# Run tests in tox (consistent envs)
+# Unit tests:
+tox -e unit
+# UI tests (app must be running on BASE_URL):
+BASE_URL=http://localhost:8002 tox -e e2e
+# Full test suite (unit + e2e). tox will start the app automatically:
+tox -e all
+
 # Start development server
 python app.py
 ```
