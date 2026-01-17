@@ -189,6 +189,9 @@ if ! getent group pihealth >/dev/null 2>&1; then
 fi
 usermod -aG pihealth "$RUN_USER"
 
+# Create directories required by helper service
+mkdir -p /backups /run/pihealth
+
 cat > "$HELPER_SERVICE_FILE" <<EOF
 [Unit]
 Description=Pi-Health Privileged Helper Service
