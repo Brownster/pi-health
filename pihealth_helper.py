@@ -595,7 +595,7 @@ def cmd_write_vpn_env(params):
         os.chmod(path, 0o600)
         return {'success': True, 'path': path}
     except Exception as e:
-    return {'success': False, 'error': str(e)}
+        return {'success': False, 'error': str(e)}
 
 
 def cmd_backup_create(params):
