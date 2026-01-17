@@ -528,6 +528,11 @@
                 refreshBackups();
                 document.getElementById('stack-modal').classList.remove('hidden');
 
+                // Refresh CodeMirror after modal is visible
+                if (editComposeEditor) {
+                    setTimeout(() => editComposeEditor.refresh(), 10);
+                }
+
             } catch (error) {
                 showNotification(`Error loading stack: ${error.message}`, 'error');
             }
