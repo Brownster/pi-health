@@ -189,8 +189,8 @@ if ! getent group pihealth >/dev/null 2>&1; then
 fi
 usermod -aG pihealth "$RUN_USER"
 
-# Create directories required by helper service
-mkdir -p /backups /run/pihealth
+# Create directories required by helper service (ReadWritePaths needs them to exist)
+mkdir -p /backups /run/pihealth /etc/sshfs /mnt
 
 cat > "$HELPER_SERVICE_FILE" <<EOF
 [Unit]
