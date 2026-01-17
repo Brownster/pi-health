@@ -666,3 +666,114 @@ def _parse_size_to_gb(size_str):
             return float(size_str) / (1024 * 1024 * 1024)
     except ValueError:
         return None
+
+
+# =============================================================================
+# SMART Health API Endpoints
+# =============================================================================
+
+@disk_manager.route('/api/disks/smart', methods=['GET'])
+@login_required
+def api_smart_all():
+    """
+    Get SMART health data for all disks.
+
+    Returns:
+        {
+            "disks": [
+                {
+                    "device": "/dev/sda",
+                    "data": { ... SMART health data ... }
+                },
+                ...
+            ]
+        }
+    """
+    try:
+        result = helper_call('smart_all_devices', {})
+        if result.get('success'):
+            return jsonify({'disks': result.get('devices', [])})
+        return jsonify({'error': result.get('error', 'Failed to get SMART data')}), 503
+    except HelperError as e:
+        return jsonify({'error': str(e), 'helper_available': False}), 503
+
+
+@disk_manager.route('/api/disks/<path:device>/smart', methods=['GET'])
+@login_required
+def api_smart_device(device):
+    """
+    Get SMART health data for a specific device.
+
+    Args:
+        device: Device path (e.g., sda or nvme0n1). Will be prefixed with /dev/.
+
+    Query params:
+        use_sat: Set to 'true' to use SAT passthrough for USB drives
+
+    Returns:
+        SMART health data for the device
+    """
+    # Sanitize device name - only allow alphanumeric and common device name chars
+    if not device or not all(c.isalnum() or c in '-_' for c in device):
+        return jsonify({'error': 'Invalid device name'}), 400
+
+    device_path = f'/dev/{device}'
+    use_sat = request.args.get('use_sat', 'false').lower() == 'true'
+
+    try:
+        result = helper_call('smart_info', {
+            'device': device_path,
+            'use_sat': use_sat
+        })
+        if result.get('success'):
+            return jsonify(result.get('data', {}))
+        return jsonify({'error': result.get('error', 'Failed to get SMART data')}), 503
+    except HelperError as e:
+        return jsonify({'error': str(e), 'helper_available': False}), 503
+
+
+@disk_manager.route('/api/disks/<path:device>/smart-test', methods=['POST'])
+@login_required
+def api_smart_test(device):
+    """
+    Run a SMART self-test on a device.
+
+    Args:
+        device: Device path (e.g., sda or nvme0n1). Will be prefixed with /dev/.
+
+    Request body:
+        {
+            "test_type": "short" | "long" | "conveyance"
+        }
+
+    Returns:
+        Result of starting the test
+    """
+    # Sanitize device name
+    if not device or not all(c.isalnum() or c in '-_' for c in device):
+        return jsonify({'error': 'Invalid device name'}), 400
+
+    data = request.get_json() or {}
+    test_type = data.get('test_type', 'short')
+
+    if test_type not in ['short', 'long', 'conveyance']:
+        return jsonify({'error': 'Invalid test type. Use: short, long, or conveyance'}), 400
+
+    device_path = f'/dev/{device}'
+    use_sat = data.get('use_sat', False)
+
+    try:
+        result = helper_call('smart_test', {
+            'device': device_path,
+            'test_type': test_type,
+            'use_sat': use_sat
+        })
+        if result.get('success'):
+            return jsonify({
+                'status': 'started',
+                'test_type': test_type,
+                'message': result.get('message', 'SMART test started')
+            })
+        return jsonify({'error': result.get('error', 'Failed to start SMART test')}), 503
+    except HelperError as e:
+        return jsonify({'error': str(e), 'helper_available': False}), 503

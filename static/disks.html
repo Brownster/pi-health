@@ -60,6 +60,25 @@
         .mounted { color: #34d399; }
         .unmounted { color: #fbbf24; }
         .missing { color: #f87171; }
+        /* SMART health status colors */
+        .smart-healthy { color: #34d399; }
+        .smart-warning { color: #fbbf24; }
+        .smart-failing { color: #f87171; }
+        .smart-unknown { color: #9ca3af; }
+        .smart-badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+        .smart-badge.healthy { background-color: rgba(52, 211, 153, 0.2); color: #34d399; border: 1px solid #34d399; }
+        .smart-badge.warning { background-color: rgba(251, 191, 36, 0.2); color: #fbbf24; border: 1px solid #fbbf24; }
+        .smart-badge.failing { background-color: rgba(248, 113, 113, 0.2); color: #f87171; border: 1px solid #f87171; }
+        .smart-badge.unknown { background-color: rgba(156, 163, 175, 0.2); color: #9ca3af; border: 1px solid #9ca3af; }
+        .smart-attr-row:hover { background-color: rgba(139, 92, 246, 0.1); }
+        .smart-attr-critical { background-color: rgba(248, 113, 113, 0.1); }
         .toggle-switch {
             position: relative;
             display: inline-block;
@@ -238,6 +257,25 @@
             </div>
         </section>
 
+        <!-- SMART Health -->
+        <section class="mb-8 bg-gray-800 rounded-lg p-6 border border-purple-900/40">
+            <div class="flex justify-between items-center mb-4">
+                <div>
+                    <h3 class="text-lg font-semibold">SMART Health</h3>
+                    <p class="text-gray-400 text-sm">Disk health monitoring via S.M.A.R.T.</p>
+                </div>
+                <button onclick="loadSmartData()" class="coraline-button text-blue-100 py-2 px-4 rounded text-sm flex items-center">
+                    <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                    </svg>
+                    Refresh SMART
+                </button>
+            </div>
+            <div id="smart-list" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div class="text-gray-400 text-sm">Click "Refresh SMART" to load disk health data...</div>
+            </div>
+        </section>
+
         <!-- Mount Suggestions -->
         <section id="suggestions-section" class="hidden mb-8">
             <h3 class="text-lg font-semibold mb-4">Mount Suggestions</h3>
@@ -277,6 +315,28 @@
             <div class="p-4 border-t border-purple-800 flex justify-end space-x-2">
                 <button onclick="closeMountModal()" class="px-4 py-2 bg-gray-700 text-white rounded">Cancel</button>
                 <button onclick="submitMount()" class="coraline-button px-4 py-2 text-white rounded">Mount</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- SMART Detail Modal -->
+    <div id="smart-modal" class="hidden fixed inset-0 bg-black bg-opacity-60 z-50 items-center justify-center p-4">
+        <div class="bg-gray-900 w-full max-w-2xl rounded-lg shadow-xl border border-purple-900 flex flex-col max-h-[90vh]">
+            <div class="flex justify-between items-center p-4 border-b border-purple-800">
+                <h3 id="smart-modal-title" class="text-xl font-semibold">SMART Details</h3>
+                <button onclick="closeSmartModal()" class="text-gray-400 hover:text-gray-200">Close</button>
+            </div>
+            <div class="p-4 overflow-y-auto flex-1">
+                <div id="smart-modal-content">
+                    <!-- Filled by JS -->
+                </div>
+            </div>
+            <div class="p-4 border-t border-purple-800 flex justify-between items-center">
+                <div class="flex gap-2">
+                    <button onclick="runSmartTest('short')" class="coraline-button px-3 py-2 text-sm rounded text-white">Short Test</button>
+                    <button onclick="runSmartTest('long')" class="coraline-button px-3 py-2 text-sm rounded text-white">Long Test</button>
+                </div>
+                <button onclick="closeSmartModal()" class="px-4 py-2 bg-gray-700 text-white rounded">Close</button>
             </div>
         </div>
     </div>
@@ -651,6 +711,268 @@
                 loadDisks();
             } catch (error) {
                 showNotification(`Unmount failed: ${error.message}`, 'error');
+            }
+        }
+
+        // ========== SMART Health Functions ==========
+        let smartData = [];
+        let currentSmartDevice = null;
+
+        async function loadSmartData() {
+            const smartList = document.getElementById('smart-list');
+            smartList.innerHTML = '<div class="text-gray-400 text-sm">Loading SMART data...</div>';
+
+            try {
+                const response = await apiFetch('/api/disks/smart');
+                const data = await response.json();
+
+                if (data.error) {
+                    smartList.innerHTML = `<div class="text-red-400 text-sm">${escapeHtml(data.error)}</div>`;
+                    return;
+                }
+
+                smartData = data.disks || [];
+
+                if (!smartData.length) {
+                    smartList.innerHTML = '<div class="text-gray-400 text-sm">No SMART-capable devices found</div>';
+                    return;
+                }
+
+                renderSmartCards();
+            } catch (error) {
+                smartList.innerHTML = `<div class="text-red-400 text-sm">Error: ${escapeHtml(error.message)}</div>`;
+            }
+        }
+
+        function renderSmartCards() {
+            const smartList = document.getElementById('smart-list');
+            smartList.innerHTML = smartData.map(disk => {
+                const data = disk.data || {};
+                const device = disk.device || 'unknown';
+                const deviceName = device.replace('/dev/', '');
+                const status = data.health_status || 'unknown';
+                const statusClass = status === 'healthy' ? 'healthy' : status === 'warning' ? 'warning' : status === 'failing' ? 'failing' : 'unknown';
+
+                // Format power-on hours
+                let powerOnDisplay = 'Unknown';
+                if (data.power_on_hours != null) {
+                    const hours = data.power_on_hours;
+                    const days = Math.floor(hours / 24);
+                    const years = Math.floor(days / 365);
+                    const remainingDays = days % 365;
+                    powerOnDisplay = years > 0 ? `${years}y ${remainingDays}d` : days > 0 ? `${days}d` : `${hours}h`;
+                }
+
+                // Drive type icon
+                const driveIcon = data.drive_type === 'nvme' ? '⚡' : data.drive_type === 'ssd' ? '💾' : data.drive_type === 'hdd' ? '🗄️' : '💿';
+
+                return `
+                    <div class="bg-gray-900 rounded-lg p-4 border border-gray-700 hover:border-purple-600 cursor-pointer transition-colors"
+                         onclick="openSmartModal('${deviceName}')">
+                        <div class="flex justify-between items-start mb-3">
+                            <div class="flex items-center">
+                                <span class="text-2xl mr-2">${driveIcon}</span>
+                                <div>
+                                    <h4 class="font-semibold">${escapeHtml(device)}</h4>
+                                    <p class="text-xs text-gray-400">${escapeHtml(data.model || 'Unknown')}</p>
+                                </div>
+                            </div>
+                            <span class="smart-badge ${statusClass}">${status.toUpperCase()}</span>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2 text-sm">
+                            <div>
+                                <span class="text-gray-400">Temp:</span>
+                                <span class="${data.temperature_c > 55 ? 'text-yellow-400' : 'text-gray-200'}">${data.temperature_c != null ? data.temperature_c + '°C' : 'N/A'}</span>
+                            </div>
+                            <div>
+                                <span class="text-gray-400">Power On:</span>
+                                <span class="text-gray-200">${powerOnDisplay}</span>
+                            </div>
+                            ${data.drive_type === 'nvme' ? `
+                            <div>
+                                <span class="text-gray-400">Used:</span>
+                                <span class="${data.percentage_used > 90 ? 'text-red-400' : 'text-gray-200'}">${data.percentage_used != null ? data.percentage_used + '%' : 'N/A'}</span>
+                            </div>
+                            <div>
+                                <span class="text-gray-400">Spare:</span>
+                                <span class="${data.available_spare < 10 ? 'text-red-400' : 'text-gray-200'}">${data.available_spare != null ? data.available_spare + '%' : 'N/A'}</span>
+                            </div>
+                            ` : `
+                            <div>
+                                <span class="text-gray-400">Realloc:</span>
+                                <span class="${data.reallocated_sectors > 0 ? 'text-yellow-400' : 'text-gray-200'}">${data.reallocated_sectors != null ? data.reallocated_sectors : 'N/A'}</span>
+                            </div>
+                            <div>
+                                <span class="text-gray-400">Pending:</span>
+                                <span class="${data.pending_sectors > 0 ? 'text-yellow-400' : 'text-gray-200'}">${data.pending_sectors != null ? data.pending_sectors : 'N/A'}</span>
+                            </div>
+                            `}
+                        </div>
+                        ${data.error_message ? `<p class="mt-2 text-xs text-yellow-400">${escapeHtml(data.error_message)}</p>` : ''}
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function openSmartModal(deviceName) {
+            currentSmartDevice = deviceName;
+            const modal = document.getElementById('smart-modal');
+            const title = document.getElementById('smart-modal-title');
+            const content = document.getElementById('smart-modal-content');
+
+            title.textContent = `SMART Details - /dev/${deviceName}`;
+            content.innerHTML = '<div class="text-gray-400">Loading detailed SMART data...</div>';
+
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+
+            try {
+                const response = await apiFetch(`/api/disks/${deviceName}/smart`);
+                const data = await response.json();
+
+                if (data.error) {
+                    content.innerHTML = `<div class="text-red-400">${escapeHtml(data.error)}</div>`;
+                    return;
+                }
+
+                renderSmartDetails(data);
+            } catch (error) {
+                content.innerHTML = `<div class="text-red-400">Error: ${escapeHtml(error.message)}</div>`;
+            }
+        }
+
+        function renderSmartDetails(data) {
+            const content = document.getElementById('smart-modal-content');
+            const status = data.health_status || 'unknown';
+            const statusClass = status === 'healthy' ? 'healthy' : status === 'warning' ? 'warning' : status === 'failing' ? 'failing' : 'unknown';
+
+            let html = `
+                <div class="mb-6">
+                    <div class="flex items-center justify-between mb-4">
+                        <div>
+                            <h4 class="font-semibold text-lg">${escapeHtml(data.model || 'Unknown Model')}</h4>
+                            <p class="text-sm text-gray-400">Serial: ${escapeHtml(data.serial || 'Unknown')}</p>
+                        </div>
+                        <span class="smart-badge ${statusClass}">${status.toUpperCase()}</span>
+                    </div>
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                        <div class="bg-gray-800 p-3 rounded">
+                            <span class="text-gray-400 block">Type</span>
+                            <span class="font-medium">${escapeHtml((data.drive_type || 'unknown').toUpperCase())}</span>
+                        </div>
+                        <div class="bg-gray-800 p-3 rounded">
+                            <span class="text-gray-400 block">Temperature</span>
+                            <span class="font-medium ${data.temperature_c > 55 ? 'text-yellow-400' : ''}">${data.temperature_c != null ? data.temperature_c + '°C' : 'N/A'}</span>
+                        </div>
+                        <div class="bg-gray-800 p-3 rounded">
+                            <span class="text-gray-400 block">Power On Hours</span>
+                            <span class="font-medium">${data.power_on_hours != null ? data.power_on_hours.toLocaleString() : 'N/A'}</span>
+                        </div>
+                        <div class="bg-gray-800 p-3 rounded">
+                            <span class="text-gray-400 block">SMART</span>
+                            <span class="font-medium">${data.smart_enabled ? 'Enabled' : data.smart_available ? 'Available' : 'N/A'}</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            // Show error/warning message if any
+            if (data.error_message) {
+                html += `
+                    <div class="mb-4 p-3 bg-yellow-900/30 border border-yellow-700 rounded text-yellow-300 text-sm">
+                        <strong>Warning:</strong> ${escapeHtml(data.error_message)}
+                    </div>
+                `;
+            }
+
+            // Attributes table
+            if (data.attributes && data.attributes.length > 0) {
+                html += `
+                    <div>
+                        <h5 class="font-semibold mb-2">SMART Attributes</h5>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-sm">
+                                <thead>
+                                    <tr class="text-gray-400 border-b border-gray-700">
+                                        ${data.drive_type === 'nvme' ? `
+                                            <th class="text-left py-2 px-2">Attribute</th>
+                                            <th class="text-right py-2 px-2">Value</th>
+                                        ` : `
+                                            <th class="text-left py-2 px-1">ID</th>
+                                            <th class="text-left py-2 px-2">Attribute</th>
+                                            <th class="text-right py-2 px-2">Value</th>
+                                            <th class="text-right py-2 px-2">Worst</th>
+                                            <th class="text-right py-2 px-2">Thresh</th>
+                                            <th class="text-right py-2 px-2">Raw</th>
+                                        `}
+                                    </tr>
+                                </thead>
+                                <tbody>
+                `;
+
+                for (const attr of data.attributes) {
+                    const critical = attr.critical ? 'smart-attr-critical' : '';
+                    if (data.drive_type === 'nvme') {
+                        html += `
+                            <tr class="border-b border-gray-800 smart-attr-row ${critical}">
+                                <td class="py-2 px-2">${escapeHtml(attr.name)}</td>
+                                <td class="py-2 px-2 text-right font-mono">${attr.value != null ? attr.value.toLocaleString() : 'N/A'}</td>
+                            </tr>
+                        `;
+                    } else {
+                        html += `
+                            <tr class="border-b border-gray-800 smart-attr-row ${critical}">
+                                <td class="py-2 px-1 text-gray-500">${attr.id || ''}</td>
+                                <td class="py-2 px-2">${escapeHtml(attr.name)}</td>
+                                <td class="py-2 px-2 text-right font-mono">${attr.value != null ? attr.value : ''}</td>
+                                <td class="py-2 px-2 text-right font-mono text-gray-500">${attr.worst != null ? attr.worst : ''}</td>
+                                <td class="py-2 px-2 text-right font-mono text-gray-500">${attr.thresh != null ? attr.thresh : ''}</td>
+                                <td class="py-2 px-2 text-right font-mono ${attr.critical && attr.raw > 0 ? 'text-yellow-400' : ''}">${attr.raw != null ? attr.raw.toLocaleString() : ''}</td>
+                            </tr>
+                        `;
+                    }
+                }
+
+                html += `
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                `;
+            }
+
+            content.innerHTML = html;
+        }
+
+        function closeSmartModal() {
+            const modal = document.getElementById('smart-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+            currentSmartDevice = null;
+        }
+
+        async function runSmartTest(testType) {
+            if (!currentSmartDevice) return;
+
+            if (!confirm(`Run a ${testType} SMART self-test on /dev/${currentSmartDevice}? ${testType === 'long' ? 'This may take several hours.' : 'This typically takes 1-2 minutes.'}`)) {
+                return;
+            }
+
+            try {
+                const response = await apiFetch(`/api/disks/${currentSmartDevice}/smart-test`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ test_type: testType })
+                });
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to start test');
+                }
+
+                showNotification(`${testType.charAt(0).toUpperCase() + testType.slice(1)} SMART test started on /dev/${currentSmartDevice}`, 'success');
+            } catch (error) {
+                showNotification(`Error: ${error.message}`, 'error');
             }
         }
 

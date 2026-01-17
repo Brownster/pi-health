@@ -58,16 +58,16 @@ These are the currently prioritized items for development.
 - [ ] Credential storage (secure)
 
 #### Disk SMART Health Display
-- [ ] Read SMART data via smartctl
-- [ ] Display health summary per disk:
+- [x] Read SMART data via smartctl
+- [x] Display health summary per disk:
   - Overall health status (PASSED/FAILED)
   - Temperature
   - Power-on hours
   - Reallocated sectors
   - Pending sectors
-  - UDMA CRC errors
-- [ ] Warning indicators for concerning values
-- [ ] SMART test scheduling (short/long)
+  - NVMe percentage used / available spare
+- [x] Warning indicators for concerning values
+- [x] SMART test scheduling (short/long)
 - [ ] Historical SMART data tracking
 - [ ] Alerts when SMART values degrade
 
@@ -234,10 +234,11 @@ Phase 3 (Long Term)
 - [x] App catalog
 
 ### In Progress
-- [ ] Phase 2: SSHFS + SMART
+- [ ] Phase 2: SSHFS (remaining)
 
 ### Completed
 - [x] Phase 1: Bug fixes & polish (401 handling, favicon, toast notifications, loading spinners)
+- [x] Phase 2: SMART Health (smartctl parsing, API endpoints, UI with health cards, detail modal, test scheduling)
 
 ---
 

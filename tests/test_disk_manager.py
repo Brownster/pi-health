@@ -659,5 +659,271 @@ class TestCatalogMediaPathsIntegration:
             shutil.rmtree(temp_catalog, ignore_errors=True)
 
 
+class TestSmartEndpoints:
+    """Test SMART health API endpoints."""
+
+    def test_smart_all_requires_auth(self, client):
+        """Test that /api/disks/smart requires authentication."""
+        response = client.get('/api/disks/smart')
+        assert response.status_code == 401
+
+    def test_smart_all_success(self, authenticated_client):
+        """Test GET /api/disks/smart returns disk list."""
+        mock_devices = [
+            {'device': '/dev/sda', 'data': {'health_status': 'healthy'}},
+            {'device': '/dev/nvme0n1', 'data': {'health_status': 'healthy'}}
+        ]
+        with patch('disk_manager.helper_call', return_value={
+            'success': True,
+            'devices': mock_devices
+        }):
+            response = authenticated_client.get('/api/disks/smart')
+        assert response.status_code == 200
+        data = response.get_json()
+        assert 'disks' in data
+        assert len(data['disks']) == 2
+
+    def test_smart_all_helper_failure(self, authenticated_client):
+        """Test GET /api/disks/smart returns error when helper fails."""
+        with patch('disk_manager.helper_call', return_value={
+            'success': False,
+            'error': 'smartctl not installed'
+        }):
+            response = authenticated_client.get('/api/disks/smart')
+        assert response.status_code == 503
+        data = response.get_json()
+        assert 'error' in data
+
+    def test_smart_all_helper_unavailable(self, authenticated_client):
+        """Test GET /api/disks/smart returns 503 when helper unavailable."""
+        from helper_client import HelperError
+        with patch('disk_manager.helper_call', side_effect=HelperError("helper unavailable")):
+            response = authenticated_client.get('/api/disks/smart')
+        assert response.status_code == 503
+        data = response.get_json()
+        assert 'helper_available' in data
+        assert data['helper_available'] is False
+
+    def test_smart_device_requires_auth(self, client):
+        """Test that /api/disks/<device>/smart requires authentication."""
+        response = client.get('/api/disks/sda/smart')
+        assert response.status_code == 401
+
+    def test_smart_device_success(self, authenticated_client):
+        """Test GET /api/disks/<device>/smart returns SMART data."""
+        mock_data = {
+            'device': '/dev/sda',
+            'model': 'Test Drive',
+            'serial': 'ABC123',
+            'health_status': 'healthy',
+            'temperature_c': 35
+        }
+        with patch('disk_manager.helper_call', return_value={
+            'success': True,
+            'data': mock_data
+        }):
+            response = authenticated_client.get('/api/disks/sda/smart')
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data['device'] == '/dev/sda'
+        assert data['health_status'] == 'healthy'
+
+    def test_smart_device_with_sat(self, authenticated_client):
+        """Test GET /api/disks/<device>/smart with SAT passthrough."""
+        mock_data = {'device': '/dev/sda', 'health_status': 'healthy'}
+        with patch('disk_manager.helper_call', return_value={
+            'success': True,
+            'data': mock_data
+        }) as mock_call:
+            response = authenticated_client.get('/api/disks/sda/smart?use_sat=true')
+        assert response.status_code == 200
+        # Verify use_sat was passed to helper
+        mock_call.assert_called_once_with('smart_info', {
+            'device': '/dev/sda',
+            'use_sat': True
+        })
+
+    def test_smart_device_invalid_name(self, authenticated_client):
+        """Test GET /api/disks/<device>/smart rejects invalid device names."""
+        # Invalid characters
+        response = authenticated_client.get('/api/disks/sda;rm/smart')
+        assert response.status_code == 400
+        data = response.get_json()
+        assert 'Invalid device name' in data['error']
+
+    def test_smart_device_nvme(self, authenticated_client):
+        """Test GET /api/disks/<device>/smart for NVMe device."""
+        mock_data = {
+            'device': '/dev/nvme0n1',
+            'drive_type': 'nvme',
+            'percentage_used': 5,
+            'available_spare': 100
+        }
+        with patch('disk_manager.helper_call', return_value={
+            'success': True,
+            'data': mock_data
+        }):
+            response = authenticated_client.get('/api/disks/nvme0n1/smart')
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data['drive_type'] == 'nvme'
+
+    def test_smart_device_helper_failure(self, authenticated_client):
+        """Test GET /api/disks/<device>/smart when helper fails."""
+        with patch('disk_manager.helper_call', return_value={
+            'success': False,
+            'error': 'Device not found'
+        }):
+            response = authenticated_client.get('/api/disks/sda/smart')
+        assert response.status_code == 503
+        data = response.get_json()
+        assert 'error' in data
+
+    def test_smart_test_requires_auth(self, client):
+        """Test that /api/disks/<device>/smart-test requires authentication."""
+        response = client.post('/api/disks/sda/smart-test',
+                               data=json.dumps({'test_type': 'short'}),
+                               content_type='application/json')
+        assert response.status_code == 401
+
+    def test_smart_test_short(self, authenticated_client):
+        """Test POST /api/disks/<device>/smart-test starts short test."""
+        with patch('disk_manager.helper_call', return_value={
+            'success': True,
+            'message': 'Test started'
+        }) as mock_call:
+            response = authenticated_client.post(
+                '/api/disks/sda/smart-test',
+                data=json.dumps({'test_type': 'short'}),
+                content_type='application/json'
+            )
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data['status'] == 'started'
+        assert data['test_type'] == 'short'
+        mock_call.assert_called_once_with('smart_test', {
+            'device': '/dev/sda',
+            'test_type': 'short',
+            'use_sat': False
+        })
+
+    def test_smart_test_long(self, authenticated_client):
+        """Test POST /api/disks/<device>/smart-test starts long test."""
+        with patch('disk_manager.helper_call', return_value={
+            'success': True,
+            'message': 'Test started'
+        }):
+            response = authenticated_client.post(
+                '/api/disks/sda/smart-test',
+                data=json.dumps({'test_type': 'long'}),
+                content_type='application/json'
+            )
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data['test_type'] == 'long'
+
+    def test_smart_test_conveyance(self, authenticated_client):
+        """Test POST /api/disks/<device>/smart-test starts conveyance test."""
+        with patch('disk_manager.helper_call', return_value={
+            'success': True,
+            'message': 'Test started'
+        }):
+            response = authenticated_client.post(
+                '/api/disks/sda/smart-test',
+                data=json.dumps({'test_type': 'conveyance'}),
+                content_type='application/json'
+            )
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data['test_type'] == 'conveyance'
+
+    def test_smart_test_invalid_type(self, authenticated_client):
+        """Test POST /api/disks/<device>/smart-test rejects invalid test types."""
+        response = authenticated_client.post(
+            '/api/disks/sda/smart-test',
+            data=json.dumps({'test_type': 'invalid'}),
+            content_type='application/json'
+        )
+        assert response.status_code == 400
+        data = response.get_json()
+        assert 'Invalid test type' in data['error']
+
+    def test_smart_test_invalid_device(self, authenticated_client):
+        """Test POST /api/disks/<device>/smart-test rejects invalid device."""
+        response = authenticated_client.post(
+            '/api/disks/../etc/passwd/smart-test',
+            data=json.dumps({'test_type': 'short'}),
+            content_type='application/json'
+        )
+        assert response.status_code == 400
+        data = response.get_json()
+        assert 'Invalid device name' in data['error']
+
+    def test_smart_test_default_type(self, authenticated_client):
+        """Test POST /api/disks/<device>/smart-test defaults to short test."""
+        with patch('disk_manager.helper_call', return_value={
+            'success': True,
+            'message': 'Test started'
+        }) as mock_call:
+            response = authenticated_client.post(
+                '/api/disks/sda/smart-test',
+                data=json.dumps({}),
+                content_type='application/json'
+            )
+        assert response.status_code == 200
+        # Verify default test_type was 'short'
+        mock_call.assert_called_once_with('smart_test', {
+            'device': '/dev/sda',
+            'test_type': 'short',
+            'use_sat': False
+        })
+
+    def test_smart_test_with_sat(self, authenticated_client):
+        """Test POST /api/disks/<device>/smart-test with SAT passthrough."""
+        with patch('disk_manager.helper_call', return_value={
+            'success': True,
+            'message': 'Test started'
+        }) as mock_call:
+            response = authenticated_client.post(
+                '/api/disks/sda/smart-test',
+                data=json.dumps({'test_type': 'short', 'use_sat': True}),
+                content_type='application/json'
+            )
+        assert response.status_code == 200
+        mock_call.assert_called_once_with('smart_test', {
+            'device': '/dev/sda',
+            'test_type': 'short',
+            'use_sat': True
+        })
+
+    def test_smart_test_helper_failure(self, authenticated_client):
+        """Test POST /api/disks/<device>/smart-test when helper fails."""
+        with patch('disk_manager.helper_call', return_value={
+            'success': False,
+            'error': 'SMART test failed to start'
+        }):
+            response = authenticated_client.post(
+                '/api/disks/sda/smart-test',
+                data=json.dumps({'test_type': 'short'}),
+                content_type='application/json'
+            )
+        assert response.status_code == 503
+        data = response.get_json()
+        assert 'error' in data
+
+    def test_smart_test_helper_unavailable(self, authenticated_client):
+        """Test POST /api/disks/<device>/smart-test when helper unavailable."""
+        from helper_client import HelperError
+        with patch('disk_manager.helper_call', side_effect=HelperError("helper unavailable")):
+            response = authenticated_client.post(
+                '/api/disks/sda/smart-test',
+                data=json.dumps({'test_type': 'short'}),
+                content_type='application/json'
+            )
+        assert response.status_code == 503
+        data = response.get_json()
+        assert data['helper_available'] is False
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
