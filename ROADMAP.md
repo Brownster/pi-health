@@ -2,7 +2,7 @@
 
 A living document tracking planned improvements and feature ideas.
 
-## Current Status
+## Current Status (v1.0.0)
 
 Pi-Health is functional with:
 - System health monitoring (CPU, temp, disk)
@@ -17,29 +17,103 @@ Pi-Health is functional with:
 
 ---
 
-## Short Term (Next Release)
+## Priority Features
 
-### Bug Fixes & Polish
-- [ ] Handle 401 auth errors gracefully (redirect to login)
-- [ ] Add favicon
-- [ ] Fix theme.js 404 error
-- [ ] Improve mobile responsiveness
-- [ ] Add loading spinners for slow operations
+These are the currently prioritized items for development.
 
-### UX Improvements
-- [ ] Toast notifications for actions (start/stop/restart)
-- [ ] Confirmation dialogs for destructive actions
-- [ ] Remember last visited tab in stack modal
-- [ ] Auto-refresh toggle for containers page
+### Phase 1: Bug Fixes & Polish ⭐ PRIORITY
+
+#### Bug Fixes
+- [ ] Handle 401 auth errors gracefully (redirect to login instead of JS error)
+- [ ] Add favicon.ico
+- [ ] Fix theme.js 404 error on pages that reference it
+- [ ] Improve mobile responsiveness on all pages
+
+#### UX Improvements
+- [ ] **Toast notifications** - Non-blocking feedback for actions (start/stop/restart/save)
+  - Success (green), error (red), info (blue) styles
+  - Auto-dismiss after 3-5 seconds
+  - Stack multiple notifications
+- [ ] **Loading spinners** - Visual feedback during slow operations
+  - Container stats fetching
+  - Stack operations (up/down/pull)
+  - Disk operations
+  - API calls
+- [ ] Confirmation dialogs for destructive actions (delete stack, unmount disk)
+
+### Phase 2: Storage Enhancements ⭐ PRIORITY
+
+#### SSHFS Mount Management UI
+- [ ] List configured SSHFS mounts
+- [ ] Add new SSHFS mount form:
+  - Remote host/IP
+  - Remote path
+  - Local mount point
+  - SSH user
+  - SSH key selection or password
+  - Mount options (reconnect, compression, etc.)
+- [ ] Mount/unmount controls
+- [ ] Connection status indicator
+- [ ] Auto-mount on boot (fstab integration)
+- [ ] Credential storage (secure)
+
+#### Disk SMART Health Display
+- [ ] Read SMART data via smartctl
+- [ ] Display health summary per disk:
+  - Overall health status (PASSED/FAILED)
+  - Temperature
+  - Power-on hours
+  - Reallocated sectors
+  - Pending sectors
+  - UDMA CRC errors
+- [ ] Warning indicators for concerning values
+- [ ] SMART test scheduling (short/long)
+- [ ] Historical SMART data tracking
+- [ ] Alerts when SMART values degrade
+
+### Phase 3: Plugin System Enhancement ⭐ PRIORITY (Long Term)
+
+#### Core Plugin Architecture
+- [ ] Define plugin interface/API
+- [ ] Plugin discovery and loading
+- [ ] Plugin configuration storage
+- [ ] Plugin enable/disable UI
+- [ ] Plugin settings pages
+
+#### Additional Filesystem Plugins
+- [ ] **bcachefs** - Next-gen copy-on-write filesystem
+  - Pool management
+  - Replication/erasure coding settings
+  - Tiered storage (SSD cache + HDD)
+- [ ] **ZFS** (where available)
+  - Pool creation and management
+  - Dataset management
+  - Snapshot scheduling
+  - Scrub scheduling
+- [ ] **Btrfs**
+  - Subvolume management
+  - Snapshot management
+  - RAID configuration
+  - Scrub scheduling
+- [ ] **LVM**
+  - Volume group management
+  - Logical volume resize
+  - Snapshot management
+- [ ] **NFS exports** - Share folders via NFS
+  - Export configuration
+  - Client access rules
+- [ ] **Samba shares** - Windows-compatible sharing
+  - Share configuration
+  - User access management
 
 ---
 
-## Medium Term
+## Other Planned Features
 
 ### Dashboard Enhancements
 - [ ] Customizable dashboard widgets
 - [ ] Drag-and-drop widget arrangement
-- [ ] Quick actions on home page (restart stack, etc.)
+- [ ] Quick actions on home page
 - [ ] System uptime display
 - [ ] Recent activity log
 
@@ -55,62 +129,115 @@ Pi-Health is functional with:
 - [ ] Historical metrics with graphs (CPU, memory, temp over time)
 - [ ] Configurable alert thresholds
 - [ ] Email notifications for alerts
-- [ ] Push notifications (ntfy.sh, Pushover, etc.)
+- [ ] Push notifications (ntfy.sh, Pushover, Discord)
 - [ ] Disk space warnings
 - [ ] Container crash alerts
-
-### Storage Improvements
-- [ ] SSHFS mount management UI
-- [ ] Disk health monitoring (SMART data display)
-- [ ] Storage usage breakdown by folder
-- [ ] SnapRAID sync progress indicator
-- [ ] Scheduled scrub status
-
----
-
-## Long Term
 
 ### Multi-System Management
 - [ ] Manage multiple Pis from single dashboard
 - [ ] Aggregate view across systems
 - [ ] Sync configurations between systems
 
-### Advanced Features
-- [ ] Backup to cloud (rclone integration)
-- [ ] VPN status indicator and controls
-- [ ] Network traffic monitoring per container
-- [ ] Reverse proxy management (Traefik/Caddy integration)
-- [ ] SSL certificate management
-- [ ] Scheduled system updates
-
 ### App Store Enhancements
 - [ ] User-contributed app templates
-- [ ] App ratings and reviews
 - [ ] Version tracking and update notifications
-- [ ] App configuration presets
 - [ ] Import/export stack configurations
-
-### Developer Experience
-- [ ] API documentation
-- [ ] Plugin system for custom extensions
-- [ ] Webhook support for automation
-- [ ] CLI tool for headless management
 
 ---
 
-## Ideas Under Consideration
+## Development Notes
 
-These need more thought/discussion:
+### Implementation Order
 
-- [ ] Home Assistant integration
-- [ ] Prometheus/Grafana export
-- [ ] Kubernetes support (k3s)
-- [ ] ARM64 Docker image optimization
-- [ ] Offline/local app catalog
-- [ ] Two-factor authentication
-- [ ] LDAP/SSO integration
-- [ ] Dark/light mode toggle (beyond themes)
-- [ ] Localization (i18n)
+```
+Phase 1 (Current Focus)
+├── Bug Fixes
+│   ├── 401 error handling
+│   ├── favicon
+│   └── theme.js fix
+├── Toast Notifications
+│   ├── Create notification component
+│   ├── Add to all action handlers
+│   └── Style variations
+└── Loading Spinners
+    ├── Create spinner component
+    ├── Add to API calls
+    └── Add to slow operations
+
+Phase 2 (After Phase 1)
+├── SSHFS Mount UI
+│   ├── Backend: helper commands
+│   ├── Backend: API endpoints
+│   ├── Frontend: mount list
+│   └── Frontend: add/edit form
+└── SMART Health
+    ├── Backend: smartctl parsing
+    ├── Backend: API endpoints
+    ├── Frontend: health cards
+    └── Frontend: detail modal
+
+Phase 3 (Long Term)
+├── Plugin Architecture
+│   ├── Define plugin spec
+│   ├── Refactor existing plugins
+│   └── Plugin manager UI
+└── New Filesystem Plugins
+    ├── bcachefs
+    ├── ZFS
+    ├── Btrfs
+    └── NFS/Samba
+```
+
+### Technical Considerations
+
+**Toast Notifications:**
+- Use a notification store/queue
+- CSS animations for enter/exit
+- Position: top-right or bottom-right
+- Z-index above modals
+
+**Loading Spinners:**
+- Inline spinners for buttons
+- Overlay spinners for page sections
+- Skeleton loaders for lists
+
+**SSHFS:**
+- Requires sshfs package
+- Helper service needs sshfs/fusermount commands
+- Credential security: use SSH keys where possible
+- Consider autofs for auto-mounting
+
+**SMART:**
+- Requires smartmontools package
+- Some USB enclosures don't pass SMART data
+- Consider caching SMART data (expensive to query)
+- Different attributes for SSD vs HDD
+
+**Plugin System:**
+- Python-based plugins
+- Each plugin: manifest.json + plugin.py
+- Hooks: on_load, on_config_change, get_status
+- UI: plugin provides its own HTML template
+
+---
+
+## Progress Tracking
+
+### Completed
+- [x] Initial release
+- [x] Bare metal install
+- [x] Helper service
+- [x] SnapRAID plugin
+- [x] MergerFS plugin
+- [x] Container stats (CPU/network)
+- [x] Stack management
+- [x] App catalog
+
+### In Progress
+- [ ] Phase 1: Bug fixes & polish
+
+### Up Next
+- [ ] Phase 2: SSHFS + SMART
 
 ---
 
@@ -122,12 +249,3 @@ Priority is determined by:
 1. User demand (issues/votes)
 2. Complexity vs. value
 3. Alignment with project goals (lightweight, Pi-focused)
-
----
-
-## Changelog
-
-### v1.0.0 (Current)
-- Initial release with core features
-- Bare metal install support
-- Helper service for privileged operations
