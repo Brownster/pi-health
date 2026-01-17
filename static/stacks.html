@@ -105,10 +105,40 @@
 
         .CodeMirror {
             height: 360px;
-            background-color: #2d3748;
+            background-color: #1a202c;
             color: #e2e8f0;
             border-radius: 0.375rem;
+            border: 1px solid #4a5568;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 14px;
         }
+        .CodeMirror-gutters {
+            background-color: #2d3748;
+            border-right: 1px solid #4a5568;
+        }
+        .CodeMirror-linenumber {
+            color: #718096;
+        }
+        .CodeMirror-cursor {
+            border-left: 2px solid #a0aec0;
+        }
+        .CodeMirror-selected {
+            background: #4a5568 !important;
+        }
+        .CodeMirror-focused .CodeMirror-selected {
+            background: #553c9a !important;
+        }
+        /* YAML syntax highlighting for dark theme */
+        .cm-s-default .cm-atom { color: #f6ad55; }
+        .cm-s-default .cm-number { color: #f6ad55; }
+        .cm-s-default .cm-keyword { color: #fc8181; }
+        .cm-s-default .cm-def { color: #68d391; }
+        .cm-s-default .cm-variable { color: #e2e8f0; }
+        .cm-s-default .cm-variable-2 { color: #90cdf4; }
+        .cm-s-default .cm-string { color: #68d391; }
+        .cm-s-default .cm-string-2 { color: #68d391; }
+        .cm-s-default .cm-comment { color: #718096; }
+        .cm-s-default .cm-meta { color: #b794f4; }
 
         @keyframes pulse {
             0%, 100% { opacity: 1; }
