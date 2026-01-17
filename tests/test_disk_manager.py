@@ -670,8 +670,26 @@ class TestSmartEndpoints:
     def test_smart_all_success(self, authenticated_client):
         """Test GET /api/disks/smart returns disk list."""
         mock_devices = [
-            {'device': '/dev/sda', 'data': {'health_status': 'healthy'}},
-            {'device': '/dev/nvme0n1', 'data': {'health_status': 'healthy'}}
+            {
+                'device': '/dev/sda',
+                'data': {
+                    'device': {'name': '/dev/sda', 'type': 'scsi'},
+                    'model_name': 'Test HDD',
+                    'smart_support': {'available': True, 'enabled': True},
+                    'smart_status': {'passed': True},
+                    'ata_smart_attributes': {'table': []}
+                }
+            },
+            {
+                'device': '/dev/nvme0n1',
+                'data': {
+                    'device': {'name': '/dev/nvme0n1', 'type': 'nvme'},
+                    'model_name': 'Test NVMe',
+                    'smart_support': {'available': True, 'enabled': True},
+                    'smart_status': {'passed': True},
+                    'nvme_smart_health_information_log': {}
+                }
+            }
         ]
         with patch('disk_manager.helper_call', return_value={
             'success': True,
@@ -682,6 +700,8 @@ class TestSmartEndpoints:
         data = response.get_json()
         assert 'disks' in data
         assert len(data['disks']) == 2
+        # Check data was processed
+        assert data['disks'][0]['data']['health_status'] == 'healthy'
 
     def test_smart_all_helper_failure(self, authenticated_client):
         """Test GET /api/disks/smart returns error when helper fails."""
@@ -711,16 +731,21 @@ class TestSmartEndpoints:
 
     def test_smart_device_success(self, authenticated_client):
         """Test GET /api/disks/<device>/smart returns SMART data."""
-        mock_data = {
-            'device': '/dev/sda',
-            'model': 'Test Drive',
-            'serial': 'ABC123',
-            'health_status': 'healthy',
-            'temperature_c': 35
+        # Raw smartctl JSON format
+        mock_smartctl_data = {
+            'device': {'name': '/dev/sda', 'type': 'scsi'},
+            'model_name': 'Test Drive',
+            'serial_number': 'ABC123',
+            'rotation_rate': 7200,
+            'smart_support': {'available': True, 'enabled': True},
+            'smart_status': {'passed': True},
+            'temperature': {'current': 35},
+            'power_on_time': {'hours': 1000},
+            'ata_smart_attributes': {'table': []}
         }
         with patch('disk_manager.helper_call', return_value={
             'success': True,
-            'data': mock_data
+            'data': mock_smartctl_data
         }):
             response = authenticated_client.get('/api/disks/sda/smart')
         assert response.status_code == 200
@@ -730,10 +755,16 @@ class TestSmartEndpoints:
 
     def test_smart_device_with_sat(self, authenticated_client):
         """Test GET /api/disks/<device>/smart with SAT passthrough."""
-        mock_data = {'device': '/dev/sda', 'health_status': 'healthy'}
+        mock_smartctl_data = {
+            'device': {'name': '/dev/sda', 'type': 'sat'},
+            'model_name': 'USB Drive',
+            'smart_support': {'available': True, 'enabled': True},
+            'smart_status': {'passed': True},
+            'ata_smart_attributes': {'table': []}
+        }
         with patch('disk_manager.helper_call', return_value={
             'success': True,
-            'data': mock_data
+            'data': mock_smartctl_data
         }) as mock_call:
             response = authenticated_client.get('/api/disks/sda/smart?use_sat=true')
         assert response.status_code == 200
@@ -753,20 +784,29 @@ class TestSmartEndpoints:
 
     def test_smart_device_nvme(self, authenticated_client):
         """Test GET /api/disks/<device>/smart for NVMe device."""
-        mock_data = {
-            'device': '/dev/nvme0n1',
-            'drive_type': 'nvme',
-            'percentage_used': 5,
-            'available_spare': 100
+        mock_smartctl_data = {
+            'device': {'name': '/dev/nvme0n1', 'type': 'nvme'},
+            'model_name': 'Samsung 980 PRO',
+            'serial_number': 'NVMe123',
+            'smart_support': {'available': True, 'enabled': True},
+            'smart_status': {'passed': True},
+            'temperature': {'current': 40},
+            'nvme_smart_health_information_log': {
+                'percentage_used': 5,
+                'available_spare': 100,
+                'media_errors': 0,
+                'power_on_hours': 500
+            }
         }
         with patch('disk_manager.helper_call', return_value={
             'success': True,
-            'data': mock_data
+            'data': mock_smartctl_data
         }):
             response = authenticated_client.get('/api/disks/nvme0n1/smart')
         assert response.status_code == 200
         data = response.get_json()
         assert data['drive_type'] == 'nvme'
+        assert data['percentage_used'] == 5
 
     def test_smart_device_helper_failure(self, authenticated_client):
         """Test GET /api/disks/<device>/smart when helper fails."""

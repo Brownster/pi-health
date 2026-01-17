@@ -10,6 +10,7 @@ import json
 from flask import Blueprint, jsonify, request
 from auth_utils import login_required
 from helper_client import helper_call, helper_available, HelperError, HELPER_SOCKET
+from smart_monitor import parse_smartctl_json
 
 disk_manager = Blueprint('disk_manager', __name__)
 
@@ -692,7 +693,23 @@ def api_smart_all():
     try:
         result = helper_call('smart_all_devices', {})
         if result.get('success'):
-            return jsonify({'disks': result.get('devices', [])})
+            # Process each device's raw smartctl data through parser
+            processed_disks = []
+            for disk in result.get('devices', []):
+                device = disk.get('device', 'unknown')
+                raw_data = disk.get('data', {})
+                if raw_data:
+                    parsed = parse_smartctl_json(raw_data)
+                    processed_disks.append({
+                        'device': device,
+                        'data': parsed.to_dict()
+                    })
+                else:
+                    processed_disks.append({
+                        'device': device,
+                        'data': {'device': device, 'error_message': disk.get('error', 'No SMART data')}
+                    })
+            return jsonify({'disks': processed_disks})
         return jsonify({'error': result.get('error', 'Failed to get SMART data')}), 503
     except HelperError as e:
         return jsonify({'error': str(e), 'helper_available': False}), 503
@@ -726,7 +743,10 @@ def api_smart_device(device):
             'use_sat': use_sat
         })
         if result.get('success'):
-            return jsonify(result.get('data', {}))
+            # Parse raw smartctl JSON into SmartHealth format
+            raw_data = result.get('data', {})
+            parsed = parse_smartctl_json(raw_data)
+            return jsonify(parsed.to_dict())
         return jsonify({'error': result.get('error', 'Failed to get SMART data')}), 503
     except HelperError as e:
         return jsonify({'error': str(e), 'helper_available': False}), 503
