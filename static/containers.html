@@ -117,19 +117,21 @@
             transform: scale(0.95);
         }
 
-        /* Dropdown menu - position to the left to avoid overflow */
+        /* Dropdown menu - vertical list positioned to the left */
         .dropdown-menu {
+            display: none;
+            flex-direction: column;
             right: 0;
-            transform: translateX(0);
         }
 
-        /* On smaller screens or when near edge, ensure dropdown stays in view */
-        @media (max-width: 1400px) {
-            .dropdown-menu {
-                right: auto;
-                left: auto;
-                transform: translateX(-70%);
-            }
+        .dropdown-menu:not(.hidden) {
+            display: flex;
+        }
+
+        .dropdown-menu button {
+            display: block;
+            width: 100%;
+            white-space: nowrap;
         }
     </style>
 </head>
