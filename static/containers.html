@@ -116,6 +116,21 @@
         .action-btn:active:not(:disabled) {
             transform: scale(0.95);
         }
+
+        /* Dropdown menu - position to the left to avoid overflow */
+        .dropdown-menu {
+            right: 0;
+            transform: translateX(0);
+        }
+
+        /* On smaller screens or when near edge, ensure dropdown stays in view */
+        @media (max-width: 1400px) {
+            .dropdown-menu {
+                right: auto;
+                left: auto;
+                transform: translateX(-70%);
+            }
+        }
     </style>
 </head>
 <body class="bg-gray-900 text-blue-100 font-sans min-h-screen">
@@ -666,14 +681,14 @@
                                 <div class="relative">
                                     <button class="bg-gray-600 hover:bg-gray-500 text-white py-1 px-2 rounded text-xs"
                                             onclick="toggleDropdown('${container.id}')">⋮</button>
-                                    <div id="dropdown-${container.id}" class="hidden absolute right-0 mt-1 w-32 bg-gray-700 rounded shadow-lg z-10 border border-gray-600">
-                                        <button class="w-full text-left px-3 py-2 text-xs hover:bg-gray-600 text-white"
+                                    <div id="dropdown-${container.id}" class="dropdown-menu hidden absolute mt-1 w-36 bg-gray-700 rounded shadow-lg z-50 border border-gray-600">
+                                        <button class="w-full text-left px-3 py-2 text-xs hover:bg-gray-600 text-white rounded-t"
                                                 onclick="controlContainer('${container.id}', 'check_update'); closeDropdown('${container.id}')">Check Update</button>
                                         <button class="w-full text-left px-3 py-2 text-xs hover:bg-gray-600 text-white"
                                                 onclick="controlContainer('${container.id}', 'update'); closeDropdown('${container.id}')">Update</button>
                                         <button class="w-full text-left px-3 py-2 text-xs hover:bg-gray-600 text-white"
                                                 onclick="viewLogs('${container.id}'); closeDropdown('${container.id}')">Logs</button>
-                                        <button class="w-full text-left px-3 py-2 text-xs hover:bg-gray-600 text-white"
+                                        <button class="w-full text-left px-3 py-2 text-xs hover:bg-gray-600 text-white rounded-b"
                                                 onclick="openContainerNetworkTest('${container.id}'); closeDropdown('${container.id}')">Network Test</button>
                                     </div>
                                 </div>
