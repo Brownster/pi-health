@@ -127,6 +127,85 @@ def test_list_plugins_uses_plugin_manager(authenticated_client, monkeypatch):
     assert data["plugins"][0]["id"] == "dummy"
 
 
+def test_toggle_plugin_imports_existing_shares(authenticated_client, monkeypatch):
+    class ImportingPlugin(DummyPlugin):
+        def import_existing_shares(self):
+            return CommandResult(success=True, message="Imported", data={"imported": 2})
+
+    registry = DummyRegistry(plugin=ImportingPlugin())
+    monkeypatch.setattr("storage_plugins.get_registry", lambda: registry)
+    monkeypatch.setattr("plugin_manager.set_enabled", lambda *_args, **_kwargs: None)
+
+    response = authenticated_client.post(
+        "/api/storage/plugins/dummy/toggle",
+        data=json.dumps({"enabled": True}),
+        content_type="application/json",
+    )
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["enabled"] is True
+    assert data["imported"] == 2
+    assert data["import_message"] == "Imported"
+
+
+def test_toggle_plugin_falls_back_to_registry(authenticated_client, monkeypatch):
+    class FallbackRegistry(DummyRegistry):
+        def set_plugin_enabled(self, plugin_id, enabled):
+            return plugin_id == "dummy" and enabled is True
+
+    registry = FallbackRegistry()
+    monkeypatch.setattr("storage_plugins.get_registry", lambda: registry)
+
+    def raise_error(*_args, **_kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("plugin_manager.set_enabled", raise_error)
+
+    response = authenticated_client.post(
+        "/api/storage/plugins/dummy/toggle",
+        data=json.dumps({"enabled": True}),
+        content_type="application/json",
+    )
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["enabled"] is True
+
+
+def test_install_plugin_requires_type_and_source(authenticated_client):
+    response = authenticated_client.post(
+        "/api/storage/plugins/install",
+        data=json.dumps({"type": "", "source": ""}),
+        content_type="application/json",
+    )
+    assert response.status_code == 400
+
+
+def test_install_plugin_failure(authenticated_client, monkeypatch):
+    monkeypatch.setattr(
+        "plugin_manager.install_plugin",
+        lambda *_args, **_kwargs: {"success": False, "error": "Install failed"},
+    )
+    response = authenticated_client.post(
+        "/api/storage/plugins/install",
+        data=json.dumps({"type": "github", "source": "https://example.com/repo"}),
+        content_type="application/json",
+    )
+    assert response.status_code == 400
+    data = response.get_json()
+    assert data["error"] == "Install failed"
+
+
+def test_remove_plugin_failure(authenticated_client, monkeypatch):
+    monkeypatch.setattr(
+        "plugin_manager.remove_plugin",
+        lambda *_args, **_kwargs: {"success": False, "error": "Remove failed"},
+    )
+    response = authenticated_client.delete("/api/storage/plugins/dummy/remove")
+    assert response.status_code == 400
+    data = response.get_json()
+    assert data["error"] == "Remove failed"
+
+
 def test_get_plugin_details(authenticated_client, monkeypatch):
     registry = DummyRegistry(plugin=DummyPlugin())
     monkeypatch.setattr("storage_plugins.get_registry", lambda: registry)
