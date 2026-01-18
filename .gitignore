@@ -5,3 +5,4 @@ __pycache__/
 .tox/
 config/plugins.json
 config/copyparty.json
+config/pihealth_update.json

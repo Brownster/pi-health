@@ -170,10 +170,54 @@
 
     <!-- Main content -->
     <main class="container mx-auto px-4 py-8">
-        <h2 class="text-3xl font-bold mb-8">Settings</h2>
+        <div class="flex flex-col gap-4 mb-8">
+            <h2 class="text-3xl font-bold">Settings</h2>
+            <div class="flex flex-wrap items-center gap-4">
+                <label class="text-sm text-gray-300" for="settings-section">Section</label>
+                <select id="settings-section" class="bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm">
+                    <option value="plugins">Plugins</option>
+                    <option value="backups">Backups</option>
+                    <option value="updates">Updates</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- Plugins Section -->
+        <section id="settings-plugins" class="bg-gray-800 rounded-lg p-6 mb-6 border border-purple-800/30 hidden">
+            <div class="flex justify-between items-center mb-6">
+                <div>
+                    <h3 class="text-xl font-semibold flex items-center">
+                        <svg class="w-6 h-6 mr-2 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5h2m-1 0v6m-7 4h14m-7 0v4"></path>
+                        </svg>
+                        Plugins
+                    </h3>
+                    <p class="text-gray-400 text-sm mt-1">Manage storage plugins and share services.</p>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <a href="/plugins.html" class="bg-gray-700 rounded-lg p-4 hover:bg-gray-600">
+                    <h4 class="font-semibold mb-1">Plugin Manager</h4>
+                    <p class="text-sm text-gray-300">Enable/disable and install plugins.</p>
+                </a>
+                <a href="/shares.html" class="bg-gray-700 rounded-lg p-4 hover:bg-gray-600">
+                    <h4 class="font-semibold mb-1">Shares</h4>
+                    <p class="text-sm text-gray-300">Configure Samba and other shares.</p>
+                </a>
+                <a href="/mounts.html" class="bg-gray-700 rounded-lg p-4 hover:bg-gray-600">
+                    <h4 class="font-semibold mb-1">Mounts</h4>
+                    <p class="text-sm text-gray-300">Configure SSHFS/Rclone mounts.</p>
+                </a>
+                <a href="/pools.html" class="bg-gray-700 rounded-lg p-4 hover:bg-gray-600">
+                    <h4 class="font-semibold mb-1">Pools</h4>
+                    <p class="text-sm text-gray-300">Manage SnapRAID/MergerFS pools.</p>
+                </a>
+            </div>
+        </section>
 
         <!-- Backups Section -->
-        <section class="bg-gray-800 rounded-lg p-6 mb-6 border border-purple-800/30">
+        <section id="settings-backups" class="bg-gray-800 rounded-lg p-6 mb-6 border border-purple-800/30 hidden">
             <div class="flex justify-between items-center mb-6">
                 <div>
                     <h3 class="text-xl font-semibold flex items-center">
@@ -273,7 +317,7 @@
         </section>
 
         <!-- Auto-Update Section -->
-        <section class="bg-gray-800 rounded-lg p-6 mb-6 border border-purple-800/30">
+        <section id="settings-updates" class="bg-gray-800 rounded-lg p-6 mb-6 border border-purple-800/30 hidden">
             <div class="flex justify-between items-center mb-6">
                 <div>
                     <h3 class="text-xl font-semibold flex items-center">
@@ -336,8 +380,49 @@
             </div>
         </section>
 
+        <!-- Pi-Health Updates -->
+        <section id="settings-pihealth-update" class="bg-gray-800 rounded-lg p-6 mb-6 border border-purple-800/30 hidden">
+            <div class="flex justify-between items-center mb-6">
+                <div>
+                    <h3 class="text-xl font-semibold flex items-center">
+                        <svg class="w-6 h-6 mr-2 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 15a4 4 0 004 4h10a4 4 0 000-8h-1a6 6 0 00-11.65 2"></path>
+                        </svg>
+                        Pi-Health Updates
+                    </h3>
+                    <p class="text-gray-400 text-sm mt-1">Pull latest code and restart the service.</p>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div>
+                    <label class="block text-sm text-gray-300 mb-1">Repository path</label>
+                    <input id="pihealth-repo-path" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm" placeholder="/home/user/pi-health">
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-300 mb-1">Systemd service name</label>
+                    <input id="pihealth-service-name" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm" placeholder="pi-health">
+                </div>
+            </div>
+
+            <div class="flex flex-wrap gap-4 mt-6 pt-4 border-t border-gray-700">
+                <button onclick="savePiHealthUpdateConfig()" class="coraline-button px-4 py-2 text-white rounded flex items-center">
+                    <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                    </svg>
+                    Save Update Settings
+                </button>
+                <button onclick="runPiHealthUpdate()" class="coraline-button px-4 py-2 text-white rounded flex items-center">
+                    <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                    </svg>
+                    Update & Restart
+                </button>
+            </div>
+        </section>
+
         <!-- Last Run Results -->
-        <section id="logs-section" class="bg-gray-800 rounded-lg p-6 border border-purple-800/30 hidden">
+        <section id="settings-updates-logs" class="bg-gray-800 rounded-lg p-6 border border-purple-800/30 hidden">
             <div class="flex justify-between items-center mb-4">
                 <h3 class="text-lg font-semibold">Last Update Run</h3>
                 <button onclick="toggleLogs()" class="text-gray-400 hover:text-white">
@@ -356,6 +441,7 @@
         let currentConfig = {};
         let backupConfig = {};
         let logsVisible = false;
+        let pihealthUpdateConfig = {};
 
         // Notification system
         function showNotification(message, type = 'info') {
@@ -389,6 +475,79 @@
             } catch (error) {
                 console.error('Error loading backup config:', error);
                 showNotification('Failed to load backup settings', 'error');
+            }
+        }
+
+        function setSettingsSection(section) {
+            const sections = ["plugins", "backups", "updates"];
+            sections.forEach(key => {
+                const block = document.getElementById(`settings-${key}`);
+                if (block) {
+                    block.classList.toggle("hidden", key !== section);
+                }
+            });
+            const updateBlock = document.getElementById("settings-pihealth-update");
+            if (updateBlock) {
+                updateBlock.classList.toggle("hidden", section !== "updates");
+            }
+            const logsBlock = document.getElementById("settings-updates-logs");
+            if (logsBlock) {
+                logsBlock.classList.toggle("hidden", section !== "updates" || !logsVisible);
+            }
+        }
+
+        async function loadPiHealthUpdateConfig() {
+            try {
+                const response = await fetch('/api/pihealth/update/config');
+                if (!response.ok) {
+                    return;
+                }
+                pihealthUpdateConfig = await response.json();
+                document.getElementById('pihealth-repo-path').value = pihealthUpdateConfig.repo_path || '';
+                document.getElementById('pihealth-service-name').value = pihealthUpdateConfig.service_name || '';
+            } catch (error) {
+                // ignore
+            }
+        }
+
+        async function savePiHealthUpdateConfig() {
+            const payload = {
+                repo_path: document.getElementById('pihealth-repo-path').value.trim(),
+                service_name: document.getElementById('pihealth-service-name').value.trim()
+            };
+
+            try {
+                const response = await fetch('/api/pihealth/update/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to save update config');
+                }
+                pihealthUpdateConfig = data.config || payload;
+                showNotification('Update settings saved', 'success');
+            } catch (error) {
+                showNotification(`Error: ${error.message}`, 'error');
+            }
+        }
+
+        async function runPiHealthUpdate() {
+            showNotification('Updating Pi-Health...', 'info');
+            try {
+                const response = await fetch('/api/pihealth/update', { method: 'POST' });
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.error || 'Update failed');
+                }
+                showNotification('Update started. Reconnecting...', 'success');
+                sessionStorage.clear();
+                setTimeout(() => {
+                    window.location.href = '/login.html';
+                }, 3000);
+            } catch (error) {
+                showNotification(`Error: ${error.message}`, 'error');
             }
         }
 
@@ -841,7 +1000,7 @@
 
         // Toggle logs visibility
         function toggleLogs() {
-            const section = document.getElementById('logs-section');
+            const section = document.getElementById('settings-updates-logs');
             logsVisible = !logsVisible;
 
             if (logsVisible) {
@@ -855,7 +1014,7 @@
         // Show logs section
         function showLogs() {
             logsVisible = true;
-            document.getElementById('logs-section').classList.remove('hidden');
+                document.getElementById('settings-updates-logs').classList.remove('hidden');
             renderLogs();
         }
 
@@ -924,8 +1083,16 @@
 
         // Initialize
         document.addEventListener('DOMContentLoaded', () => {
+            const sectionSelect = document.getElementById('settings-section');
+            if (sectionSelect) {
+                sectionSelect.addEventListener('change', (e) => {
+                    setSettingsSection(e.target.value);
+                });
+                setSettingsSection(sectionSelect.value);
+            }
             loadConfig();
             loadBackupConfig();
+            loadPiHealthUpdateConfig();
         });
     </script>
 </body>

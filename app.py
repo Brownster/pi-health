@@ -7,6 +7,7 @@ import socket
 import json
 import secrets
 import hashlib
+import getpass
 from urllib import request as urlrequest
 from stack_manager import stack_manager
 from auth_utils import login_required
@@ -19,6 +20,7 @@ from update_scheduler import update_scheduler, init_scheduler
 from backup_scheduler import backup_scheduler, init_backup_scheduler
 from disk_manager import disk_manager
 from setup_manager import setup_manager
+from helper_client import helper_call, HelperError
 
 # Initialize Flask
 app = Flask(__name__, static_folder='static')
@@ -32,6 +34,29 @@ STORAGE_PLUGIN_CONFIG_DIR = os.path.join(
 
 # Configure session
 app.secret_key = os.getenv('SECRET_KEY', secrets.token_hex(32))
+
+PIHEALTH_UPDATE_CONFIG = os.path.join(os.path.dirname(__file__), "config", "pihealth_update.json")
+DEFAULT_PIHEALTH_UPDATE_CONFIG = {
+    "repo_path": f"/home/{os.getenv('USER', 'pi')}/pi-health",
+    "service_name": "pi-health"
+}
+
+
+def _load_pihealth_update_config():
+    if os.path.exists(PIHEALTH_UPDATE_CONFIG):
+        try:
+            with open(PIHEALTH_UPDATE_CONFIG, "r") as handle:
+                data = json.load(handle)
+                return {**DEFAULT_PIHEALTH_UPDATE_CONFIG, **data}
+        except Exception:
+            return DEFAULT_PIHEALTH_UPDATE_CONFIG.copy()
+    return DEFAULT_PIHEALTH_UPDATE_CONFIG.copy()
+
+
+def _save_pihealth_update_config(config):
+    os.makedirs(os.path.dirname(PIHEALTH_UPDATE_CONFIG), exist_ok=True)
+    with open(PIHEALTH_UPDATE_CONFIG, "w") as handle:
+        json.dump(config, handle, indent=2)
 
 # Authentication configuration - supports multiple users via environment variables
 # Format: PIHEALTH_USERS=user1:password1,user2:password2
@@ -1172,6 +1197,45 @@ def api_container_network_test(container_id):
     if not docker_available:
         return jsonify({"error": "Docker is not available"}), 503
     return jsonify(run_container_network_test(container_id))
+
+
+@app.route('/api/pihealth/update/config', methods=['GET'])
+@login_required
+def api_pihealth_update_config():
+    return jsonify(_load_pihealth_update_config())
+
+
+@app.route('/api/pihealth/update/config', methods=['POST'])
+@login_required
+def api_pihealth_update_config_save():
+    data = request.get_json() or {}
+    repo_path = str(data.get("repo_path", "")).strip()
+    service_name = str(data.get("service_name", "")).strip()
+
+    if not repo_path or not repo_path.startswith("/"):
+        return jsonify({"error": "repo_path must be absolute"}), 400
+    if not service_name:
+        return jsonify({"error": "service_name is required"}), 400
+
+    config = {"repo_path": repo_path, "service_name": service_name}
+    _save_pihealth_update_config(config)
+    return jsonify({"status": "saved", "config": config})
+
+
+@app.route('/api/pihealth/update', methods=['POST'])
+@login_required
+def api_pihealth_update():
+    config = _load_pihealth_update_config()
+    config["user"] = getpass.getuser()
+    try:
+        result = helper_call("pihealth_update", config)
+    except HelperError as exc:
+        return jsonify({"error": str(exc)}), 503
+
+    if not result.get("success"):
+        return jsonify({"error": result.get("error", "Update failed")}), 400
+
+    return jsonify({"status": "updating"})
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8002))

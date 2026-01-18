@@ -70,18 +70,21 @@ RCLONE_MOUNTS_CONFIG = '/etc/rclone/mounts.json'
 SSHFS_CONFIG_DIR = '/etc/sshfs'
 SSHFS_MOUNTS_CONFIG = '/etc/sshfs/mounts.json'
 PLUGIN_DIR = os.getenv("PIHEALTH_PLUGIN_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "plugins"))
+PIHEALTH_REPO_DIR = os.getenv("PIHEALTH_REPO_DIR")
+PIHEALTH_SERVICE_NAME = os.getenv("PIHEALTH_SERVICE_NAME", "pi-health")
 
 PLUGIN_ID_PATTERN = re.compile(r'^[a-zA-Z0-9._-]+$')
 
 
-def run_command(cmd, timeout=30):
+def run_command(cmd, timeout=30, cwd=None):
     """Run a command and return stdout, stderr, returncode."""
     try:
         result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
-            timeout=timeout
+            timeout=timeout,
+            cwd=cwd
         )
         return {
             'stdout': result.stdout,
@@ -2109,6 +2112,61 @@ def cmd_copyparty_status(params):
     }
 
 
+def cmd_pihealth_update(params):
+    """Update Pi-Health repo and restart the service."""
+    user = params.get("user", "").strip()
+    repo_path = params.get("repo_path", "").strip()
+    service_name = params.get("service_name", "").strip() or PIHEALTH_SERVICE_NAME
+
+    if not user or not re.match(r"^[a-z_][a-z0-9_-]*$", user):
+        return {'success': False, 'error': 'Invalid user'}
+
+    if not repo_path:
+        repo_path = PIHEALTH_REPO_DIR or f"/home/{user}/pi-health"
+
+    if not repo_path.startswith(f"/home/{user}/") or ".." in repo_path:
+        return {'success': False, 'error': 'repo_path must be under /home/<user>'}
+
+    if not os.path.isdir(repo_path):
+        return {'success': False, 'error': 'repo_path not found'}
+
+    if not os.path.isdir(os.path.join(repo_path, ".git")):
+        return {'success': False, 'error': 'repo_path is not a git repo'}
+
+    if not service_name.endswith(".service"):
+        service_name = f"{service_name}.service"
+
+    allowed_services = {PIHEALTH_SERVICE_NAME, f"{PIHEALTH_SERVICE_NAME}.service"}
+    extra_allowed = os.getenv("PIHEALTH_UPDATE_SERVICES", "")
+    if extra_allowed:
+        for entry in extra_allowed.split(","):
+            entry = entry.strip()
+            if entry:
+                allowed_services.add(entry)
+
+    if service_name not in allowed_services:
+        return {'success': False, 'error': 'service_name not allowed'}
+
+    pull_result = run_command(
+        ["runuser", "-u", user, "--", "git", "-C", repo_path, "pull", "--ff-only"],
+        timeout=120
+    )
+    if pull_result.get('returncode') != 0:
+        return {
+            'success': False,
+            'error': pull_result.get('stderr', 'git pull failed')
+        }
+
+    restart_result = run_command(["systemctl", "restart", service_name], timeout=60)
+    if restart_result.get('returncode') != 0:
+        return {
+            'success': False,
+            'error': restart_result.get('stderr', 'service restart failed')
+        }
+
+    return {'success': True}
+
+
 def cmd_plugin_install(params):
     """Install a third-party plugin from GitHub or pip."""
     source_type = params.get('type', '').strip()
@@ -2242,6 +2300,7 @@ COMMANDS = {
     'copyparty_install': cmd_copyparty_install,
     'copyparty_configure': cmd_copyparty_configure,
     'copyparty_status': cmd_copyparty_status,
+    'pihealth_update': cmd_pihealth_update,
     'plugin_install': cmd_plugin_install,
     'plugin_remove': cmd_plugin_remove,
     'ping': lambda p: {'success': True, 'message': 'pong'}
