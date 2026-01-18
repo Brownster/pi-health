@@ -978,6 +978,18 @@ def serve_disks():
     return send_from_directory(app.static_folder, 'disks.html')
 
 
+@app.route('/network.html')
+def serve_network():
+    """Serve the host network page."""
+    return send_from_directory(app.static_folder, 'network.html')
+
+
+@app.route('/tailscale.html')
+def serve_tailscale():
+    """Serve the Tailscale page."""
+    return send_from_directory(app.static_folder, 'tailscale.html')
+
+
 @app.route('/login.html')
 def serve_login():
     """Serve the login page."""

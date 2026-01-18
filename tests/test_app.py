@@ -224,11 +224,11 @@ class TestStaticPages:
         assert 'plugins-list' in body
 
     def test_settings_page_setup_hooks(self, client):
-        """Test settings page has setup hooks."""
+        """Test settings page has backup hooks (Tailscale moved to /tailscale.html)."""
         response = client.get('/settings.html')
         assert response.status_code == 200
         body = response.data.decode('utf-8')
-        assert 'tailscale-authkey' in body
+        assert 'tailscale-authkey' not in body  # Moved to /tailscale.html
         assert 'vpn-config-dir' not in body
         assert 'backup-enabled' in body
         assert 'backup-dest-dir' in body
@@ -241,6 +241,24 @@ class TestStaticPages:
         assert 'backup-run-now' in body
         assert 'backup-list' in body
         assert 'backup-plugins-list' in body
+
+    def test_network_page(self, client):
+        """Test host network page loads."""
+        response = client.get('/network.html')
+        assert response.status_code == 200
+        body = response.data.decode('utf-8')
+        assert 'Host Network' in body
+        assert 'network-content' in body
+
+    def test_tailscale_page(self, client):
+        """Test Tailscale page loads."""
+        response = client.get('/tailscale.html')
+        assert response.status_code == 200
+        body = response.data.decode('utf-8')
+        assert 'Tailscale' in body
+        assert 'tailscale-authkey' in body
+        assert 'setup-section' in body
+        assert 'status-section' in body
 
     def test_apps_page_vpn_config_modal(self, client):
         """Test apps page includes VPN config modal."""

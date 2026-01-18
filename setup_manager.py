@@ -42,6 +42,50 @@ def api_setup_tailscale():
         return jsonify({'error': str(exc)}), 503
 
 
+@setup_manager.route('/api/tailscale/status', methods=['GET'])
+@login_required
+def api_tailscale_status():
+    """Get Tailscale status and network info."""
+    if not helper_available():
+        return jsonify({'error': 'Helper service unavailable'}), 503
+
+    try:
+        result = helper_call('tailscale_status', {})
+        return jsonify(result)
+    except HelperError as exc:
+        return jsonify({'error': str(exc)}), 503
+
+
+@setup_manager.route('/api/tailscale/logout', methods=['POST'])
+@login_required
+def api_tailscale_logout():
+    """Logout from Tailscale for re-authentication."""
+    if not helper_available():
+        return jsonify({'error': 'Helper service unavailable'}), 503
+
+    try:
+        result = helper_call('tailscale_logout', {})
+        if not result.get('success'):
+            return jsonify({'error': result.get('stderr', 'Logout failed')}), 500
+        return jsonify({'status': 'ok'})
+    except HelperError as exc:
+        return jsonify({'error': str(exc)}), 503
+
+
+@setup_manager.route('/api/network/info', methods=['GET'])
+@login_required
+def api_network_info():
+    """Get detailed host network information."""
+    if not helper_available():
+        return jsonify({'error': 'Helper service unavailable'}), 503
+
+    try:
+        result = helper_call('network_info', {})
+        return jsonify(result)
+    except HelperError as exc:
+        return jsonify({'error': str(exc)}), 503
+
+
 @setup_manager.route('/api/setup/vpn', methods=['POST'])
 @login_required
 def api_setup_vpn():

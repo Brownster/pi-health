@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script>
+        if (!sessionStorage.getItem("loggedIn")) {
+            window.location.href = "/login.html";
+        }
+
+        const username = sessionStorage.getItem("username");
+        if (username) {
+            document.addEventListener('DOMContentLoaded', () => {
+                const userEl = document.getElementById('logged-in-user');
+                if (userEl) userEl.textContent = username;
+            });
+        }
+
+        async function logout() {
+            try {
+                await fetch('/api/logout', { method: 'POST' });
+            } catch (e) {}
+            sessionStorage.clear();
+            window.location.href = '/login.html';
+        }
+    </script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Host Network - Pi-Health Dashboard</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <script src="/js/api.js"></script>
+    <script src="/js/nav.js"></script>
+    <style>
+        .coraline-button {
+            background: linear-gradient(to bottom, #5f4b8b, #372b53);
+            border: 1px solid #8a6cbd;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.25);
+            transition: all 0.3s ease;
+        }
+        .coraline-button:hover:not(:disabled) {
+            background: linear-gradient(to bottom, #6f58a3, #413162);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 10px rgba(0, 0, 0, 0.3);
+        }
+        .coraline-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .status-pill {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+        .status-up { background-color: rgba(52, 211, 153, 0.2); color: #34d399; border: 1px solid #34d399; }
+        .status-down { background-color: rgba(248, 113, 113, 0.2); color: #f87171; border: 1px solid #f87171; }
+        .status-unknown { background-color: rgba(156, 163, 175, 0.2); color: #9ca3af; border: 1px solid #9ca3af; }
+        .info-card {
+            background-color: rgba(17, 24, 39, 0.5);
+            border: 1px solid rgba(107, 33, 168, 0.3);
+            border-radius: 0.5rem;
+            padding: 1rem;
+        }
+        .info-label {
+            color: #9ca3af;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .info-value {
+            color: #e5e7eb;
+            font-size: 1rem;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+        }
+        .interface-card {
+            background-color: rgba(17, 24, 39, 0.7);
+            border: 1px solid rgba(107, 33, 168, 0.4);
+            border-radius: 0.5rem;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-blue-100 font-sans min-h-screen">
+    <header class="bg-gradient-to-r from-purple-900 to-blue-900 shadow-lg relative overflow-hidden">
+        <div class="absolute inset-0 overflow-hidden">
+            <img src="/theme-banner" alt="Dashboard" class="w-full h-full object-cover opacity-40 blur-sm" style="filter: hue-rotate(-10deg) saturate(1.15);">
+        </div>
+        <div class="container mx-auto px-8 py-12 relative">
+        </div>
+    </header>
+
+    <!-- Navigation bar -->
+    <nav id="main-nav" class="bg-purple-900 shadow-md"></nav>
+
+    <div id="notification-area" class="fixed top-4 right-4 z-50 w-80 flex flex-col items-end"></div>
+
+    <main class="container mx-auto p-6">
+        <div class="flex items-center justify-between mb-6">
+            <div>
+                <h2 class="text-2xl font-semibold">Host Network</h2>
+                <p class="text-sm text-gray-400 mt-1">Detailed network information for this host.</p>
+            </div>
+            <button onclick="refreshNetworkInfo()" class="px-4 py-2 text-sm border border-purple-700 text-purple-300 rounded hover:bg-purple-900">
+                Refresh
+            </button>
+        </div>
+
+        <!-- Loading State -->
+        <div id="loading-state" class="text-center py-10 text-gray-400">
+            <svg class="animate-spin h-8 w-8 mx-auto mb-4 text-purple-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            Loading network information...
+        </div>
+
+        <!-- Network Info Content -->
+        <div id="network-content" class="hidden space-y-6">
+            <!-- Overview Section -->
+            <section class="bg-gray-800 border border-purple-900/40 rounded-lg p-6">
+                <h3 class="text-lg font-semibold mb-4 flex items-center gap-2">
+                    <svg class="w-5 h-5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/>
+                    </svg>
+                    Overview
+                </h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div class="info-card">
+                        <div class="info-label">Hostname</div>
+                        <div class="info-value" id="net-hostname">-</div>
+                    </div>
+                    <div class="info-card">
+                        <div class="info-label">FQDN</div>
+                        <div class="info-value text-sm" id="net-fqdn">-</div>
+                    </div>
+                    <div class="info-card">
+                        <div class="info-label">Public IP</div>
+                        <div class="info-value" id="net-public-ip">-</div>
+                    </div>
+                    <div class="info-card">
+                        <div class="info-label">Default Gateway</div>
+                        <div class="info-value" id="net-gateway">-</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- DNS Section -->
+            <section class="bg-gray-800 border border-purple-900/40 rounded-lg p-6">
+                <h3 class="text-lg font-semibold mb-4 flex items-center gap-2">
+                    <svg class="w-5 h-5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"/>
+                    </svg>
+                    DNS Servers
+                </h3>
+                <div id="dns-servers" class="flex flex-wrap gap-3">
+                    <!-- Populated by JS -->
+                </div>
+            </section>
+
+            <!-- Network Interfaces Section -->
+            <section class="bg-gray-800 border border-purple-900/40 rounded-lg p-6">
+                <h3 class="text-lg font-semibold mb-4 flex items-center gap-2">
+                    <svg class="w-5 h-5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"/>
+                    </svg>
+                    Network Interfaces
+                </h3>
+                <div id="interfaces-list" class="space-y-4">
+                    <!-- Populated by JS -->
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <script>
+        async function loadNetworkInfo() {
+            try {
+                const response = await apiFetch('/api/network/info');
+                const data = await response.json();
+
+                document.getElementById('loading-state').classList.add('hidden');
+                document.getElementById('network-content').classList.remove('hidden');
+
+                renderNetworkInfo(data);
+            } catch (error) {
+                document.getElementById('loading-state').innerHTML =
+                    `<p class="text-red-400">Failed to load network info: ${error.message}</p>`;
+            }
+        }
+
+        function renderNetworkInfo(data) {
+            // Overview
+            document.getElementById('net-hostname').textContent = data.hostname || '-';
+            document.getElementById('net-fqdn').textContent = data.fqdn || '-';
+            document.getElementById('net-public-ip').textContent = data.public_ip || 'Not available';
+
+            if (data.default_gateway) {
+                document.getElementById('net-gateway').textContent =
+                    `${data.default_gateway.ip} (${data.default_gateway.interface})`;
+            } else {
+                document.getElementById('net-gateway').textContent = '-';
+            }
+
+            // DNS Servers
+            const dnsContainer = document.getElementById('dns-servers');
+            const dnsServers = data.dns_servers || [];
+            if (dnsServers.length > 0) {
+                dnsContainer.innerHTML = dnsServers.map(dns => `
+                    <div class="info-card">
+                        <div class="info-value">${escapeHtml(dns)}</div>
+                    </div>
+                `).join('');
+            } else {
+                dnsContainer.innerHTML = '<p class="text-gray-500">No DNS servers configured</p>';
+            }
+
+            // Interfaces
+            const interfacesContainer = document.getElementById('interfaces-list');
+            const interfaces = data.interfaces || [];
+
+            if (interfaces.length > 0) {
+                interfacesContainer.innerHTML = interfaces.map(iface => renderInterface(iface)).join('');
+            } else {
+                interfacesContainer.innerHTML = '<p class="text-gray-500">No network interfaces found</p>';
+            }
+        }
+
+        function renderInterface(iface) {
+            const stateClass = iface.state === 'UP' ? 'status-up' :
+                              iface.state === 'DOWN' ? 'status-down' : 'status-unknown';
+
+            const ipv4Addrs = (iface.ipv4 || []).map(addr =>
+                `<div class="flex items-center gap-2">
+                    <span class="text-green-400">${escapeHtml(addr.address)}/${addr.prefix}</span>
+                    ${addr.broadcast ? `<span class="text-gray-500 text-xs">(broadcast: ${escapeHtml(addr.broadcast)})</span>` : ''}
+                </div>`
+            ).join('') || '<span class="text-gray-500">None</span>';
+
+            const ipv6Addrs = (iface.ipv6 || []).filter(addr => addr.scope !== 'link').map(addr =>
+                `<div class="text-blue-400 text-sm">${escapeHtml(addr.address)}/${addr.prefix}</div>`
+            ).join('') || '<span class="text-gray-500 text-sm">None (excluding link-local)</span>';
+
+            return `
+                <div class="interface-card p-4">
+                    <div class="flex items-center justify-between mb-3">
+                        <div class="flex items-center gap-3">
+                            <span class="text-lg font-semibold font-mono">${escapeHtml(iface.name)}</span>
+                            <span class="status-pill ${stateClass}">${iface.state}</span>
+                        </div>
+                        <div class="text-sm text-gray-400">
+                            MTU: ${iface.mtu}
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                        <div>
+                            <div class="info-label mb-1">MAC Address</div>
+                            <div class="font-mono text-gray-300">${escapeHtml(iface.mac) || '-'}</div>
+                        </div>
+                        <div>
+                            <div class="info-label mb-1">IPv4 Addresses</div>
+                            ${ipv4Addrs}
+                        </div>
+                        <div>
+                            <div class="info-label mb-1">IPv6 Addresses</div>
+                            ${ipv6Addrs}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function refreshNetworkInfo() {
+            document.getElementById('loading-state').classList.remove('hidden');
+            document.getElementById('network-content').classList.add('hidden');
+            loadNetworkInfo();
+        }
+
+        // Load on page load
+        document.addEventListener('DOMContentLoaded', loadNetworkInfo);
+    </script>
+</body>
+</html>

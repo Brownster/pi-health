@@ -25,6 +25,13 @@ const NAV_CONFIG = {
                 { label: 'Shares', href: '/shares.html' }
             ]
         },
+        {
+            label: 'Network',
+            children: [
+                { label: 'Host Network', href: '/network.html' },
+                { label: 'Tailscale', href: '/tailscale.html' }
+            ]
+        },
         { label: 'Plugins', href: '/plugins.html' },
         { label: 'Settings', href: '/settings.html' }
     ]

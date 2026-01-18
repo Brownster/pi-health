@@ -700,6 +700,168 @@ def cmd_tailscale_up(params):
     }
 
 
+def cmd_tailscale_status(params):
+    """Get Tailscale status and network info."""
+    import json as json_module
+    import shutil
+
+    # Check if tailscale binary exists
+    if not shutil.which('tailscale'):
+        return {
+            'success': True,
+            'installed': False,
+            'status': None
+        }
+
+    # Get JSON status
+    result = run_command(['tailscale', 'status', '--json'], timeout=30)
+    if result.get('returncode') != 0:
+        # Tailscale installed but not running or not configured
+        return {
+            'success': True,
+            'installed': True,
+            'running': False,
+            'status': None,
+            'error': result.get('stderr', 'Failed to get status')
+        }
+
+    try:
+        status = json_module.loads(result.get('stdout', '{}'))
+        # Extract useful info
+        self_info = status.get('Self', {})
+        return {
+            'success': True,
+            'installed': True,
+            'running': True,
+            'backend_state': status.get('BackendState', 'Unknown'),
+            'tailnet_name': status.get('CurrentTailnet', {}).get('Name', ''),
+            'hostname': self_info.get('HostName', ''),
+            'dns_name': self_info.get('DNSName', ''),
+            'tailscale_ips': self_info.get('TailscaleIPs', []),
+            'online': self_info.get('Online', False),
+            'os': self_info.get('OS', ''),
+            'relay': self_info.get('Relay', ''),
+            'rx_bytes': self_info.get('RxBytes', 0),
+            'tx_bytes': self_info.get('TxBytes', 0),
+            'created': self_info.get('Created', ''),
+            'last_seen': self_info.get('LastSeen', ''),
+            'peers': len(status.get('Peer', {})),
+            'health': status.get('Health', []),
+            'magic_dns_suffix': status.get('MagicDNSSuffix', ''),
+            'raw_status': status
+        }
+    except json_module.JSONDecodeError:
+        return {
+            'success': False,
+            'installed': True,
+            'error': 'Failed to parse status JSON'
+        }
+
+
+def cmd_tailscale_logout(params):
+    """Logout from Tailscale (for re-authentication)."""
+    import shutil
+
+    if not shutil.which('tailscale'):
+        return {'success': False, 'error': 'Tailscale not installed'}
+
+    result = run_command(['tailscale', 'logout'], timeout=30)
+    return {
+        'success': result.get('returncode') == 0,
+        'stdout': result.get('stdout', ''),
+        'stderr': result.get('stderr', ''),
+        'returncode': result.get('returncode')
+    }
+
+
+def cmd_network_info(params):
+    """Get detailed host network information."""
+    import json as json_module
+    import socket
+
+    info = {
+        'hostname': socket.gethostname(),
+        'fqdn': socket.getfqdn(),
+        'interfaces': [],
+        'dns_servers': [],
+        'default_gateway': None,
+        'public_ip': None
+    }
+
+    # Get interface info using ip command
+    result = run_command(['ip', '-j', 'addr'], timeout=10)
+    if result.get('returncode') == 0:
+        try:
+            interfaces = json_module.loads(result.get('stdout', '[]'))
+            for iface in interfaces:
+                iface_info = {
+                    'name': iface.get('ifname', ''),
+                    'state': iface.get('operstate', 'UNKNOWN'),
+                    'mac': iface.get('address', ''),
+                    'mtu': iface.get('mtu', 0),
+                    'ipv4': [],
+                    'ipv6': []
+                }
+                for addr in iface.get('addr_info', []):
+                    if addr.get('family') == 'inet':
+                        iface_info['ipv4'].append({
+                            'address': addr.get('local', ''),
+                            'prefix': addr.get('prefixlen', 0),
+                            'broadcast': addr.get('broadcast', '')
+                        })
+                    elif addr.get('family') == 'inet6':
+                        iface_info['ipv6'].append({
+                            'address': addr.get('local', ''),
+                            'prefix': addr.get('prefixlen', 0),
+                            'scope': addr.get('scope', '')
+                        })
+                # Skip loopback from main list but include it
+                if iface_info['name'] != 'lo' or params.get('include_loopback'):
+                    info['interfaces'].append(iface_info)
+        except json_module.JSONDecodeError:
+            pass
+
+    # Get default gateway
+    result = run_command(['ip', '-j', 'route', 'show', 'default'], timeout=10)
+    if result.get('returncode') == 0:
+        try:
+            routes = json_module.loads(result.get('stdout', '[]'))
+            if routes:
+                info['default_gateway'] = {
+                    'ip': routes[0].get('gateway', ''),
+                    'interface': routes[0].get('dev', '')
+                }
+        except json_module.JSONDecodeError:
+            pass
+
+    # Get DNS servers from /etc/resolv.conf
+    try:
+        with open('/etc/resolv.conf', 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith('nameserver'):
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        info['dns_servers'].append(parts[1])
+    except Exception:
+        pass
+
+    # Try to get public IP (optional, might fail)
+    try:
+        result = run_command(['curl', '-s', '--max-time', '5', 'https://api.ipify.org'], timeout=10)
+        if result.get('returncode') == 0:
+            ip = result.get('stdout', '').strip()
+            if ip and re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', ip):
+                info['public_ip'] = ip
+    except Exception:
+        pass
+
+    return {
+        'success': True,
+        **info
+    }
+
+
 def cmd_docker_network_create(params):
     """Create Docker network if missing."""
     name = params.get('name', '').strip()
@@ -1885,6 +2047,9 @@ COMMANDS = {
     'systemctl': cmd_systemctl,
     'tailscale_install': cmd_tailscale_install,
     'tailscale_up': cmd_tailscale_up,
+    'tailscale_status': cmd_tailscale_status,
+    'tailscale_logout': cmd_tailscale_logout,
+    'network_info': cmd_network_info,
     'docker_network_create': cmd_docker_network_create,
     'write_vpn_env': cmd_write_vpn_env,
     'backup_create': cmd_backup_create,

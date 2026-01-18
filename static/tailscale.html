@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script>
+        if (!sessionStorage.getItem("loggedIn")) {
+            window.location.href = "/login.html";
+        }
+
+        const username = sessionStorage.getItem("username");
+        if (username) {
+            document.addEventListener('DOMContentLoaded', () => {
+                const userEl = document.getElementById('logged-in-user');
+                if (userEl) userEl.textContent = username;
+            });
+        }
+
+        async function logout() {
+            try {
+                await fetch('/api/logout', { method: 'POST' });
+            } catch (e) {}
+            sessionStorage.clear();
+            window.location.href = '/login.html';
+        }
+    </script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tailscale - Pi-Health Dashboard</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <script src="/js/api.js"></script>
+    <script src="/js/nav.js"></script>
+    <style>
+        .coraline-button {
+            background: linear-gradient(to bottom, #5f4b8b, #372b53);
+            border: 1px solid #8a6cbd;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.25);
+            transition: all 0.3s ease;
+        }
+        .coraline-button:hover:not(:disabled) {
+            background: linear-gradient(to bottom, #6f58a3, #413162);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 10px rgba(0, 0, 0, 0.3);
+        }
+        .coraline-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .status-pill {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+        .status-connected { background-color: rgba(52, 211, 153, 0.2); color: #34d399; border: 1px solid #34d399; }
+        .status-disconnected { background-color: rgba(248, 113, 113, 0.2); color: #f87171; border: 1px solid #f87171; }
+        .status-not-installed { background-color: rgba(156, 163, 175, 0.2); color: #9ca3af; border: 1px solid #9ca3af; }
+        .info-card {
+            background-color: rgba(17, 24, 39, 0.5);
+            border: 1px solid rgba(107, 33, 168, 0.3);
+            border-radius: 0.5rem;
+            padding: 1rem;
+        }
+        .info-label {
+            color: #9ca3af;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .info-value {
+            color: #e5e7eb;
+            font-size: 1rem;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-blue-100 font-sans min-h-screen">
+    <header class="bg-gradient-to-r from-purple-900 to-blue-900 shadow-lg relative overflow-hidden">
+        <div class="absolute inset-0 overflow-hidden">
+            <img src="/theme-banner" alt="Dashboard" class="w-full h-full object-cover opacity-40 blur-sm" style="filter: hue-rotate(-10deg) saturate(1.15);">
+        </div>
+        <div class="container mx-auto px-8 py-12 relative">
+        </div>
+    </header>
+
+    <!-- Navigation bar -->
+    <nav id="main-nav" class="bg-purple-900 shadow-md"></nav>
+
+    <div id="notification-area" class="fixed top-4 right-4 z-50 w-80 flex flex-col items-end"></div>
+
+    <main class="container mx-auto p-6">
+        <div class="mb-6">
+            <h2 class="text-2xl font-semibold">Tailscale</h2>
+            <p class="text-sm text-gray-400 mt-1">Secure remote access via Tailscale VPN.</p>
+        </div>
+
+        <!-- Loading State -->
+        <div id="loading-state" class="text-center py-10 text-gray-400">
+            <svg class="animate-spin h-8 w-8 mx-auto mb-4 text-purple-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            Loading Tailscale status...
+        </div>
+
+        <!-- Not Installed / Setup Section -->
+        <section id="setup-section" class="hidden">
+            <div class="bg-gray-800 border border-purple-900/40 rounded-lg p-6">
+                <div class="flex items-center gap-3 mb-4">
+                    <svg class="w-8 h-8 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+                    </svg>
+                    <div>
+                        <h3 class="text-lg font-semibold">Setup Tailscale</h3>
+                        <span id="setup-status" class="status-pill status-not-installed">Not Installed</span>
+                    </div>
+                </div>
+                <p class="text-gray-400 text-sm mb-4">
+                    Tailscale provides secure remote access to your Pi-Health dashboard from anywhere.
+                    It creates a private network between your devices without opening ports on your router.
+                </p>
+                <div class="bg-gray-900/50 border border-gray-700 rounded-lg p-4">
+                    <label class="block text-sm text-gray-300 mb-2">Auth Key (Optional)</label>
+                    <input id="tailscale-authkey" type="text"
+                           class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm mb-2"
+                           placeholder="tskey-auth-...">
+                    <p class="text-xs text-gray-500 mb-4">
+                        Leave blank for interactive login via browser. Get an auth key from
+                        <a href="https://login.tailscale.com/admin/settings/keys" target="_blank" class="text-purple-400 hover:underline">Tailscale Admin Console</a>.
+                    </p>
+                    <button onclick="setupTailscale()" class="coraline-button text-blue-100 py-2 px-6 rounded">
+                        Install & Connect
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Connected Status Section -->
+        <section id="status-section" class="hidden">
+            <div class="bg-gray-800 border border-purple-900/40 rounded-lg p-6 mb-6">
+                <div class="flex items-center justify-between mb-6">
+                    <div class="flex items-center gap-3">
+                        <svg class="w-8 h-8 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+                        </svg>
+                        <div>
+                            <h3 class="text-lg font-semibold">Tailscale Connected</h3>
+                            <span id="connection-status" class="status-pill status-connected">Online</span>
+                        </div>
+                    </div>
+                    <div class="flex gap-2">
+                        <button onclick="refreshStatus()" class="px-4 py-2 text-sm border border-purple-700 text-purple-300 rounded hover:bg-purple-900">
+                            Refresh
+                        </button>
+                        <button onclick="reauthenticate()" class="px-4 py-2 text-sm border border-yellow-700 text-yellow-300 rounded hover:bg-yellow-900/30">
+                            Re-authenticate
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Network Info Grid -->
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <div class="info-card">
+                        <div class="info-label">Tailscale IP</div>
+                        <div class="info-value" id="ts-ip">-</div>
+                    </div>
+                    <div class="info-card">
+                        <div class="info-label">Hostname</div>
+                        <div class="info-value" id="ts-hostname">-</div>
+                    </div>
+                    <div class="info-card">
+                        <div class="info-label">DNS Name</div>
+                        <div class="info-value text-sm" id="ts-dns">-</div>
+                    </div>
+                    <div class="info-card">
+                        <div class="info-label">Tailnet</div>
+                        <div class="info-value" id="ts-tailnet">-</div>
+                    </div>
+                    <div class="info-card">
+                        <div class="info-label">Connection State</div>
+                        <div class="info-value" id="ts-state">-</div>
+                    </div>
+                    <div class="info-card">
+                        <div class="info-label">Connected Peers</div>
+                        <div class="info-value" id="ts-peers">-</div>
+                    </div>
+                </div>
+
+                <!-- Additional Info -->
+                <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="info-card">
+                        <div class="info-label">Traffic (RX / TX)</div>
+                        <div class="info-value" id="ts-traffic">-</div>
+                    </div>
+                    <div class="info-card">
+                        <div class="info-label">Relay</div>
+                        <div class="info-value" id="ts-relay">-</div>
+                    </div>
+                </div>
+
+                <!-- Health Warnings -->
+                <div id="health-warnings" class="hidden mt-4 p-4 bg-yellow-900/20 border border-yellow-800 rounded-lg">
+                    <h4 class="text-yellow-300 font-medium mb-2">Health Warnings</h4>
+                    <ul id="health-list" class="text-sm text-yellow-200 list-disc list-inside"></ul>
+                </div>
+            </div>
+
+            <!-- Quick Access Info -->
+            <div class="bg-gray-800 border border-purple-900/40 rounded-lg p-6">
+                <h3 class="text-lg font-semibold mb-4">Quick Access</h3>
+                <p class="text-gray-400 text-sm mb-4">
+                    Access your Pi-Health dashboard from any device on your Tailnet using:
+                </p>
+                <div class="bg-gray-900 rounded p-4 font-mono text-sm">
+                    <span class="text-gray-400">http://</span><span id="access-url" class="text-green-400">-</span><span class="text-gray-400">:8002</span>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <script>
+        let currentStatus = null;
+
+        async function loadStatus() {
+            try {
+                const response = await apiFetch('/api/tailscale/status');
+                const data = await response.json();
+
+                document.getElementById('loading-state').classList.add('hidden');
+                currentStatus = data;
+
+                if (!data.installed) {
+                    showSetupSection('Not Installed');
+                } else if (!data.running) {
+                    showSetupSection('Not Running');
+                } else {
+                    showStatusSection(data);
+                }
+            } catch (error) {
+                document.getElementById('loading-state').innerHTML =
+                    `<p class="text-red-400">Failed to load Tailscale status: ${error.message}</p>`;
+            }
+        }
+
+        function showSetupSection(status) {
+            document.getElementById('setup-section').classList.remove('hidden');
+            document.getElementById('status-section').classList.add('hidden');
+            document.getElementById('setup-status').textContent = status;
+        }
+
+        function showStatusSection(data) {
+            document.getElementById('setup-section').classList.add('hidden');
+            document.getElementById('status-section').classList.remove('hidden');
+
+            // Update connection status
+            const statusEl = document.getElementById('connection-status');
+            if (data.online) {
+                statusEl.textContent = 'Online';
+                statusEl.className = 'status-pill status-connected';
+            } else {
+                statusEl.textContent = 'Offline';
+                statusEl.className = 'status-pill status-disconnected';
+            }
+
+            // Update info cards
+            const ips = data.tailscale_ips || [];
+            document.getElementById('ts-ip').textContent = ips[0] || '-';
+            document.getElementById('ts-hostname').textContent = data.hostname || '-';
+            document.getElementById('ts-dns').textContent = data.dns_name || '-';
+            document.getElementById('ts-tailnet').textContent = data.tailnet_name || '-';
+            document.getElementById('ts-state').textContent = data.backend_state || '-';
+            document.getElementById('ts-peers').textContent = data.peers !== undefined ? data.peers : '-';
+            document.getElementById('ts-relay').textContent = data.relay || 'Direct';
+
+            // Format traffic
+            const rx = formatBytes(data.rx_bytes || 0);
+            const tx = formatBytes(data.tx_bytes || 0);
+            document.getElementById('ts-traffic').textContent = `${rx} / ${tx}`;
+
+            // Quick access URL
+            const accessUrl = data.dns_name ? data.dns_name.replace(/\.$/, '') : (ips[0] || '-');
+            document.getElementById('access-url').textContent = accessUrl;
+
+            // Health warnings
+            const health = data.health || [];
+            const healthSection = document.getElementById('health-warnings');
+            const healthList = document.getElementById('health-list');
+            if (health.length > 0) {
+                healthSection.classList.remove('hidden');
+                healthList.innerHTML = health.map(h => `<li>${escapeHtml(h)}</li>`).join('');
+            } else {
+                healthSection.classList.add('hidden');
+            }
+        }
+
+        function formatBytes(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        async function setupTailscale() {
+            const authKey = document.getElementById('tailscale-authkey').value.trim();
+
+            showNotification('Installing and configuring Tailscale...', 'info');
+
+            try {
+                const response = await apiFetch('/api/setup/tailscale', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ auth_key: authKey })
+                });
+
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.error || 'Setup failed');
+                }
+
+                showNotification('Tailscale setup complete!', 'success');
+                setTimeout(() => loadStatus(), 2000);
+            } catch (error) {
+                showNotification(`Error: ${error.message}`, 'error');
+            }
+        }
+
+        async function reauthenticate() {
+            if (!confirm('This will log out of Tailscale. You will need to re-authenticate. Continue?')) {
+                return;
+            }
+
+            try {
+                const response = await apiFetch('/api/tailscale/logout', { method: 'POST' });
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Logout failed');
+                }
+
+                showNotification('Logged out. Please set up Tailscale again.', 'info');
+                loadStatus();
+            } catch (error) {
+                showNotification(`Error: ${error.message}`, 'error');
+            }
+        }
+
+        function refreshStatus() {
+            document.getElementById('loading-state').classList.remove('hidden');
+            document.getElementById('status-section').classList.add('hidden');
+            loadStatus();
+        }
+
+        function showNotification(message, type = 'info') {
+            const area = document.getElementById('notification-area');
+            const colors = {
+                success: 'bg-green-800 border-green-600',
+                error: 'bg-red-800 border-red-600',
+                info: 'bg-blue-800 border-blue-600'
+            };
+
+            const notification = document.createElement('div');
+            notification.className = `${colors[type] || colors.info} border rounded-lg p-4 shadow-lg transition-opacity duration-500`;
+            notification.innerHTML = `<p class="text-white text-sm">${escapeHtml(message)}</p>`;
+            area.appendChild(notification);
+
+            setTimeout(() => {
+                notification.classList.add('opacity-0');
+                setTimeout(() => notification.remove(), 500);
+            }, 5000);
+        }
+
+        // Load status on page load
+        document.addEventListener('DOMContentLoaded', loadStatus);
+    </script>
+</body>
+</html>
