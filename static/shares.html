@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script>
+        if (!sessionStorage.getItem("loggedIn")) {
+            window.location.href = "/login.html";
+        }
+
+        const username = sessionStorage.getItem("username");
+        if (username) {
+            document.addEventListener('DOMContentLoaded', () => {
+                const userEl = document.getElementById('logged-in-user');
+                if (userEl) userEl.textContent = username;
+            });
+        }
+
+        async function logout() {
+            try {
+                await fetch('/api/logout', { method: 'POST' });
+            } catch (e) {}
+            sessionStorage.clear();
+            window.location.href = '/login.html';
+        }
+    </script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shares - Pi-Health Dashboard</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <script src="/js/api.js"></script>
+    <script src="/js/nav.js"></script>
+    <style>
+        .status-pill {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+        .status-healthy { background-color: rgba(52, 211, 153, 0.2); color: #34d399; border: 1px solid #34d399; }
+        .status-error { background-color: rgba(248, 113, 113, 0.2); color: #f87171; border: 1px solid #f87171; }
+        .status-unconfigured { background-color: rgba(156, 163, 175, 0.2); color: #9ca3af; border: 1px solid #9ca3af; }
+    </style>
+</head>
+<body class="bg-gray-900 text-blue-100 font-sans min-h-screen">
+    <header class="bg-gradient-to-r from-purple-900 to-blue-900 shadow-lg relative overflow-hidden">
+        <div class="absolute inset-0 overflow-hidden">
+            <img src="/theme-banner" alt="Dashboard" class="w-full h-full object-cover opacity-40 blur-sm" style="filter: hue-rotate(-10deg) saturate(1.15);">
+        </div>
+        <div class="container mx-auto px-8 py-12 relative">
+        </div>
+    </header>
+
+    <nav id="main-nav" class="bg-purple-900 shadow-md"></nav>
+
+    <div id="notification-area" class="fixed top-4 right-4 z-50 w-80 flex flex-col items-end"></div>
+
+    <main class="container mx-auto p-6">
+        <div class="mb-6">
+            <h2 class="text-2xl font-semibold">Shares</h2>
+            <p class="text-sm text-gray-400 mt-1">
+                Manage network share plugins like Samba. Enable or disable them on the
+                <a href="/plugins.html" class="text-purple-400 hover:underline">Plugins</a> page.
+            </p>
+        </div>
+
+        <div id="shares-list" class="space-y-4">
+            <div class="text-center py-10 text-gray-400">Loading share plugins...</div>
+        </div>
+    </main>
+
+    <script>
+        function statusClass(status) {
+            if (status === 'healthy') return 'status-healthy';
+            if (status === 'error') return 'status-error';
+            return 'status-unconfigured';
+        }
+
+        function showNotification(message, type = 'info') {
+            const area = document.getElementById('notification-area');
+            const notification = document.createElement('div');
+            notification.className = 'p-3 mb-2 rounded shadow-lg transform transition-all duration-300 opacity-0';
+            if (type === 'success') notification.classList.add('bg-green-600');
+            else if (type === 'error') notification.classList.add('bg-red-600');
+            else notification.classList.add('bg-blue-600');
+            notification.textContent = message;
+            area.appendChild(notification);
+            setTimeout(() => notification.classList.replace('opacity-0', 'opacity-100'), 10);
+            setTimeout(() => {
+                notification.classList.replace('opacity-100', 'opacity-0');
+                setTimeout(() => notification.remove(), 300);
+            }, 3000);
+        }
+
+        async function loadSharePlugins() {
+            try {
+                const res = await apiFetch('/api/storage/plugins');
+                const data = await res.json();
+                const shares = (data.plugins || []).filter(p => p.category === 'share');
+                renderShares(shares);
+            } catch (e) {
+                document.getElementById('shares-list').innerHTML =
+                    `<p class="text-red-400">Failed to load shares: ${e.message}</p>`;
+            }
+        }
+
+        function renderShares(plugins) {
+            const container = document.getElementById('shares-list');
+            if (!plugins.length) {
+                container.innerHTML = '<p class="text-gray-500">No share plugins available</p>';
+                return;
+            }
+
+            container.innerHTML = plugins.map(p => `
+                <div class="bg-gray-800 border border-purple-900/40 rounded-lg p-5">
+                    <div class="flex items-start justify-between">
+                        <div>
+                            <div class="flex items-center gap-3 mb-1">
+                                <h4 class="text-lg font-semibold">${escapeHtml(p.name)}</h4>
+                                <span class="status-pill ${statusClass(p.status)}">${p.status}</span>
+                            </div>
+                            <p class="text-sm text-gray-400 mb-2">${escapeHtml(p.description)}</p>
+                            <p class="text-xs text-gray-500">Version ${p.version}</p>
+                            ${p.source ? `<p class="text-xs text-gray-500 mt-1">Source: ${escapeHtml(p.source)}</p>` : ''}
+                            ${!p.enabled ? `<p class="text-xs text-yellow-300 mt-2">Plugin disabled</p>` : ''}
+                            ${!p.installed ? `
+                                <div class="mt-3 p-3 bg-yellow-900/20 border border-yellow-800 rounded">
+                                    <p class="text-sm text-yellow-300 mb-2">Missing dependencies</p>
+                                    <code class="text-xs bg-gray-900 px-2 py-1 rounded">${escapeHtml(p.install_instructions)}</code>
+                                </div>
+                            ` : ''}
+                        </div>
+                        <div class="text-xs text-gray-500">Manage on Plugins page</div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+
+        document.addEventListener('DOMContentLoaded', loadSharePlugins);
+    </script>
+</body>
+</html>

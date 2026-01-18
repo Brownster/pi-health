@@ -161,6 +161,13 @@ def init_plugins(config_dir: str) -> PluginRegistry:
         pass
 
     try:
+        from storage_plugins.samba_plugin import SambaPlugin
+        if enabled("samba"):
+            registry.register(SambaPlugin)
+    except Exception:
+        pass
+
+    try:
         import plugin_manager
         plugin_manager.register_third_party_plugins(registry)
     except Exception:

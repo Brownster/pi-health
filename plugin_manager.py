@@ -45,6 +45,13 @@ BUILTIN_DEFAULTS = [
         "type": "builtin",
         "enabled": False,
         "category": "mount"
+    },
+    {
+        "id": "samba",
+        "name": "Samba",
+        "type": "builtin",
+        "enabled": False,
+        "category": "share"
     }
 ]
 

@@ -21,7 +21,8 @@ const NAV_CONFIG = {
             children: [
                 { label: 'Disks', href: '/disks.html' },
                 { label: 'Mounts', href: '/mounts.html' },
-                { label: 'Pools', href: '/pools.html' }
+                { label: 'Pools', href: '/pools.html' },
+                { label: 'Shares', href: '/shares.html' }
             ]
         },
         { label: 'Plugins', href: '/plugins.html' },

@@ -960,6 +960,12 @@ def serve_mounts():
     return send_from_directory(app.static_folder, 'mounts.html')
 
 
+@app.route('/shares.html')
+def serve_shares():
+    """Serve the network shares page."""
+    return send_from_directory(app.static_folder, 'shares.html')
+
+
 @app.route('/plugins.html')
 def serve_plugins():
     """Serve the plugins page."""

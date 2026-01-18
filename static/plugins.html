@@ -181,12 +181,14 @@
     <script>
         const CATEGORY_LABELS = {
             'storage': 'Storage \u2192 Pools',
-            'mount': 'Storage \u2192 Mounts'
+            'mount': 'Storage \u2192 Mounts',
+            'share': 'Storage \u2192 Shares'
         };
 
         const CATEGORY_LINKS = {
             'storage': '/pools.html',
-            'mount': '/mounts.html'
+            'mount': '/mounts.html',
+            'share': '/shares.html'
         };
 
         function showNotification(message, type = 'info') {
@@ -227,6 +229,7 @@
             // Group plugins by category
             const storagePlugins = plugins.filter(p => p.category === 'storage');
             const mountPlugins = plugins.filter(p => p.category === 'mount');
+            const sharePlugins = plugins.filter(p => p.category === 'share');
 
             let html = '';
 
@@ -256,6 +259,21 @@
                         </h3>
                         <p class="text-sm text-gray-400 mb-3">Configure these plugins on the <a href="/mounts.html" class="text-purple-400 hover:underline">Mounts</a> page.</p>
                         ${mountPlugins.map(p => renderPluginCard(p)).join('')}
+                    </div>
+                `;
+            }
+
+            if (sharePlugins.length > 0) {
+                html += `
+                    <div class="mb-6">
+                        <h3 class="text-lg font-semibold mb-3 flex items-center">
+                            <svg class="w-5 h-5 mr-2 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7h8m-8 5h18m-10 5h10"></path>
+                            </svg>
+                            Network Shares
+                        </h3>
+                        <p class="text-sm text-gray-400 mb-3">Configure these plugins on the <a href="/shares.html" class="text-purple-400 hover:underline">Shares</a> page.</p>
+                        ${sharePlugins.map(p => renderPluginCard(p)).join('')}
                     </div>
                 `;
             }
