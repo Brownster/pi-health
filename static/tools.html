@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tools - Pi-Health Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="/css/styles.css">
+    <script src="/js/auth.js"></script>
+    <script src="/js/theme.js"></script>
+    <script src="/js/nav.js"></script>
+</head>
+<body class="bg-gray-900 text-gray-100">
+    <nav id="main-nav" class="bg-purple-900 shadow-md"></nav>
+
+    <div class="container mx-auto px-4 py-8">
+        <div class="flex items-center justify-between mb-6">
+            <h2 class="text-2xl font-semibold">Tools</h2>
+        </div>
+
+        <div class="bg-gray-800 border border-purple-900/40 rounded-lg p-6">
+            <div class="flex items-start justify-between gap-6">
+                <div class="flex-1">
+                    <div class="flex items-center gap-3 mb-2">
+                        <h3 class="text-xl font-semibold">CopyParty</h3>
+                        <span id="copyparty-status-pill" class="status-pill status-unconfigured">Unknown</span>
+                    </div>
+                    <p class="text-sm text-gray-400 mb-4">
+                        Lightweight file server for uploads, downloads, and file management.
+                    </p>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                        <div>
+                            <label class="block text-sm text-gray-300 mb-1">Share path</label>
+                            <input id="copyparty-share-path" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm" placeholder="/srv/copyparty">
+                        </div>
+                        <div>
+                            <label class="block text-sm text-gray-300 mb-1">Port</label>
+                            <input id="copyparty-port" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm" type="number" min="1" max="65535" placeholder="3923">
+                        </div>
+                        <div class="md:col-span-2">
+                            <label class="block text-sm text-gray-300 mb-1">Extra args (optional)</label>
+                            <input id="copyparty-extra-args" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm" placeholder="--listen 0.0.0.0">
+                        </div>
+                    </div>
+
+                    <div class="flex flex-wrap items-center gap-3">
+                        <button id="copyparty-install-btn" onclick="installCopyParty()"
+                                class="coraline-button text-blue-100 font-bold py-2 px-4 rounded">
+                            Install & Enable
+                        </button>
+                        <button onclick="saveCopyPartyConfig()"
+                                class="px-4 py-2 rounded bg-purple-700 hover:bg-purple-600 text-sm font-semibold">
+                            Save & Restart
+                        </button>
+                        <a id="copyparty-link" href="#" target="_blank"
+                           class="px-4 py-2 rounded bg-gray-700 hover:bg-gray-600 text-sm font-semibold">
+                            Open CopyParty
+                        </a>
+                    </div>
+                </div>
+
+                <div class="w-full md:w-64 bg-gray-900/60 border border-gray-700 rounded-lg p-4 text-sm">
+                    <h4 class="font-semibold mb-2">Status</h4>
+                    <p class="text-gray-400">Service: <span id="copyparty-service-status">Loading...</span></p>
+                    <p class="text-gray-400">Installed: <span id="copyparty-installed">Loading...</span></p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function showNotification(message, type = 'info') {
+            const notificationArea = document.getElementById('notification-area') || (() => {
+                const area = document.createElement('div');
+                area.id = 'notification-area';
+                area.className = 'fixed top-4 right-4 z-50 w-80 flex flex-col items-end';
+                document.body.appendChild(area);
+                return area;
+            })();
+
+            const notification = document.createElement('div');
+            notification.className = `mb-3 p-4 rounded shadow-lg text-white max-w-sm ${
+                type === 'error' ? 'bg-red-600' :
+                type === 'success' ? 'bg-green-600' : 'bg-blue-600'
+            }`;
+            notification.textContent = message;
+            notificationArea.appendChild(notification);
+            setTimeout(() => notification.remove(), 4000);
+        }
+
+        function statusPill(status) {
+            if (status === 'active') return 'status-healthy';
+            if (status === 'inactive') return 'status-degraded';
+            return 'status-unconfigured';
+        }
+
+        async function loadCopyParty() {
+            try {
+                const res = await fetch('/api/tools/copyparty/status');
+                const data = await res.json();
+                if (!res.ok) {
+                    throw new Error(data.error || 'Failed to load');
+                }
+
+                document.getElementById('copyparty-share-path').value = data.config.share_path || '/srv/copyparty';
+                document.getElementById('copyparty-port').value = data.config.port || 3923;
+                document.getElementById('copyparty-extra-args').value = data.config.extra_args || '';
+
+                document.getElementById('copyparty-service-status').textContent = data.service_status || 'unknown';
+                document.getElementById('copyparty-installed').textContent = data.installed ? 'Yes' : 'No';
+
+                const pill = document.getElementById('copyparty-status-pill');
+                pill.className = `status-pill ${statusPill(data.service_status)}`;
+                pill.textContent = data.service_status || 'unknown';
+
+                const link = document.getElementById('copyparty-link');
+                link.href = data.url || '#';
+                link.classList.toggle('opacity-50', !data.installed);
+                link.classList.toggle('pointer-events-none', !data.installed);
+            } catch (e) {
+                showNotification(`CopyParty error: ${e.message}`, 'error');
+            }
+        }
+
+        async function installCopyParty() {
+            try {
+                const res = await fetch('/api/tools/copyparty/install', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    throw new Error(data.error || 'Install failed');
+                }
+                showNotification('CopyParty installed', 'success');
+                await loadCopyParty();
+            } catch (e) {
+                showNotification(`Install failed: ${e.message}`, 'error');
+            }
+        }
+
+        async function saveCopyPartyConfig() {
+            const payload = {
+                share_path: document.getElementById('copyparty-share-path').value.trim(),
+                port: parseInt(document.getElementById('copyparty-port').value, 10),
+                extra_args: document.getElementById('copyparty-extra-args').value.trim()
+            };
+            try {
+                const res = await fetch('/api/tools/copyparty/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    throw new Error(data.error || 'Save failed');
+                }
+                showNotification('CopyParty configuration saved', 'success');
+                await loadCopyParty();
+            } catch (e) {
+                showNotification(`Save failed: ${e.message}`, 'error');
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            loadCopyParty();
+        });
+    </script>
+</body>
+</html>

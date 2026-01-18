@@ -32,6 +32,12 @@ const NAV_CONFIG = {
                 { label: 'Tailscale', href: '/tailscale.html' }
             ]
         },
+        {
+            label: 'Tools',
+            children: [
+                { label: 'CopyParty', href: '/tools.html' }
+            ]
+        },
         { label: 'Plugins', href: '/plugins.html' },
         { label: 'Settings', href: '/settings.html' }
     ]

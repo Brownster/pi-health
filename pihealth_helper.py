@@ -26,11 +26,18 @@ import shutil
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
+import urllib.request
+import urllib.error
+import shlex
 
 # Configuration
 SOCKET_PATH = '/run/pihealth/helper.sock'
 LOG_FILE = '/var/log/pihealth-helper.log'
 MAX_MESSAGE_SIZE = 65536
+COPY_PARTY_DIR = '/opt/copyparty'
+COPY_PARTY_SHARE = '/srv/copyparty'
+COPY_PARTY_UNIT = '/etc/systemd/system/copyparty.service'
+COPY_PARTY_ASSET_KEYWORDS = ('copyparty-sfx', 'copyparty')
 
 # Setup logging
 logging.basicConfig(
@@ -1968,6 +1975,140 @@ def _validate_plugin_id(plugin_id: str) -> bool:
     return bool(PLUGIN_ID_PATTERN.match(plugin_id))
 
 
+def _fetch_latest_copyparty_asset() -> str:
+    """Return the browser_download_url for the latest copyparty sfx asset."""
+    url = "https://api.github.com/repos/9001/copyparty/releases/latest"
+    request = urllib.request.Request(url, headers={"User-Agent": "pi-health"})
+    with urllib.request.urlopen(request, timeout=30) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+
+    for asset in payload.get("assets", []):
+        name = asset.get("name", "")
+        if not name.endswith(".py"):
+            continue
+        lower = name.lower()
+        if any(key in lower for key in COPY_PARTY_ASSET_KEYWORDS):
+            return asset.get("browser_download_url", "")
+
+    return ""
+
+
+def _write_copyparty_unit(share_path: str, port: int, extra_args: str) -> dict:
+    """Write systemd unit for CopyParty."""
+    os.makedirs(os.path.dirname(COPY_PARTY_UNIT), exist_ok=True)
+    os.makedirs(share_path, exist_ok=True)
+    os.makedirs(COPY_PARTY_DIR, exist_ok=True)
+
+    exec_start = ["/usr/bin/python3", os.path.join(COPY_PARTY_DIR, "copyparty-sfx.py")]
+    if port:
+        exec_start.extend(["--port", str(port)])
+    if extra_args:
+        exec_start.extend(shlex.split(extra_args))
+
+    unit_contents = "\n".join([
+        "[Unit]",
+        "Description=CopyParty File Server",
+        "After=network.target",
+        "",
+        "[Service]",
+        "Type=simple",
+        f"WorkingDirectory={share_path}",
+        f"ExecStart={' '.join(exec_start)}",
+        "Restart=on-failure",
+        "Environment=PYTHONUNBUFFERED=1",
+        "",
+        "[Install]",
+        "WantedBy=multi-user.target",
+        ""
+    ])
+
+    with open(COPY_PARTY_UNIT, "w") as handle:
+        handle.write(unit_contents)
+
+    reload_result = run_command(["systemctl", "daemon-reload"])
+    if reload_result.get("returncode") != 0:
+        return {'success': False, 'error': reload_result.get('stderr', 'daemon-reload failed')}
+
+    return {'success': True}
+
+
+def cmd_copyparty_install(params):
+    """Install CopyParty from the latest GitHub release."""
+    share_path = params.get("share_path", COPY_PARTY_SHARE).strip() or COPY_PARTY_SHARE
+    port = int(params.get("port", 3923) or 3923)
+    extra_args = params.get("extra_args", "").strip()
+
+    try:
+        download_url = _fetch_latest_copyparty_asset()
+    except (urllib.error.URLError, TimeoutError) as exc:
+        return {'success': False, 'error': f'Failed to fetch release info: {exc}'}
+
+    if not download_url:
+        return {'success': False, 'error': 'No CopyParty release asset found'}
+
+    os.makedirs(COPY_PARTY_DIR, exist_ok=True)
+    target_path = os.path.join(COPY_PARTY_DIR, "copyparty-sfx.py")
+
+    try:
+        request = urllib.request.Request(download_url, headers={"User-Agent": "pi-health"})
+        with urllib.request.urlopen(request, timeout=60) as response:
+            with open(target_path, "wb") as handle:
+                handle.write(response.read())
+    except (urllib.error.URLError, TimeoutError) as exc:
+        return {'success': False, 'error': f'Failed to download CopyParty: {exc}'}
+
+    os.chmod(target_path, 0o755)
+
+    unit_result = _write_copyparty_unit(share_path, port, extra_args)
+    if not unit_result.get('success'):
+        return unit_result
+
+    result = run_command(["systemctl", "enable", "--now", "copyparty.service"], timeout=60)
+    if result.get('returncode') != 0:
+        return {'success': False, 'error': result.get('stderr', 'Failed to start CopyParty')}
+
+    return {'success': True}
+
+
+def cmd_copyparty_configure(params):
+    """Update CopyParty configuration and restart."""
+    share_path = params.get("share_path", COPY_PARTY_SHARE).strip() or COPY_PARTY_SHARE
+    port = int(params.get("port", 3923) or 3923)
+    extra_args = params.get("extra_args", "").strip()
+
+    if not os.path.exists(os.path.join(COPY_PARTY_DIR, "copyparty-sfx.py")):
+        return {'success': False, 'error': 'CopyParty is not installed'}
+
+    unit_result = _write_copyparty_unit(share_path, port, extra_args)
+    if not unit_result.get('success'):
+        return unit_result
+
+    result = run_command(["systemctl", "restart", "copyparty.service"], timeout=60)
+    if result.get('returncode') != 0:
+        return {'success': False, 'error': result.get('stderr', 'Failed to restart CopyParty')}
+
+    return {'success': True}
+
+
+def cmd_copyparty_status(params):
+    """Return CopyParty status."""
+    installed = os.path.exists(os.path.join(COPY_PARTY_DIR, "copyparty-sfx.py"))
+    service_active = False
+    service_status = "unknown"
+
+    if os.path.exists(COPY_PARTY_UNIT):
+        result = run_command(["systemctl", "is-active", "copyparty.service"], timeout=10)
+        service_status = (result.get("stdout") or "").strip() or "unknown"
+        service_active = service_status == "active"
+
+    return {
+        'success': True,
+        'installed': installed,
+        'service_active': service_active,
+        'service_status': service_status
+    }
+
+
 def cmd_plugin_install(params):
     """Install a third-party plugin from GitHub or pip."""
     source_type = params.get('type', '').strip()
@@ -2098,6 +2239,9 @@ COMMANDS = {
     'rclone_remove': cmd_rclone_remove,
     'rclone_mount': cmd_rclone_mount,
     'rclone_unmount': cmd_rclone_unmount,
+    'copyparty_install': cmd_copyparty_install,
+    'copyparty_configure': cmd_copyparty_configure,
+    'copyparty_status': cmd_copyparty_status,
     'plugin_install': cmd_plugin_install,
     'plugin_remove': cmd_plugin_remove,
     'ping': lambda p: {'success': True, 'message': 'pong'}

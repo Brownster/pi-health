@@ -11,6 +11,7 @@ from urllib import request as urlrequest
 from stack_manager import stack_manager
 from auth_utils import login_required
 from catalog_manager import catalog_manager
+from tools_manager import tools_manager
 from storage_plugins import storage_bp
 from storage_plugins.registry import init_plugins
 from pi_monitor import get_pi_metrics
@@ -104,6 +105,7 @@ except Exception as e:
 
 app.register_blueprint(stack_manager)
 app.register_blueprint(catalog_manager)
+app.register_blueprint(tools_manager)
 app.register_blueprint(storage_bp)
 app.register_blueprint(update_scheduler)
 app.register_blueprint(backup_scheduler)
@@ -938,6 +940,12 @@ def serve_apps():
 def serve_stacks():
     """Serve the stacks management page."""
     return send_from_directory(app.static_folder, 'stacks.html')
+
+
+@app.route('/tools.html')
+def serve_tools():
+    """Serve the tools page."""
+    return send_from_directory(app.static_folder, 'tools.html')
 
 
 @app.route('/settings.html')

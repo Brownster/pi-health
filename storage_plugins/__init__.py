@@ -35,11 +35,15 @@ def toggle_plugin(plugin_id: str):
         plugin = registry.get(plugin_id)
         import_result = None
         import_error = None
-        if enabled and plugin and hasattr(plugin, "import_existing_shares"):
-            try:
-                import_result = plugin.import_existing_shares()
-            except Exception as exc:
-                import_error = str(exc)
+        # Try to import existing configurations when enabling
+        if enabled and plugin:
+            for import_method in ["import_existing_shares", "import_existing_mounts"]:
+                if hasattr(plugin, import_method):
+                    try:
+                        import_result = getattr(plugin, import_method)()
+                        break
+                    except Exception as exc:
+                        import_error = str(exc)
         response = {"status": "ok", "enabled": enabled}
         if import_result is not None:
             response["imported"] = import_result.data.get("imported", 0) if import_result.data else 0
@@ -250,6 +254,30 @@ def run_plugin_command(plugin_id: str, command_id: str):
             "X-Accel-Buffering": "no"
         }
     )
+
+
+@storage_bp.route("/api/storage/mounts/<plugin_id>/detect", methods=["POST"])
+@login_required
+def detect_mounts(plugin_id: str):
+    """Detect and import existing mounts for a plugin."""
+    registry = get_registry()
+    plugin = registry.get(plugin_id)
+
+    if not plugin:
+        return jsonify({"error": f"Plugin not found: {plugin_id}"}), 404
+
+    if not hasattr(plugin, 'import_existing_mounts'):
+        return jsonify({"error": "Plugin does not support mount detection"}), 400
+
+    try:
+        result = plugin.import_existing_mounts()
+        return jsonify({
+            "status": "ok",
+            "message": result.message,
+            "imported": result.data.get("imported", 0) if result.data else 0
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @storage_bp.route("/api/storage/mounts/<plugin_id>", methods=["GET"])

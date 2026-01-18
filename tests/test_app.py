@@ -223,6 +223,14 @@ class TestStaticPages:
         assert 'Plugins' in body
         assert 'plugins-list' in body
 
+    def test_tools_page(self, client):
+        """Test tools page loads."""
+        response = client.get('/tools.html')
+        assert response.status_code == 200
+        body = response.data.decode('utf-8')
+        assert 'Tools' in body
+        assert 'CopyParty' in body
+
     def test_settings_page_setup_hooks(self, client):
         """Test settings page has backup hooks (Tailscale moved to /tailscale.html)."""
         response = client.get('/settings.html')

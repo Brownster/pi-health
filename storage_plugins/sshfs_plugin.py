@@ -232,3 +232,104 @@ class SSHFSPlugin(RemoteMountPlugin):
         except HelperError:
             pass
         return super().remove_mount(mount_id)
+
+    def import_existing_mounts(self) -> MountResult:
+        """Import existing SSHFS mounts from /proc/mounts into plugin configuration."""
+        detected = self._detect_sshfs_mounts()
+        if not detected:
+            return MountResult(True, "No existing SSHFS mounts found", data={"imported": 0})
+
+        mounts = self.load_mounts()
+        existing_mount_points = {m.get('mount_point') for m in mounts}
+
+        new_mounts = []
+        for mount_info in detected:
+            if mount_info['mount_point'] not in existing_mount_points:
+                new_mounts.append(mount_info)
+
+        if not new_mounts:
+            return MountResult(True, "No new mounts to import", data={"imported": 0})
+
+        for mount_config in new_mounts:
+            mounts.append(mount_config)
+
+        self.save_mounts(mounts)
+        return MountResult(True, f"Imported {len(new_mounts)} existing mount(s)", data={"imported": len(new_mounts)})
+
+    def _detect_sshfs_mounts(self) -> list[dict]:
+        """Detect existing SSHFS mounts from /proc/mounts."""
+        mounts = []
+
+        try:
+            with open('/proc/mounts', 'r') as f:
+                for line in f:
+                    parts = line.strip().split()
+                    if len(parts) < 3:
+                        continue
+
+                    source = parts[0]
+                    mount_point = parts[1]
+                    fs_type = parts[2]
+
+                    # Check for fuse.sshfs
+                    if fs_type != 'fuse.sshfs':
+                        continue
+
+                    # Parse user@host:path format
+                    mount_info = self._parse_sshfs_source(source, mount_point)
+                    if mount_info:
+                        mounts.append(mount_info)
+
+        except Exception:
+            pass
+
+        return mounts
+
+    def _parse_sshfs_source(self, source: str, mount_point: str) -> dict | None:
+        """Parse sshfs source string (user@host:path) into config dict."""
+        # Format: user@host:path or user@host:port:path
+        try:
+            if ':' not in source or '@' not in source:
+                return None
+
+            user_host, remote_path = source.rsplit(':', 1)
+            if '@' not in user_host:
+                return None
+
+            username, host = user_host.split('@', 1)
+
+            # Handle host:port format
+            port = 22
+            if ':' in host:
+                host, port_str = host.rsplit(':', 1)
+                try:
+                    port = int(port_str)
+                except ValueError:
+                    pass
+
+            # Generate a safe ID from mount point
+            mount_id = mount_point.strip('/').replace('/', '-').lower()
+            if not mount_id:
+                mount_id = f"sshfs-{host}"
+
+            # Ensure ID is valid
+            mount_id = re.sub(r'[^a-z0-9-]', '-', mount_id)
+
+            return {
+                'id': mount_id,
+                'name': f"{username}@{host}:{remote_path}",
+                'host': host,
+                'port': port,
+                'username': username,
+                'remote_path': remote_path,
+                'mount_point': mount_point,
+                'auth_type': 'key',  # Assume key since it's already mounted
+                'enabled': True,
+                'imported': True,  # Mark as imported
+                'options': {
+                    'reconnect': True,
+                    'allow_other': True
+                }
+            }
+        except Exception:
+            return None

@@ -33,6 +33,7 @@ class MountResult:
     success: bool
     message: str
     error: Optional[str] = None
+    data: Optional[dict] = None
 
 
 class RemoteMountPlugin(ABC):

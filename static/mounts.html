@@ -367,11 +367,19 @@
                                 <h3 class="text-lg font-semibold">${escapeHtml(plugin.name)}</h3>
                                 <p class="text-sm text-gray-400">${escapeHtml(plugin.description)}</p>
                             </div>
-                            <button onclick="openAddMountModal('${plugin.id}')"
-                                    class="coraline-button py-2 px-4 rounded text-sm"
-                                    ${!plugin.installed ? 'disabled title="Install dependencies first"' : ''}>
-                                + Add Mount
-                            </button>
+                            <div class="flex gap-2">
+                                <button onclick="detectMounts('${plugin.id}')"
+                                        class="py-2 px-4 rounded text-sm border border-purple-700 text-purple-300 hover:bg-purple-900"
+                                        ${!plugin.installed ? 'disabled' : ''}
+                                        title="Detect existing mounts on this system">
+                                    Detect
+                                </button>
+                                <button onclick="openAddMountModal('${plugin.id}')"
+                                        class="coraline-button py-2 px-4 rounded text-sm"
+                                        ${!plugin.installed ? 'disabled title="Install dependencies first"' : ''}>
+                                    + Add Mount
+                                </button>
+                            </div>
                         </div>
 
                         ${!plugin.installed ? `
@@ -465,6 +473,24 @@
                 loadMountPlugins();
             } catch (e) {
                 showNotification('Remove failed: ' + e.message, 'error');
+            }
+        }
+
+        async function detectMounts(pluginId) {
+            try {
+                showNotification('Detecting existing mounts...', 'info');
+                const res = await apiFetch(`/api/storage/mounts/${pluginId}/detect`, { method: 'POST' });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error);
+
+                if (data.imported > 0) {
+                    showNotification(`Imported ${data.imported} mount(s)`, 'success');
+                    loadMountPlugins();
+                } else {
+                    showNotification(data.message || 'No new mounts found', 'info');
+                }
+            } catch (e) {
+                showNotification('Detection failed: ' + e.message, 'error');
             }
         }
 
