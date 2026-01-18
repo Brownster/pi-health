@@ -31,7 +31,22 @@ def toggle_plugin(plugin_id: str):
     try:
         import plugin_manager
         plugin_manager.set_enabled(plugin_id, enabled)
-        return jsonify({"status": "ok", "enabled": enabled})
+        registry = get_registry()
+        plugin = registry.get(plugin_id)
+        import_result = None
+        import_error = None
+        if enabled and plugin and hasattr(plugin, "import_existing_shares"):
+            try:
+                import_result = plugin.import_existing_shares()
+            except Exception as exc:
+                import_error = str(exc)
+        response = {"status": "ok", "enabled": enabled}
+        if import_result is not None:
+            response["imported"] = import_result.data.get("imported", 0) if import_result.data else 0
+            response["import_message"] = import_result.message
+        if import_error:
+            response["import_error"] = import_error
+        return jsonify(response)
     except Exception:
         pass
 

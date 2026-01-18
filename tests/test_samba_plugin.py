@@ -105,3 +105,45 @@ def test_status_configured(temp_config_dir):
         with patch.object(plugin, "_is_service_running", return_value=True):
             status = plugin.get_status()
     assert status["status"] == "healthy"
+
+
+def test_import_existing_shares(temp_config_dir, monkeypatch):
+    smb_conf = os.path.join(temp_config_dir, "smb.conf")
+    with open(smb_conf, "w") as handle:
+        handle.write(
+            """
+[global]
+   workgroup = WORKGROUP
+
+[media]
+   path = /mnt/media
+   read only = no
+   guest ok = yes
+   browseable = yes
+   valid users = pi,media
+
+[homes]
+   read only = no
+
+[docs]
+   path = /srv/docs
+   read only = yes
+   browseable = no
+   available = no
+"""
+        )
+
+    monkeypatch.setenv("SAMBA_CONFIG_PATH", smb_conf)
+    plugin = SambaPlugin(temp_config_dir)
+    result = plugin.import_existing_shares()
+    assert result.success is True
+    assert result.data["imported"] == 2
+
+    config = plugin.get_config()
+    names = {share["name"] for share in config.get("shares", [])}
+    assert names == {"media", "docs"}
+
+    docs = next(share for share in config["shares"] if share["name"] == "docs")
+    assert docs["read_only"] is True
+    assert docs["browseable"] is False
+    assert docs["enabled"] is False

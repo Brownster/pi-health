@@ -30,6 +30,7 @@ class SambaPlugin(StoragePlugin):
     def __init__(self, config_dir: str):
         super().__init__(config_dir)
         self._schema = None
+        self._smb_conf_path = os.environ.get("SAMBA_CONFIG_PATH", "/etc/samba/smb.conf")
 
     def get_schema(self) -> dict:
         if self._schema is None:
@@ -210,6 +211,86 @@ class SambaPlugin(StoragePlugin):
             "enabled_count": len(enabled_shares),
             "disabled_count": len(disabled_shares)
         }
+
+    def import_existing_shares(self) -> CommandResult:
+        """Import shares defined in smb.conf into plugin configuration."""
+        shares = self._parse_smb_conf(self._smb_conf_path)
+        if not shares:
+            return CommandResult(success=True, message="No existing shares found", data={"imported": 0})
+
+        config = self.get_config()
+        existing = {s.get("name") for s in config.get("shares", [])}
+        new_shares = [s for s in shares if s.get("name") not in existing]
+
+        if not new_shares:
+            return CommandResult(success=True, message="No new shares to import", data={"imported": 0})
+
+        config["shares"] = config.get("shares", []) + new_shares
+        result = self.set_config(config)
+        if not result.success:
+            return result
+        return CommandResult(success=True, message="Imported existing shares", data={"imported": len(new_shares)})
+
+    def _parse_smb_conf(self, path: str) -> list[dict]:
+        """Parse smb.conf and return share configs."""
+        if not os.path.exists(path):
+            return []
+
+        sections = {}
+        current = None
+
+        try:
+            with open(path, "r") as handle:
+                for raw_line in handle:
+                    line = raw_line.strip()
+                    if not line or line.startswith(("#", ";")):
+                        continue
+                    if line.startswith("[") and line.endswith("]"):
+                        current = line[1:-1].strip()
+                        sections[current] = {}
+                        continue
+                    if current and "=" in line:
+                        key, value = line.split("=", 1)
+                        key = key.strip().lower().replace(" ", "_")
+                        value = value.strip()
+                        sections[current][key] = value
+        except Exception:
+            return []
+
+        shares = []
+        skip_sections = {"global", "homes", "printers", "print$"}
+
+        for name, data in sections.items():
+            if name.lower() in skip_sections:
+                continue
+            path_value = data.get("path")
+            if not path_value:
+                continue
+
+            def to_bool(value: str, default: bool) -> bool:
+                if value is None:
+                    return default
+                return value.strip().lower() in {"yes", "true", "1"}
+
+            read_only = to_bool(data.get("read_only") or data.get("readonly"), False)
+            guest_ok = to_bool(data.get("guest_ok") or data.get("guest"), False)
+            browseable = to_bool(data.get("browseable") or data.get("browsable"), True)
+            enabled = to_bool(data.get("available"), True)
+            comment = data.get("comment", "").strip()
+            valid_users = data.get("valid_users", "").strip()
+
+            shares.append({
+                "name": name,
+                "path": path_value,
+                "comment": comment,
+                "read_only": read_only,
+                "guest_ok": guest_ok,
+                "browseable": browseable,
+                "valid_users": valid_users,
+                "enabled": enabled
+            })
+
+        return shares
 
     def _is_service_running(self) -> bool:
         """Check if smbd service is running."""
