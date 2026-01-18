@@ -38,7 +38,6 @@ const NAV_CONFIG = {
                 { label: 'CopyParty', href: '/tools.html' }
             ]
         },
-        { label: 'Plugins', href: '/plugins.html' },
         { label: 'Settings', href: '/settings.html' }
     ]
 };
