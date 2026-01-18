@@ -48,6 +48,23 @@ def test_update_config_roundtrip(authenticated_client, monkeypatch, tmp_path):
     assert data["repo_path"] == payload["repo_path"]
 
 
+def test_update_config_requires_auth(client):
+    response = client.get("/api/pihealth/update/config")
+    assert response.status_code == 401
+
+    response = client.post(
+        "/api/pihealth/update/config",
+        data=json.dumps({}),
+        content_type="application/json"
+    )
+    assert response.status_code == 401
+
+
+def test_update_requires_auth(client):
+    response = client.post("/api/pihealth/update")
+    assert response.status_code == 401
+
+
 def test_update_calls_helper(authenticated_client, monkeypatch):
     monkeypatch.setattr("app.helper_call", lambda *_args, **_kwargs: {"success": True})
     response = authenticated_client.post("/api/pihealth/update")

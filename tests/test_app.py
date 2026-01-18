@@ -249,6 +249,10 @@ class TestStaticPages:
         assert 'backup-run-now' in body
         assert 'backup-list' in body
         assert 'backup-plugins-list' in body
+        assert 'settings-pihealth-update' in body
+        assert 'pihealth-repo-path' in body
+        assert 'pihealth-service-name' in body
+        assert 'settings-updates-logs' in body
 
     def test_network_page(self, client):
         """Test host network page loads."""
