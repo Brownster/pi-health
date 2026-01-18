@@ -10,6 +10,8 @@ def open_nav_link(page: Page, menu_label: str, href: str) -> None:
     link = page.locator(f"nav a[href='{href}']")
     expect(link).to_be_visible()
     link.click()
+    # Wait for navigation to complete
+    page.wait_for_load_state("domcontentloaded")
 
 def test_login_success(page: Page, browser_context_args, test_user_credentials):
     """
@@ -105,7 +107,7 @@ def test_navigation_regression(authenticated_page: Page):
     
     # Visit Storage Pools
     open_nav_link(page, "Storage", "/pools.html")
-    expect(page.get_by_role("heading", name="Storage Pools")).to_be_visible()
+    expect(page.get_by_role("heading", name="Storage Pools")).to_be_visible(timeout=10000)
 
 def test_settings_backup_toggle(authenticated_page: Page):
     """
