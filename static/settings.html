@@ -758,7 +758,8 @@
                     return;
                 }
 
-                const stacks = await response.json();
+                const stacksData = await response.json();
+                const stacks = Array.isArray(stacksData) ? stacksData : (stacksData.stacks || []);
                 const container = document.getElementById('stacks-list');
 
                 if (stacks.length === 0) {
