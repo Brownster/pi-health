@@ -25,6 +25,7 @@ import signal
 import shutil
 from pathlib import Path
 from datetime import datetime
+from typing import Optional
 
 # Configuration
 SOCKET_PATH = '/run/pihealth/helper.sock'
@@ -1947,7 +1948,7 @@ def cmd_sshfs_unmount(params):
     return {'success': True}
 
 
-def _normalize_github_source(source: str) -> str | None:
+def _normalize_github_source(source: str) -> Optional[str]:
     if source.startswith(('http://', 'https://', 'git@')):
         return source
     if source.count('/') == 1:
