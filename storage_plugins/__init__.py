@@ -14,25 +14,71 @@ storage_bp = Blueprint("storage", __name__)
 @login_required
 def list_plugins():
     registry = get_registry()
-    return jsonify({"plugins": registry.list_plugins()})
+    try:
+        import plugin_manager
+        plugins = plugin_manager.list_plugins(registry)
+    except Exception:
+        plugins = registry.list_plugins()
+    return jsonify({"plugins": plugins})
 
 
 @storage_bp.route("/api/storage/plugins/<plugin_id>/toggle", methods=["POST"])
 @login_required
 def toggle_plugin(plugin_id: str):
-    """Enable or disable a plugin."""
-    registry = get_registry()
-    plugin = registry.get(plugin_id)
-
-    if not plugin:
-        return jsonify({"error": f"Plugin not found: {plugin_id}"}), 404
-
     data = request.get_json() or {}
-    enabled = data.get('enabled', True)
+    enabled = bool(data.get("enabled", False))
 
+    try:
+        import plugin_manager
+        plugin_manager.set_enabled(plugin_id, enabled)
+        return jsonify({"status": "ok", "enabled": enabled})
+    except Exception:
+        pass
+
+    registry = get_registry()
     if registry.set_plugin_enabled(plugin_id, enabled):
         return jsonify({"status": "ok", "enabled": enabled})
     return jsonify({"error": "Failed to update plugin state"}), 500
+
+
+@storage_bp.route("/api/storage/plugins/install", methods=["POST"])
+@login_required
+def install_plugin():
+    data = request.get_json() or {}
+    source_type = data.get("type", "").strip()
+    source = data.get("source", "").strip()
+    plugin_id = data.get("id", "").strip() or None
+    entry = data.get("entry", "").strip() or None
+    class_name = data.get("class_name", "").strip() or None
+
+    if not source_type or not source:
+        return jsonify({"error": "type and source are required"}), 400
+
+    try:
+        import plugin_manager
+        result = plugin_manager.install_plugin(source_type, source, plugin_id, entry, class_name)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+    if not result.get("success"):
+        return jsonify({"error": result.get("error", "Install failed")}), 400
+
+    return jsonify({"status": "installed", "plugin": result.get("plugin")})
+
+
+@storage_bp.route("/api/storage/plugins/<plugin_id>/remove", methods=["DELETE"])
+@login_required
+def remove_plugin(plugin_id: str):
+    try:
+        import plugin_manager
+        result = plugin_manager.remove_plugin(plugin_id)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+    if not result.get("success"):
+        return jsonify({"error": result.get("error", "Remove failed")}), 400
+
+    return jsonify({"status": "removed"})
 
 
 @storage_bp.route("/api/storage/plugins/<plugin_id>", methods=["GET"])

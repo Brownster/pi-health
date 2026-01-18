@@ -61,6 +61,9 @@ RCLONE_MOUNTS_CONFIG = '/etc/rclone/mounts.json'
 # SSHFS multi-mount configuration
 SSHFS_CONFIG_DIR = '/etc/sshfs'
 SSHFS_MOUNTS_CONFIG = '/etc/sshfs/mounts.json'
+PLUGIN_DIR = os.getenv("PIHEALTH_PLUGIN_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "plugins"))
+
+PLUGIN_ID_PATTERN = re.compile(r'^[a-zA-Z0-9._-]+$')
 
 
 def run_command(cmd, timeout=30):
@@ -1752,6 +1755,113 @@ def cmd_sshfs_unmount(params):
     return {'success': True}
 
 
+def _normalize_github_source(source: str) -> str | None:
+    if source.startswith(('http://', 'https://', 'git@')):
+        return source
+    if source.count('/') == 1:
+        return f"https://github.com/{source}.git"
+    return None
+
+
+def _derive_plugin_id(source: str) -> str:
+    cleaned = source.rstrip('/')
+    name = cleaned.split('/')[-1]
+    if name.endswith('.git'):
+        name = name[:-4]
+    return name
+
+
+def _validate_plugin_id(plugin_id: str) -> bool:
+    return bool(PLUGIN_ID_PATTERN.match(plugin_id))
+
+
+def cmd_plugin_install(params):
+    """Install a third-party plugin from GitHub or pip."""
+    source_type = params.get('type', '').strip()
+    source = params.get('source', '').strip()
+    plugin_id = params.get('id', '').strip()
+
+    if not source_type or not source:
+        return {'success': False, 'error': 'type and source required'}
+
+    if source_type == 'github':
+        if not plugin_id:
+            plugin_id = _derive_plugin_id(source)
+        if not plugin_id or not _validate_plugin_id(plugin_id):
+            return {'success': False, 'error': 'Invalid plugin ID'}
+
+        normalized = _normalize_github_source(source)
+        if not normalized:
+            return {'success': False, 'error': 'Invalid GitHub source'}
+
+        os.makedirs(PLUGIN_DIR, exist_ok=True)
+        plugin_path = os.path.join(PLUGIN_DIR, plugin_id)
+        if os.path.exists(plugin_path):
+            return {'success': False, 'error': 'Plugin already installed'}
+
+        deps = _ensure_dependencies(
+            ['git'],
+            {
+                'apt-get': ['git'],
+                'dnf': ['git'],
+                'pacman': ['git']
+            }
+        )
+        if not deps.get('success'):
+            return deps
+
+        result = run_command(['git', 'clone', '--depth', '1', normalized, plugin_path], timeout=600)
+        if result.get('returncode') != 0:
+            return {'success': False, 'error': result.get('stderr', 'Failed to clone repo')}
+
+        return {'success': True, 'id': plugin_id}
+
+    if source_type == 'pip':
+        try:
+            version_check = run_command([sys.executable, '-m', 'pip', '--version'])
+        except Exception:
+            version_check = {'returncode': 1}
+        if version_check.get('returncode') != 0:
+            return {'success': False, 'error': 'pip is not available'}
+
+        result = run_command([sys.executable, '-m', 'pip', 'install', source], timeout=1200)
+        if result.get('returncode') != 0:
+            return {'success': False, 'error': result.get('stderr', 'pip install failed')}
+        return {'success': True, 'id': plugin_id or source}
+
+    return {'success': False, 'error': 'Unsupported plugin type'}
+
+
+def cmd_plugin_remove(params):
+    """Remove a third-party plugin."""
+    plugin_id = params.get('id', '').strip()
+    source_type = params.get('type', '').strip()
+    source = params.get('source', '').strip()
+
+    if not plugin_id and source_type == 'github':
+        return {'success': False, 'error': 'Plugin ID required'}
+
+    if source_type == 'github':
+        if not _validate_plugin_id(plugin_id):
+            return {'success': False, 'error': 'Invalid plugin ID'}
+
+        plugin_path = os.path.join(PLUGIN_DIR, plugin_id)
+        if os.path.exists(plugin_path):
+            shutil.rmtree(plugin_path)
+        return {'success': True}
+
+    if source_type == 'pip':
+        package = source or plugin_id
+        if not package:
+            return {'success': False, 'error': 'Package name required'}
+        result = run_command([sys.executable, '-m', 'pip', 'uninstall', '-y', package], timeout=600)
+        if result.get('returncode') != 0:
+            return {'success': False, 'error': result.get('stderr', 'pip uninstall failed')}
+        return {'success': True}
+
+    return {'success': False, 'error': 'Unsupported plugin type'}
+
+
 # Command whitelist
 COMMANDS = {
     'lsblk': cmd_lsblk,
@@ -1791,6 +1901,8 @@ COMMANDS = {
     'rclone_remove': cmd_rclone_remove,
     'rclone_mount': cmd_rclone_mount,
     'rclone_unmount': cmd_rclone_unmount,
+    'plugin_install': cmd_plugin_install,
+    'plugin_remove': cmd_plugin_remove,
     'ping': lambda p: {'success': True, 'message': 'pong'}
 }
 

@@ -62,9 +62,11 @@ class PluginRegistry:
                     "message": f"{mounted}/{len(mounts)} mounted" if mounts else "No mounts configured"
                 }
                 configured = len(mounts) > 0
+                category = getattr(plugin, 'PLUGIN_CATEGORY', 'mount')
             else:
                 status = plugin.get_status()
                 configured = status.get("status") != "unconfigured"
+                category = getattr(plugin, 'PLUGIN_CATEGORY', 'storage')
 
             # Get enabled state from plugin config
             enabled = self._get_plugin_enabled(plugin_id)
@@ -74,7 +76,7 @@ class PluginRegistry:
                 "name": plugin.PLUGIN_NAME,
                 "description": plugin.PLUGIN_DESCRIPTION,
                 "version": plugin.PLUGIN_VERSION,
-                "category": getattr(plugin, 'PLUGIN_CATEGORY', 'storage'),
+                "category": category,
                 "installed": plugin.is_installed(),
                 "install_instructions": plugin.get_install_instructions(),
                 "enabled": enabled,
@@ -86,31 +88,18 @@ class PluginRegistry:
 
     def _get_plugin_enabled(self, plugin_id: str) -> bool:
         """Get plugin enabled state from config."""
-        import json
-        enabled_path = os.path.join(self.config_dir, "plugins_enabled.json")
         try:
-            if os.path.exists(enabled_path):
-                with open(enabled_path, 'r') as f:
-                    data = json.load(f)
-                    return data.get(plugin_id, True)
+            import plugin_manager
+            return plugin_manager.is_enabled(plugin_id)
         except Exception:
             pass
-        return True  # Enabled by default
+        return True
 
     def set_plugin_enabled(self, plugin_id: str, enabled: bool) -> bool:
         """Set plugin enabled state."""
-        import json
-        if plugin_id not in self._plugins:
-            return False
-        enabled_path = os.path.join(self.config_dir, "plugins_enabled.json")
         try:
-            data = {}
-            if os.path.exists(enabled_path):
-                with open(enabled_path, 'r') as f:
-                    data = json.load(f)
-            data[plugin_id] = enabled
-            with open(enabled_path, 'w') as f:
-                json.dump(data, f, indent=2)
+            import plugin_manager
+            plugin_manager.set_enabled(plugin_id, enabled)
             return True
         except Exception:
             return False
@@ -137,28 +126,43 @@ def get_registry(config_dir: str = None) -> PluginRegistry:
 
 def init_plugins(config_dir: str) -> PluginRegistry:
     registry = get_registry(config_dir)
+    try:
+        import plugin_manager
+        enabled = plugin_manager.is_enabled
+    except Exception:
+        enabled = lambda _id: True
 
     try:
         from storage_plugins.snapraid_plugin import SnapRAIDPlugin
-        registry.register(SnapRAIDPlugin)
+        if enabled("snapraid"):
+            registry.register(SnapRAIDPlugin)
     except Exception:
         pass
 
     try:
         from storage_plugins.mergerfs_plugin import MergerFSPlugin
-        registry.register(MergerFSPlugin)
+        if enabled("mergerfs"):
+            registry.register(MergerFSPlugin)
     except Exception:
         pass
 
     try:
         from storage_plugins.sshfs_plugin import SSHFSPlugin
-        registry.register(SSHFSPlugin)
+        if enabled("sshfs"):
+            registry.register(SSHFSPlugin)
     except Exception:
         pass
 
     try:
         from storage_plugins.rclone_plugin import RclonePlugin
-        registry.register(RclonePlugin)
+        if enabled("rclone"):
+            registry.register(RclonePlugin)
+    except Exception:
+        pass
+
+    try:
+        import plugin_manager
+        plugin_manager.register_third_party_plugins(registry)
     except Exception:
         pass
 

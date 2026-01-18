@@ -46,6 +46,7 @@ class RemoteMountPlugin(ABC):
     PLUGIN_VERSION: str = "1.0.0"
     PLUGIN_DESCRIPTION: str = ""
     PLUGIN_CATEGORY: str = "mount"  # UI appears on Mounts page
+    PLUGIN_ENABLED_DEFAULT: bool = True  # Whether plugin is enabled by default
     REQUIRED_PACKAGES: list[str] = []
 
     def __init__(self, config_dir: str):

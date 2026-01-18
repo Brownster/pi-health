@@ -120,10 +120,63 @@
             </p>
         </div>
 
+        <div class="mb-6 flex items-center justify-between">
+            <p class="text-sm text-gray-400">Install third-party plugins from GitHub or pip.</p>
+            <button onclick="openInstallModal()" class="coraline-button text-blue-100 font-bold py-2 px-4 rounded">+ Add Plugin</button>
+        </div>
+
         <div id="plugins-list" class="space-y-4">
             <div class="text-center py-10 text-gray-400">Loading plugins...</div>
         </div>
     </main>
+
+    <div id="install-modal" class="hidden fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4">
+        <div class="bg-gray-800 w-full max-w-lg rounded-lg shadow-xl border border-purple-900">
+            <div class="p-4 border-b border-purple-800 flex justify-between items-center">
+                <h3 class="text-xl font-semibold">Install Plugin</h3>
+                <button onclick="closeInstallModal()" class="text-gray-400 hover:text-white">&times;</button>
+            </div>
+            <form id="install-form" class="p-4 space-y-4">
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">Source Type</label>
+                    <select name="type" onchange="toggleInstallType(this.value)"
+                            class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white">
+                        <option value="github">GitHub Repo</option>
+                        <option value="pip">pip Package</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">Source</label>
+                    <input type="text" name="source" required placeholder="https://github.com/org/repo"
+                           class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white">
+                </div>
+                <div id="plugin-id-field">
+                    <label class="block text-sm text-gray-400 mb-1">Plugin ID (optional)</label>
+                    <input type="text" name="id" placeholder="my-plugin"
+                           class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white">
+                </div>
+                <div id="pip-fields" class="hidden space-y-3">
+                    <div>
+                        <label class="block text-sm text-gray-400 mb-1">Module Entry</label>
+                        <input type="text" name="entry" placeholder="my_plugin.module"
+                               class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white">
+                    </div>
+                    <div>
+                        <label class="block text-sm text-gray-400 mb-1">Class Name</label>
+                        <input type="text" name="class_name" placeholder="MyPlugin"
+                               class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white">
+                    </div>
+                </div>
+                <div class="text-xs text-gray-500">
+                    GitHub plugins must include a <code>pihealth_plugin.json</code> manifest at the repo root.
+                </div>
+            </form>
+            <div class="p-4 border-t border-purple-800 flex justify-end gap-3">
+                <button onclick="closeInstallModal()" class="px-4 py-2 text-gray-400 hover:text-white">Cancel</button>
+                <button onclick="submitInstall()" class="coraline-button px-4 py-2 rounded">Install</button>
+            </div>
+        </div>
+    </div>
 
     <script>
         const CATEGORY_LABELS = {
@@ -224,6 +277,7 @@
                             </div>
                             <p class="text-sm text-gray-400 mb-2">${escapeHtml(p.description)}</p>
                             <p class="text-xs text-gray-500">Version ${p.version}</p>
+                            ${p.source ? `<p class="text-xs text-gray-500 mt-1">Source: ${escapeHtml(p.source)}</p>` : ''}
 
                             ${!p.installed ? `
                                 <div class="mt-3 p-3 bg-yellow-900/20 border border-yellow-800 rounded">
@@ -240,6 +294,9 @@
                         </div>
 
                         <div class="flex items-center gap-4 ml-4">
+                            ${p.type && p.type !== 'builtin' ? `
+                                <button onclick="removePlugin('${p.id}')" class="text-xs text-red-300 hover:text-red-200">Remove</button>
+                            ` : ''}
                             <label class="toggle-switch">
                                 <input type="checkbox" ${p.enabled ? 'checked' : ''}
                                        onchange="togglePlugin('${p.id}', this.checked)">
@@ -267,6 +324,77 @@
             } catch (e) {
                 showNotification('Failed: ' + e.message, 'error');
                 loadPlugins();
+            }
+        }
+
+        function openInstallModal() {
+            document.getElementById('install-modal').classList.remove('hidden');
+        }
+
+        function closeInstallModal() {
+            document.getElementById('install-modal').classList.add('hidden');
+            document.getElementById('install-form').reset();
+            toggleInstallType('github');
+        }
+
+        function toggleInstallType(type) {
+            const sourceInput = document.querySelector('#install-form input[name="source"]');
+            const pipFields = document.getElementById('pip-fields');
+            const entryInput = document.querySelector('#install-form input[name="entry"]');
+            const classInput = document.querySelector('#install-form input[name="class_name"]');
+            if (sourceInput) {
+                sourceInput.placeholder = type === 'pip' ? 'pihealth-plugin-foo' : 'https://github.com/org/repo';
+            }
+            if (pipFields && entryInput && classInput) {
+                if (type === 'pip') {
+                    pipFields.classList.remove('hidden');
+                    entryInput.required = true;
+                    classInput.required = true;
+                } else {
+                    pipFields.classList.add('hidden');
+                    entryInput.required = false;
+                    classInput.required = false;
+                }
+            }
+        }
+
+        async function submitInstall() {
+            const form = document.getElementById('install-form');
+            const formData = new FormData(form);
+            const payload = Object.fromEntries(formData.entries());
+
+            try {
+                const res = await apiFetch('/api/storage/plugins/install', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    throw new Error(data.error || 'Install failed');
+                }
+                showNotification('Plugin installed (restart to load)', 'success');
+                closeInstallModal();
+                loadPlugins();
+            } catch (e) {
+                showNotification(e.message, 'error');
+            }
+        }
+
+        async function removePlugin(pluginId) {
+            if (!confirm('Remove this plugin?')) {
+                return;
+            }
+            try {
+                const res = await apiFetch(`/api/storage/plugins/${pluginId}/remove`, { method: 'DELETE' });
+                const data = await res.json();
+                if (!res.ok) {
+                    throw new Error(data.error || 'Remove failed');
+                }
+                showNotification('Plugin removed (restart to unload)', 'success');
+                loadPlugins();
+            } catch (e) {
+                showNotification(e.message, 'error');
             }
         }
 
