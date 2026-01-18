@@ -329,16 +329,19 @@ def get_temperature_fallback():
 
 def get_system_stats():
     """Gather system statistics including CPU, memory, disk, and network."""
-    # CPU usage
-    try:
-        with open('/host_proc/stat', 'r') as f:
-            stat_lines = f.readlines()
-            cpu_line = stat_lines[0].split() if stat_lines else []
-            cpu_usage = calculate_cpu_usage(cpu_line) if cpu_line else None
-            per_core = get_cpu_usage_per_core(stat_lines)
-    except Exception:
-        cpu_usage = None
-        per_core = []
+    # CPU usage - try /host_proc/stat first (Docker), then fall back to /proc/stat
+    cpu_usage = None
+    per_core = []
+    for stat_path in ['/host_proc/stat', '/proc/stat']:
+        try:
+            with open(stat_path, 'r') as f:
+                stat_lines = f.readlines()
+                cpu_line = stat_lines[0].split() if stat_lines else []
+                cpu_usage = calculate_cpu_usage(cpu_line) if cpu_line else None
+                per_core = get_cpu_usage_per_core(stat_lines)
+                break  # Success, no need to try fallback
+        except Exception:
+            continue
 
     # Memory usage
     memory = psutil.virtual_memory()
