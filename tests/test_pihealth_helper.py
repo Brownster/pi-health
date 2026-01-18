@@ -182,3 +182,31 @@ class TestRequestHandling:
     def test_handle_request_ping(self):
         result = helper.handle_request('{"command":"ping"}')
         assert result["success"] is True
+
+
+class TestNetworkInfo:
+    @patch("pihealth_helper.run_command")
+    def test_cmd_network_info_parses_interfaces(self, mock_run):
+        mock_run.side_effect = [
+            {
+                "returncode": 0,
+                "stdout": '[{"ifname":"eth0","operstate":"UP","address":"00:11",'
+                          '"mtu":1500,"addr_info":[{"family":"inet","local":"192.168.1.2","prefixlen":24}]}]'
+            },
+            {
+                "returncode": 0,
+                "stdout": '[{"gateway":"192.168.1.1","dev":"eth0"}]'
+            },
+            {
+                "returncode": 0,
+                "stdout": "1.2.3.4"
+            }
+        ]
+
+        with patch("builtins.open", mock_open(read_data="nameserver 8.8.8.8\n")):
+            result = helper.cmd_network_info({})
+
+        assert result["success"] is True
+        assert result["interfaces"]
+        assert result["default_gateway"]["ip"] == "192.168.1.1"
+        assert "8.8.8.8" in result["dns_servers"]

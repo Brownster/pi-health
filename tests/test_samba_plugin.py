@@ -102,5 +102,6 @@ def test_status_configured(temp_config_dir):
     plugin = SambaPlugin(temp_config_dir)
     plugin.set_config(sample_config())
     with patch("storage_plugins.samba_plugin.shutil.which", return_value="/usr/sbin/smbd"):
-        status = plugin.get_status()
+        with patch.object(plugin, "_is_service_running", return_value=True):
+            status = plugin.get_status()
     assert status["status"] == "healthy"

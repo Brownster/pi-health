@@ -30,6 +30,21 @@
     <script src="/js/api.js"></script>
     <script src="/js/nav.js"></script>
     <style>
+        .coraline-button {
+            background: linear-gradient(to bottom, #5f4b8b, #372b53);
+            border: 1px solid #8a6cbd;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.25);
+            transition: all 0.3s ease;
+        }
+        .coraline-button:hover:not(:disabled) {
+            background: linear-gradient(to bottom, #6f58a3, #413162);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 10px rgba(0, 0, 0, 0.3);
+        }
+        .coraline-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
         .status-pill {
             display: inline-block;
             padding: 0.25rem 0.75rem;
@@ -38,8 +53,48 @@
             font-weight: 500;
         }
         .status-healthy { background-color: rgba(52, 211, 153, 0.2); color: #34d399; border: 1px solid #34d399; }
+        .status-degraded { background-color: rgba(251, 191, 36, 0.2); color: #fbbf24; border: 1px solid #fbbf24; }
         .status-error { background-color: rgba(248, 113, 113, 0.2); color: #f87171; border: 1px solid #f87171; }
         .status-unconfigured { background-color: rgba(156, 163, 175, 0.2); color: #9ca3af; border: 1px solid #9ca3af; }
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 44px;
+            height: 24px;
+        }
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #4b5563;
+            transition: 0.3s;
+            border-radius: 24px;
+        }
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: 0.3s;
+            border-radius: 50%;
+        }
+        input:checked + .toggle-slider {
+            background-color: #8b5cf6;
+        }
+        input:checked + .toggle-slider:before {
+            transform: translateX(20px);
+        }
     </style>
 </head>
 <body class="bg-gray-900 text-blue-100 font-sans min-h-screen">
@@ -59,30 +114,152 @@
         <div class="mb-6">
             <h2 class="text-2xl font-semibold">Shares</h2>
             <p class="text-sm text-gray-400 mt-1">
-                Manage network share plugins like Samba. Enable or disable them on the
+                Manage network shares (Samba/SMB). Enable plugins on the
                 <a href="/plugins.html" class="text-purple-400 hover:underline">Plugins</a> page.
             </p>
         </div>
 
-        <div id="shares-list" class="space-y-4">
-            <div class="text-center py-10 text-gray-400">Loading share plugins...</div>
+        <!-- Loading State -->
+        <div id="loading-state" class="text-center py-10 text-gray-400">
+            <svg class="animate-spin h-8 w-8 mx-auto mb-4 text-purple-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            Loading share plugins...
+        </div>
+
+        <!-- Share Plugins Content -->
+        <div id="shares-content" class="hidden space-y-6">
+            <!-- Dynamically populated -->
         </div>
     </main>
 
+    <!-- Add/Edit Share Modal -->
+    <div id="share-modal" class="hidden fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4" onclick="if(event.target === this) closeShareModal()">
+        <div class="bg-gray-800 w-full max-w-lg rounded-lg shadow-xl border border-purple-900" onclick="event.stopPropagation()">
+            <div class="flex justify-between items-center p-4 border-b border-purple-800">
+                <h3 id="modal-title" class="text-xl font-semibold">Add Share</h3>
+                <button onclick="closeShareModal()" class="text-gray-400 hover:text-white text-2xl">&times;</button>
+            </div>
+            <form id="share-form" class="p-4 space-y-4" onsubmit="saveShare(event)">
+                <input type="hidden" id="share-plugin-id">
+                <input type="hidden" id="share-edit-mode">
+                <input type="hidden" id="share-original-name">
+
+                <div>
+                    <label class="block text-sm text-gray-300 mb-1">Share Name *</label>
+                    <input type="text" id="share-name" required pattern="^[a-zA-Z0-9._-]+$"
+                           class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white"
+                           placeholder="e.g., media, documents">
+                    <p class="text-xs text-gray-500 mt-1">Letters, numbers, dots, underscores, hyphens only</p>
+                </div>
+
+                <div>
+                    <label class="block text-sm text-gray-300 mb-1">Path *</label>
+                    <input type="text" id="share-path" required
+                           class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white"
+                           placeholder="/mnt/storage/media">
+                    <p class="text-xs text-gray-500 mt-1">Absolute path to the directory to share</p>
+                </div>
+
+                <div>
+                    <label class="block text-sm text-gray-300 mb-1">Description</label>
+                    <input type="text" id="share-comment"
+                           class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white"
+                           placeholder="Media files">
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="flex items-center justify-between bg-gray-700/50 rounded p-3">
+                        <span class="text-sm text-gray-300">Read Only</span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="share-readonly">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <div class="flex items-center justify-between bg-gray-700/50 rounded p-3">
+                        <span class="text-sm text-gray-300">Guest Access</span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="share-guest">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <div class="flex items-center justify-between bg-gray-700/50 rounded p-3">
+                        <span class="text-sm text-gray-300">Browseable</span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="share-browseable" checked>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <div class="flex items-center justify-between bg-gray-700/50 rounded p-3">
+                        <span class="text-sm text-gray-300">Enabled</span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="share-enabled" checked>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-sm text-gray-300 mb-1">Valid Users (optional)</label>
+                    <input type="text" id="share-users"
+                           class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white"
+                           placeholder="user1, user2">
+                    <p class="text-xs text-gray-500 mt-1">Comma-separated list of allowed users (leave empty for all)</p>
+                </div>
+
+                <div class="flex justify-end gap-3 pt-4 border-t border-gray-700">
+                    <button type="button" onclick="closeShareModal()" class="px-4 py-2 text-gray-400 hover:text-white">Cancel</button>
+                    <button type="submit" class="coraline-button px-6 py-2 rounded text-white">Save Share</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Command Output Modal -->
+    <div id="output-modal" class="hidden fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4">
+        <div class="bg-gray-900 w-full max-w-2xl rounded-lg shadow-xl border border-purple-900 flex flex-col max-h-[80vh]">
+            <div class="flex justify-between items-center p-4 border-b border-purple-800">
+                <h3 id="output-modal-title" class="text-xl font-semibold">Command Output</h3>
+                <button onclick="closeOutputModal()" class="text-gray-400 hover:text-white text-2xl">&times;</button>
+            </div>
+            <div class="p-4 overflow-y-auto flex-1 bg-gray-950">
+                <pre id="output-content" class="text-sm font-mono text-green-400 whitespace-pre-wrap"></pre>
+            </div>
+            <div class="p-4 border-t border-purple-800">
+                <button onclick="closeOutputModal()" class="coraline-button px-4 py-2 rounded">Close</button>
+            </div>
+        </div>
+    </div>
+
     <script>
+        let sharePlugins = [];
+
         function statusClass(status) {
             if (status === 'healthy') return 'status-healthy';
+            if (status === 'degraded') return 'status-degraded';
             if (status === 'error') return 'status-error';
             return 'status-unconfigured';
         }
 
+        function escapeHtml(str) {
+            if (!str) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+
         function showNotification(message, type = 'info') {
             const area = document.getElementById('notification-area');
+            const colors = {
+                success: 'bg-green-600',
+                error: 'bg-red-600',
+                info: 'bg-blue-600'
+            };
             const notification = document.createElement('div');
-            notification.className = 'p-3 mb-2 rounded shadow-lg transform transition-all duration-300 opacity-0';
-            if (type === 'success') notification.classList.add('bg-green-600');
-            else if (type === 'error') notification.classList.add('bg-red-600');
-            else notification.classList.add('bg-blue-600');
+            notification.className = `${colors[type] || colors.info} p-3 mb-2 rounded shadow-lg transform transition-all duration-300 opacity-0`;
             notification.textContent = message;
             area.appendChild(notification);
             setTimeout(() => notification.classList.replace('opacity-0', 'opacity-100'), 10);
@@ -96,55 +273,338 @@
             try {
                 const res = await apiFetch('/api/storage/plugins');
                 const data = await res.json();
-                const shares = (data.plugins || []).filter(p => p.category === 'share');
-                renderShares(shares);
+                sharePlugins = (data.plugins || []).filter(p => p.category === 'share' && p.enabled);
+
+                document.getElementById('loading-state').classList.add('hidden');
+                document.getElementById('shares-content').classList.remove('hidden');
+
+                if (sharePlugins.length === 0) {
+                    document.getElementById('shares-content').innerHTML = `
+                        <div class="bg-gray-800 border border-purple-900/40 rounded-lg p-6 text-center">
+                            <p class="text-gray-400 mb-4">No share plugins enabled.</p>
+                            <a href="/plugins.html" class="text-purple-400 hover:underline">Enable plugins on the Plugins page</a>
+                        </div>
+                    `;
+                    return;
+                }
+
+                renderSharePlugins();
             } catch (e) {
-                document.getElementById('shares-list').innerHTML =
+                document.getElementById('loading-state').innerHTML =
                     `<p class="text-red-400">Failed to load shares: ${e.message}</p>`;
             }
         }
 
-        function renderShares(plugins) {
-            const container = document.getElementById('shares-list');
-            if (!plugins.length) {
-                container.innerHTML = '<p class="text-gray-500">No share plugins available</p>';
+        async function renderSharePlugins() {
+            const container = document.getElementById('shares-content');
+            let html = '';
+
+            for (const plugin of sharePlugins) {
+                // Fetch detailed share info
+                let shareData = { shares: [], service_running: false, status: 'unknown' };
+                try {
+                    const res = await apiFetch(`/api/storage/shares/${plugin.id}`);
+                    shareData = await res.json();
+                } catch (e) {
+                    console.error(`Failed to load shares for ${plugin.id}:`, e);
+                }
+
+                const serviceStatus = shareData.service_running
+                    ? '<span class="status-pill status-healthy">Service Running</span>'
+                    : '<span class="status-pill status-error">Service Stopped</span>';
+
+                html += `
+                    <section class="bg-gray-800 border border-purple-900/40 rounded-lg p-6">
+                        <div class="flex items-center justify-between mb-4">
+                            <div>
+                                <div class="flex items-center gap-3 mb-1">
+                                    <h3 class="text-lg font-semibold">${escapeHtml(plugin.name)}</h3>
+                                    ${serviceStatus}
+                                    <span class="status-pill ${statusClass(shareData.status)}">${shareData.status}</span>
+                                </div>
+                                <p class="text-sm text-gray-400">${escapeHtml(plugin.description)}</p>
+                            </div>
+                            <div class="flex gap-2">
+                                <button onclick="runPluginCommand('${plugin.id}', 'apply')"
+                                        class="px-3 py-1 text-sm border border-purple-700 text-purple-300 rounded hover:bg-purple-900"
+                                        title="Generate configuration file">
+                                    Apply Config
+                                </button>
+                                <button onclick="runPluginCommand('${plugin.id}', 'restart')"
+                                        class="px-3 py-1 text-sm border border-yellow-700 text-yellow-300 rounded hover:bg-yellow-900/30"
+                                        title="Restart Samba service">
+                                    Restart Service
+                                </button>
+                                <button onclick="openAddShareModal('${plugin.id}')"
+                                        class="coraline-button px-4 py-1 rounded text-sm"
+                                        ${!plugin.installed ? 'disabled title="Install Samba first"' : ''}>
+                                    + Add Share
+                                </button>
+                            </div>
+                        </div>
+
+                        ${!plugin.installed ? `
+                            <div class="p-3 bg-yellow-900/20 border border-yellow-800 rounded mb-4">
+                                <p class="text-sm text-yellow-300">Install required packages:</p>
+                                <code class="text-xs">${escapeHtml(plugin.install_instructions)}</code>
+                            </div>
+                        ` : ''}
+
+                        <div class="space-y-3" id="shares-${plugin.id}">
+                            ${shareData.shares.length === 0
+                                ? '<p class="text-gray-500 text-sm py-4">No shares configured. Click "Add Share" to create one.</p>'
+                                : shareData.shares.map(share => renderShareCard(plugin.id, share)).join('')
+                            }
+                        </div>
+                    </section>
+                `;
+            }
+
+            container.innerHTML = html;
+        }
+
+        function renderShareCard(pluginId, share) {
+            const isEnabled = share.enabled !== false;
+            const pathExists = share.path_exists !== false;
+            const isActive = share.active;
+
+            let statusBadge;
+            if (!isEnabled) {
+                statusBadge = '<span class="status-pill status-unconfigured">Disabled</span>';
+            } else if (!pathExists) {
+                statusBadge = '<span class="status-pill status-error">Path Missing</span>';
+            } else if (isActive) {
+                statusBadge = '<span class="status-pill status-healthy">Active</span>';
+            } else {
+                statusBadge = '<span class="status-pill status-degraded">Configured</span>';
+            }
+
+            return `
+                <div class="bg-gray-900 rounded-lg p-4 ${!isEnabled ? 'opacity-60' : ''}">
+                    <div class="flex items-start justify-between">
+                        <div class="flex-1">
+                            <div class="flex items-center gap-3 mb-2">
+                                <h4 class="font-semibold text-lg">${escapeHtml(share.name)}</h4>
+                                ${statusBadge}
+                                ${share.read_only ? '<span class="text-xs text-yellow-400">(Read Only)</span>' : ''}
+                                ${share.guest_ok ? '<span class="text-xs text-blue-400">(Guest OK)</span>' : ''}
+                            </div>
+                            ${share.comment ? `<p class="text-sm text-gray-400 mb-1">${escapeHtml(share.comment)}</p>` : ''}
+                            <p class="text-sm font-mono ${pathExists ? 'text-green-400' : 'text-red-400'}">
+                                ${escapeHtml(share.path)}
+                                ${!pathExists ? ' (not found)' : ''}
+                            </p>
+                            ${share.valid_users ? `<p class="text-xs text-gray-500 mt-1">Users: ${escapeHtml(share.valid_users)}</p>` : ''}
+                        </div>
+                        <div class="flex items-center gap-3 ml-4">
+                            <label class="toggle-switch" title="${isEnabled ? 'Disable share' : 'Enable share'}">
+                                <input type="checkbox" ${isEnabled ? 'checked' : ''}
+                                       onchange="toggleShare('${pluginId}', '${escapeHtml(share.name)}', this.checked)">
+                                <span class="toggle-slider"></span>
+                            </label>
+                            <button onclick="openEditShareModal('${pluginId}', ${JSON.stringify(share).replace(/'/g, "\\'")})"
+                                    class="text-sm text-gray-400 hover:text-white px-2 py-1">
+                                Edit
+                            </button>
+                            <button onclick="deleteShare('${pluginId}', '${escapeHtml(share.name)}')"
+                                    class="text-sm text-red-400 hover:text-red-300 px-2 py-1">
+                                Delete
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function openAddShareModal(pluginId) {
+            document.getElementById('modal-title').textContent = 'Add Share';
+            document.getElementById('share-plugin-id').value = pluginId;
+            document.getElementById('share-edit-mode').value = 'false';
+            document.getElementById('share-original-name').value = '';
+
+            // Reset form
+            document.getElementById('share-name').value = '';
+            document.getElementById('share-name').disabled = false;
+            document.getElementById('share-path').value = '';
+            document.getElementById('share-comment').value = '';
+            document.getElementById('share-readonly').checked = false;
+            document.getElementById('share-guest').checked = false;
+            document.getElementById('share-browseable').checked = true;
+            document.getElementById('share-enabled').checked = true;
+            document.getElementById('share-users').value = '';
+
+            document.getElementById('share-modal').classList.remove('hidden');
+        }
+
+        function openEditShareModal(pluginId, share) {
+            document.getElementById('modal-title').textContent = 'Edit Share';
+            document.getElementById('share-plugin-id').value = pluginId;
+            document.getElementById('share-edit-mode').value = 'true';
+            document.getElementById('share-original-name').value = share.name;
+
+            document.getElementById('share-name').value = share.name;
+            document.getElementById('share-name').disabled = true; // Can't change name
+            document.getElementById('share-path').value = share.path || '';
+            document.getElementById('share-comment').value = share.comment || '';
+            document.getElementById('share-readonly').checked = share.read_only || false;
+            document.getElementById('share-guest').checked = share.guest_ok || false;
+            document.getElementById('share-browseable').checked = share.browseable !== false;
+            document.getElementById('share-enabled').checked = share.enabled !== false;
+            document.getElementById('share-users').value = share.valid_users || '';
+
+            document.getElementById('share-modal').classList.remove('hidden');
+        }
+
+        function closeShareModal() {
+            document.getElementById('share-modal').classList.add('hidden');
+        }
+
+        async function saveShare(event) {
+            event.preventDefault();
+
+            const pluginId = document.getElementById('share-plugin-id').value;
+            const isEdit = document.getElementById('share-edit-mode').value === 'true';
+            const originalName = document.getElementById('share-original-name').value;
+
+            const share = {
+                name: document.getElementById('share-name').value.trim(),
+                path: document.getElementById('share-path').value.trim(),
+                comment: document.getElementById('share-comment').value.trim(),
+                read_only: document.getElementById('share-readonly').checked,
+                guest_ok: document.getElementById('share-guest').checked,
+                browseable: document.getElementById('share-browseable').checked,
+                enabled: document.getElementById('share-enabled').checked,
+                valid_users: document.getElementById('share-users').value.trim()
+            };
+
+            try {
+                let res;
+                if (isEdit) {
+                    res = await apiFetch(`/api/storage/shares/${pluginId}/${originalName}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(share)
+                    });
+                } else {
+                    res = await apiFetch(`/api/storage/shares/${pluginId}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(share)
+                    });
+                }
+
+                const data = await res.json();
+                if (!res.ok) {
+                    throw new Error(data.error || 'Failed to save share');
+                }
+
+                showNotification(isEdit ? 'Share updated' : 'Share created', 'success');
+                closeShareModal();
+                renderSharePlugins();
+            } catch (e) {
+                showNotification(`Error: ${e.message}`, 'error');
+            }
+        }
+
+        async function toggleShare(pluginId, shareName, enabled) {
+            try {
+                const res = await apiFetch(`/api/storage/shares/${pluginId}/${shareName}/toggle`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled })
+                });
+
+                const data = await res.json();
+                if (!res.ok) {
+                    throw new Error(data.error || 'Failed to toggle share');
+                }
+
+                showNotification(`Share ${enabled ? 'enabled' : 'disabled'}`, 'success');
+                renderSharePlugins();
+            } catch (e) {
+                showNotification(`Error: ${e.message}`, 'error');
+                renderSharePlugins(); // Reset toggle state
+            }
+        }
+
+        async function deleteShare(pluginId, shareName) {
+            if (!confirm(`Delete share "${shareName}"? This cannot be undone.`)) {
                 return;
             }
 
-            container.innerHTML = plugins.map(p => `
-                <div class="bg-gray-800 border border-purple-900/40 rounded-lg p-5">
-                    <div class="flex items-start justify-between">
-                        <div>
-                            <div class="flex items-center gap-3 mb-1">
-                                <h4 class="text-lg font-semibold">${escapeHtml(p.name)}</h4>
-                                <span class="status-pill ${statusClass(p.status)}">${p.status}</span>
-                            </div>
-                            <p class="text-sm text-gray-400 mb-2">${escapeHtml(p.description)}</p>
-                            <p class="text-xs text-gray-500">Version ${p.version}</p>
-                            ${p.source ? `<p class="text-xs text-gray-500 mt-1">Source: ${escapeHtml(p.source)}</p>` : ''}
-                            ${!p.enabled ? `<p class="text-xs text-yellow-300 mt-2">Plugin disabled</p>` : ''}
-                            ${!p.installed ? `
-                                <div class="mt-3 p-3 bg-yellow-900/20 border border-yellow-800 rounded">
-                                    <p class="text-sm text-yellow-300 mb-2">Missing dependencies</p>
-                                    <code class="text-xs bg-gray-900 px-2 py-1 rounded">${escapeHtml(p.install_instructions)}</code>
-                                </div>
-                            ` : ''}
-                        </div>
-                        <div class="text-xs text-gray-500">Manage on Plugins page</div>
-                    </div>
-                </div>
-            `).join('');
+            try {
+                const res = await apiFetch(`/api/storage/shares/${pluginId}/${shareName}`, {
+                    method: 'DELETE'
+                });
+
+                const data = await res.json();
+                if (!res.ok) {
+                    throw new Error(data.error || 'Failed to delete share');
+                }
+
+                showNotification('Share deleted', 'success');
+                renderSharePlugins();
+            } catch (e) {
+                showNotification(`Error: ${e.message}`, 'error');
+            }
         }
 
-        function escapeHtml(str) {
-            if (!str) return '';
-            return String(str)
-                .replace(/&/g, '&amp;')
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;')
-                .replace(/"/g, '&quot;');
+        async function runPluginCommand(pluginId, commandId) {
+            if (commandId === 'restart' && !confirm('Restart Samba service? This will briefly disconnect clients.')) {
+                return;
+            }
+
+            document.getElementById('output-modal-title').textContent =
+                commandId === 'restart' ? 'Restarting Service' : 'Applying Configuration';
+            document.getElementById('output-content').textContent = '';
+            document.getElementById('output-modal').classList.remove('hidden');
+
+            try {
+                const res = await fetch(`/api/storage/plugins/${pluginId}/commands/${commandId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+
+                const reader = res.body.getReader();
+                const decoder = new TextDecoder();
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    const chunk = decoder.decode(value);
+                    const lines = chunk.split('\n');
+
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            try {
+                                const data = JSON.parse(line.slice(6));
+                                if (data.type === 'output') {
+                                    document.getElementById('output-content').textContent += data.line;
+                                } else if (data.type === 'complete') {
+                                    if (data.success) {
+                                        showNotification(data.message || 'Command completed', 'success');
+                                    }
+                                } else if (data.type === 'error') {
+                                    document.getElementById('output-content').textContent += `\nError: ${data.error}`;
+                                }
+                            } catch (e) {}
+                        }
+                    }
+                }
+
+                renderSharePlugins();
+            } catch (e) {
+                document.getElementById('output-content').textContent += `\nError: ${e.message}`;
+                showNotification(`Error: ${e.message}`, 'error');
+            }
         }
 
+        function closeOutputModal() {
+            document.getElementById('output-modal').classList.add('hidden');
+        }
+
+        // Load on page load
         document.addEventListener('DOMContentLoaded', loadSharePlugins);
     </script>
 </body>

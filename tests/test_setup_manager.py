@@ -46,11 +46,12 @@ class TestSetupEndpoints:
         assert response.status_code == 401
 
     def test_defaults_with_auth(self, authenticated_client):
-        response = authenticated_client.get('/api/setup/defaults')
+        with patch('setup_manager.load_media_paths', return_value={'config': '/tmp/config'}):
+            response = authenticated_client.get('/api/setup/defaults')
         assert response.status_code == 200
         data = json.loads(response.data)
-        assert 'config_dir' in data
-        assert 'network_name' in data
+        assert data['config_dir'] == '/tmp/config'
+        assert data['network_name'] == 'vpn_network'
 
     def test_tailscale_helper_unavailable(self, authenticated_client):
         with patch('setup_manager.helper_available', return_value=False):
@@ -59,9 +60,52 @@ class TestSetupEndpoints:
                                                  content_type='application/json')
             assert response.status_code == 503
 
+    def test_tailscale_success(self, authenticated_client):
+        with patch('setup_manager.helper_available', return_value=True):
+            with patch('setup_manager.helper_call') as helper_call:
+                helper_call.side_effect = [
+                    {'success': True},
+                    {'success': True}
+                ]
+                response = authenticated_client.post(
+                    '/api/setup/tailscale',
+                    data=json.dumps({'auth_key': 'tskey-123'}),
+                    content_type='application/json'
+                )
+        assert response.status_code == 200
+        assert helper_call.call_count == 2
+
     def test_vpn_invalid_payload(self, authenticated_client):
         with patch('setup_manager.helper_available', return_value=True):
             response = authenticated_client.post('/api/setup/vpn',
                                                  data=json.dumps({'config_dir': 'relative'}),
                                                  content_type='application/json')
             assert response.status_code == 400
+
+    def test_vpn_missing_credentials(self, authenticated_client):
+        with patch('setup_manager.helper_available', return_value=True):
+            response = authenticated_client.post(
+                '/api/setup/vpn',
+                data=json.dumps({'config_dir': '/home/pi/docker', 'network_name': 'vpn_network'}),
+                content_type='application/json'
+            )
+            assert response.status_code == 400
+
+    def test_vpn_success(self, authenticated_client):
+        with patch('setup_manager.helper_available', return_value=True):
+            with patch('setup_manager.helper_call') as helper_call:
+                helper_call.side_effect = [
+                    {'success': True},
+                    {'success': True}
+                ]
+                response = authenticated_client.post(
+                    '/api/setup/vpn',
+                    data=json.dumps({
+                        'config_dir': '/home/pi/docker',
+                        'network_name': 'vpn_network',
+                        'pia_username': 'user',
+                        'pia_password': 'pass'
+                    }),
+                    content_type='application/json'
+                )
+        assert response.status_code == 200

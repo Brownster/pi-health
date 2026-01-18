@@ -351,3 +351,95 @@ def get_mount_status(plugin_id: str, mount_id: str):
         return jsonify({"error": "Plugin not found"}), 404
 
     return jsonify(plugin.get_mount_status(mount_id))
+
+
+# Share plugin endpoints (Samba, NFS, etc.)
+@storage_bp.route("/api/storage/shares/<plugin_id>", methods=["GET"])
+@login_required
+def list_shares(plugin_id: str):
+    """List all shares for a share plugin."""
+    registry = get_registry()
+    plugin = registry.get(plugin_id)
+
+    if not plugin:
+        return jsonify({"error": f"Plugin not found: {plugin_id}"}), 404
+
+    status = plugin.get_status()
+    return jsonify({
+        "shares": status.get("details", {}).get("shares", []),
+        "service_running": status.get("service_running", False),
+        "status": status.get("status"),
+        "message": status.get("message")
+    })
+
+
+@storage_bp.route("/api/storage/shares/<plugin_id>", methods=["POST"])
+@login_required
+def add_share(plugin_id: str):
+    """Add a new share."""
+    registry = get_registry()
+    plugin = registry.get(plugin_id)
+
+    if not plugin or not hasattr(plugin, 'add_share'):
+        return jsonify({"error": "Plugin not found or doesn't support shares"}), 404
+
+    share = request.get_json() or {}
+    result = plugin.add_share(share)
+
+    if result.success:
+        return jsonify({"status": "created", "message": result.message})
+    return jsonify({"error": result.error}), 400
+
+
+@storage_bp.route("/api/storage/shares/<plugin_id>/<share_name>", methods=["PUT"])
+@login_required
+def update_share(plugin_id: str, share_name: str):
+    """Update a share."""
+    registry = get_registry()
+    plugin = registry.get(plugin_id)
+
+    if not plugin or not hasattr(plugin, 'update_share'):
+        return jsonify({"error": "Plugin not found"}), 404
+
+    share = request.get_json() or {}
+    result = plugin.update_share(share_name, share)
+
+    if result.success:
+        return jsonify({"status": "updated", "message": result.message})
+    return jsonify({"error": result.error}), 400
+
+
+@storage_bp.route("/api/storage/shares/<plugin_id>/<share_name>", methods=["DELETE"])
+@login_required
+def delete_share(plugin_id: str, share_name: str):
+    """Delete a share."""
+    registry = get_registry()
+    plugin = registry.get(plugin_id)
+
+    if not plugin or not hasattr(plugin, 'remove_share'):
+        return jsonify({"error": "Plugin not found"}), 404
+
+    result = plugin.remove_share(share_name)
+
+    if result.success:
+        return jsonify({"status": "deleted", "message": result.message})
+    return jsonify({"error": result.error}), 400
+
+
+@storage_bp.route("/api/storage/shares/<plugin_id>/<share_name>/toggle", methods=["POST"])
+@login_required
+def toggle_share(plugin_id: str, share_name: str):
+    """Enable or disable a share."""
+    registry = get_registry()
+    plugin = registry.get(plugin_id)
+
+    if not plugin or not hasattr(plugin, 'toggle_share'):
+        return jsonify({"error": "Plugin not found"}), 404
+
+    data = request.get_json() or {}
+    enabled = bool(data.get("enabled", True))
+    result = plugin.toggle_share(share_name, enabled)
+
+    if result.success:
+        return jsonify({"status": "toggled", "enabled": enabled})
+    return jsonify({"error": result.error}), 400
