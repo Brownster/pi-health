@@ -196,22 +196,6 @@
                         <button onclick="setupTailscale()" class="coraline-button text-blue-100 py-2 px-4 rounded text-sm">Install & Start</button>
                     </div>
                 </div>
-
-                <div class="bg-gray-900/50 border border-gray-700 rounded-lg p-4">
-                    <h4 class="text-lg font-semibold mb-2">VPN (Gluetun)</h4>
-                    <p class="text-sm text-gray-400 mb-3">Creates vpn network and writes VPN env file.</p>
-                    <label class="block text-sm text-gray-300 mb-1">Config Directory</label>
-                    <input id="vpn-config-dir" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm" placeholder="/home/pi/docker">
-                    <label class="block text-sm text-gray-300 mt-3 mb-1">PIA Username</label>
-                    <input id="vpn-username" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm">
-                    <label class="block text-sm text-gray-300 mt-3 mb-1">PIA Password</label>
-                    <input id="vpn-password" type="password" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm">
-                    <label class="block text-sm text-gray-300 mt-3 mb-1">Network Name</label>
-                    <input id="vpn-network-name" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm" placeholder="vpn_network">
-                    <div class="mt-3 flex gap-2">
-                        <button onclick="setupVpn()" class="coraline-button text-blue-100 py-2 px-4 rounded text-sm">Setup VPN</button>
-                    </div>
-                </div>
             </div>
         </section>
 
@@ -423,17 +407,6 @@
             }, 3000);
         }
 
-        async function loadSetupDefaults() {
-            try {
-                const response = await fetch('/api/setup/defaults');
-                const data = await response.json();
-                document.getElementById('vpn-config-dir').value = data.config_dir || '/home/pi/docker';
-                document.getElementById('vpn-network-name').value = data.network_name || 'vpn_network';
-            } catch (error) {
-                // ignore
-            }
-        }
-
         async function setupTailscale() {
             const authKey = document.getElementById('tailscale-authkey').value.trim();
             try {
@@ -445,27 +418,6 @@
                 const data = await response.json();
                 if (!response.ok) throw new Error(data.error || 'Tailscale setup failed');
                 showNotification('Tailscale setup complete', 'success');
-            } catch (error) {
-                showNotification(`Error: ${error.message}`, 'error');
-            }
-        }
-
-        async function setupVpn() {
-            const payload = {
-                config_dir: document.getElementById('vpn-config-dir').value.trim(),
-                pia_username: document.getElementById('vpn-username').value.trim(),
-                pia_password: document.getElementById('vpn-password').value.trim(),
-                network_name: document.getElementById('vpn-network-name').value.trim() || 'vpn_network'
-            };
-            try {
-                const response = await fetch('/api/setup/vpn', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-                const data = await response.json();
-                if (!response.ok) throw new Error(data.error || 'VPN setup failed');
-                showNotification('VPN setup complete', 'success');
             } catch (error) {
                 showNotification(`Error: ${error.message}`, 'error');
             }
@@ -1014,7 +966,6 @@
 
         // Initialize
         document.addEventListener('DOMContentLoaded', () => {
-            loadSetupDefaults();
             loadConfig();
             loadBackupConfig();
         });

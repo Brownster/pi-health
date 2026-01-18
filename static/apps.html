@@ -106,6 +106,38 @@
         </div>
     </div>
 
+    <div id="vpn-modal" class="hidden fixed inset-0 bg-black bg-opacity-60 z-50 items-center justify-center p-4">
+        <div class="bg-gray-900 w-full max-w-lg rounded-lg shadow-xl border border-purple-900 flex flex-col">
+            <div class="flex justify-between items-center p-4 border-b border-purple-800">
+                <h3 class="text-xl font-semibold">Configure Gluetun VPN</h3>
+                <button onclick="closeVpnModal()" class="text-gray-400 hover:text-gray-200">Close</button>
+            </div>
+            <div class="p-4 space-y-4">
+                <p class="text-sm text-gray-400">Creates the VPN network and writes a Gluetun env file.</p>
+                <div>
+                    <label class="block text-sm text-gray-300 mb-1">Config Directory</label>
+                    <input id="vpn-config-dir" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white text-sm" placeholder="/home/pi/docker">
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-300 mb-1">PIA Username</label>
+                    <input id="vpn-username" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white text-sm">
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-300 mb-1">PIA Password</label>
+                    <input id="vpn-password" type="password" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white text-sm">
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-300 mb-1">Network Name</label>
+                    <input id="vpn-network-name" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white text-sm" placeholder="vpn_network">
+                </div>
+            </div>
+            <div class="p-4 border-t border-purple-800 flex justify-end space-x-2">
+                <button onclick="closeVpnModal()" class="px-4 py-2 bg-gray-700 text-white rounded">Cancel</button>
+                <button onclick="submitVpnConfig()" class="coraline-button px-4 py-2 text-white rounded">Save Config</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         let catalogItems = [];
         let installedServices = [];
@@ -195,6 +227,10 @@
                             ${installed
                                 ? `<button onclick="openRemoveModal('${item.id}')" class="px-3 py-1 text-sm rounded bg-red-700 hover:bg-red-600 text-white">Remove</button>`
                                 : `<button onclick="openInstallModal('${item.id}')" class="coraline-button px-3 py-1 text-sm rounded text-white">Install</button>`
+                            }
+                            ${item.id === 'vpn'
+                                ? `<button onclick="openVpnModal()" class="px-3 py-1 text-sm rounded bg-purple-700 hover:bg-purple-600 text-white">Configure</button>`
+                                : ''
                             }
                         </div>
                     </div>
@@ -313,6 +349,51 @@
             modal.classList.add('hidden');
             modal.classList.remove('flex');
             activeRemove = null;
+        }
+
+        async function openVpnModal() {
+            const modal = document.getElementById('vpn-modal');
+            try {
+                const response = await fetch('/api/setup/defaults');
+                if (response.ok) {
+                    const data = await response.json();
+                    document.getElementById('vpn-config-dir').value = data.config_dir || '/home/pi/docker';
+                    document.getElementById('vpn-network-name').value = data.network_name || 'vpn_network';
+                }
+            } catch (error) {
+                // ignore defaults
+            }
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closeVpnModal() {
+            const modal = document.getElementById('vpn-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        async function submitVpnConfig() {
+            const payload = {
+                config_dir: document.getElementById('vpn-config-dir').value.trim(),
+                pia_username: document.getElementById('vpn-username').value.trim(),
+                pia_password: document.getElementById('vpn-password').value.trim(),
+                network_name: document.getElementById('vpn-network-name').value.trim() || 'vpn_network'
+            };
+
+            try {
+                const response = await fetch('/api/setup/vpn', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error || 'VPN setup failed');
+                showNotification('VPN setup complete', 'success');
+                closeVpnModal();
+            } catch (error) {
+                showNotification(`Error: ${error.message}`, 'error');
+            }
         }
 
         async function submitInstall() {

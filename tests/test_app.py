@@ -229,10 +229,7 @@ class TestStaticPages:
         assert response.status_code == 200
         body = response.data.decode('utf-8')
         assert 'tailscale-authkey' in body
-        assert 'vpn-config-dir' in body
-        assert 'vpn-username' in body
-        assert 'vpn-password' in body
-        assert 'vpn-network-name' in body
+        assert 'vpn-config-dir' not in body
         assert 'backup-enabled' in body
         assert 'backup-dest-dir' in body
         assert 'backup-config-dir' in body
@@ -244,6 +241,16 @@ class TestStaticPages:
         assert 'backup-run-now' in body
         assert 'backup-list' in body
         assert 'backup-plugins-list' in body
+
+    def test_apps_page_vpn_config_modal(self, client):
+        """Test apps page includes VPN config modal."""
+        response = client.get('/apps.html')
+        assert response.status_code == 200
+        body = response.data.decode('utf-8')
+        assert 'vpn-config-dir' in body
+        assert 'vpn-username' in body
+        assert 'vpn-password' in body
+        assert 'vpn-network-name' in body
 
 
 

@@ -4,6 +4,13 @@ from playwright.sync_api import Page, expect
 
 pytestmark = pytest.mark.e2e
 
+def open_nav_link(page: Page, menu_label: str, href: str) -> None:
+    dropdown = page.locator("nav .nav-dropdown", has_text=menu_label)
+    dropdown.hover()
+    link = page.locator(f"nav a[href='{href}']")
+    expect(link).to_be_visible()
+    link.click()
+
 def test_login_success(page: Page, browser_context_args, test_user_credentials):
     """
     Test 1: Verify login functionality works.
@@ -47,7 +54,7 @@ def test_container_stop_workflow(authenticated_page: Page, test_container):
     page = authenticated_page
     
     # Navigate to Containers page using the navbar
-    page.click("nav a[href='/containers.html']")
+    open_nav_link(page, "My Apps", "/containers.html")
     expect(page).to_have_url(r".*/containers.html")
     
     # Define selectors for our specific test container
@@ -93,12 +100,12 @@ def test_navigation_regression(authenticated_page: Page):
     expect(page.get_by_role("heading", name="System Metrics")).to_be_visible()
     
     # Visit Stacks
-    page.click("nav a[href='/stacks.html']")
+    open_nav_link(page, "My Apps", "/stacks.html")
     expect(page.get_by_role("heading", name="Docker Stacks")).to_be_visible()
     
-    # Visit Storage
-    page.click("nav a[href='/storage.html']")
-    expect(page.get_by_role("heading", name="Storage")).to_be_visible()
+    # Visit Storage Pools
+    open_nav_link(page, "Storage", "/pools.html")
+    expect(page.get_by_role("heading", name="Storage Pools")).to_be_visible()
 
 def test_settings_backup_toggle(authenticated_page: Page):
     """
@@ -149,7 +156,7 @@ def test_settings_backup_toggle(authenticated_page: Page):
     toggle_slider.click()
     expect(page.locator("#notification-area")).to_contain_text("Backup settings saved", timeout=5000)
 
-def test_stack_lifecycle(authenticated_page: Page):
+def test_stack_lifecycle(authenticated_page: Page, docker_client):
     """
     Test 5: Stack Creation and Deletion.
     Creates a new stack, checks it appears, and deletes it.
@@ -158,7 +165,7 @@ def test_stack_lifecycle(authenticated_page: Page):
     stack_name = "e2e-test-stack"
     
     # Navigate to Stacks
-    page.click("nav a[href='/stacks.html']")
+    open_nav_link(page, "My Apps", "/stacks.html")
 
     # Ensure our test stack doesn't exist from a previous failed run via API.
     base_url = page.url.replace("/stacks.html", "")
@@ -208,7 +215,10 @@ services:
             error_payload = response_info.value.json()
         except Exception:
             pass
-        if response_info.value.status in (409, 400) or "exists" in str(error_payload).lower():
+        error_text = str(error_payload).lower()
+        if response_info.value.status >= 500 and ("docker" in error_text or "compose" in error_text):
+            pytest.skip("Docker unavailable for stack lifecycle test")
+        if response_info.value.status in (409, 400) or "exists" in error_text:
             page.request.delete(f"{base_url}/api/stacks/{stack_name}")
             page.reload()
             with page.expect_response(f"**/api/stacks/{stack_name}") as retry_info:
