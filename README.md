@@ -12,13 +12,18 @@ Pi-Health is a full home lab management interface for Raspberry Pi and small ser
 
 ## Features
 
-- **System Health Monitoring**: CPU, memory, temperature, and disk usage
+- **System Health Monitoring**: CPU, memory, temperature, disk, and network stats
 - **Docker Management**: View, start, stop, and restart containers
 - **Stack Management**: Deploy and manage Docker Compose stacks
-- **App Store**: One-click deployment of popular self-hosted applications
-- **Disk Management**: Mount/unmount drives, manage fstab entries
+- **App Store**: YAML-driven catalog with one-click deployments
+- **Disk Management**: Mount/unmount drives and manage fstab entries
 - **Storage Plugins**: SnapRAID parity protection and MergerFS drive pooling
-- **Auto-Update Scheduler**: Automatically update container images on a schedule
+- **Remote Mounts**: SSHFS mounts with automount support
+- **Share Plugins**: Samba sharing (NFS planned)
+- **Networking Setup**: Tailscale and VPN (Gluetun) bootstrap
+- **Updates**: Container auto-update scheduler and Pi-Health self-update
+- **Backups**: Scheduled config backups
+- **Tools**: CopyParty deployment and configuration
 - **Multi-user Authentication**: Support for multiple users
 - **Theming**: Multiple visual themes (Coraline, Professional, Minimal)
 
@@ -84,6 +89,23 @@ ENABLE_VPN=1 PIA_USERNAME=your_user PIA_PASSWORD=your_pass ./start.sh
 ```
 
 Access the dashboard at `http://<host-ip>:8002`
+
+## Quick Start
+
+1. Create `/etc/pi-health.env` with your admin credentials:
+   ```bash
+   sudo tee /etc/pi-health.env >/dev/null <<'EOF'
+   PIHEALTH_USER=admin
+   PIHEALTH_PASSWORD=change-me
+   EOF
+   ```
+2. Install and start Pi-Health:
+   ```bash
+   ./start.sh
+   ```
+3. Log in at `http://<host-ip>:8002` (defaults to `admin` / `pihealth` if you skip step 1).
+4. Go to **Settings > Plugins** and enable the storage/share plugins you need.
+5. Use **Disks**, **Storage**, **Apps**, and **Tools** to configure mounts, pools, apps, and CopyParty.
 
 ### Example: Split VPN and Non-VPN Stacks
 
