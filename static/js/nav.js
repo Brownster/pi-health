@@ -56,7 +56,7 @@ function renderNav(currentPage) {
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
                         </svg>
                     </button>
-                    <div class="nav-dropdown-menu absolute hidden bg-gray-800 border border-purple-700 rounded-lg shadow-xl mt-1 py-1 min-w-[160px] z-50">
+                    <div class="nav-dropdown-menu absolute hidden bg-gray-800 border border-purple-700 rounded-lg shadow-xl py-1 min-w-[160px] z-50">
                         ${item.children.map(child => `
                             <a href="${child.href}"
                                class="block px-4 py-2 text-sm ${child.href === currentPage ? 'text-white bg-purple-800' : 'text-blue-200 hover:bg-purple-700 hover:text-white'}">
@@ -123,13 +123,22 @@ function toggleDropdown(button) {
 function setupDropdownHover() {
     document.querySelectorAll('.nav-dropdown').forEach(dropdown => {
         const menu = dropdown.querySelector('.nav-dropdown-menu');
+        let hideTimeout = null;
 
         dropdown.addEventListener('mouseenter', () => {
+            // Cancel any pending hide
+            if (hideTimeout) {
+                clearTimeout(hideTimeout);
+                hideTimeout = null;
+            }
             menu.classList.remove('hidden');
         });
 
         dropdown.addEventListener('mouseleave', () => {
-            menu.classList.add('hidden');
+            // Small delay before hiding to allow moving to submenu
+            hideTimeout = setTimeout(() => {
+                menu.classList.add('hidden');
+            }, 150);
         });
     });
 
@@ -174,6 +183,15 @@ function injectNavStyles() {
         .nav-dropdown-menu {
             left: 0;
             top: 100%;
+            padding-top: 0.25rem;
+        }
+        .nav-dropdown-menu::before {
+            content: '';
+            position: absolute;
+            top: -8px;
+            left: 0;
+            right: 0;
+            height: 8px;
         }
         .nav-dropdown button svg {
             transition: transform 0.2s ease;
