@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script>
+        if (!sessionStorage.getItem("loggedIn")) {
+            window.location.href = "/login.html";
+        }
+
+        const username = sessionStorage.getItem("username");
+        if (username) {
+            document.addEventListener('DOMContentLoaded', () => {
+                const userEl = document.getElementById('logged-in-user');
+                if (userEl) userEl.textContent = username;
+            });
+        }
+
+        async function logout() {
+            try {
+                await fetch('/api/logout', { method: 'POST' });
+            } catch (e) {}
+            sessionStorage.clear();
+            window.location.href = '/login.html';
+        }
+    </script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mounts - Pi-Health Dashboard</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <script src="/js/api.js"></script>
+    <script src="/js/nav.js"></script>
+    <style>
+        .coraline-button {
+            background: linear-gradient(to bottom, #5f4b8b, #372b53);
+            border: 1px solid #8a6cbd;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.25);
+            transition: all 0.3s ease;
+        }
+        .coraline-button:hover:not(:disabled) {
+            background: linear-gradient(to bottom, #6f58a3, #413162);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 10px rgba(0, 0, 0, 0.3);
+        }
+        .coraline-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .status-pill {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+        .status-connected { background-color: rgba(52, 211, 153, 0.2); color: #34d399; border: 1px solid #34d399; }
+        .status-disconnected { background-color: rgba(251, 191, 36, 0.2); color: #fbbf24; border: 1px solid #fbbf24; }
+        .status-error { background-color: rgba(248, 113, 113, 0.2); color: #f87171; border: 1px solid #f87171; }
+    </style>
+</head>
+<body class="bg-gray-900 text-blue-100 font-sans min-h-screen">
+    <header class="bg-gradient-to-r from-purple-900 to-blue-900 shadow-lg relative overflow-hidden">
+        <div class="absolute inset-0 overflow-hidden">
+            <img src="/theme-banner" alt="Dashboard" class="w-full h-full object-cover opacity-40 blur-sm" style="filter: hue-rotate(-10deg) saturate(1.15);">
+        </div>
+        <div class="container mx-auto px-8 py-12 relative">
+        </div>
+    </header>
+
+    <!-- Navigation bar -->
+    <nav id="main-nav" class="bg-purple-900 shadow-md"></nav>
+
+    <div id="notification-area" class="fixed top-4 right-4 z-50 w-80 flex flex-col items-end"></div>
+
+    <main class="container mx-auto p-6">
+        <div class="mb-6">
+            <h2 class="text-2xl font-semibold">Mounts</h2>
+            <p class="text-sm text-gray-400 mt-1">Configure media paths and remote mount plugins.</p>
+        </div>
+
+        <!-- Media Paths Section -->
+        <section class="mb-8 bg-gray-800 rounded-lg p-6 border border-purple-900/40">
+            <div class="flex justify-between items-center mb-4">
+                <div>
+                    <h3 class="text-lg font-semibold">Media Paths</h3>
+                    <p class="text-gray-400 text-sm">Default paths used by app templates</p>
+                </div>
+                <button onclick="saveMediaPaths()" class="coraline-button text-blue-100 py-2 px-4 rounded text-sm">Save Paths</button>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div>
+                    <label class="block text-sm text-gray-300 mb-1">Downloads</label>
+                    <input id="path-downloads" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm" placeholder="/mnt/downloads">
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-300 mb-1">Media Storage</label>
+                    <input id="path-storage" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm" placeholder="/mnt/storage">
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-300 mb-1">Backup</label>
+                    <input id="path-backup" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm" placeholder="/mnt/backup">
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-300 mb-1">Docker Config</label>
+                    <input id="path-config" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm" placeholder="/home/pi/docker">
+                </div>
+            </div>
+            <div class="mt-4 pt-4 border-t border-purple-900/40">
+                <button onclick="previewStartupService()" class="text-sm text-purple-400 hover:text-purple-300">
+                    Regenerate Startup Service...
+                </button>
+            </div>
+        </section>
+
+        <!-- Remote Mount Plugins -->
+        <div id="mount-plugins">
+            <div class="text-center py-10 text-gray-400">Loading mount plugins...</div>
+        </div>
+    </main>
+
+    <!-- Add/Edit Mount Modal -->
+    <div id="mount-modal" class="hidden fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4">
+        <div class="bg-gray-900 w-full max-w-lg rounded-lg shadow-xl border border-purple-900 flex flex-col max-h-[90vh]">
+            <div class="flex justify-between items-center p-4 border-b border-purple-800 flex-shrink-0">
+                <h3 id="mount-modal-title" class="text-xl font-semibold">Add Mount</h3>
+                <button onclick="closeMountModal()" class="text-gray-400 hover:text-white text-2xl">&times;</button>
+            </div>
+            <div class="p-4 overflow-y-auto flex-1 min-h-0" id="mount-modal-form">
+                <!-- Form fields populated by JS -->
+            </div>
+            <div class="p-4 border-t border-purple-800 flex justify-end gap-3 flex-shrink-0">
+                <button onclick="closeMountModal()" class="px-4 py-2 text-gray-400 hover:text-white">Cancel</button>
+                <button id="mount-modal-submit" onclick="submitMountForm()" class="coraline-button px-4 py-2 rounded text-white">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Diff Preview Modal -->
+    <div id="diff-modal" class="hidden fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4" onclick="if(event.target === this) closeDiffModal()">
+        <div class="bg-gray-800 w-full max-w-4xl rounded-lg shadow-xl border border-purple-900 flex flex-col max-h-[90vh]" onclick="event.stopPropagation()">
+            <div class="flex justify-between items-center p-4 border-b border-purple-800 flex-shrink-0">
+                <h3 class="text-xl font-semibold">Startup Service Changes</h3>
+                <button onclick="closeDiffModal()" class="text-gray-400 hover:text-white text-2xl font-bold leading-none">&times;</button>
+            </div>
+            <div class="p-4 overflow-y-auto flex-1 min-h-0">
+                <div id="diff-content" class="space-y-6">
+                    <!-- Populated by JS -->
+                </div>
+            </div>
+            <div class="p-4 border-t border-purple-800 flex justify-end gap-3 flex-shrink-0">
+                <button onclick="closeDiffModal()" class="px-4 py-2 text-gray-400 hover:text-white">Cancel</button>
+                <button onclick="applyStartupService()" class="coraline-button px-4 py-2 rounded text-white">Apply Changes</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let mountPlugins = [];
+        let currentMountPlugin = null;
+        let currentMountId = null;
+        let mediaPaths = {};
+
+        function showNotification(message, type = 'info') {
+            const area = document.getElementById('notification-area');
+            const notification = document.createElement('div');
+            notification.className = 'p-3 mb-2 rounded shadow-lg transform transition-all duration-300 opacity-0';
+            if (type === 'success') notification.classList.add('bg-green-600');
+            else if (type === 'error') notification.classList.add('bg-red-600');
+            else notification.classList.add('bg-blue-600');
+            notification.textContent = message;
+            area.appendChild(notification);
+            setTimeout(() => notification.classList.replace('opacity-0', 'opacity-100'), 10);
+            setTimeout(() => {
+                notification.classList.replace('opacity-100', 'opacity-0');
+                setTimeout(() => notification.remove(), 300);
+            }, 3000);
+        }
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+
+        async function loadPage() {
+            await Promise.all([
+                loadMediaPaths(),
+                loadMountPlugins()
+            ]);
+        }
+
+        // ========== Media Paths ==========
+        async function loadMediaPaths() {
+            try {
+                const response = await apiFetch('/api/disks/media-paths');
+                const data = await response.json();
+                mediaPaths = data.paths || {};
+
+                document.getElementById('path-downloads').value = mediaPaths.downloads || '';
+                document.getElementById('path-storage').value = mediaPaths.storage || '';
+                document.getElementById('path-backup').value = mediaPaths.backup || '';
+                document.getElementById('path-config').value = mediaPaths.config || '';
+            } catch (error) {
+                console.error('Failed to load media paths:', error);
+            }
+        }
+
+        async function saveMediaPaths() {
+            const paths = {
+                downloads: document.getElementById('path-downloads').value,
+                storage: document.getElementById('path-storage').value,
+                backup: document.getElementById('path-backup').value,
+                config: document.getElementById('path-config').value
+            };
+
+            try {
+                const response = await apiFetch('/api/disks/media-paths', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(paths)
+                });
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error);
+                showNotification('Media paths saved', 'success');
+                mediaPaths = data.paths;
+            } catch (error) {
+                showNotification(`Error: ${error.message}`, 'error');
+            }
+        }
+
+        // ========== Startup Service Diff ==========
+        async function previewStartupService() {
+            try {
+                const res = await apiFetch('/api/disks/startup-service/preview');
+                if (!res.ok) {
+                    // Endpoint may not exist yet, just apply directly
+                    if (confirm('Apply startup service changes?')) {
+                        applyStartupService();
+                    }
+                    return;
+                }
+                const data = await res.json();
+
+                if (!data.script?.changed && !data.service?.changed) {
+                    showNotification('No changes needed', 'info');
+                    return;
+                }
+
+                renderDiff(data);
+                document.getElementById('diff-modal').classList.remove('hidden');
+            } catch (e) {
+                // Fallback: just apply
+                if (confirm('Apply startup service changes?')) {
+                    applyStartupService();
+                }
+            }
+        }
+
+        function renderDiff(data) {
+            const content = document.getElementById('diff-content');
+            let html = '';
+
+            if (data.script?.changed) {
+                html += `
+                    <div>
+                        <h4 class="font-semibold mb-2">${escapeHtml(data.script.path)}</h4>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <p class="text-sm text-gray-400 mb-1">Current</p>
+                                <pre class="bg-gray-900 p-3 rounded text-xs overflow-auto max-h-64 text-red-300">${escapeHtml(data.script.current || '(file does not exist)')}</pre>
+                            </div>
+                            <div>
+                                <p class="text-sm text-gray-400 mb-1">Proposed</p>
+                                <pre class="bg-gray-900 p-3 rounded text-xs overflow-auto max-h-64 text-green-300">${escapeHtml(data.script.proposed)}</pre>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            if (data.service?.changed) {
+                html += `
+                    <div>
+                        <h4 class="font-semibold mb-2">${escapeHtml(data.service.path)}</h4>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <p class="text-sm text-gray-400 mb-1">Current</p>
+                                <pre class="bg-gray-900 p-3 rounded text-xs overflow-auto max-h-64 text-red-300">${escapeHtml(data.service.current || '(file does not exist)')}</pre>
+                            </div>
+                            <div>
+                                <p class="text-sm text-gray-400 mb-1">Proposed</p>
+                                <pre class="bg-gray-900 p-3 rounded text-xs overflow-auto max-h-64 text-green-300">${escapeHtml(data.service.proposed)}</pre>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            content.innerHTML = html || '<p class="text-gray-400">No changes to preview</p>';
+        }
+
+        function closeDiffModal() {
+            document.getElementById('diff-modal').classList.add('hidden');
+        }
+
+        async function applyStartupService() {
+            try {
+                const res = await apiFetch('/api/disks/startup-service', { method: 'POST' });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Failed to update service');
+                showNotification('Startup service updated', 'success');
+                closeDiffModal();
+            } catch (e) {
+                showNotification('Failed: ' + e.message, 'error');
+            }
+        }
+
+        // ========== Mount Plugins ==========
+        async function loadMountPlugins() {
+            try {
+                const res = await apiFetch('/api/storage/plugins');
+                const data = await res.json();
+
+                // Filter to only mount-category plugins that are enabled
+                mountPlugins = (data.plugins || []).filter(p =>
+                    p.category === 'mount' && p.enabled
+                );
+
+                await renderMountPluginSections();
+            } catch (e) {
+                document.getElementById('mount-plugins').innerHTML =
+                    `<p class="text-red-400">Failed to load plugins: ${e.message}</p>`;
+            }
+        }
+
+        async function renderMountPluginSections() {
+            const container = document.getElementById('mount-plugins');
+
+            if (!mountPlugins.length) {
+                container.innerHTML = `
+                    <div class="text-center py-10">
+                        <p class="text-gray-500 mb-2">No mount plugins enabled.</p>
+                        <a href="/plugins.html" class="text-purple-400 hover:underline">Enable plugins &rarr;</a>
+                    </div>
+                `;
+                return;
+            }
+
+            let html = '';
+            for (const plugin of mountPlugins) {
+                // Fetch mounts for this plugin
+                let mounts = [];
+                try {
+                    const res = await apiFetch(`/api/storage/mounts/${plugin.id}`);
+                    const data = await res.json();
+                    mounts = data.mounts || [];
+                } catch (e) {
+                    console.error(`Failed to load mounts for ${plugin.id}:`, e);
+                }
+
+                html += `
+                    <section class="bg-gray-800 border border-purple-900/40 rounded-lg p-5 mb-6">
+                        <div class="flex items-center justify-between mb-4">
+                            <div>
+                                <h3 class="text-lg font-semibold">${escapeHtml(plugin.name)}</h3>
+                                <p class="text-sm text-gray-400">${escapeHtml(plugin.description)}</p>
+                            </div>
+                            <button onclick="openAddMountModal('${plugin.id}')"
+                                    class="coraline-button py-2 px-4 rounded text-sm"
+                                    ${!plugin.installed ? 'disabled title="Install dependencies first"' : ''}>
+                                + Add Mount
+                            </button>
+                        </div>
+
+                        ${!plugin.installed ? `
+                            <div class="p-3 bg-yellow-900/20 border border-yellow-800 rounded mb-4">
+                                <p class="text-sm text-yellow-300 mb-1">Install required packages:</p>
+                                <code class="text-xs bg-gray-900 px-2 py-1 rounded">${escapeHtml(plugin.install_instructions)}</code>
+                            </div>
+                        ` : ''}
+
+                        <div class="space-y-3" id="mounts-${plugin.id}">
+                            ${mounts.length === 0 ?
+                                '<p class="text-gray-500 text-sm">No mounts configured</p>' :
+                                mounts.map(m => renderMountCard(plugin.id, m)).join('')
+                            }
+                        </div>
+                    </section>
+                `;
+            }
+
+            container.innerHTML = html;
+        }
+
+        function renderMountCard(pluginId, mount) {
+            const statusClass = mount.mounted ? 'status-connected' : 'status-disconnected';
+            const statusText = mount.mounted ? 'Connected' : 'Disconnected';
+
+            // Build source display based on plugin type
+            let sourceDisplay = '';
+            if (mount.host && mount.username) {
+                // SSHFS
+                sourceDisplay = `${mount.username}@${mount.host}:${mount.remote_path || '/'}`;
+            } else if (mount.bucket) {
+                // Rclone/S3
+                sourceDisplay = `${mount.backend || 's3'}:${mount.bucket}`;
+            } else {
+                sourceDisplay = mount.remote_path || 'Unknown source';
+            }
+
+            return `
+                <div class="bg-gray-900 rounded p-4 flex items-center justify-between">
+                    <div class="flex-1">
+                        <h4 class="font-medium">${escapeHtml(mount.name)}</h4>
+                        <p class="text-sm text-gray-400">${escapeHtml(sourceDisplay)}</p>
+                        <p class="text-xs text-gray-500">\u2192 ${escapeHtml(mount.mount_point)}</p>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <span class="status-pill ${statusClass}">${statusText}</span>
+                        ${mount.mounted ?
+                            `<button onclick="unmountRemote('${pluginId}', '${mount.id}')" class="text-sm text-red-400 hover:text-red-300">Unmount</button>` :
+                            `<button onclick="mountRemote('${pluginId}', '${mount.id}')" class="text-sm text-green-400 hover:text-green-300">Mount</button>`
+                        }
+                        <button onclick="editMount('${pluginId}', '${mount.id}')" class="text-sm text-gray-400 hover:text-white">Edit</button>
+                        <button onclick="removeMount('${pluginId}', '${mount.id}')" class="text-sm text-gray-400 hover:text-red-400">Remove</button>
+                    </div>
+                </div>
+            `;
+        }
+
+        // ========== Mount Operations ==========
+        async function mountRemote(pluginId, mountId) {
+            try {
+                const res = await apiFetch(`/api/storage/mounts/${pluginId}/${mountId}/mount`, { method: 'POST' });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error);
+                showNotification('Mounted successfully', 'success');
+                loadMountPlugins();
+            } catch (e) {
+                showNotification('Mount failed: ' + e.message, 'error');
+            }
+        }
+
+        async function unmountRemote(pluginId, mountId) {
+            try {
+                const res = await apiFetch(`/api/storage/mounts/${pluginId}/${mountId}/unmount`, { method: 'POST' });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error);
+                showNotification('Unmounted successfully', 'success');
+                loadMountPlugins();
+            } catch (e) {
+                showNotification('Unmount failed: ' + e.message, 'error');
+            }
+        }
+
+        async function removeMount(pluginId, mountId) {
+            if (!confirm('Remove this mount configuration?')) return;
+            try {
+                const res = await apiFetch(`/api/storage/mounts/${pluginId}/${mountId}`, { method: 'DELETE' });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error);
+                showNotification('Mount removed', 'success');
+                loadMountPlugins();
+            } catch (e) {
+                showNotification('Remove failed: ' + e.message, 'error');
+            }
+        }
+
+        // ========== Mount Modal ==========
+        async function openAddMountModal(pluginId) {
+            currentMountPlugin = pluginId;
+            currentMountId = null;
+
+            document.getElementById('mount-modal-title').textContent = 'Add Mount';
+
+            // Load schema for this plugin
+            try {
+                const res = await apiFetch(`/api/storage/plugins/${pluginId}`);
+                const data = await res.json();
+                renderMountForm(data.schema, {});
+            } catch (e) {
+                showNotification('Failed to load form: ' + e.message, 'error');
+                return;
+            }
+
+            document.getElementById('mount-modal').classList.remove('hidden');
+        }
+
+        async function editMount(pluginId, mountId) {
+            currentMountPlugin = pluginId;
+            currentMountId = mountId;
+
+            document.getElementById('mount-modal-title').textContent = 'Edit Mount';
+
+            // Load plugin schema and mount data
+            try {
+                const [schemaRes, mountsRes] = await Promise.all([
+                    apiFetch(`/api/storage/plugins/${pluginId}`),
+                    apiFetch(`/api/storage/mounts/${pluginId}`)
+                ]);
+                const schemaData = await schemaRes.json();
+                const mountsData = await mountsRes.json();
+                const mount = (mountsData.mounts || []).find(m => m.id === mountId);
+                renderMountForm(schemaData.schema, mount || {});
+            } catch (e) {
+                showNotification('Failed to load form: ' + e.message, 'error');
+                return;
+            }
+
+            document.getElementById('mount-modal').classList.remove('hidden');
+        }
+
+        function renderMountForm(schema, values) {
+            const form = document.getElementById('mount-modal-form');
+            const properties = schema.properties || {};
+            const required = schema.required || [];
+
+            let html = '';
+            for (const [key, prop] of Object.entries(properties)) {
+                if (key === 'id' && currentMountId) continue; // Don't show ID when editing
+
+                const isRequired = required.includes(key);
+                const value = values[key] ?? prop.default ?? '';
+                const inputType = prop.type === 'integer' ? 'number' :
+                                 key.includes('password') || key.includes('secret') ? 'password' : 'text';
+
+                if (prop.enum) {
+                    html += `
+                        <div class="mb-4">
+                            <label class="block text-sm text-gray-300 mb-1">${escapeHtml(prop.description || key)}${isRequired ? ' *' : ''}</label>
+                            <select name="${key}" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm">
+                                ${prop.enum.map(opt => `<option value="${opt}" ${value === opt ? 'selected' : ''}>${opt}</option>`).join('')}
+                            </select>
+                        </div>
+                    `;
+                } else if (prop.type === 'boolean') {
+                    html += `
+                        <div class="mb-4 flex items-center gap-3">
+                            <input type="checkbox" name="${key}" ${value ? 'checked' : ''} class="w-4 h-4 rounded">
+                            <label class="text-sm text-gray-300">${escapeHtml(prop.description || key)}</label>
+                        </div>
+                    `;
+                } else if (prop.type === 'object') {
+                    // Skip nested objects for simplicity
+                    continue;
+                } else {
+                    html += `
+                        <div class="mb-4">
+                            <label class="block text-sm text-gray-300 mb-1">${escapeHtml(prop.description || key)}${isRequired ? ' *' : ''}</label>
+                            <input type="${inputType}" name="${key}" value="${escapeHtml(String(value))}"
+                                   class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm"
+                                   ${isRequired ? 'required' : ''}>
+                        </div>
+                    `;
+                }
+            }
+
+            form.innerHTML = html || '<p class="text-gray-400">No configuration options</p>';
+        }
+
+        function closeMountModal() {
+            document.getElementById('mount-modal').classList.add('hidden');
+            currentMountPlugin = null;
+            currentMountId = null;
+        }
+
+        async function submitMountForm() {
+            const form = document.getElementById('mount-modal-form');
+            const formData = {};
+
+            form.querySelectorAll('input, select').forEach(el => {
+                if (el.type === 'checkbox') {
+                    formData[el.name] = el.checked;
+                } else if (el.type === 'number') {
+                    formData[el.name] = parseInt(el.value, 10) || 0;
+                } else {
+                    formData[el.name] = el.value;
+                }
+            });
+
+            // Include original ID when editing
+            if (currentMountId) {
+                formData.id = currentMountId;
+            }
+
+            try {
+                let res;
+                if (currentMountId) {
+                    res = await apiFetch(`/api/storage/mounts/${currentMountPlugin}/${currentMountId}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(formData)
+                    });
+                } else {
+                    res = await apiFetch(`/api/storage/mounts/${currentMountPlugin}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(formData)
+                    });
+                }
+
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error);
+
+                showNotification(currentMountId ? 'Mount updated' : 'Mount added', 'success');
+                closeMountModal();
+                loadMountPlugins();
+            } catch (e) {
+                showNotification('Failed: ' + e.message, 'error');
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', loadPage);
+    </script>
+</body>
+</html>

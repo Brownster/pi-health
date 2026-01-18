@@ -33,6 +33,7 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <script src="/js/api.js"></script>
+    <script src="/js/nav.js"></script>
     <style>
         /* Animation for refreshing data */
         @keyframes fadeIn {
@@ -79,26 +80,7 @@
     </header>
 
     <!-- Navigation bar -->
-    <nav class="bg-purple-900 shadow-md">
-        <div class="container mx-auto px-4">
-            <div class="flex items-center justify-between h-12">
-                <div class="flex space-x-4">
-                    <a href="/" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Home</a>
-                    <a href="/system.html" class="px-3 py-2 rounded-md text-white bg-blue-800 font-medium border border-blue-400">System Health</a>
-                    <a href="/containers.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Containers</a>
-                    <a href="/stacks.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Stacks</a>
-                    <a href="/apps.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Apps</a>
-                    <a href="/disks.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Disks</a>
-                    <a href="/storage.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Storage</a>
-                    <a href="/settings.html" class="px-3 py-2 rounded-md text-blue-200 hover:bg-purple-800 hover:text-white font-medium">Settings</a>
-                </div>
-                <div class="flex items-center space-x-3">
-                    <span id="logged-in-user" class="text-blue-200 text-sm"></span>
-                    <button onclick="logout()" class="px-3 py-2 rounded-md text-red-300 hover:bg-red-800 hover:text-white font-medium text-sm">Logout</button>
-                </div>
-            </div>
-        </div>
-    </nav>
+    <nav id="main-nav" class="bg-purple-900 shadow-md"></nav>
 
     <!-- Notification area - fixed position at the top right -->
     <div id="notification-area" class="fixed top-4 right-4 z-50 w-72 flex flex-col items-end"></div>
@@ -125,6 +107,7 @@
                     <div class="w-full bg-gray-700 rounded-full h-4 overflow-hidden">
                         <div id="cpu-bar" class="progress-bar bg-blue-500 h-4 rounded-full" style="width: 0%"></div>
                     </div>
+                    <div id="cpu-cores" class="mt-4 space-y-2 text-sm text-gray-300"></div>
                 </div>
             </div>
 
@@ -209,6 +192,8 @@
                     <div>
                         <p id="network-recv" class="text-xl mb-1">Received: Loading...</p>
                         <p id="network-sent" class="text-xl">Sent: Loading...</p>
+                        <p id="network-recv-rate" class="text-sm text-gray-400 mt-2">Receive rate: —</p>
+                        <p id="network-sent-rate" class="text-sm text-gray-400">Send rate: —</p>
                     </div>
                 </div>
             </div>
@@ -432,6 +417,7 @@
         async function fetchSystemMetrics() {
             const cpuUsageEl = document.getElementById('cpu-usage');
             const cpuBarEl = document.getElementById('cpu-bar');
+            const cpuCoresEl = document.getElementById('cpu-cores');
             const memoryUsageEl = document.getElementById('memory-usage');
             const memoryBarEl = document.getElementById('memory-bar');
             const temperatureEl = document.getElementById('temperature');
@@ -442,7 +428,12 @@
             const diskBar2El = document.getElementById('disk2-bar');
             const networkRecvEl = document.getElementById('network-recv');
             const networkSentEl = document.getElementById('network-sent');
+            const networkRecvRateEl = document.getElementById('network-recv-rate');
+            const networkSentRateEl = document.getElementById('network-sent-rate');
             const lastUpdatedEl = document.getElementById('last-updated');
+            if (!window._networkStats) {
+                window._networkStats = { recv: null, sent: null, time: null };
+            }
 
             try {
                 const response = await fetch('/api/stats');
@@ -459,6 +450,25 @@
                 cpuUsageEl.textContent = `${cpuPercent}%`;
                 cpuUsageEl.className = `text-3xl font-bold mb-2 ${getColorClass(cpuPercent)}`;
                 cpuBarEl.style.width = `${cpuPercent}%`;
+                if (cpuCoresEl) {
+                    const cores = data.cpu_usage_per_core || [];
+                    if (cores.length === 0) {
+                        cpuCoresEl.innerHTML = '<div class="text-gray-400">Per-core stats unavailable</div>';
+                    } else {
+                        cpuCoresEl.innerHTML = cores.map(core => {
+                            const pct = core.usage_percent ? core.usage_percent.toFixed(1) : 0;
+                            return `
+                                <div class="flex items-center justify-between gap-3">
+                                    <span class="w-16">${core.core}</span>
+                                    <div class="flex-1 bg-gray-700 rounded-full h-2 overflow-hidden">
+                                        <div class="progress-bar bg-blue-400 h-2 rounded-full" style="width: ${pct}%"></div>
+                                    </div>
+                                    <span class="w-12 text-right">${pct}%</span>
+                                </div>
+                            `;
+                        }).join('');
+                    }
+                }
 
                 // Update memory usage
                 const memPercent = data.memory_usage.percent.toFixed(1);
@@ -493,6 +503,20 @@
                 // Update network usage
                 networkRecvEl.textContent = `Received: ${formatBytes(data.network_usage.bytes_recv)}`;
                 networkSentEl.textContent = `Sent: ${formatBytes(data.network_usage.bytes_sent)}`;
+                const nowMs = Date.now();
+                const last = window._networkStats;
+                if (last.recv !== null && last.sent !== null && last.time !== null) {
+                    const deltaSeconds = (nowMs - last.time) / 1000;
+                    const recvRate = deltaSeconds > 0 ? (data.network_usage.bytes_recv - last.recv) / deltaSeconds : 0;
+                    const sentRate = deltaSeconds > 0 ? (data.network_usage.bytes_sent - last.sent) / deltaSeconds : 0;
+                    networkRecvRateEl.textContent = `Receive rate: ${formatBytes(Math.max(recvRate, 0))}/s`;
+                    networkSentRateEl.textContent = `Send rate: ${formatBytes(Math.max(sentRate, 0))}/s`;
+                }
+                window._networkStats = {
+                    recv: data.network_usage.bytes_recv,
+                    sent: data.network_usage.bytes_sent,
+                    time: nowMs
+                };
 
                 // Update Pi-specific metrics
                 updatePiMetrics(data);

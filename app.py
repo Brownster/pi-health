@@ -294,15 +294,51 @@ def calculate_cpu_usage(cpu_line):
     return usage_percent
 
 
+def get_cpu_usage_per_core(stat_lines):
+    """Calculate per-core usage percentages from /proc/stat lines."""
+    per_core = []
+    for line in stat_lines:
+        if not line.startswith('cpu') or line.startswith('cpu '):
+            continue
+        parts = line.split()
+        if len(parts) < 9:
+            continue
+        core_id = parts[0]
+        usage = calculate_cpu_usage(parts)
+        per_core.append({'core': core_id, 'usage_percent': usage})
+    return per_core
+
+
+def get_temperature_fallback():
+    """Try to get temperature using psutil sensors when vcgencmd is unavailable."""
+    try:
+        temps = psutil.sensors_temperatures(fahrenheit=False)
+    except Exception:
+        return None
+
+    if not temps:
+        return None
+
+    for entries in temps.values():
+        for entry in entries:
+            current = getattr(entry, 'current', None)
+            if current is not None:
+                return current
+    return None
+
+
 def get_system_stats():
     """Gather system statistics including CPU, memory, disk, and network."""
     # CPU usage
     try:
         with open('/host_proc/stat', 'r') as f:
-            cpu_line = f.readline().split()
-            cpu_usage = calculate_cpu_usage(cpu_line)
+            stat_lines = f.readlines()
+            cpu_line = stat_lines[0].split() if stat_lines else []
+            cpu_usage = calculate_cpu_usage(cpu_line) if cpu_line else None
+            per_core = get_cpu_usage_per_core(stat_lines)
     except Exception:
         cpu_usage = None
+        per_core = []
 
     # Memory usage
     memory = psutil.virtual_memory()
@@ -343,6 +379,9 @@ def get_system_stats():
     else:
         temperature = None
 
+    if temperature is None:
+        temperature = get_temperature_fallback()
+
     # Network I/O
     net_io = psutil.net_io_counters()
     network_usage = {
@@ -356,6 +395,7 @@ def get_system_stats():
     # Combine all stats
     return {
         "cpu_usage_percent": cpu_usage,
+        "cpu_usage_per_core": per_core,
         "memory_usage": memory_usage,
         "disk_usage": disk_usage,
         "disk_usage_2": disk_usage_2,
@@ -904,8 +944,26 @@ def serve_settings():
 
 @app.route('/storage.html')
 def serve_storage():
-    """Serve the storage plugins page."""
+    """Serve the storage plugins page (redirects to pools)."""
     return send_from_directory(app.static_folder, 'storage.html')
+
+
+@app.route('/pools.html')
+def serve_pools():
+    """Serve the storage pools page."""
+    return send_from_directory(app.static_folder, 'pools.html')
+
+
+@app.route('/mounts.html')
+def serve_mounts():
+    """Serve the mounts page."""
+    return send_from_directory(app.static_folder, 'mounts.html')
+
+
+@app.route('/plugins.html')
+def serve_plugins():
+    """Serve the plugins page."""
+    return send_from_directory(app.static_folder, 'plugins.html')
 
 
 @app.route('/disks.html')

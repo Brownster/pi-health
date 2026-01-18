@@ -37,6 +37,7 @@ class StoragePlugin(ABC):
     PLUGIN_NAME: str = ""
     PLUGIN_VERSION: str = "1.0.0"
     PLUGIN_DESCRIPTION: str = ""
+    PLUGIN_CATEGORY: str = "storage"  # UI appears on Pools page
 
     def __init__(self, config_dir: str):
         self.config_dir = config_dir

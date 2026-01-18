@@ -22,6 +22,7 @@ import subprocess
 import re
 import logging
 import signal
+import shutil
 from pathlib import Path
 from datetime import datetime
 
@@ -53,6 +54,13 @@ SEEDBOX_MOUNT_POINT = '/mnt/seedbox'
 SEEDBOX_PASSFILE = '/etc/sshfs/seedbox.pass'
 SEEDBOX_MOUNT_UNIT = 'mnt-seedbox.mount'
 SEEDBOX_AUTOMOUNT_UNIT = 'mnt-seedbox.automount'
+RCLONE_CONFIG_DIR = '/etc/rclone'
+RCLONE_CONFIG_FILE = '/etc/rclone/rclone.conf'
+RCLONE_MOUNTS_CONFIG = '/etc/rclone/mounts.json'
+
+# SSHFS multi-mount configuration
+SSHFS_CONFIG_DIR = '/etc/sshfs'
+SSHFS_MOUNTS_CONFIG = '/etc/sshfs/mounts.json'
 
 
 def run_command(cmd, timeout=30):
@@ -73,6 +81,61 @@ def run_command(cmd, timeout=30):
         return {'error': 'Command timed out', 'returncode': -1}
     except Exception as e:
         return {'error': str(e), 'returncode': -1}
+
+
+def _command_exists(name: str) -> bool:
+    return shutil.which(name) is not None
+
+
+def _detect_pkg_manager():
+    for manager in ('apt-get', 'dnf', 'pacman'):
+        if _command_exists(manager):
+            return manager
+    return None
+
+
+def _install_packages(packages):
+    manager = _detect_pkg_manager()
+    if not manager:
+        return {'success': False, 'error': 'No supported package manager found'}
+
+    if manager == 'apt-get':
+        update = run_command(['apt-get', 'update', '-y'], timeout=600)
+        if update.get('returncode') != 0:
+            return {'success': False, 'error': update.get('stderr', 'apt-get update failed')}
+        install_cmd = ['apt-get', 'install', '-y'] + packages
+    elif manager == 'dnf':
+        install_cmd = ['dnf', 'install', '-y'] + packages
+    else:
+        install_cmd = ['pacman', '-S', '--noconfirm'] + packages
+
+    result = run_command(install_cmd, timeout=1200)
+    if result.get('returncode') != 0:
+        return {'success': False, 'error': result.get('stderr', 'Package install failed')}
+    return {'success': True}
+
+
+def _ensure_dependencies(required_bins, package_map):
+    missing = []
+    for binary in required_bins:
+        if binary in ('fusermount', 'fusermount3'):
+            if _command_exists('fusermount') or _command_exists('fusermount3'):
+                continue
+        if not _command_exists(binary):
+            missing.append(binary)
+
+    if not missing:
+        return {'success': True}
+
+    manager = _detect_pkg_manager()
+    if not manager:
+        return {'success': False, 'error': 'Missing dependencies and no package manager found'}
+
+    packages = package_map.get(manager, [])
+    if not packages:
+        return {'success': False, 'error': f'No package mapping for {manager}'}
+
+    return _install_packages(packages)
 
 
 def cmd_lsblk(params):
@@ -860,6 +923,835 @@ def cmd_seedbox_disable(params):
     return {'success': True}
 
 
+# =============================================================================
+# Rclone Mount Commands
+# =============================================================================
+
+def _get_rclone_unit_name(mount_id: str) -> str:
+    safe_id = re.sub(r'[^a-zA-Z0-9]', '-', mount_id)
+    return f"rclone-{safe_id}.service"
+
+
+def _load_rclone_mounts():
+    try:
+        if os.path.exists(RCLONE_MOUNTS_CONFIG):
+            with open(RCLONE_MOUNTS_CONFIG, 'r') as f:
+                return json.load(f).get('mounts', [])
+    except Exception:
+        pass
+    return []
+
+
+def _save_rclone_mounts(mounts):
+    os.makedirs(RCLONE_CONFIG_DIR, exist_ok=True)
+    with open(RCLONE_MOUNTS_CONFIG, 'w') as f:
+        json.dump({'mounts': mounts}, f, indent=2)
+
+
+def _write_rclone_remote(config):
+    os.makedirs(RCLONE_CONFIG_DIR, exist_ok=True)
+    remote_name = f"rclone-{config['id']}"
+    backend = config.get('backend', 's3')
+    provider = config.get('provider', 'AWS')
+    region = config.get('region', 'us-east-1')
+    endpoint = config.get('endpoint', '')
+    access_key_id = config.get('access_key_id', '')
+    secret_access_key = config.get('secret_access_key', '')
+
+    lines = []
+    if os.path.exists(RCLONE_CONFIG_FILE):
+        with open(RCLONE_CONFIG_FILE, 'r') as f:
+            lines = f.read().splitlines()
+
+    # Remove existing section
+    new_lines = []
+    in_section = False
+    for line in lines:
+        if line.strip().startswith('[') and line.strip().endswith(']'):
+            in_section = line.strip()[1:-1] == remote_name
+            if in_section:
+                continue
+        if in_section:
+            continue
+        new_lines.append(line)
+
+    new_lines.append(f"[{remote_name}]")
+    new_lines.append(f"type = s3")
+    new_lines.append(f"provider = {provider}")
+    new_lines.append(f"access_key_id = {access_key_id}")
+    new_lines.append(f"secret_access_key = {secret_access_key}")
+    new_lines.append(f"region = {region}")
+    if backend == 's3-compatible' and endpoint:
+        new_lines.append(f"endpoint = {endpoint}")
+
+    with open(RCLONE_CONFIG_FILE, 'w') as f:
+        f.write("\n".join(new_lines) + "\n")
+
+
+def _read_rclone_remote(remote_name: str) -> dict:
+    result = {}
+    if not os.path.exists(RCLONE_CONFIG_FILE):
+        return result
+    try:
+        with open(RCLONE_CONFIG_FILE, 'r') as f:
+            lines = f.read().splitlines()
+    except Exception:
+        return result
+
+    in_section = False
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith('[') and line.endswith(']'):
+            in_section = line[1:-1] == remote_name
+            continue
+        if not in_section or '=' not in line:
+            continue
+        key, value = [part.strip() for part in line.split('=', 1)]
+        result[key] = value
+    return result
+
+
+def cmd_rclone_list(params):
+    mounts = _load_rclone_mounts()
+    result = []
+    for mount in mounts:
+        mount_id = mount.get('id', '')
+        mount_point = mount.get('mount_point', '')
+        unit = _get_rclone_unit_name(mount_id)
+        active = run_command(['systemctl', 'is-active', unit]).get('returncode') == 0
+        mounted = run_command(['mountpoint', '-q', mount_point]).get('returncode') == 0
+        result.append({
+            **mount,
+            'active': active,
+            'mounted': mounted
+        })
+    return {'success': True, 'mounts': result}
+
+
+def cmd_rclone_configure(params):
+    mount_id = params.get('id', '').strip()
+    name = params.get('name', '').strip()
+    backend = params.get('backend', 's3')
+    bucket = params.get('bucket', '').strip()
+    mount_point = params.get('mount_point', '').strip()
+    enabled = bool(params.get('enabled', False))
+
+    if not mount_id or not name or not bucket or not mount_point:
+        return {'success': False, 'error': 'id, name, bucket, mount_point required'}
+    if not re.match(r'^[a-z0-9-]+$', mount_id):
+        return {'success': False, 'error': 'ID must be lowercase alphanumeric with hyphens'}
+    if not mount_point.startswith('/mnt/') or '..' in mount_point:
+        return {'success': False, 'error': 'Mount point must be under /mnt/'}
+
+    if backend not in ('s3', 's3-compatible'):
+        return {'success': False, 'error': 'Unsupported backend'}
+
+    access_key_id = params.get('access_key_id', '')
+    secret_access_key = params.get('secret_access_key', '')
+    if not access_key_id or not secret_access_key:
+        existing = _read_rclone_remote(f"rclone-{mount_id}")
+        access_key_id = access_key_id or existing.get('access_key_id', '')
+        secret_access_key = secret_access_key or existing.get('secret_access_key', '')
+
+    if not access_key_id and not secret_access_key:
+        return {'success': False, 'error': 'Access key and secret key required'}
+    if not access_key_id:
+        return {'success': False, 'error': 'Access key required'}
+    if not secret_access_key:
+        return {'success': False, 'error': 'Secret key required'}
+    if backend == 's3-compatible' and not params.get('endpoint'):
+        return {'success': False, 'error': 'Endpoint required for S3-compatible'}
+
+    os.makedirs(mount_point, exist_ok=True)
+    params = {
+        **params,
+        'access_key_id': access_key_id,
+        'secret_access_key': secret_access_key
+    }
+    _write_rclone_remote(params)
+
+    unit = _get_rclone_unit_name(mount_id)
+    remote_name = f"rclone-{mount_id}:{bucket}"
+    options = params.get('options', {}) or {}
+    vfs_cache_mode = options.get('vfs_cache_mode', 'writes')
+    read_only = options.get('read_only', False)
+    allow_other = options.get('allow_other', True)
+
+    flags = [
+        f"--config={RCLONE_CONFIG_FILE}",
+        f"--vfs-cache-mode={vfs_cache_mode}",
+        "--dir-cache-time=5m",
+        "--poll-interval=1m"
+    ]
+    if read_only:
+        flags.append("--read-only")
+    if allow_other:
+        flags.append("--allow-other")
+
+    unit_body = f"""[Unit]
+Description=Rclone Mount: {name}
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/rclone mount {remote_name} {mount_point} {' '.join(flags)}
+ExecStop=/bin/fusermount -u {mount_point}
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+    try:
+        with open(f"/etc/systemd/system/{unit}", 'w') as f:
+            f.write(unit_body)
+    except Exception as e:
+        return {'success': False, 'error': f'Failed to write unit file: {e}'}
+
+    run_command(['systemctl', 'daemon-reload'])
+
+    if enabled and params.get('auto_install', True):
+        deps = _ensure_dependencies(
+            ['rclone', 'fusermount', 'fusermount3'],
+            {
+                'apt-get': ['rclone', 'fuse3'],
+                'dnf': ['rclone', 'fuse3'],
+                'pacman': ['rclone', 'fuse3']
+            }
+        )
+        if not deps.get('success'):
+            return {'success': False, 'error': deps.get('error', 'Dependency install failed')}
+
+    if enabled:
+        result = run_command(['systemctl', 'enable', '--now', unit])
+        if result.get('returncode') != 0:
+            return {'success': False, 'error': result.get('stderr', 'Failed to enable')}
+    else:
+        run_command(['systemctl', 'disable', '--now', unit])
+
+    mounts = _load_rclone_mounts()
+    mounts = [m for m in mounts if m.get('id') != mount_id]
+    mounts.append({
+        'id': mount_id,
+        'name': name,
+        'backend': backend,
+        'provider': params.get('provider', 'AWS'),
+        'region': params.get('region', 'us-east-1'),
+        'endpoint': params.get('endpoint', ''),
+        'bucket': bucket,
+        'mount_point': mount_point,
+        'enabled': enabled
+    })
+    _save_rclone_mounts(mounts)
+
+    return {'success': True}
+
+
+def cmd_rclone_remove(params):
+    mount_id = params.get('id', '').strip()
+    if not mount_id:
+        return {'success': False, 'error': 'id required'}
+    unit = _get_rclone_unit_name(mount_id)
+    run_command(['systemctl', 'disable', '--now', unit])
+    if os.path.exists(f"/etc/systemd/system/{unit}"):
+        os.remove(f"/etc/systemd/system/{unit}")
+    run_command(['systemctl', 'daemon-reload'])
+
+    mounts = _load_rclone_mounts()
+    mounts = [m for m in mounts if m.get('id') != mount_id]
+    _save_rclone_mounts(mounts)
+    return {'success': True}
+
+
+def cmd_rclone_mount(params):
+    mount_id = params.get('id', '').strip()
+    if not mount_id:
+        return {'success': False, 'error': 'id required'}
+    unit = _get_rclone_unit_name(mount_id)
+    result = run_command(['systemctl', 'start', unit])
+    if result.get('returncode') == 0:
+        return {'success': True}
+    return {'success': False, 'error': result.get('stderr', 'Mount failed')}
+
+
+def cmd_rclone_unmount(params):
+    mount_id = params.get('id', '').strip()
+    if not mount_id:
+        return {'success': False, 'error': 'id required'}
+    unit = _get_rclone_unit_name(mount_id)
+    result = run_command(['systemctl', 'stop', unit])
+    if result.get('returncode') == 0:
+        return {'success': True}
+    return {'success': False, 'error': result.get('stderr', 'Unmount failed')}
+
+
+# =============================================================================
+# SSHFS Multi-Mount Commands
+# =============================================================================
+
+SSHFS_CONFIG_DIR = '/etc/sshfs'
+SSHFS_MOUNTS_CONFIG = '/etc/sshfs/mounts.json'
+
+
+def _get_sshfs_unit_names(mount_id: str) -> dict:
+    """Get systemd unit names for a mount ID."""
+    safe_id = re.sub(r'[^a-zA-Z0-9]', '-', mount_id)
+    return {
+        'mount': f'sshfs-{safe_id}.mount',
+        'automount': f'sshfs-{safe_id}.automount'
+    }
+
+
+def cmd_sshfs_list(params):
+    """List all configured SSHFS mounts with status."""
+    try:
+        if os.path.exists(SSHFS_MOUNTS_CONFIG):
+            with open(SSHFS_MOUNTS_CONFIG, 'r') as f:
+                mounts = json.load(f).get('mounts', [])
+        else:
+            mounts = []
+
+        result = []
+        for mount in mounts:
+            mount_point = mount.get('mount_point', '')
+            mount_id = mount.get('id', '')
+            units = _get_sshfs_unit_names(mount_id)
+
+            mp_result = run_command(['mountpoint', '-q', mount_point])
+            is_mounted = mp_result.get('returncode') == 0
+
+            enabled_result = run_command(['systemctl', 'is-enabled', units['automount']])
+            is_enabled = enabled_result.get('returncode') == 0
+
+            result.append({
+                'id': mount_id,
+                'name': mount.get('name', ''),
+                'host': mount.get('host', ''),
+                'port': mount.get('port', 22),
+                'username': mount.get('username', ''),
+                'remote_path': mount.get('remote_path', ''),
+                'mount_point': mount_point,
+                'mounted': is_mounted,
+                'enabled': is_enabled
+            })
+
+        return {'success': True, 'mounts': result}
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
+
+
+def cmd_sshfs_configure(params):
+    """Configure an SSHFS mount (add or update)."""
+    mount_id = params.get('id', '').strip()
+    name = params.get('name', '').strip()
+    host = params.get('host', '').strip()
+    port = str(params.get('port', '22')).strip()
+    username = params.get('username', '').strip()
+    password = params.get('password', '')
+    remote_path = params.get('remote_path', '').strip()
+    mount_point = params.get('mount_point', '').strip()
+    auth_type = params.get('auth_type', 'password')
+    ssh_key_path = params.get('ssh_key_path', '')
+    options = params.get('options', {})
+
+    if not mount_id or not host or not username or not remote_path or not mount_point:
+        return {'success': False, 'error': 'id, host, username, remote_path, mount_point required'}
+
+    if not re.match(r'^[a-z0-9-]+$', mount_id):
+        return {'success': False, 'error': 'ID must be lowercase alphanumeric with hyphens'}
+
+    if not mount_point.startswith('/mnt/') or '..' in mount_point:
+        return {'success': False, 'error': 'Mount point must be under /mnt/'}
+
+    if not remote_path.startswith('/'):
+        return {'success': False, 'error': 'Remote path must be absolute'}
+
+    if not port.isdigit() or not (1 <= int(port) <= 65535):
+        return {'success': False, 'error': 'Invalid port'}
+
+    passfile = f"{SSHFS_CONFIG_DIR}/{mount_id}.pass"
+    if auth_type == 'password' and not password and not os.path.exists(passfile):
+        return {'success': False, 'error': 'Password required for password auth'}
+
+    os.makedirs(SSHFS_CONFIG_DIR, exist_ok=True)
+    os.makedirs(mount_point, exist_ok=True)
+
+    units = _get_sshfs_unit_names(mount_id)
+    if auth_type == 'password' and password:
+        with open(passfile, 'w') as f:
+            f.write(password)
+        os.chmod(passfile, 0o600)
+
+    opts = ['_netdev', 'users', 'reconnect', 'ServerAliveInterval=15',
+            'ServerAliveCountMax=3', 'StrictHostKeyChecking=accept-new']
+
+    if options.get('allow_other', True):
+        opts.append('allow_other')
+    if options.get('compression', False):
+        opts.append('Compression=yes')
+
+    if auth_type == 'password':
+        opts.append(f'ssh_command=sshpass -f {passfile} ssh')
+    elif auth_type == 'key' and ssh_key_path:
+        opts.append(f'IdentityFile={ssh_key_path}')
+
+    opts.append(f'port={port}')
+
+    mount_unit = f"""[Unit]
+Description=SSHFS Mount: {name}
+After=network-online.target
+Wants=network-online.target
+
+[Mount]
+What=sshfs#{username}@{host}:{remote_path}
+Where={mount_point}
+Type=fuse.sshfs
+Options={','.join(opts)}
+TimeoutSec=30
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+    automount_unit = f"""[Unit]
+Description=SSHFS Automount: {name}
+After=network-online.target
+Wants=network-online.target
+
+[Automount]
+Where={mount_point}
+TimeoutIdleSec=0
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+    try:
+        with open(f"/etc/systemd/system/{units['mount']}", 'w') as f:
+            f.write(mount_unit)
+        with open(f"/etc/systemd/system/{units['automount']}", 'w') as f:
+            f.write(automount_unit)
+    except Exception as e:
+        return {'success': False, 'error': f'Failed to write unit files: {e}'}
+
+    run_command(['systemctl', 'daemon-reload'])
+
+    if params.get('enabled', True):
+        result = run_command(['systemctl', 'enable', '--now', units['automount']])
+        if result.get('returncode') != 0:
+            return {'success': False, 'error': result.get('stderr', 'Failed to enable')}
+    else:
+        run_command(['systemctl', 'disable', '--now', units['automount']])
+        run_command(['systemctl', 'stop', units['mount']])
+
+    try:
+        if os.path.exists(SSHFS_MOUNTS_CONFIG):
+            with open(SSHFS_MOUNTS_CONFIG, 'r') as f:
+                stored = json.load(f).get('mounts', [])
+        else:
+            stored = []
+    except Exception:
+        stored = []
+
+    config = {
+        'id': mount_id,
+        'name': name,
+        'host': host,
+        'port': int(port),
+        'username': username,
+        'remote_path': remote_path,
+        'mount_point': mount_point,
+        'auth_type': auth_type,
+        'ssh_key_path': ssh_key_path,
+        'enabled': params.get('enabled', True),
+        'options': options
+    }
+
+    stored = [m for m in stored if m.get('id') != mount_id]
+    stored.append(config)
+
+    with open(SSHFS_MOUNTS_CONFIG, 'w') as f:
+        json.dump({'mounts': stored}, f, indent=2)
+
+    return {'success': True, 'message': f'Mount {mount_id} configured'}
+
+
+def cmd_sshfs_remove(params):
+    """Remove an SSHFS mount configuration."""
+    mount_id = params.get('id', '').strip()
+    if not mount_id:
+        return {'success': False, 'error': 'id required'}
+
+    units = _get_sshfs_unit_names(mount_id)
+    passfile = f"{SSHFS_CONFIG_DIR}/{mount_id}.pass"
+
+    run_command(['systemctl', 'disable', '--now', units['automount']])
+    run_command(['systemctl', 'stop', units['mount']])
+
+    for unit in [units['mount'], units['automount']]:
+        path = f"/etc/systemd/system/{unit}"
+        if os.path.exists(path):
+            os.remove(path)
+
+    if os.path.exists(passfile):
+        os.remove(passfile)
+
+    try:
+        if os.path.exists(SSHFS_MOUNTS_CONFIG):
+            with open(SSHFS_MOUNTS_CONFIG, 'r') as f:
+                stored = json.load(f).get('mounts', [])
+            stored = [m for m in stored if m.get('id') != mount_id]
+            with open(SSHFS_MOUNTS_CONFIG, 'w') as f:
+                json.dump({'mounts': stored}, f, indent=2)
+    except Exception:
+        pass
+
+    run_command(['systemctl', 'daemon-reload'])
+    return {'success': True}
+
+
+def cmd_sshfs_mount(params):
+    """Manually mount an SSHFS filesystem."""
+    mount_id = params.get('id', '').strip()
+    if not mount_id:
+        return {'success': False, 'error': 'id required'}
+
+    units = _get_sshfs_unit_names(mount_id)
+    result = run_command(['systemctl', 'start', units['mount']])
+
+    if result.get('returncode') == 0:
+        return {'success': True}
+    return {'success': False, 'error': result.get('stderr', 'Mount failed')}
+
+
+def cmd_sshfs_unmount(params):
+    """Manually unmount an SSHFS filesystem."""
+    mount_id = params.get('id', '').strip()
+    if not mount_id:
+        return {'success': False, 'error': 'id required'}
+
+    units = _get_sshfs_unit_names(mount_id)
+    result = run_command(['systemctl', 'stop', units['mount']])
+
+    if result.get('returncode') == 0:
+        return {'success': True}
+    return {'success': False, 'error': result.get('stderr', 'Unmount failed')}
+
+
+# =============================================================================
+# SSHFS Multi-Mount Commands
+# =============================================================================
+
+def _load_sshfs_mounts():
+    """Load SSHFS mounts configuration."""
+    try:
+        if os.path.exists(SSHFS_MOUNTS_CONFIG):
+            with open(SSHFS_MOUNTS_CONFIG, 'r') as f:
+                return json.load(f).get('mounts', [])
+    except Exception:
+        pass
+    return []
+
+
+def _save_sshfs_mounts(mounts):
+    """Save SSHFS mounts configuration."""
+    os.makedirs(SSHFS_CONFIG_DIR, exist_ok=True)
+    with open(SSHFS_MOUNTS_CONFIG, 'w') as f:
+        json.dump({'mounts': mounts}, f, indent=2)
+    os.chmod(SSHFS_MOUNTS_CONFIG, 0o600)
+
+
+def _get_sshfs_unit_names(mount_id):
+    """Get systemd unit names for a mount ID."""
+    # Convert mount_id to a safe unit name
+    safe_id = re.sub(r'[^a-zA-Z0-9]', '-', mount_id)
+    return {
+        'mount': f'sshfs-{safe_id}.mount',
+        'automount': f'sshfs-{safe_id}.automount'
+    }
+
+
+def _is_sshfs_mounted(mount_point):
+    """Check if an SSHFS mount point is currently mounted."""
+    try:
+        result = run_command(['mountpoint', '-q', mount_point])
+        return result.get('returncode') == 0
+    except Exception:
+        return False
+
+
+def cmd_sshfs_list(params):
+    """List all configured SSHFS mounts with their status."""
+    mounts = _load_sshfs_mounts()
+    result = []
+
+    for mount in mounts:
+        mount_point = mount.get('mount_point', '')
+        units = _get_sshfs_unit_names(mount.get('id', ''))
+
+        # Check if mounted
+        is_mounted = _is_sshfs_mounted(mount_point) if mount_point else False
+
+        # Check if enabled (automount unit is enabled)
+        enabled_check = run_command(['systemctl', 'is-enabled', units['automount']])
+        is_enabled = enabled_check.get('returncode') == 0
+
+        result.append({
+            'id': mount.get('id'),
+            'name': mount.get('name', ''),
+            'host': mount.get('host', ''),
+            'port': mount.get('port', 22),
+            'username': mount.get('username', ''),
+            'remote_path': mount.get('remote_path', ''),
+            'mount_point': mount_point,
+            'mounted': is_mounted,
+            'enabled': is_enabled,
+            'options': mount.get('options', {})
+        })
+
+    return {'success': True, 'mounts': result}
+
+
+def cmd_sshfs_configure(params):
+    """Configure an SSHFS mount (add or update)."""
+    mount_id = params.get('id', '').strip()
+    name = params.get('name', '').strip()
+    host = params.get('host', '').strip()
+    username = params.get('username', '').strip()
+    password = params.get('password', '')
+    remote_path = params.get('remote_path', '').strip()
+    mount_point = params.get('mount_point', '').strip()
+    port = str(params.get('port', '22')).strip()
+    options = params.get('options', {})
+
+    # Validation
+    if not mount_id:
+        return {'success': False, 'error': 'Mount ID required'}
+    if not re.match(r'^[a-zA-Z0-9_-]+$', mount_id):
+        return {'success': False, 'error': 'Invalid mount ID (use alphanumeric, dash, underscore)'}
+    if not host or not username or not remote_path or not mount_point:
+        return {'success': False, 'error': 'host, username, remote_path, and mount_point required'}
+    if not remote_path.startswith('/'):
+        return {'success': False, 'error': 'remote_path must be absolute'}
+    if not mount_point.startswith('/mnt/'):
+        return {'success': False, 'error': 'mount_point must be under /mnt/'}
+    if '..' in remote_path or '..' in mount_point:
+        return {'success': False, 'error': 'Path traversal not allowed'}
+    if not port.isdigit() or not (1 <= int(port) <= 65535):
+        return {'success': False, 'error': 'Invalid port'}
+
+    # Load existing mounts
+    mounts = _load_sshfs_mounts()
+
+    # Check if updating existing or adding new
+    existing_idx = next((i for i, m in enumerate(mounts) if m.get('id') == mount_id), None)
+
+    # If password provided, store it
+    passfile = os.path.join(SSHFS_CONFIG_DIR, f'{mount_id}.pass')
+    if password:
+        os.makedirs(SSHFS_CONFIG_DIR, exist_ok=True)
+        with open(passfile, 'w') as f:
+            f.write(password)
+        os.chmod(passfile, 0o600)
+    elif existing_idx is None and not os.path.exists(passfile):
+        return {'success': False, 'error': 'Password required for new mount'}
+
+    # Create mount point directory
+    os.makedirs(mount_point, exist_ok=True)
+
+    # Build systemd units
+    units = _get_sshfs_unit_names(mount_id)
+
+    # Build mount options
+    mount_opts = [
+        '_netdev',
+        'users',
+        'allow_other',
+        f'port={port}'
+    ]
+    if options.get('reconnect', True):
+        mount_opts.extend(['reconnect', 'ServerAliveInterval=15', 'ServerAliveCountMax=3'])
+    if options.get('compression', False):
+        mount_opts.append('Compression=yes')
+    mount_opts.append('StrictHostKeyChecking=accept-new')
+    mount_opts.append(f'ssh_command=sshpass -f {passfile} ssh')
+
+    # Escape mount point for systemd unit name
+    mount_unit_path = mount_point.replace('/', '-').strip('-')
+
+    mount_unit = f"""[Unit]
+Description=SSHFS Mount - {name or mount_id}
+After=network-online.target
+Wants=network-online.target
+
+[Mount]
+What=sshfs#{username}@{host}:{remote_path}
+Where={mount_point}
+Type=fuse.sshfs
+Options={','.join(mount_opts)}
+TimeoutSec=30
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+    automount_unit = f"""[Unit]
+Description=SSHFS Automount - {name or mount_id}
+After=network-online.target
+Wants=network-online.target
+
+[Automount]
+Where={mount_point}
+TimeoutIdleSec=300
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+    try:
+        # Write systemd units
+        with open(f"/etc/systemd/system/{units['mount']}", 'w') as f:
+            f.write(mount_unit)
+        with open(f"/etc/systemd/system/{units['automount']}", 'w') as f:
+            f.write(automount_unit)
+    except Exception as e:
+        return {'success': False, 'error': f'Failed to write systemd units: {e}'}
+
+    # Reload systemd
+    run_command(['systemctl', 'daemon-reload'])
+
+    if params.get('enabled', True) and params.get('auto_install', True):
+        deps = _ensure_dependencies(
+            ['sshfs', 'sshpass'],
+            {
+                'apt-get': ['sshfs', 'sshpass'],
+                'dnf': ['sshfs', 'sshpass'],
+                'pacman': ['sshfs', 'sshpass']
+            }
+        )
+        if not deps.get('success'):
+            return {'success': False, 'error': deps.get('error', 'Dependency install failed')}
+
+    # Enable automount
+    if params.get('enabled', True):
+        enable_result = run_command(['systemctl', 'enable', '--now', units['automount']])
+        if enable_result.get('returncode') != 0:
+            return {'success': False, 'error': enable_result.get('stderr', 'Failed to enable automount')}
+    else:
+        run_command(['systemctl', 'disable', '--now', units['automount']])
+        run_command(['systemctl', 'stop', units['mount']])
+
+    # Update config
+    mount_config = {
+        'id': mount_id,
+        'name': name or mount_id,
+        'host': host,
+        'port': int(port),
+        'username': username,
+        'remote_path': remote_path,
+        'mount_point': mount_point,
+        'options': options,
+        'enabled': bool(params.get('enabled', True))
+    }
+
+    if existing_idx is not None:
+        mounts[existing_idx] = mount_config
+    else:
+        mounts.append(mount_config)
+
+    _save_sshfs_mounts(mounts)
+
+    return {'success': True, 'mount': mount_config}
+
+
+def cmd_sshfs_remove(params):
+    """Remove an SSHFS mount configuration."""
+    mount_id = params.get('id', '').strip()
+
+    if not mount_id:
+        return {'success': False, 'error': 'Mount ID required'}
+
+    mounts = _load_sshfs_mounts()
+    mount = next((m for m in mounts if m.get('id') == mount_id), None)
+
+    if not mount:
+        return {'success': False, 'error': 'Mount not found'}
+
+    units = _get_sshfs_unit_names(mount_id)
+
+    # Stop and disable units
+    run_command(['systemctl', 'disable', '--now', units['automount']])
+    run_command(['systemctl', 'stop', units['mount']])
+
+    # Remove unit files
+    for unit in [units['mount'], units['automount']]:
+        unit_path = f"/etc/systemd/system/{unit}"
+        if os.path.exists(unit_path):
+            os.remove(unit_path)
+
+    # Remove password file
+    passfile = os.path.join(SSHFS_CONFIG_DIR, f'{mount_id}.pass')
+    if os.path.exists(passfile):
+        os.remove(passfile)
+
+    # Reload systemd
+    run_command(['systemctl', 'daemon-reload'])
+
+    # Remove from config
+    mounts = [m for m in mounts if m.get('id') != mount_id]
+    _save_sshfs_mounts(mounts)
+
+    return {'success': True}
+
+
+def cmd_sshfs_mount(params):
+    """Manually mount an SSHFS mount."""
+    mount_id = params.get('id', '').strip()
+
+    if not mount_id:
+        return {'success': False, 'error': 'Mount ID required'}
+
+    mounts = _load_sshfs_mounts()
+    mount = next((m for m in mounts if m.get('id') == mount_id), None)
+
+    if not mount:
+        return {'success': False, 'error': 'Mount not found'}
+
+    units = _get_sshfs_unit_names(mount_id)
+    result = run_command(['systemctl', 'start', units['mount']])
+
+    if result.get('returncode') != 0:
+        return {'success': False, 'error': result.get('stderr', 'Failed to mount')}
+
+    return {'success': True}
+
+
+def cmd_sshfs_unmount(params):
+    """Manually unmount an SSHFS mount."""
+    mount_id = params.get('id', '').strip()
+
+    if not mount_id:
+        return {'success': False, 'error': 'Mount ID required'}
+
+    mounts = _load_sshfs_mounts()
+    mount = next((m for m in mounts if m.get('id') == mount_id), None)
+
+    if not mount:
+        return {'success': False, 'error': 'Mount not found'}
+
+    units = _get_sshfs_unit_names(mount_id)
+    result = run_command(['systemctl', 'stop', units['mount']])
+
+    if result.get('returncode') != 0:
+        return {'success': False, 'error': result.get('stderr', 'Failed to unmount')}
+
+    return {'success': True}
+
+
 # Command whitelist
 COMMANDS = {
     'lsblk': cmd_lsblk,
@@ -889,6 +1781,16 @@ COMMANDS = {
     'backup_restore': cmd_backup_restore,
     'seedbox_configure': cmd_seedbox_configure,
     'seedbox_disable': cmd_seedbox_disable,
+    'sshfs_list': cmd_sshfs_list,
+    'sshfs_configure': cmd_sshfs_configure,
+    'sshfs_remove': cmd_sshfs_remove,
+    'sshfs_mount': cmd_sshfs_mount,
+    'sshfs_unmount': cmd_sshfs_unmount,
+    'rclone_list': cmd_rclone_list,
+    'rclone_configure': cmd_rclone_configure,
+    'rclone_remove': cmd_rclone_remove,
+    'rclone_mount': cmd_rclone_mount,
+    'rclone_unmount': cmd_rclone_unmount,
     'ping': lambda p: {'success': True, 'message': 'pong'}
 }
 

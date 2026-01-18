@@ -33,6 +33,7 @@ class MergerFSPlugin(StoragePlugin):
     PLUGIN_NAME = "MergerFS"
     PLUGIN_VERSION = "1.0.0"
     PLUGIN_DESCRIPTION = "Combine multiple drives into a single unified pool"
+    PLUGIN_CATEGORY = "storage"  # UI appears on Pools page
 
     MERGERFS_BIN = "/usr/bin/mergerfs"
     FSTAB_PATH = "/etc/fstab"

@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script>
+        if (!sessionStorage.getItem("loggedIn")) {
+            window.location.href = "/login.html";
+        }
+
+        const username = sessionStorage.getItem("username");
+        if (username) {
+            document.addEventListener('DOMContentLoaded', () => {
+                const userEl = document.getElementById('logged-in-user');
+                if (userEl) userEl.textContent = username;
+            });
+        }
+
+        async function logout() {
+            try {
+                await fetch('/api/logout', { method: 'POST' });
+            } catch (e) {}
+            sessionStorage.clear();
+            window.location.href = '/login.html';
+        }
+    </script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Plugins - Pi-Health Dashboard</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <script src="/js/api.js"></script>
+    <script src="/js/nav.js"></script>
+    <style>
+        .coraline-button {
+            background: linear-gradient(to bottom, #5f4b8b, #372b53);
+            border: 1px solid #8a6cbd;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.25);
+            transition: all 0.3s ease;
+        }
+        .coraline-button:hover:not(:disabled) {
+            background: linear-gradient(to bottom, #6f58a3, #413162);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 10px rgba(0, 0, 0, 0.3);
+        }
+        .coraline-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .status-pill {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+        .status-healthy { background-color: rgba(52, 211, 153, 0.2); color: #34d399; border: 1px solid #34d399; }
+        .status-error { background-color: rgba(248, 113, 113, 0.2); color: #f87171; border: 1px solid #f87171; }
+        .status-unconfigured { background-color: rgba(156, 163, 175, 0.2); color: #9ca3af; border: 1px solid #9ca3af; }
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 44px;
+            height: 24px;
+        }
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #4a5568;
+            transition: 0.3s;
+            border-radius: 24px;
+        }
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: 0.3s;
+            border-radius: 50%;
+        }
+        input:checked + .toggle-slider {
+            background-color: #7c3aed;
+        }
+        input:checked + .toggle-slider:before {
+            transform: translateX(20px);
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-blue-100 font-sans min-h-screen">
+    <header class="bg-gradient-to-r from-purple-900 to-blue-900 shadow-lg relative overflow-hidden">
+        <div class="absolute inset-0 overflow-hidden">
+            <img src="/theme-banner" alt="Dashboard" class="w-full h-full object-cover opacity-40 blur-sm" style="filter: hue-rotate(-10deg) saturate(1.15);">
+        </div>
+        <div class="container mx-auto px-8 py-12 relative">
+        </div>
+    </header>
+
+    <!-- Navigation bar -->
+    <nav id="main-nav" class="bg-purple-900 shadow-md"></nav>
+
+    <div id="notification-area" class="fixed top-4 right-4 z-50 w-80 flex flex-col items-end"></div>
+
+    <main class="container mx-auto p-6">
+        <div class="mb-6">
+            <h2 class="text-2xl font-semibold">Plugins</h2>
+            <p class="text-sm text-gray-400 mt-1">
+                Manage which plugins are active. Configure them in their respective pages
+                (<a href="/mounts.html" class="text-purple-400 hover:underline">Mounts</a>,
+                <a href="/pools.html" class="text-purple-400 hover:underline">Pools</a>).
+            </p>
+        </div>
+
+        <div id="plugins-list" class="space-y-4">
+            <div class="text-center py-10 text-gray-400">Loading plugins...</div>
+        </div>
+    </main>
+
+    <script>
+        const CATEGORY_LABELS = {
+            'storage': 'Storage \u2192 Pools',
+            'mount': 'Storage \u2192 Mounts'
+        };
+
+        const CATEGORY_LINKS = {
+            'storage': '/pools.html',
+            'mount': '/mounts.html'
+        };
+
+        function showNotification(message, type = 'info') {
+            const area = document.getElementById('notification-area');
+            const notification = document.createElement('div');
+            notification.className = 'p-3 mb-2 rounded shadow-lg transform transition-all duration-300 opacity-0';
+            if (type === 'success') notification.classList.add('bg-green-600');
+            else if (type === 'error') notification.classList.add('bg-red-600');
+            else notification.classList.add('bg-blue-600');
+            notification.textContent = message;
+            area.appendChild(notification);
+            setTimeout(() => notification.classList.replace('opacity-0', 'opacity-100'), 10);
+            setTimeout(() => {
+                notification.classList.replace('opacity-100', 'opacity-0');
+                setTimeout(() => notification.remove(), 300);
+            }, 3000);
+        }
+
+        async function loadPlugins() {
+            try {
+                const res = await apiFetch('/api/storage/plugins');
+                const data = await res.json();
+                renderPlugins(data.plugins || []);
+            } catch (e) {
+                document.getElementById('plugins-list').innerHTML =
+                    `<p class="text-red-400">Failed to load plugins: ${e.message}</p>`;
+            }
+        }
+
+        function renderPlugins(plugins) {
+            const container = document.getElementById('plugins-list');
+
+            if (!plugins.length) {
+                container.innerHTML = '<p class="text-gray-500">No plugins available</p>';
+                return;
+            }
+
+            // Group plugins by category
+            const storagePlugins = plugins.filter(p => p.category === 'storage');
+            const mountPlugins = plugins.filter(p => p.category === 'mount');
+
+            let html = '';
+
+            if (storagePlugins.length > 0) {
+                html += `
+                    <div class="mb-6">
+                        <h3 class="text-lg font-semibold mb-3 flex items-center">
+                            <svg class="w-5 h-5 mr-2 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"></path>
+                            </svg>
+                            Storage Pools
+                        </h3>
+                        <p class="text-sm text-gray-400 mb-3">Configure these plugins on the <a href="/pools.html" class="text-purple-400 hover:underline">Pools</a> page.</p>
+                        ${storagePlugins.map(p => renderPluginCard(p)).join('')}
+                    </div>
+                `;
+            }
+
+            if (mountPlugins.length > 0) {
+                html += `
+                    <div class="mb-6">
+                        <h3 class="text-lg font-semibold mb-3 flex items-center">
+                            <svg class="w-5 h-5 mr-2 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2"></path>
+                            </svg>
+                            Remote Mounts
+                        </h3>
+                        <p class="text-sm text-gray-400 mb-3">Configure these plugins on the <a href="/mounts.html" class="text-purple-400 hover:underline">Mounts</a> page.</p>
+                        ${mountPlugins.map(p => renderPluginCard(p)).join('')}
+                    </div>
+                `;
+            }
+
+            container.innerHTML = html;
+        }
+
+        function renderPluginCard(p) {
+            const statusClass = p.status === 'healthy' ? 'status-healthy' :
+                               p.status === 'error' ? 'status-error' : 'status-unconfigured';
+
+            return `
+                <div class="bg-gray-800 border border-purple-900/40 rounded-lg p-5 mb-3">
+                    <div class="flex items-start justify-between">
+                        <div class="flex-1">
+                            <div class="flex items-center gap-3 mb-1">
+                                <h4 class="text-lg font-semibold">${escapeHtml(p.name)}</h4>
+                                <span class="status-pill ${statusClass}">${p.status}</span>
+                            </div>
+                            <p class="text-sm text-gray-400 mb-2">${escapeHtml(p.description)}</p>
+                            <p class="text-xs text-gray-500">Version ${p.version}</p>
+
+                            ${!p.installed ? `
+                                <div class="mt-3 p-3 bg-yellow-900/20 border border-yellow-800 rounded">
+                                    <p class="text-sm text-yellow-300 mb-2">Missing dependencies</p>
+                                    <code class="text-xs bg-gray-900 px-2 py-1 rounded">${escapeHtml(p.install_instructions)}</code>
+                                </div>
+                            ` : ''}
+
+                            ${p.enabled && p.configured ? `
+                                <a href="${CATEGORY_LINKS[p.category]}" class="inline-block mt-3 text-sm text-purple-400 hover:text-purple-300">
+                                    Configure &rarr;
+                                </a>
+                            ` : ''}
+                        </div>
+
+                        <div class="flex items-center gap-4 ml-4">
+                            <label class="toggle-switch">
+                                <input type="checkbox" ${p.enabled ? 'checked' : ''}
+                                       onchange="togglePlugin('${p.id}', this.checked)">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        async function togglePlugin(pluginId, enabled) {
+            try {
+                const res = await apiFetch(`/api/storage/plugins/${pluginId}/toggle`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled })
+                });
+                if (!res.ok) {
+                    const data = await res.json();
+                    throw new Error(data.error || 'Failed to update');
+                }
+                showNotification(`Plugin ${enabled ? 'enabled' : 'disabled'}`, 'success');
+                loadPlugins();
+            } catch (e) {
+                showNotification('Failed: ' + e.message, 'error');
+                loadPlugins();
+            }
+        }
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+
+        document.addEventListener('DOMContentLoaded', loadPlugins);
+    </script>
+</body>
+</html>

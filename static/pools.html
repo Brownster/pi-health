@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script>
+        if (!sessionStorage.getItem("loggedIn")) {
+            window.location.href = "/login.html";
+        }
+
+        const username = sessionStorage.getItem("username");
+        if (username) {
+            document.addEventListener('DOMContentLoaded', () => {
+                const userEl = document.getElementById('logged-in-user');
+                if (userEl) userEl.textContent = username;
+            });
+        }
+
+        async function logout() {
+            try {
+                await fetch('/api/logout', { method: 'POST' });
+            } catch (e) {}
+            sessionStorage.clear();
+            window.location.href = '/login.html';
+        }
+    </script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Storage Pools - Pi-Health Dashboard</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <script src="/js/api.js"></script>
+    <script src="/js/nav.js"></script>
+    <style>
+        .coraline-button {
+            background: linear-gradient(to bottom, #5f4b8b, #372b53);
+            border: 1px solid #8a6cbd;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.25);
+            transition: all 0.3s ease;
+        }
+        .coraline-button:hover:not(:disabled) {
+            background: linear-gradient(to bottom, #6f58a3, #413162);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 10px rgba(0, 0, 0, 0.3);
+        }
+        .coraline-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .status-pill {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+        .status-healthy { background-color: rgba(52, 211, 153, 0.2); color: #34d399; border: 1px solid #34d399; }
+        .status-degraded { background-color: rgba(251, 191, 36, 0.2); color: #fbbf24; border: 1px solid #fbbf24; }
+        .status-error { background-color: rgba(248, 113, 113, 0.2); color: #f87171; border: 1px solid #f87171; }
+        .status-unconfigured { background-color: rgba(156, 163, 175, 0.2); color: #9ca3af; border: 1px solid #9ca3af; }
+        .output-panel {
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 0.75rem;
+            line-height: 1.4;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-blue-100 font-sans min-h-screen">
+    <header class="bg-gradient-to-r from-purple-900 to-blue-900 shadow-lg relative overflow-hidden">
+        <div class="absolute inset-0 overflow-hidden">
+            <img src="/theme-banner" alt="Dashboard" class="w-full h-full object-cover opacity-40 blur-sm" style="filter: hue-rotate(-10deg) saturate(1.15);">
+        </div>
+        <div class="container mx-auto px-8 py-12 relative">
+        </div>
+    </header>
+
+    <!-- Navigation bar -->
+    <nav id="main-nav" class="bg-purple-900 shadow-md"></nav>
+
+    <div id="notification-area" class="fixed top-4 right-4 z-50 w-80 flex flex-col items-end"></div>
+
+    <main class="container mx-auto p-6">
+        <div class="mb-6">
+            <h2 class="text-2xl font-semibold">Storage Pools</h2>
+            <p class="text-sm text-gray-400 mt-1">Manage storage pool plugins (SnapRAID, MergerFS, etc.).</p>
+        </div>
+
+        <div id="pool-plugins">
+            <div class="text-center py-10 text-gray-400">Loading storage plugins...</div>
+        </div>
+    </main>
+
+    <!-- Command Output Modal -->
+    <div id="output-modal" class="hidden fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4" onclick="if(event.target === this) closeOutputModal()">
+        <div class="bg-gray-900 w-full max-w-3xl rounded-lg shadow-xl border border-purple-900 flex flex-col max-h-[90vh]" onclick="event.stopPropagation()">
+            <div class="flex justify-between items-center p-4 border-b border-purple-800 flex-shrink-0">
+                <h3 id="output-modal-title" class="text-xl font-semibold">Command Output</h3>
+                <button onclick="closeOutputModal()" class="text-gray-400 hover:text-white text-2xl font-bold leading-none">&times;</button>
+            </div>
+            <div class="p-4 overflow-y-auto flex-1 min-h-0 bg-gray-950">
+                <div id="output-content" class="output-panel text-gray-300"></div>
+            </div>
+            <div class="p-4 border-t border-purple-800 flex justify-end flex-shrink-0">
+                <button onclick="closeOutputModal()" class="px-4 py-2 bg-gray-700 text-white rounded hover:bg-gray-600">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Configure Modal -->
+    <div id="config-modal" class="hidden fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4" onclick="if(event.target === this) closeConfigModal()">
+        <div class="bg-gray-900 w-full max-w-2xl rounded-lg shadow-xl border border-purple-900 flex flex-col max-h-[90vh]" onclick="event.stopPropagation()">
+            <div class="flex justify-between items-center p-4 border-b border-purple-800 flex-shrink-0">
+                <h3 id="config-modal-title" class="text-xl font-semibold">Configure Plugin</h3>
+                <button onclick="closeConfigModal()" class="text-gray-400 hover:text-white text-2xl font-bold leading-none">&times;</button>
+            </div>
+            <div class="p-4 overflow-y-auto flex-1 min-h-0" id="config-modal-form">
+                <!-- Form fields populated by JS -->
+            </div>
+            <div class="p-4 border-t border-purple-800 flex justify-between flex-shrink-0">
+                <button onclick="applyConfig()" class="coraline-button px-4 py-2 rounded text-white">Apply to System</button>
+                <div class="flex gap-2">
+                    <button onclick="closeConfigModal()" class="px-4 py-2 text-gray-400 hover:text-white">Cancel</button>
+                    <button onclick="saveConfig()" class="coraline-button px-4 py-2 rounded text-white">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let poolPlugins = [];
+        let currentPlugin = null;
+        let currentPluginSchema = null;
+
+        function showNotification(message, type = 'info') {
+            const area = document.getElementById('notification-area');
+            const notification = document.createElement('div');
+            notification.className = 'p-3 mb-2 rounded shadow-lg transform transition-all duration-300 opacity-0';
+            if (type === 'success') notification.classList.add('bg-green-600');
+            else if (type === 'error') notification.classList.add('bg-red-600');
+            else notification.classList.add('bg-blue-600');
+            notification.textContent = message;
+            area.appendChild(notification);
+            setTimeout(() => notification.classList.replace('opacity-0', 'opacity-100'), 10);
+            setTimeout(() => {
+                notification.classList.replace('opacity-100', 'opacity-0');
+                setTimeout(() => notification.remove(), 300);
+            }, 3000);
+        }
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+
+        async function loadPage() {
+            const res = await apiFetch('/api/storage/plugins');
+            const data = await res.json();
+
+            // Filter to storage-category plugins that are enabled
+            poolPlugins = (data.plugins || []).filter(p =>
+                p.category === 'storage' && p.enabled
+            );
+
+            await renderPoolPluginSections();
+        }
+
+        async function renderPoolPluginSections() {
+            const container = document.getElementById('pool-plugins');
+
+            if (!poolPlugins.length) {
+                container.innerHTML = `
+                    <div class="text-center py-10">
+                        <p class="text-gray-500 mb-2">No storage plugins enabled.</p>
+                        <a href="/plugins.html" class="text-purple-400 hover:underline">Enable plugins &rarr;</a>
+                    </div>
+                `;
+                return;
+            }
+
+            let html = '';
+            for (const plugin of poolPlugins) {
+                // Fetch full plugin details
+                let details = { status: { status: 'unknown' }, commands: [] };
+                try {
+                    const res = await apiFetch(`/api/storage/plugins/${plugin.id}`);
+                    details = await res.json();
+                } catch (e) {
+                    console.error(`Failed to load ${plugin.id}:`, e);
+                }
+
+                const statusClass = details.status?.status === 'healthy' ? 'status-healthy' :
+                                   details.status?.status === 'degraded' ? 'status-degraded' :
+                                   details.status?.status === 'error' ? 'status-error' : 'status-unconfigured';
+
+                html += `
+                    <section class="bg-gray-800 border border-purple-900/40 rounded-lg p-5 mb-6">
+                        <div class="flex items-center justify-between mb-4">
+                            <div>
+                                <h3 class="text-lg font-semibold">${escapeHtml(plugin.name)}</h3>
+                                <p class="text-sm text-gray-400">${escapeHtml(plugin.description)}</p>
+                            </div>
+                            <span class="status-pill ${statusClass}">${details.status?.status || 'unknown'}</span>
+                        </div>
+
+                        ${!plugin.installed ? `
+                            <div class="p-3 bg-yellow-900/20 border border-yellow-800 rounded mb-4">
+                                <p class="text-sm text-yellow-300 mb-1">Install required packages:</p>
+                                <code class="text-xs bg-gray-900 px-2 py-1 rounded">${escapeHtml(plugin.install_instructions)}</code>
+                            </div>
+                        ` : `
+                            <!-- Plugin status summary -->
+                            <div class="bg-gray-900 rounded p-4 mb-4">
+                                ${renderPluginStatus(plugin.id, details.status)}
+                            </div>
+
+                            <!-- Plugin commands -->
+                            <div class="flex flex-wrap gap-2">
+                                ${(details.commands || []).map(cmd => `
+                                    <button onclick="runPluginCommand('${plugin.id}', '${cmd.id}', '${escapeHtml(cmd.name)}')"
+                                            class="coraline-button py-2 px-4 rounded text-sm">
+                                        ${escapeHtml(cmd.name)}
+                                    </button>
+                                `).join('')}
+                                <button onclick="openConfigModal('${plugin.id}')"
+                                        class="py-2 px-4 rounded text-sm border border-purple-700 text-purple-300 hover:bg-purple-900">
+                                    Configure
+                                </button>
+                            </div>
+                        `}
+                    </section>
+                `;
+            }
+
+            container.innerHTML = html;
+        }
+
+        function renderPluginStatus(pluginId, status) {
+            if (!status) return '<p class="text-gray-500">No status available</p>';
+
+            if (pluginId === 'snapraid') {
+                // SnapRAID specific status
+                return `
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                        <div>
+                            <span class="text-gray-400">Status:</span>
+                            <span class="ml-2 ${status.status === 'healthy' ? 'text-green-400' : 'text-yellow-400'}">${status.status || 'Unknown'}</span>
+                        </div>
+                        ${status.last_sync ? `
+                        <div>
+                            <span class="text-gray-400">Last Sync:</span>
+                            <span class="ml-2">${status.last_sync}</span>
+                        </div>
+                        ` : ''}
+                        ${status.last_scrub ? `
+                        <div>
+                            <span class="text-gray-400">Last Scrub:</span>
+                            <span class="ml-2">${status.last_scrub}</span>
+                        </div>
+                        ` : ''}
+                        ${status.data_disks !== undefined ? `
+                        <div>
+                            <span class="text-gray-400">Data Disks:</span>
+                            <span class="ml-2">${status.data_disks}</span>
+                        </div>
+                        ` : ''}
+                    </div>
+                    ${status.message ? `<p class="mt-2 text-sm text-gray-400">${escapeHtml(status.message)}</p>` : ''}
+                `;
+            } else if (pluginId === 'mergerfs') {
+                // MergerFS specific status
+                return `
+                    <div class="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+                        <div>
+                            <span class="text-gray-400">Status:</span>
+                            <span class="ml-2 ${status.status === 'healthy' ? 'text-green-400' : 'text-yellow-400'}">${status.status || 'Unknown'}</span>
+                        </div>
+                        ${status.mount_point ? `
+                        <div>
+                            <span class="text-gray-400">Mount Point:</span>
+                            <span class="ml-2">${escapeHtml(status.mount_point)}</span>
+                        </div>
+                        ` : ''}
+                        ${status.branches !== undefined ? `
+                        <div>
+                            <span class="text-gray-400">Branches:</span>
+                            <span class="ml-2">${status.branches}</span>
+                        </div>
+                        ` : ''}
+                    </div>
+                    ${status.message ? `<p class="mt-2 text-sm text-gray-400">${escapeHtml(status.message)}</p>` : ''}
+                `;
+            }
+
+            // Generic status
+            return `<p class="text-sm text-gray-400">${escapeHtml(status.message || 'Status OK')}</p>`;
+        }
+
+        // ========== Command Execution ==========
+        async function runPluginCommand(pluginId, commandId, commandName) {
+            const modal = document.getElementById('output-modal');
+            const title = document.getElementById('output-modal-title');
+            const content = document.getElementById('output-content');
+
+            title.textContent = `Running: ${commandName}`;
+            content.textContent = '';
+            modal.classList.remove('hidden');
+
+            try {
+                const res = await fetch(`/api/storage/plugins/${pluginId}/commands/${commandId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({})
+                });
+
+                const reader = res.body.getReader();
+                const decoder = new TextDecoder();
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    const chunk = decoder.decode(value);
+                    const lines = chunk.split('\n');
+
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            try {
+                                const data = JSON.parse(line.slice(6));
+                                if (data.type === 'output') {
+                                    content.textContent += data.line + '\n';
+                                    content.scrollTop = content.scrollHeight;
+                                } else if (data.type === 'complete') {
+                                    content.textContent += `\n--- ${data.success ? 'Completed successfully' : 'Failed'} ---\n`;
+                                    if (data.message) {
+                                        content.textContent += data.message + '\n';
+                                    }
+                                    loadPage(); // Refresh status
+                                } else if (data.type === 'error') {
+                                    content.textContent += `\nERROR: ${data.error}\n`;
+                                }
+                            } catch (e) {
+                                // Ignore parse errors
+                            }
+                        }
+                    }
+                }
+            } catch (e) {
+                content.textContent += `\nConnection error: ${e.message}\n`;
+            }
+        }
+
+        function closeOutputModal() {
+            document.getElementById('output-modal').classList.add('hidden');
+        }
+
+        // ========== Configuration ==========
+        async function openConfigModal(pluginId) {
+            currentPlugin = pluginId;
+
+            try {
+                const res = await apiFetch(`/api/storage/plugins/${pluginId}`);
+                const data = await res.json();
+                currentPluginSchema = data.schema;
+                renderConfigForm(data.schema, data.config || {});
+                document.getElementById('config-modal-title').textContent = `Configure ${data.name}`;
+            } catch (e) {
+                showNotification('Failed to load config: ' + e.message, 'error');
+                return;
+            }
+
+            document.getElementById('config-modal').classList.remove('hidden');
+        }
+
+        function renderConfigForm(schema, values) {
+            const form = document.getElementById('config-modal-form');
+            const properties = schema.properties || {};
+
+            let html = '';
+            for (const [key, prop] of Object.entries(properties)) {
+                const value = values[key] ?? prop.default ?? '';
+                const description = prop.description || key;
+
+                if (prop.type === 'array') {
+                    // Array fields (like data disks, parity disks)
+                    const items = Array.isArray(value) ? value : [];
+                    html += `
+                        <div class="mb-4">
+                            <label class="block text-sm text-gray-300 mb-1">${escapeHtml(description)}</label>
+                            <div id="array-${key}" class="space-y-2">
+                                ${items.map((item, i) => `
+                                    <div class="flex gap-2">
+                                        <input type="text" name="${key}[]" value="${escapeHtml(String(item))}"
+                                               class="flex-1 bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm">
+                                        <button type="button" onclick="removeArrayItem('${key}', ${i})" class="px-2 text-red-400 hover:text-red-300">&times;</button>
+                                    </div>
+                                `).join('')}
+                            </div>
+                            <button type="button" onclick="addArrayItem('${key}')" class="mt-2 text-sm text-purple-400 hover:text-purple-300">+ Add</button>
+                        </div>
+                    `;
+                } else if (prop.type === 'boolean') {
+                    html += `
+                        <div class="mb-4 flex items-center gap-3">
+                            <input type="checkbox" name="${key}" ${value ? 'checked' : ''} class="w-4 h-4 rounded">
+                            <label class="text-sm text-gray-300">${escapeHtml(description)}</label>
+                        </div>
+                    `;
+                } else if (prop.type === 'integer' || prop.type === 'number') {
+                    html += `
+                        <div class="mb-4">
+                            <label class="block text-sm text-gray-300 mb-1">${escapeHtml(description)}</label>
+                            <input type="number" name="${key}" value="${value}"
+                                   class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm">
+                        </div>
+                    `;
+                } else if (prop.enum) {
+                    html += `
+                        <div class="mb-4">
+                            <label class="block text-sm text-gray-300 mb-1">${escapeHtml(description)}</label>
+                            <select name="${key}" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm">
+                                ${prop.enum.map(opt => `<option value="${opt}" ${value === opt ? 'selected' : ''}>${opt}</option>`).join('')}
+                            </select>
+                        </div>
+                    `;
+                } else {
+                    html += `
+                        <div class="mb-4">
+                            <label class="block text-sm text-gray-300 mb-1">${escapeHtml(description)}</label>
+                            <input type="text" name="${key}" value="${escapeHtml(String(value))}"
+                                   class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm">
+                        </div>
+                    `;
+                }
+            }
+
+            form.innerHTML = html || '<p class="text-gray-400">No configuration options</p>';
+        }
+
+        function addArrayItem(key) {
+            const container = document.getElementById(`array-${key}`);
+            const idx = container.children.length;
+            const div = document.createElement('div');
+            div.className = 'flex gap-2';
+            div.innerHTML = `
+                <input type="text" name="${key}[]" value=""
+                       class="flex-1 bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm">
+                <button type="button" onclick="removeArrayItem('${key}', ${idx})" class="px-2 text-red-400 hover:text-red-300">&times;</button>
+            `;
+            container.appendChild(div);
+        }
+
+        function removeArrayItem(key, idx) {
+            const container = document.getElementById(`array-${key}`);
+            if (container.children[idx]) {
+                container.children[idx].remove();
+            }
+        }
+
+        function closeConfigModal() {
+            document.getElementById('config-modal').classList.add('hidden');
+            currentPlugin = null;
+            currentPluginSchema = null;
+        }
+
+        function getFormData() {
+            const form = document.getElementById('config-modal-form');
+            const formData = {};
+            const properties = currentPluginSchema?.properties || {};
+
+            for (const [key, prop] of Object.entries(properties)) {
+                if (prop.type === 'array') {
+                    const inputs = form.querySelectorAll(`input[name="${key}[]"]`);
+                    formData[key] = Array.from(inputs).map(i => i.value).filter(v => v);
+                } else if (prop.type === 'boolean') {
+                    const checkbox = form.querySelector(`input[name="${key}"]`);
+                    formData[key] = checkbox?.checked || false;
+                } else if (prop.type === 'integer' || prop.type === 'number') {
+                    const input = form.querySelector(`input[name="${key}"], select[name="${key}"]`);
+                    formData[key] = parseInt(input?.value, 10) || 0;
+                } else {
+                    const input = form.querySelector(`input[name="${key}"], select[name="${key}"]`);
+                    formData[key] = input?.value || '';
+                }
+            }
+
+            return formData;
+        }
+
+        async function saveConfig() {
+            const formData = getFormData();
+
+            try {
+                const res = await apiFetch(`/api/storage/plugins/${currentPlugin}/config`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(formData)
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || data.details?.join(', '));
+                showNotification('Configuration saved', 'success');
+                closeConfigModal();
+                loadPage();
+            } catch (e) {
+                showNotification('Save failed: ' + e.message, 'error');
+            }
+        }
+
+        async function applyConfig() {
+            try {
+                const res = await apiFetch(`/api/storage/plugins/${currentPlugin}/apply`, {
+                    method: 'POST'
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error);
+                showNotification('Configuration applied to system', 'success');
+                loadPage();
+            } catch (e) {
+                showNotification('Apply failed: ' + e.message, 'error');
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', loadPage);
+    </script>
+</body>
+</html>

@@ -22,6 +22,7 @@ class SnapRAIDPlugin(StoragePlugin):
     PLUGIN_NAME = "SnapRAID"
     PLUGIN_VERSION = "1.0.0"
     PLUGIN_DESCRIPTION = "Parity-based backup for data recovery"
+    PLUGIN_CATEGORY = "storage"  # UI appears on Pools page
 
     SNAPRAID_BIN = "/usr/bin/snapraid"
     SNAPRAID_CONF = "/etc/snapraid.conf"
