@@ -260,6 +260,37 @@ def test_run_plugin_command_stream(authenticated_client, monkeypatch):
     assert "complete" in body
 
 
+def test_run_plugin_command_stream_includes_output(authenticated_client, monkeypatch):
+    registry = DummyRegistry(plugin=DummyPlugin())
+    monkeypatch.setattr("storage_plugins.get_registry", lambda: registry)
+
+    response = authenticated_client.post(
+        "/api/storage/plugins/dummy/commands/status",
+        data=json.dumps({}),
+        content_type="application/json",
+    )
+    assert response.status_code == 200
+    events = []
+    for line in response.data.decode("utf-8").splitlines():
+        if line.startswith("data: "):
+            payload = json.loads(line.replace("data: ", "", 1))
+            events.append(payload)
+    assert any(event.get("type") == "output" and "running" in event.get("line", "") for event in events)
+    assert any(event.get("type") == "complete" and event.get("success") is True for event in events)
+
+
+def test_run_plugin_command_unknown(authenticated_client, monkeypatch):
+    registry = DummyRegistry(plugin=DummyPlugin())
+    monkeypatch.setattr("storage_plugins.get_registry", lambda: registry)
+
+    response = authenticated_client.post(
+        "/api/storage/plugins/dummy/commands/unknown",
+        data=json.dumps({}),
+        content_type="application/json",
+    )
+    assert response.status_code == 404
+
+
 def test_mount_endpoints(authenticated_client, monkeypatch):
     registry = DummyRegistry(mount_plugin=DummyMountPlugin())
     monkeypatch.setattr("storage_plugins.get_registry", lambda: registry)
