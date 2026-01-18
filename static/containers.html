@@ -103,6 +103,30 @@
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
+
+        /* Action button styles */
+        .action-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 50px;
+            transition: all 0.2s;
+        }
+
+        .action-btn:active:not(:disabled) {
+            transform: scale(0.95);
+        }
+
+        .action-btn .btn-spinner {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .action-btn .btn-spinner .loading-spinner {
+            width: 12px;
+            height: 12px;
+        }
     </style>
 </head>
 <body class="bg-gray-900 text-blue-100 font-sans min-h-screen">
@@ -292,8 +316,14 @@
             return 'text-red-400';
         }
 
+        // Loading spinner HTML
+        function loadingSpinner() {
+            return '<div class="loading-spinner"></div>';
+        }
+
         // Format stats display with mini progress bars
-        function formatCpuCell(cpuPercent) {
+        function formatCpuCell(cpuPercent, loading = false) {
+            if (loading) return loadingSpinner();
             if (cpuPercent === null || cpuPercent === undefined) return '<span class="text-gray-500">—</span>';
             const colorClass = getStatColorClass(cpuPercent);
             const barColor = cpuPercent < 50 ? 'bg-green-500' : cpuPercent < 80 ? 'bg-yellow-500' : 'bg-red-500';
@@ -304,7 +334,8 @@
                 </div>`;
         }
 
-        function formatMemoryCell(memPercent, memUsed, memLimit) {
+        function formatMemoryCell(memPercent, memUsed, memLimit, loading = false) {
+            if (loading) return loadingSpinner();
             if (memPercent === null || memPercent === undefined) return '<span class="text-gray-500">—</span>';
             const colorClass = getStatColorClass(memPercent);
             const barColor = memPercent < 50 ? 'bg-green-500' : memPercent < 80 ? 'bg-yellow-500' : 'bg-red-500';
@@ -339,7 +370,8 @@
             return { rxRate, txRate };
         }
 
-        function formatNetworkCell(rx, tx, containerId) {
+        function formatNetworkCell(rx, tx, containerId, loading = false) {
+            if (loading) return loadingSpinner();
             if (rx === null || rx === undefined) return '<span class="text-gray-500">—</span>';
 
             const rates = containerId ? calculateNetworkRate(containerId, rx, tx) : null;
@@ -403,18 +435,23 @@
             return fallback ? fallback.container_port : null;
         }
 
+        // Track stats loading state
+        let statsLoading = false;
+
         // Fetch Docker containers and update the table
-        async function fetchDockerContainers(forceFullRender = false) {
+        async function fetchDockerContainers(forceFullRender = false, includeStats = false) {
             const containerListEl = document.getElementById('container-list');
             const lastUpdatedEl = document.getElementById('last-updated');
 
             // Only show loading indicator on initial load
             if (!initialLoadComplete) {
-                containerListEl.innerHTML = '<tr><td colspan="5" class="text-center py-4">Loading...</td></tr>';
+                containerListEl.innerHTML = '<tr><td colspan="8" class="text-center py-4">Loading...</td></tr>';
             }
 
             try {
-                const response = await apiFetch('/api/containers');
+                // First fetch: get containers without stats (fast)
+                const statsParam = includeStats ? 'true' : 'false';
+                const response = await apiFetch(`/api/containers?stats=${statsParam}`);
                 const newContainerList = await response.json();
 
                 // Update timestamp for network rate calculation
@@ -432,18 +469,58 @@
                 containerList = newContainerList;
 
                 if (needsFullRender) {
-                    renderContainers();
+                    renderContainers(!includeStats); // Pass true to show loading spinners
                 } else {
                     updateContainerRows();
                 }
 
                 initialLoadComplete = true;
+
+                // Lazy load stats for running containers if not already included
+                if (!includeStats) {
+                    fetchContainerStats();
+                }
             } catch (error) {
                 console.error('Error fetching Docker containers:', error);
                 if (!initialLoadComplete) {
-                    containerListEl.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-red-500">Error loading containers</td></tr>';
+                    containerListEl.innerHTML = '<tr><td colspan="8" class="text-center py-4 text-red-500">Error loading containers</td></tr>';
                 }
                 showNotification('Error fetching containers', 'error');
+            }
+        }
+
+        // Fetch stats for running containers lazily
+        async function fetchContainerStats() {
+            const runningContainers = containerList.filter(c => c.status === 'running');
+            if (runningContainers.length === 0) return;
+
+            statsLoading = true;
+            const ids = runningContainers.map(c => c.id).join(',');
+
+            try {
+                const response = await apiFetch(`/api/containers/stats?ids=${ids}`);
+                const stats = await response.json();
+
+                // Update container list with stats
+                containerList.forEach(container => {
+                    const containerStats = stats[container.id];
+                    if (containerStats) {
+                        container.cpu_percent = containerStats.cpu_percent;
+                        container.memory_percent = containerStats.memory_percent;
+                        container.memory_used = containerStats.memory_used;
+                        container.memory_limit = containerStats.memory_limit;
+                        container.net_rx = containerStats.net_rx;
+                        container.net_tx = containerStats.net_tx;
+                    }
+                });
+
+                // Update the display
+                updateContainerRows();
+                lastFetchTime = Date.now();
+            } catch (error) {
+                console.error('Error fetching container stats:', error);
+            } finally {
+                statsLoading = false;
             }
         }
 
@@ -517,21 +594,21 @@
         }
 
         // Render containers based on filter
-        function renderContainers() {
+        function renderContainers(showStatsLoading = false) {
             const containerListEl = document.getElementById('container-list');
             containerListEl.innerHTML = '';
-            
+
             // Filter containers based on current filter
             const filteredContainers = containerList.filter(container => {
                 if (currentFilter === 'all') return true;
                 return container.status === currentFilter;
             });
-            
+
             if (filteredContainers.length === 0) {
                 containerListEl.innerHTML = `<tr><td colspan="8" class="text-center py-4">No ${currentFilter} containers found</td></tr>`;
                 return;
             }
-            
+
             // Special case for when Docker is not available
             if (filteredContainers.length === 1 &&
                 (filteredContainers[0].status === 'unavailable' || filteredContainers[0].status === 'error')) {
@@ -548,62 +625,81 @@
                         <td class="px-4 py-4 whitespace-nowrap text-sm text-gray-500">—</td>
                         <td class="px-4 py-4 whitespace-nowrap text-sm text-gray-500">—</td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm">N/A</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm">
-                            <button class="bg-gray-500 text-white font-bold py-1 px-2 rounded opacity-50 cursor-not-allowed" disabled>Start</button>
-                            <button class="bg-gray-500 text-white font-bold py-1 px-2 rounded opacity-50 cursor-not-allowed" disabled>Stop</button>
-                            <button class="bg-gray-500 text-white font-bold py-1 px-2 rounded opacity-50 cursor-not-allowed" disabled>Restart</button>
-                            <button class="bg-gray-500 text-white font-bold py-1 px-2 rounded opacity-50 cursor-not-allowed" disabled>Logs</button>
-                        </td>
+                        <td class="px-4 py-4 whitespace-nowrap text-sm">—</td>
                     </tr>
                 `;
                 containerListEl.innerHTML = row;
                 return;
             }
-            
+
             // Create rows for each container
             filteredContainers.forEach(container => {
                 const statusClass = container.status === 'running' ? 'status-running' :
                     container.status === 'stopped' ? 'status-stopped' : 'status-other';
-                
+
+                // Show loading spinners for running containers that don't have stats yet
+                const isRunning = container.status === 'running';
+                const hasStats = container.cpu_percent !== null && container.cpu_percent !== undefined;
+                const loading = showStatsLoading && isRunning && !hasStats;
+
                 // Determine if the container has a Web UI
                 const port = getWebUIPort(container);
                 const webUILink = port
                     ? `<a href="http://${window.location.hostname}:${port}" target="_blank" class="text-blue-500 hover:text-blue-400 underline">Open</a>`
                     : 'N/A';
-                
+
                 const row = `
                     <tr data-container-id="${container.id}" data-container-name="${container.name}">
                         <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
                             ${container.name}
                             ${container.update_available ? '<span class="ml-1 text-yellow-400" title="Update available">&#x21bb;</span>' : ''}
                         </td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-400">${container.image}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-400 max-w-xs truncate" title="${container.image}">${container.image}</td>
                         <td class="px-6 py-4 whitespace-nowrap">
                             <span class="px-2 py-1 text-white rounded ${statusClass}">
                                 ${container.status}
                             </span>
                         </td>
-                        <td class="px-4 py-4 whitespace-nowrap text-sm" data-stat="cpu">${formatCpuCell(container.cpu_percent)}</td>
-                        <td class="px-4 py-4 whitespace-nowrap text-sm" data-stat="memory">${formatMemoryCell(container.memory_percent, container.memory_used, container.memory_limit)}</td>
-                        <td class="px-4 py-4 whitespace-nowrap text-sm" data-stat="network">${formatNetworkCell(container.net_rx, container.net_tx, container.id)}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm">${webUILink}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm">
-                            <button data-action="start" class="coraline-button text-blue-100 font-bold py-1 px-3 rounded button border border-green-800 ${container.status === 'running' ? 'opacity-50 cursor-not-allowed' : ''}"
-                                    onclick="controlContainer('${container.id}', 'start')"
-                                    ${container.status === 'running' ? 'disabled' : ''}>Start</button>
-                            <button data-action="stop" class="coraline-button text-blue-100 font-bold py-1 px-3 rounded button border border-yellow-800 ${container.status === 'stopped' ? 'opacity-50 cursor-not-allowed' : ''}"
-                                    onclick="controlContainer('${container.id}', 'stop')"
-                                    ${container.status === 'stopped' ? 'disabled' : ''}>Stop</button>
-                            <button data-action="restart" class="coraline-button text-blue-100 font-bold py-1 px-3 rounded button border border-blue-800"
-                                    onclick="controlContainer('${container.id}', 'restart')">Restart</button>
-                            <button data-action="check_update" class="coraline-button text-blue-100 font-bold py-1 px-3 rounded button border border-purple-800"
-                                    onclick="controlContainer('${container.id}', 'check_update')">Check</button>
-                            <button data-action="update" class="coraline-button text-blue-100 font-bold py-1 px-3 rounded button border border-red-800"
-                                    onclick="controlContainer('${container.id}', 'update')">Update</button>
-                            <button data-action="logs" class="coraline-button text-blue-100 font-bold py-1 px-3 rounded button border border-gray-500"
-                                    onclick="viewLogs('${container.id}')">Logs</button>
-                            <button data-action="network-test" class="coraline-button text-blue-100 font-bold py-1 px-3 rounded button border border-blue-500"
-                                    onclick="openContainerNetworkTest('${container.id}')">Net Test</button>
+                        <td class="px-4 py-4 whitespace-nowrap text-sm" data-stat="cpu">${formatCpuCell(container.cpu_percent, loading)}</td>
+                        <td class="px-4 py-4 whitespace-nowrap text-sm" data-stat="memory">${formatMemoryCell(container.memory_percent, container.memory_used, container.memory_limit, loading)}</td>
+                        <td class="px-4 py-4 whitespace-nowrap text-sm" data-stat="network">${formatNetworkCell(container.net_rx, container.net_tx, container.id, loading)}</td>
+                        <td class="px-4 py-4 whitespace-nowrap text-sm">${webUILink}</td>
+                        <td class="px-4 py-4 whitespace-nowrap text-sm">
+                            <div class="flex items-center gap-1">
+                                <button data-action="start" class="action-btn bg-green-700 hover:bg-green-600 text-white py-1 px-2 rounded text-xs ${container.status === 'running' ? 'opacity-50 cursor-not-allowed' : ''}"
+                                        onclick="controlContainer('${container.id}', 'start')"
+                                        ${container.status === 'running' ? 'disabled' : ''}>
+                                    <span class="btn-text">Start</span>
+                                    <span class="btn-spinner hidden">${loadingSpinner()}</span>
+                                </button>
+                                <button data-action="stop" class="action-btn bg-yellow-700 hover:bg-yellow-600 text-white py-1 px-2 rounded text-xs ${container.status === 'stopped' ? 'opacity-50 cursor-not-allowed' : ''}"
+                                        onclick="controlContainer('${container.id}', 'stop')"
+                                        ${container.status === 'stopped' ? 'disabled' : ''}>
+                                    <span class="btn-text">Stop</span>
+                                    <span class="btn-spinner hidden">${loadingSpinner()}</span>
+                                </button>
+                                <button data-action="restart" class="action-btn bg-blue-700 hover:bg-blue-600 text-white py-1 px-2 rounded text-xs"
+                                        onclick="controlContainer('${container.id}', 'restart')">
+                                    <span class="btn-text">Restart</span>
+                                    <span class="btn-spinner hidden">${loadingSpinner()}</span>
+                                </button>
+                                <div class="relative">
+                                    <button class="bg-gray-600 hover:bg-gray-500 text-white py-1 px-2 rounded text-xs"
+                                            onclick="toggleDropdown('${container.id}')">
+                                        ⋮
+                                    </button>
+                                    <div id="dropdown-${container.id}" class="hidden absolute right-0 mt-1 w-32 bg-gray-700 rounded shadow-lg z-10 border border-gray-600">
+                                        <button class="w-full text-left px-3 py-2 text-xs hover:bg-gray-600 text-white"
+                                                onclick="controlContainer('${container.id}', 'check_update'); closeDropdown('${container.id}')">Check Update</button>
+                                        <button class="w-full text-left px-3 py-2 text-xs hover:bg-gray-600 text-white"
+                                                onclick="controlContainer('${container.id}', 'update'); closeDropdown('${container.id}')">Update</button>
+                                        <button class="w-full text-left px-3 py-2 text-xs hover:bg-gray-600 text-white"
+                                                onclick="viewLogs('${container.id}'); closeDropdown('${container.id}')">Logs</button>
+                                        <button class="w-full text-left px-3 py-2 text-xs hover:bg-gray-600 text-white"
+                                                onclick="openContainerNetworkTest('${container.id}'); closeDropdown('${container.id}')">Network Test</button>
+                                    </div>
+                                </div>
+                            </div>
                         </td>
                     </tr>
                 `;
@@ -611,55 +707,94 @@
             });
         }
 
+        // Toggle dropdown menu
+        function toggleDropdown(containerId) {
+            // Close all other dropdowns first
+            document.querySelectorAll('[id^="dropdown-"]').forEach(el => {
+                if (el.id !== `dropdown-${containerId}`) {
+                    el.classList.add('hidden');
+                }
+            });
+            const dropdown = document.getElementById(`dropdown-${containerId}`);
+            dropdown.classList.toggle('hidden');
+        }
+
+        function closeDropdown(containerId) {
+            document.getElementById(`dropdown-${containerId}`).classList.add('hidden');
+        }
+
+        // Close dropdowns when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('[id^="dropdown-"]') && !e.target.closest('button')) {
+                document.querySelectorAll('[id^="dropdown-"]').forEach(el => el.classList.add('hidden'));
+            }
+        });
+
         // Control Docker container (start/stop/restart)
         async function controlContainer(id, action) {
-            try {
-                // Find the container row and add loading indicator
-                const containerRow = document.querySelector(`tr[data-container-id="${id}"]`);
-                if (containerRow) {
-                    const statusCell = containerRow.querySelector('td:nth-child(3)');
-                    const originalStatus = statusCell.innerHTML;
-                    statusCell.innerHTML = '<div class="animate-pulse">Processing...</div>';
-                    
-                    // Disable action buttons for this container while processing
-                    const buttons = containerRow.querySelectorAll('button');
-                    buttons.forEach(btn => btn.disabled = true);
-                    
-                    const response = await fetch(`/api/containers/${id}/${action}`, { method: 'POST' });
-                    const result = await response.json();
-                    
-                    if (result.error) {
-                        showNotification(`Error: ${result.error}`, 'error');
-                        // Reset the status cell
-                        statusCell.innerHTML = originalStatus;
-                        buttons.forEach(btn => btn.disabled = false);
-                    } else {
-                        const containerName = containerRow.getAttribute('data-container-name');
-                        let message = `${containerName} ${action}ed successfully`;
-                        if (action === 'check_update') message = `${containerName} check complete`;
-                        if (action === 'update') message = `${containerName} update triggered`;
-                        showNotification(message, 'success');
-                        
-                        updateContainerStatus(id);
-                    }
-                } else {
-                    // Fallback if container row not found
-                    const response = await fetch(`/api/containers/${id}/${action}`, { method: 'POST' });
-                    const result = await response.json();
+            const containerRow = document.querySelector(`tr[data-container-id="${id}"]`);
+            const containerName = containerRow ? containerRow.getAttribute('data-container-name') : id;
 
-                    if (result.error) {
-                        showNotification(`Error: ${result.error}`, 'error');
-                    } else {
-                        let message = `Container ${action}ed successfully`;
-                        if (action === 'check_update') message = 'Check complete';
-                        if (action === 'update') message = 'Update triggered';
-                        showNotification(message, 'success');
-                        fetchDockerContainers();
+            // Show loading state on the button
+            let actionBtn = null;
+            if (containerRow) {
+                actionBtn = containerRow.querySelector(`button[data-action="${action}"]`);
+                if (actionBtn) {
+                    actionBtn.disabled = true;
+                    actionBtn.classList.add('opacity-75');
+                    const btnText = actionBtn.querySelector('.btn-text');
+                    const btnSpinner = actionBtn.querySelector('.btn-spinner');
+                    if (btnText) btnText.classList.add('hidden');
+                    if (btnSpinner) btnSpinner.classList.remove('hidden');
+                }
+            }
+
+            // Show toast immediately so user knows action started
+            const actionNames = {
+                'start': 'Starting',
+                'stop': 'Stopping',
+                'restart': 'Restarting',
+                'check_update': 'Checking for updates',
+                'update': 'Updating'
+            };
+            showNotification(`${actionNames[action] || action} ${containerName}...`, 'info');
+
+            try {
+                const response = await fetch(`/api/containers/${id}/${action}`, { method: 'POST' });
+                const result = await response.json();
+
+                if (result.error) {
+                    showNotification(`Error: ${result.error}`, 'error');
+                } else {
+                    let message = `${containerName} ${action}ed successfully`;
+                    if (action === 'check_update') {
+                        message = result.update_available
+                            ? `${containerName}: Update available!`
+                            : `${containerName}: Up to date`;
                     }
+                    if (action === 'update') message = `${containerName} update triggered`;
+                    showNotification(message, 'success');
+                }
+
+                // Refresh container status
+                if (containerRow) {
+                    await updateContainerStatus(id);
+                } else {
+                    await fetchDockerContainers(true);
                 }
             } catch (error) {
                 console.error(`Error controlling container ${id}:`, error);
                 showNotification(`Error ${action}ing container: ${error.message}`, 'error');
+            } finally {
+                // Reset button state
+                if (actionBtn) {
+                    actionBtn.disabled = false;
+                    actionBtn.classList.remove('opacity-75');
+                    const btnText = actionBtn.querySelector('.btn-text');
+                    const btnSpinner = actionBtn.querySelector('.btn-spinner');
+                    if (btnText) btnText.classList.remove('hidden');
+                    if (btnSpinner) btnSpinner.classList.add('hidden');
+                }
             }
         }
         
@@ -940,7 +1075,8 @@
         fetchDockerContainers();
         
         // Periodic updates
-        const refreshInterval = setInterval(fetchDockerContainers, 10000);
+        // Periodic refresh with stats (after initial load, stats are included)
+        const refreshInterval = setInterval(() => fetchDockerContainers(false, true), 10000);
     </script>
 </body>
 </html>

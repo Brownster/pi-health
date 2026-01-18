@@ -58,6 +58,31 @@ class TestListContainers:
             assert 'image' in container
 
 
+class TestContainerStatsBatch:
+    """Test batch container stats endpoint."""
+
+    def test_stats_batch_returns_dict(self, authenticated_client):
+        """Test that /api/containers/stats returns a dict."""
+        response = authenticated_client.get('/api/containers/stats?ids=test1,test2')
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert isinstance(data, dict)
+
+    def test_stats_batch_empty_ids(self, authenticated_client):
+        """Test that empty ids returns empty dict."""
+        response = authenticated_client.get('/api/containers/stats?ids=')
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data == {}
+
+    def test_stats_batch_no_ids_param(self, authenticated_client):
+        """Test that missing ids param returns empty dict."""
+        response = authenticated_client.get('/api/containers/stats')
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data == {}
+
+
 class TestContainerControl:
     """Test container control operations."""
 

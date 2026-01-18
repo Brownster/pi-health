@@ -1093,6 +1093,34 @@ def api_list_containers():
     return jsonify(list_containers(include_stats=include_stats))
 
 
+@app.route('/api/containers/stats', methods=['GET'])
+@login_required
+def api_container_stats_batch():
+    """API endpoint to fetch stats for multiple containers at once."""
+    if not docker_available:
+        return jsonify({})
+
+    ids = request.args.get('ids', '')
+    container_ids = [cid.strip() for cid in ids.split(',') if cid.strip()]
+
+    if not container_ids:
+        return jsonify({})
+
+    result = {}
+    for container_id in container_ids:
+        stats = get_container_stats_cached(container_id)
+        if stats:
+            result[container_id] = {
+                'cpu_percent': stats.get('cpu_percent'),
+                'memory_percent': stats.get('memory', {}).get('percent'),
+                'memory_used': stats.get('memory', {}).get('used'),
+                'memory_limit': stats.get('memory', {}).get('limit'),
+                'net_rx': stats.get('network', {}).get('rx'),
+                'net_tx': stats.get('network', {}).get('tx'),
+            }
+    return jsonify(result)
+
+
 @app.route('/api/containers/<container_id>/<action>', methods=['POST'])
 @login_required
 def api_control_container(container_id, action):
