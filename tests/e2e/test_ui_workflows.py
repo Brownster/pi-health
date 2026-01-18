@@ -115,11 +115,14 @@ def test_settings_backup_toggle(authenticated_page: Page):
     Verifies that changing a setting in the UI persists after reload.
     """
     page = authenticated_page
-    
+
     # Navigate to Settings
     page.click("nav a[href='/settings.html']")
     expect(page.locator("h2")).to_contain_text("Settings")
-    
+
+    # Select the Backups section (default is Plugins)
+    page.select_option("#settings-section", "backups")
+
     # Wait for config to load
     # The checkbox is hidden (opacity 0) due to custom styling, so we locate the label/slider to check visibility
     toggle_input = page.locator("#backup-enabled")
@@ -140,11 +143,14 @@ def test_settings_backup_toggle(authenticated_page: Page):
     
     # Reload page to verify persistence
     page.reload()
-    
+
+    # Select the Backups section again after reload
+    page.select_option("#settings-section", "backups")
+
     # Wait for it to load again
     expect(toggle_slider).to_be_visible()
     # It takes a moment for JS to fetch config and update checkbox
-    # We wait for the spinner or just wait a safe moment/condition? 
+    # We wait for the spinner or just wait a safe moment/condition?
     # Best to wait for the badge to update if possible.
     status_badge = page.locator("#backup-status-badge")
     if not initial_state: # If we turned it ON
