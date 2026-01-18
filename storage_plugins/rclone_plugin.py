@@ -18,6 +18,7 @@ class RclonePlugin(RemoteMountPlugin):
     PLUGIN_VERSION = "1.0.0"
     PLUGIN_DESCRIPTION = "Mount S3-compatible storage via rclone"
     PLUGIN_CATEGORY = "mount"  # UI appears on Mounts page
+    PLUGIN_ENABLED_DEFAULT = False  # Not enabled by default
     REQUIRED_PACKAGES = ["rclone", "fusermount"]
 
     def get_schema(self) -> dict:
