@@ -636,6 +636,36 @@ def cmd_write_startup_script(params):
         return {'success': False, 'error': str(e)}
 
 
+def cmd_read_startup_files(params):
+    """Read current startup script and service files for diff preview."""
+    script_path = '/usr/local/bin/check_mount_and_start.sh'
+    service_path = '/etc/systemd/system/docker-compose-start.service'
+
+    result = {
+        'success': True,
+        'script': {'path': script_path, 'content': '', 'exists': False},
+        'service': {'path': service_path, 'content': '', 'exists': False}
+    }
+
+    try:
+        if os.path.exists(script_path):
+            with open(script_path, 'r') as f:
+                result['script']['content'] = f.read()
+                result['script']['exists'] = True
+    except Exception as e:
+        result['script']['error'] = str(e)
+
+    try:
+        if os.path.exists(service_path):
+            with open(service_path, 'r') as f:
+                result['service']['content'] = f.read()
+                result['service']['exists'] = True
+    except Exception as e:
+        result['service']['error'] = str(e)
+
+    return result
+
+
 def cmd_systemctl(params):
     """Run systemctl commands for SnapRAID timers."""
     action = params.get('action', '')
@@ -2044,6 +2074,7 @@ COMMANDS = {
     'write_snapraid_conf': cmd_write_snapraid_conf,
     'write_systemd_unit': cmd_write_systemd_unit,
     'write_startup_script': cmd_write_startup_script,
+    'read_startup_files': cmd_read_startup_files,
     'systemctl': cmd_systemctl,
     'tailscale_install': cmd_tailscale_install,
     'tailscale_up': cmd_tailscale_up,

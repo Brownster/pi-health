@@ -573,6 +573,42 @@ def api_set_media_paths():
         return jsonify({'error': f'Failed to save paths: {str(e)}'}), 500
 
 
+@disk_manager.route('/api/disks/startup-service/preview', methods=['GET'])
+@login_required
+def api_preview_startup_service():
+    """Preview changes to startup service before applying."""
+    if not helper_available():
+        return jsonify({'error': 'Helper service unavailable'}), 503
+
+    paths = load_media_paths()
+
+    # Generate proposed content
+    proposed_script = _build_startup_script(paths)
+    proposed_service = _build_startup_service()
+
+    # Get current files via helper
+    current = helper_call('read_startup_files', {})
+    if not current.get('success'):
+        return jsonify({'error': current.get('error', 'Failed to read current files')}), 500
+
+    return jsonify({
+        'script': {
+            'path': current['script']['path'],
+            'current': current['script']['content'],
+            'proposed': proposed_script,
+            'exists': current['script']['exists'],
+            'changed': current['script']['content'] != proposed_script
+        },
+        'service': {
+            'path': current['service']['path'],
+            'current': current['service']['content'],
+            'proposed': proposed_service,
+            'exists': current['service']['exists'],
+            'changed': current['service']['content'] != proposed_service
+        }
+    })
+
+
 @disk_manager.route('/api/disks/startup-service', methods=['POST'])
 @login_required
 def api_regenerate_startup_service():

@@ -126,6 +126,16 @@ class TestValidationFailures:
         result = helper.cmd_write_startup_script({"path": "/tmp/script.sh"})
         assert result["success"] is False
 
+    def test_cmd_read_startup_files(self):
+        """Test reading startup files for diff preview."""
+        result = helper.cmd_read_startup_files({})
+        assert result["success"] is True
+        assert "script" in result
+        assert "service" in result
+        assert "path" in result["script"]
+        assert "content" in result["script"]
+        assert "exists" in result["script"]
+
     def test_cmd_systemctl_invalid_action(self):
         result = helper.cmd_systemctl({"action": "reboot"})
         assert result["success"] is False

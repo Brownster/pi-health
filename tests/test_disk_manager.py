@@ -335,6 +335,20 @@ class TestMediaPaths:
         finally:
             disk_manager.MEDIA_PATHS_CONFIG = original_config
 
+    def test_startup_service_preview_unavailable(self, authenticated_client, temp_config_dir):
+        """Test startup service preview returns 503 when helper unavailable."""
+        import disk_manager
+        original_config = disk_manager.MEDIA_PATHS_CONFIG
+        disk_manager.MEDIA_PATHS_CONFIG = os.path.join(temp_config_dir, 'media_paths.json')
+
+        try:
+            response = authenticated_client.get('/api/disks/startup-service/preview')
+            assert response.status_code == 503
+            data = json.loads(response.data)
+            assert 'error' in data
+        finally:
+            disk_manager.MEDIA_PATHS_CONFIG = original_config
+
     def test_seedbox_unavailable(self, authenticated_client, temp_config_dir):
         """Test seedbox returns 503 when helper unavailable."""
         import disk_manager
