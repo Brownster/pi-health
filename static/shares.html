@@ -402,7 +402,9 @@
                                        onchange="toggleShare('${pluginId}', '${escapeHtml(share.name)}', this.checked)">
                                 <span class="toggle-slider"></span>
                             </label>
-                            <button onclick="openEditShareModal('${pluginId}', ${JSON.stringify(share).replace(/'/g, "\\'")})"
+                            <button data-plugin-id="${escapeHtml(pluginId)}"
+                                    data-share="${encodeURIComponent(JSON.stringify(share))}"
+                                    onclick="openEditShareModalFromButton(this)"
                                     class="text-sm text-gray-400 hover:text-white px-2 py-1">
                                 Edit
                             </button>
@@ -453,6 +455,21 @@
             document.getElementById('share-users').value = share.valid_users || '';
 
             document.getElementById('share-modal').classList.remove('hidden');
+        }
+
+        function openEditShareModalFromButton(button) {
+            const pluginId = button.getAttribute('data-plugin-id');
+            const shareData = button.getAttribute('data-share');
+            if (!pluginId || !shareData) {
+                showNotification('Missing share data', 'error');
+                return;
+            }
+            try {
+                const share = JSON.parse(decodeURIComponent(shareData));
+                openEditShareModal(pluginId, share);
+            } catch (e) {
+                showNotification('Failed to load share data', 'error');
+            }
         }
 
         function closeShareModal() {
