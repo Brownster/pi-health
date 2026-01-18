@@ -116,17 +116,6 @@
         .action-btn:active:not(:disabled) {
             transform: scale(0.95);
         }
-
-        .action-btn .btn-spinner {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .action-btn .btn-spinner .loading-spinner {
-            width: 12px;
-            height: 12px;
-        }
     </style>
 </head>
 <body class="bg-gray-900 text-blue-100 font-sans min-h-screen">
@@ -668,26 +657,15 @@
                             <div class="flex items-center gap-1">
                                 <button data-action="start" class="action-btn bg-green-700 hover:bg-green-600 text-white py-1 px-2 rounded text-xs ${container.status === 'running' ? 'opacity-50 cursor-not-allowed' : ''}"
                                         onclick="controlContainer('${container.id}', 'start')"
-                                        ${container.status === 'running' ? 'disabled' : ''}>
-                                    <span class="btn-text">Start</span>
-                                    <span class="btn-spinner hidden">${loadingSpinner()}</span>
-                                </button>
+                                        ${container.status === 'running' ? 'disabled' : ''}>Start</button>
                                 <button data-action="stop" class="action-btn bg-yellow-700 hover:bg-yellow-600 text-white py-1 px-2 rounded text-xs ${container.status === 'stopped' ? 'opacity-50 cursor-not-allowed' : ''}"
                                         onclick="controlContainer('${container.id}', 'stop')"
-                                        ${container.status === 'stopped' ? 'disabled' : ''}>
-                                    <span class="btn-text">Stop</span>
-                                    <span class="btn-spinner hidden">${loadingSpinner()}</span>
-                                </button>
+                                        ${container.status === 'stopped' ? 'disabled' : ''}>Stop</button>
                                 <button data-action="restart" class="action-btn bg-blue-700 hover:bg-blue-600 text-white py-1 px-2 rounded text-xs"
-                                        onclick="controlContainer('${container.id}', 'restart')">
-                                    <span class="btn-text">Restart</span>
-                                    <span class="btn-spinner hidden">${loadingSpinner()}</span>
-                                </button>
+                                        onclick="controlContainer('${container.id}', 'restart')">Restart</button>
                                 <div class="relative">
                                     <button class="bg-gray-600 hover:bg-gray-500 text-white py-1 px-2 rounded text-xs"
-                                            onclick="toggleDropdown('${container.id}')">
-                                        ⋮
-                                    </button>
+                                            onclick="toggleDropdown('${container.id}')">⋮</button>
                                     <div id="dropdown-${container.id}" class="hidden absolute right-0 mt-1 w-32 bg-gray-700 rounded shadow-lg z-10 border border-gray-600">
                                         <button class="w-full text-left px-3 py-2 text-xs hover:bg-gray-600 text-white"
                                                 onclick="controlContainer('${container.id}', 'check_update'); closeDropdown('${container.id}')">Check Update</button>
@@ -737,15 +715,14 @@
 
             // Show loading state on the button
             let actionBtn = null;
+            let originalText = '';
             if (containerRow) {
                 actionBtn = containerRow.querySelector(`button[data-action="${action}"]`);
                 if (actionBtn) {
+                    originalText = actionBtn.textContent;
                     actionBtn.disabled = true;
                     actionBtn.classList.add('opacity-75');
-                    const btnText = actionBtn.querySelector('.btn-text');
-                    const btnSpinner = actionBtn.querySelector('.btn-spinner');
-                    if (btnText) btnText.classList.add('hidden');
-                    if (btnSpinner) btnSpinner.classList.remove('hidden');
+                    actionBtn.textContent = '...';
                 }
             }
 
@@ -754,7 +731,7 @@
                 'start': 'Starting',
                 'stop': 'Stopping',
                 'restart': 'Restarting',
-                'check_update': 'Checking for updates',
+                'check_update': 'Checking',
                 'update': 'Updating'
             };
             showNotification(`${actionNames[action] || action} ${containerName}...`, 'info');
@@ -790,10 +767,7 @@
                 if (actionBtn) {
                     actionBtn.disabled = false;
                     actionBtn.classList.remove('opacity-75');
-                    const btnText = actionBtn.querySelector('.btn-text');
-                    const btnSpinner = actionBtn.querySelector('.btn-spinner');
-                    if (btnText) btnText.classList.remove('hidden');
-                    if (btnSpinner) btnSpinner.classList.add('hidden');
+                    actionBtn.textContent = originalText;
                 }
             }
         }
