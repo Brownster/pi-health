@@ -1,6 +1,6 @@
 # Pi-Health
 
-A lightweight, web-based dashboard for monitoring and managing Raspberry Pi systems running Docker. Features system health monitoring, container management, disk management, and storage pooling with SnapRAID/MergerFS integration.
+Pi-Health is a full home lab management interface for Raspberry Pi and small servers. It provides system monitoring, Docker management, storage pooling, shares, app templates, and automation in a single UI.
 
 ![Dashboard](https://github.com/user-attachments/assets/ea6db04f-52dd-4f5a-8576-731381744f56)
 
@@ -54,9 +54,11 @@ When connecting multiple drives to a Raspberry Pi:
 - Recommended: 10+ port hub with 5V/4A+ power supply
 - Avoid bus-powered hubs for HDDs
 
-## Installation
+## Installation (Host Service Only)
 
-### Bare Metal Install (Recommended for Raspberry Pi)
+Pi-Health runs as a systemd service on the host. Docker deployment is no longer supported.
+
+### Bare Metal Install (Recommended)
 
 ```bash
 git clone https://github.com/Brownster/pi-health.git
@@ -81,7 +83,7 @@ ENABLE_TAILSCALE=1 ./start.sh
 ENABLE_VPN=1 PIA_USERNAME=your_user PIA_PASSWORD=your_pass ./start.sh
 ```
 
-Access the dashboard at `http://<pi-ip>:8002`
+Access the dashboard at `http://<host-ip>:8002`
 
 ### Example: Split VPN and Non-VPN Stacks
 
@@ -103,42 +105,6 @@ sudo cp -r examples/stacks/media-stack /opt/stacks/
 sudo cp examples/stacks/.env.example /opt/stacks/vpn-stack/.env
 sudo cp examples/stacks/.env.example /opt/stacks/media-stack/.env
 ```
-
-### Docker Install
-
-**Docker Run:**
-```bash
-docker run -d \
-  -p 8080:8080 \
-  -v /proc:/host_proc:ro \
-  -v /sys:/host_sys:ro \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  --name pi-health-dashboard \
-  brownster/pi-health:latest
-```
-
-**Docker Compose:**
-```yaml
-services:
-  pi-health-dashboard:
-    image: brownster/pi-health:latest
-    container_name: pi-health-dashboard
-    environment:
-      - TZ=${TIMEZONE}
-      - DISK_PATH=/mnt/storage
-      - STACKS_PATH=/opt/stacks
-    ports:
-      - 8080:8080
-    volumes:
-      - /proc:/host_proc:ro
-      - /sys:/host_sys:ro
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./config:/config
-      - /mnt/storage:/mnt/storage
-    restart: unless-stopped
-```
-
-> **Note**: Disk management and storage plugin features require the bare metal install with the helper service.
 
 ## Configuration
 
