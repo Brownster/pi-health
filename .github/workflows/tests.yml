@@ -25,6 +25,14 @@ jobs:
     - name: Run Unit Tests
       run: tox -e unit
 
+    - name: Install dependencies for e2e
+      run: |
+        pip install -r requirements.txt
+        pip install -r tests/requirements.txt
+
+    - name: Install Playwright browsers
+      run: python -m playwright install chromium
+
     - name: Start Application
       env:
         PORT: 8002
@@ -33,15 +41,22 @@ jobs:
       run: |
         # Start app in background
         python app.py &
-        # Wait for it to be ready
-        sleep 5
+        APP_PID=$!
+        # Wait for it to be ready (max 30 seconds)
+        for i in {1..30}; do
+          if python -c "import urllib.request; urllib.request.urlopen('http://localhost:8002/api/theme', timeout=1)" 2>/dev/null; then
+            echo "App is ready!"
+            break
+          fi
+          sleep 1
+        done
 
     - name: Run UI Tests
       env:
         BASE_URL: http://localhost:8002
         PIHEALTH_USER: admin
         PIHEALTH_PASSWORD: password
-      run: tox -e e2e
+      run: pytest -m e2e tests/e2e -v
 
     - name: Upload Test Artifacts
       if: failure()
