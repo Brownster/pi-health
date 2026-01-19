@@ -450,3 +450,40 @@ def test_settings_auto_update_section(authenticated_page: Page):
     logs_section = page.locator("#settings-updates-logs")
     expect(logs_section).to_be_visible()
     expect(page.locator("#logs-content")).to_be_visible()
+
+
+def test_apps_catalog_rendering(authenticated_page: Page):
+    """
+    Test 12: Apps catalog renders and supports install modal + VPN config.
+    """
+    page = authenticated_page
+
+    base_url = "/".join(page.url.split("/")[:3])
+    page.goto(f"{base_url}/apps.html")
+    expect(page.get_by_role("heading", name="App Catalog")).to_be_visible()
+
+    grid = page.locator("#catalog-grid")
+    expect(grid).to_be_visible()
+    expect(grid).not_to_have_text("Loading catalog...", timeout=10000)
+
+    item_card = grid.locator("div.bg-gray-800").first
+    expect(item_card).to_be_visible()
+
+    install_button = item_card.locator("button:has-text('Install')")
+    if install_button.count() > 0:
+        install_button.first.click()
+        modal = page.locator("#install-modal")
+        expect(modal).to_be_visible()
+        expect(modal.locator("#install-title")).to_be_visible()
+        expect(modal.locator("#install-stack-select")).to_be_visible()
+        page.click("#install-modal button:has-text('Cancel')")
+        expect(modal).to_be_hidden()
+
+    vpn_card = page.locator("div.bg-gray-800", has=page.locator("h3", has_text="VPN")).first
+    if vpn_card.count() > 0:
+        vpn_card.locator("button:has-text('Configure')").first.click()
+        vpn_modal = page.locator("#vpn-modal")
+        expect(vpn_modal).to_be_visible()
+        expect(vpn_modal.locator("#vpn-config-dir")).to_be_visible()
+        page.click("#vpn-modal button:has-text('Cancel')")
+        expect(vpn_modal).to_be_hidden()
