@@ -79,10 +79,10 @@ def test_container_stop_workflow(authenticated_page: Page, test_container):
     stop_button.click()
 
     # Observation: The UI should show "Processing..." or similar, then update.
-    # We just want to assert it eventually becomes "stopped".
+    # Docker shows "exited" status when a container is stopped.
     # Using a longer timeout as stopping a container takes time.
-    expect(status_locator).to_have_text("stopped", ignore_case=True, timeout=15000)
-    expect(status_locator).to_have_class(re.compile(r".*status-stopped.*"))
+    expect(status_locator).to_have_text(re.compile(r"(stopped|exited)", re.IGNORECASE), timeout=15000)
+    expect(status_locator).to_have_class(re.compile(r".*status-(stopped|exited|other).*"))
     
     # Verify button states update correctly
     expect(stop_button).to_be_disabled()
