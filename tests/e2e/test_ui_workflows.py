@@ -295,3 +295,33 @@ def test_plugins_toggle_samba(authenticated_page: Page):
         f"Plugin {'enabled' if initial_state else 'disabled'}",
         timeout=5000
     )
+
+
+def test_tools_copyparty_status(authenticated_page: Page):
+    """
+    Test 7: Tools page CopyParty status handling.
+    Validates status rendering or error notification.
+    """
+    page = authenticated_page
+
+    base_url = "/".join(page.url.split("/")[:3])
+    page.goto(f"{base_url}/tools.html")
+    expect(page.get_by_role("heading", name="Tools")).to_be_visible()
+
+    status_resp = page.request.get(f"{base_url}/api/tools/copyparty/status")
+    if not status_resp.ok:
+        expect(page.locator("#notification-area")).to_contain_text("CopyParty error", timeout=5000)
+        return
+
+    data = status_resp.json()
+    expected_service = data.get("service_status") or "unknown"
+    expected_installed = "Yes" if data.get("installed") else "No"
+
+    expect(page.locator("#copyparty-service-status")).to_have_text(expected_service, timeout=5000)
+    expect(page.locator("#copyparty-installed")).to_have_text(expected_installed)
+
+    expect(page.locator("#copyparty-share-path")).to_have_value(data.get("config", {}).get("share_path", ""))
+    expect(page.locator("#copyparty-port")).to_have_value(str(data.get("config", {}).get("port", "")))
+
+    if data.get("url"):
+        expect(page.locator("#copyparty-link")).to_have_attribute("href", data["url"])
