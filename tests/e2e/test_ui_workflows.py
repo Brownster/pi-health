@@ -327,3 +327,45 @@ def test_tools_copyparty_status(authenticated_page: Page):
 
     if data.get("url"):
         expect(page.locator("#copyparty-link")).to_have_attribute("href", data["url"])
+
+
+def test_pools_plugin_status_and_commands(authenticated_page: Page):
+    """
+    Test 8: Pools page plugin status display and command buttons.
+    """
+    page = authenticated_page
+
+    base_url = "/".join(page.url.split("/")[:3])
+    plugins_resp = page.request.get(f"{base_url}/api/storage/plugins")
+    if not plugins_resp.ok:
+        pytest.skip("Storage plugins API unavailable")
+
+    plugins = plugins_resp.json().get("plugins", [])
+    storage_plugins = [p for p in plugins if p.get("category") == "storage" and p.get("enabled")]
+    if not storage_plugins:
+        pytest.skip("No enabled storage plugins")
+
+    plugin = storage_plugins[0]
+    details_resp = page.request.get(f"{base_url}/api/storage/plugins/{plugin['id']}")
+    if not details_resp.ok:
+        pytest.skip(f"Plugin details unavailable for {plugin['id']}")
+    details = details_resp.json()
+
+    page.goto(f"{base_url}/pools.html")
+    expect(page.get_by_role("heading", name="Storage Pools")).to_be_visible()
+
+    card = page.locator("section", has=page.locator("h3", has_text=plugin["name"])).first
+    expect(card).to_be_visible(timeout=10000)
+
+    status_pill = card.locator(".status-pill")
+    expect(status_pill).to_be_visible()
+    if details.get("status", {}).get("status"):
+        expect(status_pill).to_have_text(details["status"]["status"])
+
+    if not plugin.get("installed"):
+        expect(card.locator("code")).to_be_visible()
+        pytest.skip("Plugin not installed; commands are hidden")
+
+    commands = details.get("commands") or []
+    command_buttons = card.locator("button.coraline-button")
+    expect(command_buttons).to_have_count(len(commands))
