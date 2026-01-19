@@ -402,3 +402,51 @@ def test_system_metrics_rendering(authenticated_page: Page):
     for bar in (cpu_bar, memory_bar, disk1_bar, disk2_bar):
         style = bar.get_attribute("style") or ""
         assert "%" in style
+
+
+def test_settings_backup_logs(authenticated_page: Page):
+    """
+    Test 10: Settings backups section loads backup lists.
+    """
+    page = authenticated_page
+
+    base_url = "/".join(page.url.split("/")[:3])
+    page.goto(f"{base_url}/settings.html")
+    expect(page.locator("#settings-section")).to_be_visible()
+    page.select_option("#settings-section", "backups")
+
+    expect(page.locator("#settings-backups")).to_be_visible()
+
+    backup_list = page.locator("#backup-list")
+    plugin_list = page.locator("#backup-plugins-list")
+    expect(backup_list).to_be_visible()
+    expect(plugin_list).to_be_visible()
+
+    expect(backup_list).not_to_have_text("Loading backups...", timeout=10000)
+    expect(plugin_list).not_to_have_text("Loading plugin backups...", timeout=10000)
+
+
+def test_settings_auto_update_section(authenticated_page: Page):
+    """
+    Test 11: Settings updates section renders and logs toggle works.
+    """
+    page = authenticated_page
+
+    base_url = "/".join(page.url.split("/")[:3])
+    page.goto(f"{base_url}/settings.html")
+    expect(page.locator("#settings-section")).to_be_visible()
+    page.select_option("#settings-section", "updates")
+
+    expect(page.locator("#settings-updates")).to_be_visible()
+    expect(page.locator("#auto-update-enabled")).to_be_visible()
+    expect(page.locator("#run-now-btn")).to_be_visible()
+
+    stacks_list = page.locator("#stacks-list")
+    expect(stacks_list).to_be_visible()
+    expect(stacks_list).not_to_have_text("Loading stacks...", timeout=10000)
+
+    # Show logs
+    page.click("button:has-text('View Last Run')")
+    logs_section = page.locator("#settings-updates-logs")
+    expect(logs_section).to_be_visible()
+    expect(page.locator("#logs-content")).to_be_visible()
