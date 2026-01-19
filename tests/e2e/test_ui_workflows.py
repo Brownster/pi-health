@@ -369,3 +369,36 @@ def test_pools_plugin_status_and_commands(authenticated_page: Page):
     commands = details.get("commands") or []
     command_buttons = card.locator("button.coraline-button")
     expect(command_buttons).to_have_count(len(commands))
+
+
+def test_system_metrics_rendering(authenticated_page: Page):
+    """
+    Test 9: System Health metrics render (no longer show Loading...).
+    """
+    page = authenticated_page
+
+    base_url = "/".join(page.url.split("/")[:3])
+    stats_resp = page.request.get(f"{base_url}/api/stats")
+    if not stats_resp.ok:
+        pytest.skip("Stats API unavailable")
+
+    page.goto(f"{base_url}/system.html")
+    expect(page.get_by_role("heading", name="System Metrics")).to_be_visible()
+
+    def not_loading(selector: str) -> None:
+        expect(page.locator(selector)).not_to_have_text("Loading...", timeout=10000)
+
+    not_loading("#cpu-usage")
+    not_loading("#memory-usage")
+    not_loading("#disk-usage")
+    not_loading("#disk-usage-2")
+    not_loading("#network-recv")
+    not_loading("#network-sent")
+
+    cpu_bar = page.locator("#cpu-bar")
+    memory_bar = page.locator("#memory-bar")
+    disk1_bar = page.locator("#disk1-bar")
+    disk2_bar = page.locator("#disk2-bar")
+    for bar in (cpu_bar, memory_bar, disk1_bar, disk2_bar):
+        style = bar.get_attribute("style") or ""
+        assert "%" in style
