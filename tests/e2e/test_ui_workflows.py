@@ -253,3 +253,45 @@ services:
 
     # Verify card is gone
     expect(page.locator(f".stack-card:has-text('{stack_name}')")).to_have_count(0, timeout=10000)
+
+
+def test_plugins_toggle_samba(authenticated_page: Page):
+    """
+    Test 6: Plugins page toggle flow.
+    Toggles the Samba plugin on/off and verifies UI updates.
+    """
+    page = authenticated_page
+
+    # Navigate to Plugins
+    page.click("nav a[href='/settings.html']")
+    expect(page.locator("#settings-section")).to_be_visible()
+    page.select_option("#settings-section", "plugins")
+    settings_link = page.locator("a[href='/plugins.html']")
+    settings_link.first.click()
+
+    expect(page).to_have_url(r".*/plugins.html")
+    expect(page.locator("#plugins-list")).to_be_visible()
+
+    # Locate the Samba plugin card
+    card = page.locator("div.bg-gray-800", has=page.locator("h4", has_text="Samba")).first
+    expect(card).to_be_visible(timeout=10000)
+
+    toggle = card.locator("input[type='checkbox']")
+    initial_state = toggle.is_checked()
+
+    # Toggle on/off and verify notification
+    toggle.set_checked(not initial_state)
+    expect(page.locator("#notification-area")).to_contain_text(
+        f"Plugin {'enabled' if not initial_state else 'disabled'}",
+        timeout=5000
+    )
+
+    # Wait for reload to finish and verify checkbox state
+    expect(toggle).to_be_checked(checked=not initial_state)
+
+    # Restore original state
+    toggle.set_checked(initial_state)
+    expect(page.locator("#notification-area")).to_contain_text(
+        f"Plugin {'enabled' if initial_state else 'disabled'}",
+        timeout=5000
+    )
