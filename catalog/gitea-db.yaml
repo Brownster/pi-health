@@ -1,0 +1,33 @@
+id: gitea-db
+name: Gitea Database (Postgres)
+description: PostgreSQL database for Gitea
+requires: []
+disabled_by_default: false
+fields:
+  - key: CONFIG_DIR
+    label: Config root directory
+    default: "/home/pi/docker"
+  - key: DB_NAME
+    label: Database name
+    default: "gitea"
+  - key: DB_USER
+    label: Database user
+    default: "gitea"
+  - key: DB_PASSWORD
+    label: Database password
+    default: "gitea"
+service:
+  image: docker.io/library/postgres:14
+  container_name: gitea-db
+  environment:
+    - POSTGRES_DB={{DB_NAME}}
+    - POSTGRES_USER={{DB_USER}}
+    - POSTGRES_PASSWORD={{DB_PASSWORD}}
+  volumes:
+    - "{{CONFIG_DIR}}/gitea-db:/var/lib/postgresql/data"
+  networks:
+    - gitea
+  restart: unless-stopped
+networks:
+  gitea:
+    driver: bridge

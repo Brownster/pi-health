@@ -1,0 +1,50 @@
+id: pihole
+name: Pi-hole
+description: Network-wide ad blocker and DNS sinkhole
+requires: []
+disabled_by_default: false
+fields:
+  - key: TZ
+    label: Timezone
+    default: "Europe/London"
+  - key: WEBPASSWORD
+    label: Web UI password
+    default: ""
+  - key: DNS_LISTENING_MODE
+    label: DNS listening mode (ALL/LOCAL)
+    default: "ALL"
+  - key: CONFIG_DIR
+    label: Config root directory
+    default: "/home/pi/docker"
+  - key: DNS_TCP_PORT
+    label: DNS TCP port
+    default: "53"
+  - key: DNS_UDP_PORT
+    label: DNS UDP port
+    default: "53"
+  - key: HTTP_PORT
+    label: HTTP port
+    default: "80"
+  - key: HTTPS_PORT
+    label: HTTPS port
+    default: "443"
+service:
+  image: pihole/pihole:latest
+  container_name: pihole
+  network_mode: bridge
+  environment:
+    - TZ={{TZ}}
+    - FTLCONF_webserver_api_password={{WEBPASSWORD}}
+    - FTLCONF_dns_listeningMode={{DNS_LISTENING_MODE}}
+  volumes:
+    - "{{CONFIG_DIR}}/pihole/etc-pihole:/etc/pihole"
+  ports:
+    - "{{DNS_TCP_PORT}}:53/tcp"
+    - "{{DNS_UDP_PORT}}:53/udp"
+    - "{{HTTP_PORT}}:80/tcp"
+    - "{{HTTPS_PORT}}:443/tcp"
+  cap_add:
+    - NET_ADMIN
+    - SYS_TIME
+    - SYS_NICE
+  restart: unless-stopped

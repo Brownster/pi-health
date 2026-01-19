@@ -1,0 +1,61 @@
+id: code-server
+name: code-server
+description: VS Code in the browser
+requires: []
+disabled_by_default: false
+fields:
+  - key: TZ
+    label: Timezone
+    default: "Etc/UTC"
+  - key: PUID
+    label: User ID (PUID)
+    default: "1000"
+  - key: PGID
+    label: Group ID (PGID)
+    default: "1000"
+  - key: CONFIG_DIR
+    label: Config root directory
+    default: "/home/pi/docker"
+  - key: PORT
+    label: HTTPS port
+    default: "8443"
+  - key: PASSWORD
+    label: Login password (optional)
+    default: ""
+  - key: HASHED_PASSWORD
+    label: Hashed password (optional)
+    default: ""
+  - key: SUDO_PASSWORD
+    label: Sudo password (optional)
+    default: ""
+  - key: SUDO_PASSWORD_HASH
+    label: Sudo password hash (optional)
+    default: ""
+  - key: PROXY_DOMAIN
+    label: Proxy domain (optional)
+    default: ""
+  - key: DEFAULT_WORKSPACE
+    label: Default workspace path
+    default: "/config/workspace"
+  - key: PWA_APPNAME
+    label: PWA app name
+    default: "code-server"
+service:
+  image: lscr.io/linuxserver/code-server:latest
+  container_name: code-server
+  environment:
+    - PUID={{PUID}}
+    - PGID={{PGID}}
+    - TZ={{TZ}}
+    - PASSWORD={{PASSWORD}}
+    - HASHED_PASSWORD={{HASHED_PASSWORD}}
+    - SUDO_PASSWORD={{SUDO_PASSWORD}}
+    - SUDO_PASSWORD_HASH={{SUDO_PASSWORD_HASH}}
+    - PROXY_DOMAIN={{PROXY_DOMAIN}}
+    - DEFAULT_WORKSPACE={{DEFAULT_WORKSPACE}}
+    - PWA_APPNAME={{PWA_APPNAME}}
+  volumes:
+    - "{{CONFIG_DIR}}/code-server:/config"
+  ports:
+    - "{{PORT}}:8443"
+  restart: unless-stopped

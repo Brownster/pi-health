@@ -1,0 +1,56 @@
+id: gitea
+name: Gitea
+description: Self-hosted Git service
+requires: ["gitea-db"]
+disabled_by_default: false
+fields:
+  - key: CONFIG_DIR
+    label: Config root directory
+    default: "/home/pi/docker"
+  - key: USER_UID
+    label: User UID
+    default: "1000"
+  - key: USER_GID
+    label: User GID
+    default: "1000"
+  - key: WEB_PORT
+    label: Web UI port
+    default: "3000"
+  - key: SSH_PORT
+    label: SSH port
+    default: "222"
+  - key: DB_NAME
+    label: Database name
+    default: "gitea"
+  - key: DB_USER
+    label: Database user
+    default: "gitea"
+  - key: DB_PASSWORD
+    label: Database password
+    default: "gitea"
+service:
+  image: docker.gitea.com/gitea:1.25.3
+  container_name: gitea
+  environment:
+    - USER_UID={{USER_UID}}
+    - USER_GID={{USER_GID}}
+    - GITEA__database__DB_TYPE=postgres
+    - GITEA__database__HOST=gitea-db:5432
+    - GITEA__database__NAME={{DB_NAME}}
+    - GITEA__database__USER={{DB_USER}}
+    - GITEA__database__PASSWD={{DB_PASSWORD}}
+  volumes:
+    - "{{CONFIG_DIR}}/gitea:/data"
+    - "/etc/timezone:/etc/timezone:ro"
+    - "/etc/localtime:/etc/localtime:ro"
+  ports:
+    - "{{WEB_PORT}}:3000"
+    - "{{SSH_PORT}}:22"
+  networks:
+    - gitea
+  depends_on:
+    - gitea-db
+  restart: unless-stopped
+networks:
+  gitea:
+    driver: bridge
