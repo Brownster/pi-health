@@ -235,8 +235,11 @@
             try {
                 const res = await apiFetch('/api/disks/startup-service/preview');
                 if (!res.ok) {
-                    // Endpoint may not exist yet, just apply directly
-                    if (confirm('Apply startup service changes?')) {
+                    const errData = await res.json().catch(() => ({}));
+                    const errMsg = errData.error || `Preview failed (${res.status})`;
+                    showNotification(errMsg, 'error');
+                    // Fallback to simple apply
+                    if (confirm('Preview unavailable. Apply startup service changes anyway?')) {
                         applyStartupService();
                     }
                     return;
@@ -251,8 +254,10 @@
                 renderDiff(data);
                 document.getElementById('diff-modal').classList.remove('hidden');
             } catch (e) {
+                console.error('Preview error:', e);
+                showNotification('Preview failed: ' + e.message, 'error');
                 // Fallback: just apply
-                if (confirm('Apply startup service changes?')) {
+                if (confirm('Preview unavailable. Apply startup service changes anyway?')) {
                     applyStartupService();
                 }
             }

@@ -577,30 +577,56 @@ def api_set_media_paths():
 @login_required
 def api_preview_startup_service():
     """Preview changes to startup service before applying."""
-    if not helper_available():
-        return jsonify({'error': 'Helper service unavailable'}), 503
-
     paths = load_media_paths()
 
     # Generate proposed content
     proposed_script = _build_startup_script(paths)
     proposed_service = _build_startup_service()
 
-    # Get current files via helper
-    current = helper_call('read_startup_files', {})
-    if not current.get('success'):
-        return jsonify({'error': current.get('error', 'Failed to read current files')}), 500
+    script_path = '/usr/local/bin/check_mount_and_start.sh'
+    service_path = '/etc/systemd/system/docker-compose-start.service'
+
+    # Try helper first, fall back to direct read
+    current = None
+    if helper_available():
+        try:
+            current = helper_call('read_startup_files', {})
+            if not current.get('success'):
+                current = None
+        except Exception:
+            current = None
+
+    # Fallback: try to read files directly (works if we have read permission)
+    if not current:
+        current = {
+            'script': {'path': script_path, 'content': '', 'exists': False},
+            'service': {'path': service_path, 'content': '', 'exists': False}
+        }
+        try:
+            if os.path.exists(script_path):
+                with open(script_path, 'r') as f:
+                    current['script']['content'] = f.read()
+                    current['script']['exists'] = True
+        except (IOError, PermissionError):
+            pass
+        try:
+            if os.path.exists(service_path):
+                with open(service_path, 'r') as f:
+                    current['service']['content'] = f.read()
+                    current['service']['exists'] = True
+        except (IOError, PermissionError):
+            pass
 
     return jsonify({
         'script': {
-            'path': current['script']['path'],
+            'path': script_path,
             'current': current['script']['content'],
             'proposed': proposed_script,
             'exists': current['script']['exists'],
             'changed': current['script']['content'] != proposed_script
         },
         'service': {
-            'path': current['service']['path'],
+            'path': service_path,
             'current': current['service']['content'],
             'proposed': proposed_service,
             'exists': current['service']['exists'],

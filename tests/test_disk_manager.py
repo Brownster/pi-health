@@ -335,17 +335,21 @@ class TestMediaPaths:
         finally:
             disk_manager.MEDIA_PATHS_CONFIG = original_config
 
-    def test_startup_service_preview_unavailable(self, authenticated_client, temp_config_dir):
-        """Test startup service preview returns 503 when helper unavailable."""
+    def test_startup_service_preview_fallback(self, authenticated_client, temp_config_dir):
+        """Test startup service preview works without helper (uses fallback)."""
         import disk_manager
         original_config = disk_manager.MEDIA_PATHS_CONFIG
         disk_manager.MEDIA_PATHS_CONFIG = os.path.join(temp_config_dir, 'media_paths.json')
 
         try:
             response = authenticated_client.get('/api/disks/startup-service/preview')
-            assert response.status_code == 503
+            # Should return 200 with fallback to direct file read
+            assert response.status_code == 200
             data = json.loads(response.data)
-            assert 'error' in data
+            assert 'script' in data
+            assert 'service' in data
+            assert 'proposed' in data['script']
+            assert 'proposed' in data['service']
         finally:
             disk_manager.MEDIA_PATHS_CONFIG = original_config
 
