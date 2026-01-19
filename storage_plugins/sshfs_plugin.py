@@ -5,6 +5,7 @@ Mounts remote directories over SSH/SFTP.
 import os
 import re
 import subprocess
+from typing import Optional
 
 from helper_client import helper_call, HelperError
 from storage_plugins.remote_base import RemoteMountPlugin, MountResult
@@ -285,7 +286,7 @@ class SSHFSPlugin(RemoteMountPlugin):
 
         return mounts
 
-    def _parse_sshfs_source(self, source: str, mount_point: str) -> dict | None:
+    def _parse_sshfs_source(self, source: str, mount_point: str) -> Optional[dict]:
         """Parse sshfs source string (user@host:path) into config dict."""
         # Format: user@host:path or user@host:port:path
         try:
