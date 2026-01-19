@@ -675,9 +675,9 @@
                                 <button data-action="start" class="action-btn bg-green-700 hover:bg-green-600 text-white py-1 px-2 rounded text-xs ${container.status === 'running' ? 'opacity-50 cursor-not-allowed' : ''}"
                                         onclick="controlContainer('${container.id}', 'start')"
                                         ${container.status === 'running' ? 'disabled' : ''}>Start</button>
-                                <button data-action="stop" class="action-btn bg-yellow-700 hover:bg-yellow-600 text-white py-1 px-2 rounded text-xs ${container.status === 'stopped' ? 'opacity-50 cursor-not-allowed' : ''}"
+                                <button data-action="stop" class="action-btn bg-yellow-700 hover:bg-yellow-600 text-white py-1 px-2 rounded text-xs ${['stopped', 'exited'].includes(container.status) ? 'opacity-50 cursor-not-allowed' : ''}"
                                         onclick="controlContainer('${container.id}', 'stop')"
-                                        ${container.status === 'stopped' ? 'disabled' : ''}>Stop</button>
+                                        ${['stopped', 'exited'].includes(container.status) ? 'disabled' : ''}>Stop</button>
                                 <button data-action="restart" class="action-btn bg-blue-700 hover:bg-blue-600 text-white py-1 px-2 rounded text-xs"
                                         onclick="controlContainer('${container.id}', 'restart')">Restart</button>
                                 <div class="relative">
@@ -851,9 +851,10 @@
                         }
                         
                         if (stopButton) {
-                            stopButton.disabled = container.status === 'stopped';
-                            stopButton.classList.toggle('opacity-50', container.status === 'stopped');
-                            stopButton.classList.toggle('cursor-not-allowed', container.status === 'stopped');
+                            const isStopped = ['stopped', 'exited'].includes(container.status);
+                            stopButton.disabled = isStopped;
+                            stopButton.classList.toggle('opacity-50', isStopped);
+                            stopButton.classList.toggle('cursor-not-allowed', isStopped);
                         }
 
                         if (restartButton) restartButton.disabled = false;
