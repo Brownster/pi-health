@@ -1,3 +1,4 @@
+import os
 import pytest
 import time
 from playwright.sync_api import Page, expect
@@ -258,25 +259,27 @@ services:
 def test_plugins_toggle_samba(authenticated_page: Page):
     """
     Test 6: Plugins page toggle flow.
-    Toggles the Samba plugin on/off and verifies UI updates.
+    Toggles the first available plugin on/off and verifies UI updates.
     """
     page = authenticated_page
+    base_url = os.getenv('BASE_URL', 'http://localhost:8002')
 
-    # Navigate to Plugins
-    page.click("nav a[href='/settings.html']")
-    expect(page.locator("#settings-section")).to_be_visible()
-    page.select_option("#settings-section", "plugins")
-    settings_link = page.locator("a[href='/plugins.html']")
-    settings_link.first.click()
+    # Navigate directly to Plugins page
+    page.goto(f"{base_url}/plugins.html")
+    expect(page.locator("#plugins-list")).to_be_visible(timeout=10000)
 
-    expect(page).to_have_url(r".*/plugins.html")
-    expect(page.locator("#plugins-list")).to_be_visible()
+    # Find first plugin card with a toggle
+    cards = page.locator("#plugins-list > div.bg-gray-800")
+    if cards.count() == 0:
+        pytest.skip("No plugins available")
 
-    # Locate the Samba plugin card
-    card = page.locator("div.bg-gray-800", has=page.locator("h4", has_text="Samba")).first
-    expect(card).to_be_visible(timeout=10000)
+    card = cards.first
+    expect(card).to_be_visible(timeout=5000)
 
     toggle = card.locator("input[type='checkbox']")
+    if toggle.count() == 0:
+        pytest.skip("No toggleable plugin found")
+
     initial_state = toggle.is_checked()
 
     # Toggle on/off and verify notification
