@@ -487,3 +487,72 @@ def test_apps_catalog_rendering(authenticated_page: Page):
         expect(vpn_modal.locator("#vpn-config-dir")).to_be_visible()
         page.click("#vpn-modal button:has-text('Cancel')")
         expect(vpn_modal).to_be_hidden()
+
+
+def test_mounts_page_rendering(authenticated_page: Page):
+    """
+    Test 13: Mounts page renders plugin sections and modal forms safely.
+    """
+    page = authenticated_page
+
+    base_url = "/".join(page.url.split("/")[:3])
+    plugins_resp = page.request.get(f"{base_url}/api/storage/plugins")
+    if not plugins_resp.ok:
+        pytest.skip("Storage plugins API unavailable")
+
+    plugins = plugins_resp.json().get("plugins", [])
+    mount_plugins = [p for p in plugins if p.get("category") == "mount" and p.get("enabled")]
+    if not mount_plugins:
+        pytest.skip("No enabled mount plugins")
+
+    plugin = mount_plugins[0]
+
+    page.goto(f"{base_url}/mounts.html")
+    expect(page.get_by_role("heading", name="Mounts")).to_be_visible()
+
+    section = page.locator("section", has=page.locator("h3", has_text=plugin["name"])).first
+    expect(section).to_be_visible(timeout=10000)
+
+    add_button = section.locator("button:has-text('+ Add Mount')")
+    detect_button = section.locator("button:has-text('Detect')")
+    expect(detect_button).to_be_visible()
+    expect(add_button).to_be_visible()
+
+    if not plugin.get("installed"):
+        expect(section.locator("code")).to_be_visible()
+        expect(add_button).to_be_disabled()
+        pytest.skip("Mount plugin not installed; skipping modal interactions")
+
+    # Open Add Mount modal and verify dynamic form renders
+    add_button.click()
+    modal = page.locator("#mount-modal")
+    expect(modal).to_be_visible()
+    expect(page.locator("#mount-modal-title")).to_have_text("Add Mount")
+    form_inputs = page.locator("#mount-modal-form input, #mount-modal-form select")
+    expect(form_inputs.first).to_be_visible()
+    page.click("#mount-modal button:has-text('Cancel')")
+    expect(modal).to_be_hidden()
+
+    mounts_resp = page.request.get(f"{base_url}/api/storage/mounts/{plugin['id']}")
+    if not mounts_resp.ok:
+        pytest.skip("Mounts API unavailable")
+
+    mounts = mounts_resp.json().get("mounts", [])
+    if not mounts:
+        expect(section).to_contain_text("No mounts configured")
+        return
+
+    mount = mounts[0]
+    mount_card = section.locator("div.bg-gray-900", has=page.locator("h4", has_text=mount["name"])).first
+    expect(mount_card).to_be_visible()
+    expect(mount_card.locator(".status-pill")).to_be_visible()
+    expect(mount_card.locator("button:has-text('Edit')")).to_be_visible()
+
+    # Open Edit modal for visibility check; avoid saving changes.
+    mount_card.locator("button:has-text('Edit')").click()
+    expect(page.locator("#mount-modal-title")).to_have_text("Edit Mount")
+    name_field = page.locator("#mount-modal-form input[name='name']")
+    if name_field.count() > 0:
+        expect(name_field).to_have_value(mount.get("name", ""))
+    page.click("#mount-modal button:has-text('Cancel')")
+    expect(modal).to_be_hidden()

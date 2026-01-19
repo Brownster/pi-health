@@ -347,3 +347,107 @@ def test_navigation_to_disks_via_menu(authenticated_page: Page):
     # Verify navigation
     expect(page).to_have_url(re.compile(r".*/disks\.html"))
     expect(page.locator("h2")).to_contain_text("Disk Management")
+
+
+def test_mount_modal_validation_error(authenticated_page: Page):
+    """
+    Test that the mount modal validates mountpoint input.
+    """
+    page = authenticated_page
+    page.goto(f"{BASE_URL}/disks.html")
+
+    suggestions_resp = page.request.get(f"{BASE_URL}/api/disks/suggested-mounts")
+    if not suggestions_resp.ok:
+        pytest.skip("Suggested mounts API not available")
+
+    suggestions = suggestions_resp.json().get("suggestions", [])
+    if not suggestions:
+        pytest.skip("No suggested mounts available")
+
+    page.wait_for_selector("#suggestions-list")
+    mount_button = page.locator("#suggestions-list button").first
+    if mount_button.count() == 0:
+        pytest.skip("No mount suggestion buttons found")
+
+    mount_button.click()
+
+    modal = page.locator("#mount-modal")
+    expect(modal).not_to_have_class(re.compile(r".*hidden.*"), timeout=5000)
+
+    page.fill("#mount-point", "/invalid")
+    page.click("#mount-modal button:has-text('Mount')")
+
+    expect(page.locator("#notification-area")).to_contain_text(
+        "Mountpoint must start with /mnt/",
+        timeout=5000
+    )
+
+    page.click("#mount-modal button:has-text('Cancel')")
+    expect(modal).to_have_class(re.compile(r".*hidden.*"), timeout=5000)
+
+
+def test_unmount_confirmation_cancel(authenticated_page: Page):
+    """
+    Test that the unmount confirmation dialog appears and can be canceled.
+    """
+    page = authenticated_page
+    page.goto(f"{BASE_URL}/disks.html")
+
+    page.wait_for_function(
+        """() => {
+            const el = document.getElementById('disk-list');
+            return el && !el.textContent.includes('Loading...');
+        }""",
+        timeout=10000
+    )
+
+    unmount_buttons = page.locator("button:has-text('Unmount')")
+    if unmount_buttons.count() == 0:
+        pytest.skip("No mounted partitions available for unmount test")
+
+    dialog_message = {"text": ""}
+
+    def handle_dialog(dialog):
+        dialog_message["text"] = dialog.message
+        dialog.dismiss()
+
+    page.once("dialog", handle_dialog)
+    unmount_buttons.first.click()
+
+    assert "Unmount" in dialog_message["text"]
+    expect(page.locator("#disk-list")).to_be_visible()
+
+
+def test_smart_self_test_confirmation(authenticated_page: Page):
+    """
+    Test that SMART self-test buttons prompt for confirmation.
+    """
+    page = authenticated_page
+    page.goto(f"{BASE_URL}/disks.html")
+
+    page.click("button:has-text('Refresh SMART')")
+    page.wait_for_function(
+        """() => {
+            const el = document.getElementById('smart-list');
+            return el && !el.textContent.includes('Loading');
+        }""",
+        timeout=15000
+    )
+
+    smart_cards = page.locator("#smart-list .bg-gray-900.rounded-lg.cursor-pointer")
+    if smart_cards.count() == 0:
+        pytest.skip("No SMART-capable devices available for self-test")
+
+    smart_cards.first.click()
+    expect(page.locator("#smart-modal")).not_to_have_class(re.compile(r".*hidden.*"), timeout=5000)
+
+    dialog_message = {"text": ""}
+
+    def handle_dialog(dialog):
+        dialog_message["text"] = dialog.message
+        dialog.dismiss()
+
+    page.once("dialog", handle_dialog)
+    page.click("#smart-modal button:has-text('Short Test')")
+
+    assert "SMART self-test" in dialog_message["text"]
