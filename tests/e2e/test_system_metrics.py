@@ -12,7 +12,7 @@ def test_system_metrics_page_renders(authenticated_page: Page):
     page.goto(f"{BASE_URL}/system.html")
 
     expect(page).to_have_title("System Health - Pi-Health Dashboard")
-    expect(page.locator("h2")).to_contain_text("System Metrics")
+    expect(page.get_by_role("heading", name="System Metrics")).to_be_visible()
 
     stats_resp = page.request.get(f"{BASE_URL}/api/stats")
     if not stats_resp.ok:

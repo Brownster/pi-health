@@ -438,7 +438,9 @@ def test_settings_auto_update_section(authenticated_page: Page):
     page.select_option("#settings-section", "updates")
 
     expect(page.locator("#settings-updates")).to_be_visible()
-    expect(page.locator("#auto-update-enabled")).to_be_visible()
+    toggle_input = page.locator("#auto-update-enabled")
+    toggle_slider = page.locator("#auto-update-enabled + .toggle-slider")
+    expect(toggle_slider).to_be_visible()
     expect(page.locator("#run-now-btn")).to_be_visible()
 
     stacks_list = page.locator("#stacks-list")
