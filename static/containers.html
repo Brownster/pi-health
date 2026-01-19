@@ -592,9 +592,10 @@
                 }
 
                 if (stopBtn) {
-                    stopBtn.disabled = container.status === 'stopped';
-                    stopBtn.classList.toggle('opacity-50', container.status === 'stopped');
-                    stopBtn.classList.toggle('cursor-not-allowed', container.status === 'stopped');
+                    const isStopped = ['stopped', 'exited'].includes(container.status);
+                    stopBtn.disabled = isStopped;
+                    stopBtn.classList.toggle('opacity-50', isStopped);
+                    stopBtn.classList.toggle('cursor-not-allowed', isStopped);
                 }
             });
         }
