@@ -73,16 +73,16 @@ def test_container_stop_workflow(authenticated_page: Page, test_container):
     
     # Verify initial state: It should be running
     expect(status_locator).to_have_text("running", ignore_case=True)
-    expect(status_locator).to_have_class(r".*status-running.*")
-    
+    expect(status_locator).to_have_class(re.compile(r".*status-running.*"))
+
     # Action: Click Stop
     stop_button.click()
-    
+
     # Observation: The UI should show "Processing..." or similar, then update.
     # We just want to assert it eventually becomes "stopped".
     # Using a longer timeout as stopping a container takes time.
     expect(status_locator).to_have_text("stopped", ignore_case=True, timeout=15000)
-    expect(status_locator).to_have_class(r".*status-stopped.*")
+    expect(status_locator).to_have_class(re.compile(r".*status-stopped.*"))
     
     # Verify button states update correctly
     expect(stop_button).to_be_disabled()
