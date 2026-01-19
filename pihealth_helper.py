@@ -955,6 +955,7 @@ def cmd_backup_create(params):
     retention_count = params.get('retention_count', 7)
     compression = params.get('compression', 'zst')
     archive_prefix = params.get('archive_prefix', 'pi-health-backup')
+    excludes = params.get('excludes', [])
 
     if not isinstance(sources, list) or not sources:
         return {'success': False, 'error': 'sources required'}
@@ -982,6 +983,13 @@ def cmd_backup_create(params):
     if not valid_sources:
         return {'success': False, 'error': 'No valid sources found'}
 
+    # Validate and build exclude arguments
+    exclude_args = []
+    if isinstance(excludes, list):
+        for pattern in excludes:
+            if isinstance(pattern, str) and pattern and '..' not in pattern:
+                exclude_args.extend(['--exclude', pattern])
+
     os.makedirs(dest_dir, exist_ok=True)
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     safe_prefix = re.sub(r'[^a-zA-Z0-9._-]', '', archive_prefix) or 'pi-health-backup'
@@ -989,9 +997,9 @@ def cmd_backup_create(params):
     archive_path = os.path.join(dest_dir, archive_name)
 
     if compression == 'zst':
-        cmd = ['tar', '-I', 'zstd', '-cf', archive_path] + valid_sources
+        cmd = ['tar', '-I', 'zstd', '-cf', archive_path] + exclude_args + valid_sources
     else:
-        cmd = ['tar', '-czf', archive_path] + valid_sources
+        cmd = ['tar', '-czf', archive_path] + exclude_args + valid_sources
 
     result = run_command(cmd, timeout=3600)
     if result.get('returncode') != 0:

@@ -6,3 +6,4 @@ __pycache__/
 config/plugins.json
 config/copyparty.json
 config/pihealth_update.json
+*.tar.zst

@@ -999,23 +999,39 @@
         }
 
         // Toggle logs visibility
-        function toggleLogs() {
+        async function toggleLogs() {
             const section = document.getElementById('settings-updates-logs');
             logsVisible = !logsVisible;
 
             if (logsVisible) {
                 section.classList.remove('hidden');
-                renderLogs();
+                // Fetch fresh logs data
+                await fetchAndRenderLogs();
             } else {
                 section.classList.add('hidden');
             }
         }
 
-        // Show logs section
-        function showLogs() {
-            logsVisible = true;
-                document.getElementById('settings-updates-logs').classList.remove('hidden');
+        // Fetch logs from API and render
+        async function fetchAndRenderLogs() {
+            try {
+                const response = await fetch('/api/auto-update/logs');
+                if (response.ok) {
+                    const data = await response.json();
+                    currentConfig.last_run = data.last_run;
+                    currentConfig.last_run_result = data.last_run_result;
+                }
+            } catch (e) {
+                console.error('Failed to fetch logs:', e);
+            }
             renderLogs();
+        }
+
+        // Show logs section
+        async function showLogs() {
+            logsVisible = true;
+            document.getElementById('settings-updates-logs').classList.remove('hidden');
+            await fetchAndRenderLogs();
         }
 
         // Render logs content

@@ -44,6 +44,39 @@ DEFAULT_CONFIG = {
     'last_restore_result': None
 }
 
+# Default patterns to exclude from backups (media, cache, logs, temp files)
+DEFAULT_EXCLUDES = [
+    # Media files (podcasts, videos, music)
+    '*.mp3',
+    '*.mp4',
+    '*.mkv',
+    '*.avi',
+    '*.mov',
+    '*.flac',
+    '*.wav',
+    '*.m4a',
+    '*.webm',
+    # Image cache directories (Sonarr, Radarr, etc.)
+    '*/MediaCover/*',
+    '*/MediaCover',
+    # Cache and temporary files
+    '*/cache/*',
+    '*/Cache/*',
+    '*/.cache/*',
+    '*/logs/*',
+    '*.log',
+    '*.log.*',
+    # Database journals/temp (keep main db, exclude temp)
+    '*-shm',
+    '*-wal',
+    '*.db-journal',
+    # Transcoding/temp
+    '*/transcode/*',
+    '*/Transcode/*',
+    '*/temp/*',
+    '*/tmp/*',
+]
+
 SCHEDULE_PRESETS = {
     'disabled': None,
     'daily_2am': '0 2 * * *',
@@ -148,7 +181,8 @@ def run_backup_job():
                     'dest_dir': config.get('dest_dir'),
                     'retention_count': config.get('retention_count', 7),
                     'compression': config.get('compression', 'zst'),
-                    'archive_prefix': 'pi-health-backup'
+                    'archive_prefix': 'pi-health-backup',
+                    'excludes': DEFAULT_EXCLUDES
                 })
                 if config.get('plugin_backup_enabled', True):
                     plugin_result = helper_call('backup_create', {
@@ -190,8 +224,10 @@ def list_backups(dest_dir):
     if not dest_dir or not os.path.isdir(dest_dir):
         return entries
 
+    # Include both primary backups and plugin backups
+    prefixes = ('pi-health-backup-', 'storage-plugins-')
     for name in sorted(os.listdir(dest_dir)):
-        if not name.startswith('pi-health-backup-'):
+        if not any(name.startswith(p) for p in prefixes):
             continue
         if not (name.endswith('.tar.zst') or name.endswith('.tar.gz')):
             continue
@@ -292,8 +328,14 @@ def api_backup_status():
 @login_required
 def api_backup_run():
     result = run_backup_job()
-    if not result or not result.get('success'):
-        return jsonify({'error': result.get('error', 'Backup failed'), 'result': result}), 500
+    if not result:
+        return jsonify({'error': 'Backup failed'}), 500
+
+    # Check if this is the structured result from run_backup_job
+    primary = result.get('primary', result)
+    if not primary.get('success'):
+        return jsonify({'error': primary.get('error', 'Backup failed'), 'result': result}), 500
+
     return jsonify({'status': 'ok', 'result': result})
 
 
