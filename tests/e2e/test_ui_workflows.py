@@ -1,4 +1,5 @@
 import os
+import re
 import pytest
 import time
 from playwright.sync_api import Page, expect
@@ -58,7 +59,7 @@ def test_container_stop_workflow(authenticated_page: Page, test_container):
     
     # Navigate to Containers page using the navbar
     open_nav_link(page, "My Apps", "/containers.html")
-    expect(page).to_have_url(r".*/containers.html")
+    expect(page).to_have_url(re.compile(r".*/containers\.html"))
     
     # Define selectors for our specific test container
     # The row has data-container-name attribute matching the name
