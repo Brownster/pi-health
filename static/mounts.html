@@ -135,13 +135,13 @@
     </div>
 
     <!-- Diff Preview Modal -->
-    <div id="diff-modal" class="hidden fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4" onclick="if(event.target === this) closeDiffModal()">
-        <div class="bg-gray-800 w-full max-w-4xl rounded-lg shadow-xl border border-purple-900 flex flex-col max-h-[90vh]" onclick="event.stopPropagation()">
+    <div id="diff-modal" class="hidden fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4 overflow-y-auto" onclick="if(event.target === this) closeDiffModal()">
+        <div class="bg-gray-800 w-full max-w-4xl rounded-lg shadow-xl border border-purple-900 flex flex-col my-auto" style="max-height: calc(100vh - 2rem);" onclick="event.stopPropagation()">
             <div class="flex justify-between items-center p-4 border-b border-purple-800 flex-shrink-0">
                 <h3 class="text-xl font-semibold">Startup Service Changes</h3>
                 <button onclick="closeDiffModal()" class="text-gray-400 hover:text-white text-2xl font-bold leading-none">&times;</button>
             </div>
-            <div class="p-4 overflow-y-auto flex-1 min-h-0">
+            <div class="p-4 overflow-y-auto flex-1" style="min-height: 0;">
                 <div id="diff-content" class="space-y-6">
                     <!-- Populated by JS -->
                 </div>
