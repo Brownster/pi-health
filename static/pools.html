@@ -108,7 +108,7 @@
 
     <!-- Configure Modal -->
     <div id="config-modal" class="hidden fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4" onclick="if(event.target === this) closeConfigModal()">
-        <div class="bg-gray-900 w-full max-w-2xl rounded-lg shadow-xl border border-purple-900 flex flex-col max-h-[90vh]" onclick="event.stopPropagation()">
+        <div class="bg-gray-900 w-full max-w-2xl rounded-lg shadow-xl border border-purple-900 flex flex-col max-h-[90vh] overflow-hidden" onclick="event.stopPropagation()">
             <div class="flex justify-between items-center p-4 border-b border-purple-800 flex-shrink-0">
                 <h3 id="config-modal-title" class="text-xl font-semibold">Configure Plugin</h3>
                 <button onclick="closeConfigModal()" class="text-gray-400 hover:text-white text-2xl font-bold leading-none">&times;</button>
