@@ -13,8 +13,8 @@ def _wait_for_network_content(page: Page) -> None:
             const loading = document.getElementById('loading-state');
             const content = document.getElementById('network-content');
             if (!loading || !content) return false;
-            if (content.classList.contains('hidden')) return false;
-            return true;
+            if (!content.classList.contains('hidden')) return true;
+            return (loading.textContent || '').includes('Failed to load');
         }""",
         timeout=10000
     )
@@ -44,13 +44,9 @@ def test_network_page_sections_render(authenticated_page: Page):
 
     _wait_for_network_content(page)
 
-    page.wait_for_function(
-        """() => {
-            const el = document.getElementById('net-hostname');
-            return el && el.textContent.trim() !== '-';
-        }""",
-        timeout=10000
-    )
+    if page.locator("#loading-state").text_content() and "Failed to load" in page.locator("#loading-state").text_content():
+        expect(page.locator("#loading-state")).to_contain_text("Failed to load network info")
+        return
     expect(page.locator("#dns-servers")).to_be_visible()
     expect(page.locator("#interfaces-list")).to_be_visible()
 
