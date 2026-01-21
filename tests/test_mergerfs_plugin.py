@@ -23,6 +23,26 @@ def temp_config_dir():
 def mergerfs_plugin(temp_config_dir):
     return MergerFSPlugin(temp_config_dir)
 
+@pytest.fixture(autouse=True)
+def mock_mnt_paths(monkeypatch):
+    real_exists = os.path.exists
+    real_isdir = os.path.isdir
+
+    def fake_exists(path):
+        path_str = os.fspath(path)
+        if path_str.startswith("/mnt/"):
+            return True
+        return real_exists(path)
+
+    def fake_isdir(path):
+        path_str = os.fspath(path)
+        if path_str.startswith("/mnt/"):
+            return True
+        return real_isdir(path)
+
+    monkeypatch.setattr(os.path, "exists", fake_exists)
+    monkeypatch.setattr(os.path, "isdir", fake_isdir)
+
 
 @pytest.fixture
 def valid_config():
@@ -107,6 +127,32 @@ class TestMergerFSValidation:
         }
         errors = mergerfs_plugin.validate_config(config)
         assert any("policy" in e.lower() for e in errors)
+
+    def test_invalid_min_free_space_fails(self, mergerfs_plugin):
+        config = {
+            "pools": [
+                {"id": "p1", "name": "storage", "branches": ["/mnt/d1", "/mnt/d2"],
+                 "mount_point": "/mnt/storage", "min_free_space": "4Z"}
+            ]
+        }
+        errors = mergerfs_plugin.validate_config(config)
+        assert any("min_free_space" in e for e in errors)
+
+    def test_branch_must_exist_fails(self, mergerfs_plugin, monkeypatch):
+        def fake_exists(path):
+            if path == "/mnt/missing":
+                return False
+            return path.startswith("/mnt/")
+
+        monkeypatch.setattr(os.path, "exists", fake_exists)
+        config = {
+            "pools": [
+                {"id": "p1", "name": "storage", "branches": ["/mnt/missing", "/mnt/d2"],
+                 "mount_point": "/mnt/storage"}
+            ]
+        }
+        errors = mergerfs_plugin.validate_config(config)
+        assert any("not found" in e.lower() for e in errors)
 
 
 class TestMergerFSFstabGeneration:

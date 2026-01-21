@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 from typing import Generator
 
@@ -106,6 +107,7 @@ class MergerFSPlugin(StoragePlugin):
         names = []
         mount_points = []
         all_branches = []
+        size_pattern = re.compile(r"^\d+([KMGTP]i?B?|B)?$", re.IGNORECASE)
 
         for pool in pools:
             name = pool.get("name", "")
@@ -123,13 +125,32 @@ class MergerFSPlugin(StoragePlugin):
                 errors.append(f"Duplicate mount point: {mount_point}")
             mount_points.append(mount_point)
 
+            seen_branches = set()
             for branch in branches:
+                if not branch:
+                    errors.append(f"Pool '{name}' has empty branch path")
+                    continue
+                if ".." in branch:
+                    errors.append(f"Invalid branch path: {branch}")
+                if not branch.startswith("/mnt/"):
+                    errors.append(f"Branch must be under /mnt/: {branch}")
+                if branch in seen_branches:
+                    errors.append(f"Duplicate branch in pool '{name}': {branch}")
+                seen_branches.add(branch)
                 if branch in all_branches:
                     errors.append(f"Branch used in multiple pools: {branch}")
                 all_branches.append(branch)
+                if branch.startswith("/mnt/") and not os.path.exists(branch):
+                    errors.append(f"Branch path not found: {branch}")
+                if branch.startswith("/mnt/") and os.path.exists(branch) and not os.path.isdir(branch):
+                    errors.append(f"Branch path is not a directory: {branch}")
 
-            if not mount_point.startswith("/mnt/"):
+            if not mount_point.startswith("/mnt/") or ".." in mount_point:
                 errors.append(f"Mount point must be under /mnt/: {mount_point}")
+            if mount_point in branches:
+                errors.append(f"Mount point cannot be a branch: {mount_point}")
+            if mount_point.startswith("/mnt/") and os.path.exists(mount_point) and not os.path.isdir(mount_point):
+                errors.append(f"Mount point is not a directory: {mount_point}")
 
             policy = pool.get("create_policy", "epmfs")
             if policy not in POLICIES:
@@ -138,6 +159,10 @@ class MergerFSPlugin(StoragePlugin):
             preset = pool.get("preset", "linux_6_5_no_mmap")
             if preset not in PRESET_OPTIONS:
                 errors.append(f"Invalid preset: {preset}")
+
+            min_free = pool.get("min_free_space", "4G")
+            if min_free and not size_pattern.match(str(min_free)):
+                errors.append(f"Invalid min_free_space: {min_free}")
 
         return errors
 
