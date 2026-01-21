@@ -1,0 +1,42 @@
+id: unmanic
+name: Unmanic
+description: Automated media library transcoding
+requires: []
+disabled_by_default: false
+fields:
+  - key: TZ
+    label: Timezone
+    default: "Europe/London"
+  - key: PUID
+    label: User ID (PUID)
+    default: "1000"
+  - key: PGID
+    label: Group ID (PGID)
+    default: "1000"
+  - key: CONFIG_DIR
+    label: Config root directory
+    default: "/home/pi/docker"
+  - key: LIBRARY_DIR
+    label: Library path
+    default: "/mnt/storage"
+  - key: CACHE_DIR
+    label: Encode cache path
+    default: "/mnt/cache"
+  - key: PORT
+    label: Web UI port
+    default: "8888"
+service:
+  image: josh5/unmanic:latest
+  container_name: unmanic
+  network_mode: bridge
+  environment:
+    - TZ={{TZ}}
+    - PUID={{PUID}}
+    - PGID={{PGID}}
+  volumes:
+    - "{{CONFIG_DIR}}/unmanic:/config"
+    - "{{LIBRARY_DIR}}:/library"
+    - "{{CACHE_DIR}}:/tmp/unmanic"
+  ports:
+    - "{{PORT}}:8888"
+  restart: unless-stopped
