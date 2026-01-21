@@ -342,25 +342,31 @@
                 `;
             } else if (pluginId === 'mergerfs') {
                 // MergerFS specific status
+                const pools = status?.details?.pools || [];
+                const poolCards = pools.map(pool => {
+                    const mounted = pool.mounted ? 'Mounted' : 'Not mounted';
+                    const usage = pool.used_percent !== undefined ? `${pool.used_percent}%` : 'n/a';
+                    return `
+                        <div class="bg-gray-950 border border-purple-900/40 rounded p-3">
+                            <div class="flex items-center justify-between text-sm">
+                                <span class="text-gray-300 font-medium">${escapeHtml(pool.name || 'Unnamed')}</span>
+                                <span class="${pool.mounted ? 'text-green-400' : 'text-yellow-400'}">${mounted}</span>
+                            </div>
+                            <div class="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs text-gray-400">
+                                <div>Mount: <span class="text-gray-200">${escapeHtml(pool.mount_point || 'n/a')}</span></div>
+                                <div>Branches: <span class="text-gray-200">${pool.branches ?? 'n/a'}</span></div>
+                                <div>Used: <span class="text-gray-200">${usage}</span></div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+
                 return `
-                    <div class="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
-                        <div>
-                            <span class="text-gray-400">Status:</span>
-                            <span class="ml-2 ${status.status === 'healthy' ? 'text-green-400' : 'text-yellow-400'}">${status.status || 'Unknown'}</span>
-                        </div>
-                        ${status.mount_point ? `
-                        <div>
-                            <span class="text-gray-400">Mount Point:</span>
-                            <span class="ml-2">${escapeHtml(status.mount_point)}</span>
-                        </div>
-                        ` : ''}
-                        ${status.branches !== undefined ? `
-                        <div>
-                            <span class="text-gray-400">Branches:</span>
-                            <span class="ml-2">${status.branches}</span>
-                        </div>
-                        ` : ''}
+                    <div class="text-sm mb-3">
+                        <span class="text-gray-400">Status:</span>
+                        <span class="ml-2 ${status.status === 'healthy' ? 'text-green-400' : 'text-yellow-400'}">${status.status || 'Unknown'}</span>
                     </div>
+                    ${poolCards ? `<div class="space-y-3">${poolCards}</div>` : '<p class="text-sm text-gray-500">No pools configured</p>'}
                     ${status.message ? `<p class="mt-2 text-sm text-gray-400">${escapeHtml(status.message)}</p>` : ''}
                 `;
             }
