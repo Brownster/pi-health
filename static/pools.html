@@ -358,6 +358,8 @@
         }
 
         // ========== Configuration ==========
+        let mergerfsPolicies = [];
+
         async function openConfigModal(pluginId) {
             currentPlugin = pluginId;
 
@@ -376,6 +378,10 @@
         }
 
         function renderConfigForm(schema, values) {
+            if (currentPlugin === 'mergerfs') {
+                renderMergerFSConfigForm(schema, values);
+                return;
+            }
             const form = document.getElementById('config-modal-form');
             const properties = schema.properties || {};
 
@@ -440,6 +446,153 @@
             form.innerHTML = html || '<p class="text-gray-400">No configuration options</p>';
         }
 
+        function renderMergerFSConfigForm(schema, values) {
+            const form = document.getElementById('config-modal-form');
+            const poolSchema = schema?.properties?.pools?.items?.properties || {};
+            mergerfsPolicies = poolSchema?.create_policy?.enum || [
+                'epmfs', 'eplfs', 'eplus', 'mfs', 'lfs', 'lus', 'rand', 'pfrd', 'ff'
+            ];
+
+            const pools = Array.isArray(values.pools) ? values.pools : [];
+            const poolCards = pools.map((pool, idx) => renderMergerFSPoolCard(pool, idx)).join('');
+
+            form.innerHTML = `
+                <div class="space-y-4">
+                    <div class="flex items-center justify-between">
+                        <div class="text-sm text-gray-400">
+                            Configure MergerFS pools. Branches and mount points should be under /mnt/.
+                        </div>
+                        <button type="button" onclick="addMergerFSPool()" class="text-sm text-purple-400 hover:text-purple-300">+ Add Pool</button>
+                    </div>
+                    <div id="mergerfs-pools" class="space-y-4">
+                        ${poolCards || '<p class="text-gray-500">No pools configured</p>'}
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderMergerFSPoolCard(pool, idx) {
+            const name = pool?.name || '';
+            const mountPoint = pool?.mount_point || '';
+            const createPolicy = pool?.create_policy || 'epmfs';
+            const minFree = pool?.min_free_space || '4G';
+            const options = pool?.options || '';
+            const enabled = pool?.enabled !== false;
+            const poolId = pool?.id || '';
+            const branches = Array.isArray(pool?.branches) ? pool.branches : [];
+
+            const branchRows = branches.map(branch => `
+                <div class="flex gap-2 mergerfs-branch-row">
+                    <input type="text" name="branches[]" value="${escapeHtml(String(branch))}"
+                           class="flex-1 bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm">
+                    <button type="button" onclick="removeMergerFSBranch(this)" class="px-2 text-red-400 hover:text-red-300">&times;</button>
+                </div>
+            `).join('');
+
+            const policyOptions = mergerfsPolicies.map(opt => `
+                <option value="${opt}" ${opt === createPolicy ? 'selected' : ''}>${opt}</option>
+            `).join('');
+
+            return `
+                <div class="bg-gray-900 border border-purple-900/40 rounded p-4 mergerfs-pool">
+                    <div class="flex items-center justify-between mb-3">
+                        <h4 class="text-sm font-semibold text-gray-200">Pool ${idx + 1}</h4>
+                        <button type="button" onclick="removeMergerFSPool(this)" class="text-xs text-red-300 hover:text-red-200">Remove</button>
+                    </div>
+                    <input type="hidden" name="pool_id" value="${escapeHtml(String(poolId))}">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                        <div>
+                            <label class="block text-sm text-gray-300 mb-1">Pool name</label>
+                            <input type="text" name="pool_name" value="${escapeHtml(String(name))}"
+                                   class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm">
+                        </div>
+                        <div>
+                            <label class="block text-sm text-gray-300 mb-1">Mount point</label>
+                            <input type="text" name="mount_point" value="${escapeHtml(String(mountPoint))}"
+                                   class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm" placeholder="/mnt/storage">
+                        </div>
+                        <div>
+                            <label class="block text-sm text-gray-300 mb-1">Create policy</label>
+                            <select name="create_policy" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm">
+                                ${policyOptions}
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm text-gray-300 mb-1">Min free space</label>
+                            <input type="text" name="min_free_space" value="${escapeHtml(String(minFree))}"
+                                   class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm" placeholder="4G">
+                        </div>
+                        <div class="md:col-span-2">
+                            <label class="block text-sm text-gray-300 mb-1">Options</label>
+                            <input type="text" name="options" value="${escapeHtml(String(options))}"
+                                   class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm">
+                        </div>
+                    </div>
+                    <div class="mb-4">
+                        <label class="block text-sm text-gray-300 mb-1">Branches</label>
+                        <div class="space-y-2 mergerfs-branches">
+                            ${branchRows || `
+                                <div class="flex gap-2 mergerfs-branch-row">
+                                    <input type="text" name="branches[]" value=""
+                                           class="flex-1 bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm">
+                                    <button type="button" onclick="removeMergerFSBranch(this)" class="px-2 text-red-400 hover:text-red-300">&times;</button>
+                                </div>
+                            `}
+                        </div>
+                        <button type="button" onclick="addMergerFSBranch(this)" class="mt-2 text-sm text-purple-400 hover:text-purple-300">+ Add Branch</button>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <input type="checkbox" name="enabled" ${enabled ? 'checked' : ''} class="w-4 h-4 rounded">
+                        <label class="text-sm text-gray-300">Enabled</label>
+                    </div>
+                </div>
+            `;
+        }
+
+        function addMergerFSPool() {
+            const container = document.getElementById('mergerfs-pools');
+            if (!container) return;
+            const idx = container.querySelectorAll('.mergerfs-pool').length + 1;
+            const pool = {
+                id: `pool-${Date.now()}-${idx}`,
+                name: `pool${idx}`,
+                branches: [],
+                mount_point: `/mnt/pool${idx}`,
+                create_policy: 'epmfs',
+                min_free_space: '4G',
+                options: '',
+                enabled: true
+            };
+            const wrapper = document.createElement('div');
+            wrapper.innerHTML = renderMergerFSPoolCard(pool, idx);
+            container.appendChild(wrapper.firstElementChild);
+        }
+
+        function removeMergerFSPool(button) {
+            const poolCard = button.closest('.mergerfs-pool');
+            if (poolCard) poolCard.remove();
+        }
+
+        function addMergerFSBranch(button) {
+            const poolCard = button.closest('.mergerfs-pool');
+            if (!poolCard) return;
+            const container = poolCard.querySelector('.mergerfs-branches');
+            if (!container) return;
+            const row = document.createElement('div');
+            row.className = 'flex gap-2 mergerfs-branch-row';
+            row.innerHTML = `
+                <input type="text" name="branches[]" value=""
+                       class="flex-1 bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm">
+                <button type="button" onclick="removeMergerFSBranch(this)" class="px-2 text-red-400 hover:text-red-300">&times;</button>
+            `;
+            container.appendChild(row);
+        }
+
+        function removeMergerFSBranch(button) {
+            const row = button.closest('.mergerfs-branch-row');
+            if (row) row.remove();
+        }
+
         function addArrayItem(key) {
             const container = document.getElementById(`array-${key}`);
             const idx = container.children.length;
@@ -467,6 +620,9 @@
         }
 
         function getFormData() {
+            if (currentPlugin === 'mergerfs') {
+                return getMergerFSFormData();
+            }
             const form = document.getElementById('config-modal-form');
             const formData = {};
             const properties = currentPluginSchema?.properties || {};
@@ -490,6 +646,37 @@
             return formData;
         }
 
+        function getMergerFSFormData() {
+            const form = document.getElementById('config-modal-form');
+            const pools = [];
+            const poolCards = form.querySelectorAll('.mergerfs-pool');
+
+            poolCards.forEach(card => {
+                const poolId = card.querySelector('input[name="pool_id"]')?.value || '';
+                const name = card.querySelector('input[name="pool_name"]')?.value.trim() || '';
+                const mountPoint = card.querySelector('input[name="mount_point"]')?.value.trim() || '';
+                const createPolicy = card.querySelector('select[name="create_policy"]')?.value || 'epmfs';
+                const minFree = card.querySelector('input[name="min_free_space"]')?.value.trim() || '4G';
+                const options = card.querySelector('input[name="options"]')?.value.trim() || '';
+                const enabled = card.querySelector('input[name="enabled"]')?.checked || false;
+                const branches = Array.from(card.querySelectorAll('input[name="branches[]"]'))
+                    .map(input => input.value.trim())
+                    .filter(value => value);
+
+                pools.push({
+                    id: poolId || `pool-${Date.now()}-${pools.length + 1}`,
+                    name,
+                    branches,
+                    mount_point: mountPoint,
+                    create_policy: createPolicy,
+                    min_free_space: minFree,
+                    options,
+                    enabled
+                });
+            });
+
+            return { pools };
+        }
         async function saveConfig() {
             const formData = getFormData();
 
