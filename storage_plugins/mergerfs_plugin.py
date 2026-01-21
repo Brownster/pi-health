@@ -25,6 +25,27 @@ POLICIES = {
     "ff": "First found - Write to first drive with enough space"
 }
 
+PRESET_OPTIONS = {
+    "linux_6_6_plus": {
+        "cache.files": "off",
+        "category.create": "pfrd",
+        "func.getattr": "newest",
+        "dropcacheonclose": "false"
+    },
+    "linux_6_5_mmap": {
+        "cache.files": "auto-full",
+        "category.create": "pfrd",
+        "func.getattr": "newest",
+        "dropcacheonclose": "true"
+    },
+    "linux_6_5_no_mmap": {
+        "cache.files": "off",
+        "category.create": "pfrd",
+        "func.getattr": "newest",
+        "dropcacheonclose": "false"
+    }
+}
+
 
 class MergerFSPlugin(StoragePlugin):
     """MergerFS pool management plugin."""
@@ -114,6 +135,10 @@ class MergerFSPlugin(StoragePlugin):
             if policy not in POLICIES:
                 errors.append(f"Invalid create policy: {policy}")
 
+            preset = pool.get("preset", "linux_6_5_no_mmap")
+            if preset not in PRESET_OPTIONS:
+                errors.append(f"Invalid preset: {preset}")
+
         return errors
 
     def apply_config(self) -> CommandResult:
@@ -159,31 +184,7 @@ class MergerFSPlugin(StoragePlugin):
     def _generate_fstab_entry(self, pool: dict) -> str:
         branches = ":".join(pool["branches"])
         mount_point = pool["mount_point"]
-        policy = pool.get("create_policy", "epmfs")
-        min_free = pool.get("min_free_space", "4G")
-        options = pool.get("options", "")
-
-        opts = [
-            "defaults",
-            "allow_other",
-            "use_ino",
-            f"category.create={policy}",
-            f"minfreespace={min_free}",
-            "cache.files=off",
-            "dropcacheonclose=true",
-            "fsname=mergerfs"
-        ]
-
-        if options:
-            for opt in options.split(","):
-                opt = opt.strip()
-                if not opt:
-                    continue
-                key = opt.split("=")[0]
-                if not any(key == existing.split("=")[0] for existing in opts):
-                    opts.append(opt)
-
-        opts_str = ",".join(opts)
+        opts_str = self._build_options(pool)
         return f"{branches} {mount_point} fuse.mergerfs {opts_str} 0 0"
 
     def _build_fstab_lines(self, pools: list[dict]) -> list[str]:
@@ -228,6 +229,51 @@ class MergerFSPlugin(StoragePlugin):
         content = "\n".join(updated).rstrip("\n") + "\n"
         with open(path, "w") as handle:
             handle.write(content)
+
+    def _build_options(self, pool: dict) -> str:
+        flags: list[str] = []
+        keyvals: dict[str, str] = {}
+
+        def add_flag(flag: str) -> None:
+            if flag and flag not in flags:
+                flags.append(flag)
+
+        def set_kv(key: str, value: str) -> None:
+            if not key:
+                return
+            if key not in keyvals:
+                keyvals[key] = value
+            else:
+                keyvals[key] = value
+
+        add_flag("defaults")
+        add_flag("allow_other")
+        add_flag("use_ino")
+        set_kv("fsname", "mergerfs")
+
+        preset = pool.get("preset", "linux_6_5_no_mmap")
+        preset_opts = PRESET_OPTIONS.get(preset, PRESET_OPTIONS["linux_6_5_no_mmap"])
+        for key, value in preset_opts.items():
+            set_kv(key, value)
+
+        policy = pool.get("create_policy", "epmfs")
+        min_free = pool.get("min_free_space", "4G")
+        set_kv("category.create", policy)
+        set_kv("minfreespace", min_free)
+
+        options = pool.get("options", "")
+        if options:
+            for opt in options.split(","):
+                opt = opt.strip()
+                if not opt:
+                    continue
+                if "=" in opt:
+                    key, value = opt.split("=", 1)
+                    set_kv(key.strip(), value.strip())
+                else:
+                    add_flag(opt)
+
+        return ",".join(flags + [f"{key}={value}" for key, value in keyvals.items()])
 
     def get_status(self) -> dict:
         config = self.get_config()
@@ -395,9 +441,7 @@ class MergerFSPlugin(StoragePlugin):
             return
 
         branches = ":".join(pool["branches"])
-        policy = pool.get("create_policy", "epmfs")
-        min_free = pool.get("min_free_space", "4G")
-        opts = f"category.create={policy},minfreespace={min_free},allow_other,use_ino"
+        opts = self._build_options(pool)
 
         yield f"Mounting {pool_name}..."
         yield f"  Source: {branches}"

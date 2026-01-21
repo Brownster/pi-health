@@ -44,6 +44,16 @@
             "default": "epmfs",
             "description": "Policy for creating new files"
           },
+          "preset": {
+            "type": "string",
+            "enum": [
+              "linux_6_6_plus",
+              "linux_6_5_mmap",
+              "linux_6_5_no_mmap"
+            ],
+            "default": "linux_6_5_no_mmap",
+            "description": "MergerFS options preset based on kernel and mmap needs"
+          },
           "min_free_space": {
             "type": "string",
             "default": "4G",
@@ -51,8 +61,8 @@
           },
           "options": {
             "type": "string",
-            "default": "defaults,allow_other,cache.files=off,category.create=epmfs",
-            "description": "Additional mount options"
+            "default": "",
+            "description": "Additional mount options (comma-separated, overrides defaults)"
           },
           "enabled": {
             "type": "boolean",

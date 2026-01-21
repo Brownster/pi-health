@@ -137,6 +137,34 @@ class TestMergerFSFstabGeneration:
 
         assert "category.create=lfs" in entry
 
+    def test_preset_defaults_applied(self, mergerfs_plugin):
+        pool = {
+            "name": "test",
+            "branches": ["/mnt/d1", "/mnt/d2"],
+            "mount_point": "/mnt/test",
+            "preset": "linux_6_6_plus",
+            "create_policy": "epmfs",
+            "min_free_space": "1G"
+        }
+        entry = mergerfs_plugin._generate_fstab_entry(pool)
+
+        assert "func.getattr=newest" in entry
+        assert "dropcacheonclose=false" in entry
+
+    def test_options_override_defaults(self, mergerfs_plugin):
+        pool = {
+            "name": "test",
+            "branches": ["/mnt/d1", "/mnt/d2"],
+            "mount_point": "/mnt/test",
+            "create_policy": "epmfs",
+            "min_free_space": "1G",
+            "options": "category.create=lus,cache.files=auto-full"
+        }
+        entry = mergerfs_plugin._generate_fstab_entry(pool)
+
+        assert "category.create=lus" in entry
+        assert "cache.files=auto-full" in entry
+
 
 class TestMergerFSStatus:
     def test_unconfigured_status(self, mergerfs_plugin):

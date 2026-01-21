@@ -407,6 +407,7 @@
 
         // ========== Configuration ==========
         let mergerfsPolicies = [];
+        let mergerfsPresets = [];
 
         async function openConfigModal(pluginId) {
             currentPlugin = pluginId;
@@ -500,6 +501,9 @@
             mergerfsPolicies = poolSchema?.create_policy?.enum || [
                 'epmfs', 'eplfs', 'eplus', 'mfs', 'lfs', 'lus', 'rand', 'pfrd', 'ff'
             ];
+            mergerfsPresets = poolSchema?.preset?.enum || [
+                'linux_6_6_plus', 'linux_6_5_mmap', 'linux_6_5_no_mmap'
+            ];
 
             const pools = Array.isArray(values.pools) ? values.pools : [];
             const poolCards = pools.map((pool, idx) => renderMergerFSPoolCard(pool, idx)).join('');
@@ -520,9 +524,15 @@
         }
 
         function renderMergerFSPoolCard(pool, idx) {
+            const presetLabels = {
+                linux_6_6_plus: 'Linux 6.6+ (no mmap)',
+                linux_6_5_mmap: 'Linux 6.5 or below (mmap)',
+                linux_6_5_no_mmap: 'Linux 6.5 or below (no mmap)'
+            };
             const name = pool?.name || '';
             const mountPoint = pool?.mount_point || '';
             const createPolicy = pool?.create_policy || 'epmfs';
+            const preset = pool?.preset || 'linux_6_5_no_mmap';
             const minFree = pool?.min_free_space || '4G';
             const options = pool?.options || '';
             const enabled = pool?.enabled !== false;
@@ -539,6 +549,9 @@
 
             const policyOptions = mergerfsPolicies.map(opt => `
                 <option value="${opt}" ${opt === createPolicy ? 'selected' : ''}>${opt}</option>
+            `).join('');
+            const presetOptions = mergerfsPresets.map(opt => `
+                <option value="${opt}" ${opt === preset ? 'selected' : ''}>${presetLabels[opt] || opt}</option>
             `).join('');
 
             return `
@@ -566,12 +579,18 @@
                             </select>
                         </div>
                         <div>
+                            <label class="block text-sm text-gray-300 mb-1">Preset</label>
+                            <select name="preset" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm">
+                                ${presetOptions}
+                            </select>
+                        </div>
+                        <div>
                             <label class="block text-sm text-gray-300 mb-1">Min free space</label>
                             <input type="text" name="min_free_space" value="${escapeHtml(String(minFree))}"
                                    class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm" placeholder="4G">
                         </div>
                         <div class="md:col-span-2">
-                            <label class="block text-sm text-gray-300 mb-1">Options</label>
+                            <label class="block text-sm text-gray-300 mb-1">Options (override)</label>
                             <input type="text" name="options" value="${escapeHtml(String(options))}"
                                    class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm">
                         </div>
@@ -607,6 +626,7 @@
                 branches: [],
                 mount_point: `/mnt/pool${idx}`,
                 create_policy: 'epmfs',
+                preset: 'linux_6_5_no_mmap',
                 min_free_space: '4G',
                 options: '',
                 enabled: true
@@ -704,6 +724,7 @@
                 const name = card.querySelector('input[name="pool_name"]')?.value.trim() || '';
                 const mountPoint = card.querySelector('input[name="mount_point"]')?.value.trim() || '';
                 const createPolicy = card.querySelector('select[name="create_policy"]')?.value || 'epmfs';
+                const preset = card.querySelector('select[name="preset"]')?.value || 'linux_6_5_no_mmap';
                 const minFree = card.querySelector('input[name="min_free_space"]')?.value.trim() || '4G';
                 const options = card.querySelector('input[name="options"]')?.value.trim() || '';
                 const enabled = card.querySelector('input[name="enabled"]')?.checked || false;
@@ -717,6 +738,7 @@
                     branches,
                     mount_point: mountPoint,
                     create_policy: createPolicy,
+                    preset,
                     min_free_space: minFree,
                     options,
                     enabled
