@@ -80,9 +80,18 @@
     <div id="notification-area" class="fixed top-4 right-4 z-50 w-80 flex flex-col items-end"></div>
 
     <main class="container mx-auto p-6">
-        <div class="mb-6">
-            <h2 class="text-2xl font-semibold">Storage Pools</h2>
-            <p class="text-sm text-gray-400 mt-1">Manage storage pool plugins (SnapRAID, MergerFS, etc.).</p>
+        <div class="mb-6 flex flex-wrap items-start justify-between gap-4">
+            <div>
+                <h2 class="text-2xl font-semibold">Storage Pools</h2>
+                <p class="text-sm text-gray-400 mt-1">Manage storage pool plugins (SnapRAID, MergerFS, etc.).</p>
+            </div>
+            <div id="pool-filter-wrap" class="hidden">
+                <label class="block text-xs text-gray-400 mb-1">Plugin</label>
+                <select id="pool-filter" onchange="setPoolFilter(this.value)"
+                        class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-white">
+                    <option value="all">All</option>
+                </select>
+            </div>
         </div>
 
         <div id="pool-plugins">
@@ -128,6 +137,7 @@
 
     <script>
         let poolPlugins = [];
+        let currentPoolFilter = "all";
         let currentPlugin = null;
         let currentPluginSchema = null;
 
@@ -165,6 +175,9 @@
                 p.category === 'storage' && p.enabled
             );
 
+            if (poolPlugins.length && (currentPoolFilter === "all" || !poolPlugins.find(p => p.id === currentPoolFilter))) {
+                currentPoolFilter = poolPlugins[0].id;
+            }
             await renderPoolPluginSections();
         }
 
@@ -178,6 +191,7 @@
                         <a href="/plugins.html" class="text-purple-400 hover:underline">Enable plugins &rarr;</a>
                     </div>
                 `;
+                updatePoolFilterVisibility(false);
                 return;
             }
 
@@ -197,7 +211,7 @@
                                    details.status?.status === 'error' ? 'status-error' : 'status-unconfigured';
 
                 html += `
-                    <section class="bg-gray-800 border border-purple-900/40 rounded-lg p-5 mb-6">
+                    <section class="pool-plugin-section bg-gray-800 border border-purple-900/40 rounded-lg p-5 mb-6" data-plugin-id="${plugin.id}">
                         <div class="flex items-center justify-between mb-4">
                             <div>
                                 <h3 class="text-lg font-semibold">${escapeHtml(plugin.name)}</h3>
@@ -236,6 +250,40 @@
             }
 
             container.innerHTML = html;
+            renderPoolFilterOptions();
+            applyPoolFilter();
+        }
+
+        function renderPoolFilterOptions() {
+            const select = document.getElementById('pool-filter');
+            if (!select) return;
+            const options = [
+                '<option value="all">All</option>',
+                ...poolPlugins.map(plugin => `<option value="${plugin.id}">${escapeHtml(plugin.name)}</option>`)
+            ];
+            select.innerHTML = options.join('');
+            select.value = currentPoolFilter;
+            updatePoolFilterVisibility(poolPlugins.length > 1);
+        }
+
+        function updatePoolFilterVisibility(show) {
+            const wrap = document.getElementById('pool-filter-wrap');
+            if (!wrap) return;
+            wrap.classList.toggle('hidden', !show);
+        }
+
+        function setPoolFilter(filterValue) {
+            currentPoolFilter = filterValue || 'all';
+            applyPoolFilter();
+        }
+
+        function applyPoolFilter() {
+            const sections = document.querySelectorAll('.pool-plugin-section');
+            sections.forEach(section => {
+                const pluginId = section.getAttribute('data-plugin-id');
+                const visible = currentPoolFilter === 'all' || currentPoolFilter === pluginId;
+                section.classList.toggle('hidden', !visible);
+            });
         }
 
         function renderPluginStatus(pluginId, status) {
