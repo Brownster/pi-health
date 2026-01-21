@@ -1,0 +1,17 @@
+id: asterisk
+name: Asterisk
+description: Asterisk PBX (SIP server)
+requires: []
+disabled_by_default: false
+fields:
+  - key: SIP_PORT
+    label: SIP port (UDP/TCP)
+    default: "5060"
+service:
+  image: andrius/asterisk:latest
+  container_name: asterisk
+  network_mode: bridge
+  ports:
+    - "{{SIP_PORT}}:5060/udp"
+    - "{{SIP_PORT}}:5060/tcp"
+  restart: unless-stopped
