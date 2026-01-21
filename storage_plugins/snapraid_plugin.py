@@ -14,7 +14,12 @@ from typing import Generator, Optional
 
 from storage_plugins.base import StoragePlugin, CommandResult, PluginStatus
 from helper_client import helper_call, helper_available, HelperError
-from storage_plugins.snapraid_logtags import parse_log_tags
+from storage_plugins.snapraid_logtags import (
+    parse_log_tags,
+    parse_log_tag_line,
+    apply_tag_event,
+    LogTagParseResult,
+)
 
 
 class SnapRAIDPlugin(StoragePlugin):
@@ -48,6 +53,7 @@ class SnapRAIDPlugin(StoragePlugin):
     def __init__(self, config_dir: str):
         super().__init__(config_dir)
         self._schema = None
+        self._state_path = os.path.join(config_dir, "snapraid_state.json")
 
     def get_schema(self) -> dict:
         if self._schema is None:
@@ -421,6 +427,11 @@ class SnapRAIDPlugin(StoragePlugin):
             "last_scrub": None,
             "sync_in_progress": False
         }
+        state = self._load_state()
+        if state:
+            details["last_summary"] = state.get("last_summary")
+            details["last_command"] = state.get("last_command")
+            details["last_run_at"] = state.get("last_run_at")
 
         if not os.path.exists(self.SNAPRAID_CONF):
             return {
@@ -518,6 +529,10 @@ class SnapRAIDPlugin(StoragePlugin):
         log_target = params.get("log_target")
         gui = params.get("gui", True)
         conf_path = params.get("conf_path")
+        stream_tags = params.get("stream_tags", False)
+
+        if stream_tags and not log_target:
+            log_target = ">&1"
 
         cmd_map = {
             "status": ["status"],
@@ -545,6 +560,7 @@ class SnapRAIDPlugin(StoragePlugin):
                     error=diff_check
                 )
 
+        tag_result = LogTagParseResult()
         if helper_available():
             try:
                 helper_params = {'command': command_id}
@@ -566,7 +582,14 @@ class SnapRAIDPlugin(StoragePlugin):
                 tag_data = None
                 if log_tags:
                     tag_text = "\n".join([stderr, stdout])
-                    tag_data = parse_log_tags(tag_text).to_dict() if tag_text else None
+                    parsed = parse_log_tags(tag_text) if tag_text else None
+                    if parsed:
+                        tag_result = parsed
+                        tag_data = parsed.to_dict()
+                        if stream_tags:
+                            for event in tag_data.get("events", []):
+                                yield {"type": "tag", "name": event["name"], "values": event["values"]}
+                        self._persist_last_summary(command_id, tag_data)
                 if result.get('success'):
                     return CommandResult(success=True, message="Complete", data={"log_tags": tag_data})
                 return CommandResult(
@@ -607,8 +630,15 @@ class SnapRAIDPlugin(StoragePlugin):
 
             output_lines = []
             for line in iter(process.stdout.readline, ""):
-                output_lines.append(line.rstrip())
-                yield output_lines[-1]
+                clean_line = line.rstrip()
+                output_lines.append(clean_line)
+                if log_tags and stream_tags:
+                    event = parse_log_tag_line(clean_line)
+                    if event:
+                        apply_tag_event(tag_result, event)
+                        yield {"type": "tag", "name": event["name"], "values": event["values"]}
+                        continue
+                yield clean_line
 
             process.wait()
 
@@ -624,7 +654,10 @@ class SnapRAIDPlugin(StoragePlugin):
                     except Exception:
                         tag_text = ""
                 if tag_text:
-                    tag_data = parse_log_tags(tag_text).to_dict()
+                    parsed = parse_log_tags(tag_text)
+                    tag_result = parsed
+                    tag_data = parsed.to_dict()
+                    self._persist_last_summary(command_id, tag_data)
 
             if process.returncode == 0:
                 yield ""
@@ -656,6 +689,33 @@ class SnapRAIDPlugin(StoragePlugin):
                     os.remove(tmp_log_path)
                 except Exception:
                     pass
+
+    def _load_state(self) -> dict:
+        try:
+            if os.path.exists(self._state_path):
+                with open(self._state_path) as handle:
+                    return json.load(handle)
+        except Exception:
+            return {}
+        return {}
+
+    def _persist_last_summary(self, command_id: str, tag_data: dict | None) -> None:
+        if not tag_data:
+            return
+        summary = tag_data.get("summary")
+        if not summary:
+            return
+        state = self._load_state()
+        state.update({
+            "last_command": command_id,
+            "last_run_at": datetime.now().isoformat(),
+            "last_summary": summary,
+        })
+        try:
+            with open(self._state_path, "w") as handle:
+                json.dump(state, handle, indent=2)
+        except Exception:
+            pass
 
     def _check_diff_thresholds(self) -> Optional[str]:
         config = self.get_config()

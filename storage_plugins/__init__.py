@@ -233,6 +233,10 @@ def run_plugin_command(plugin_id: str, command_id: str):
                     break
                 if isinstance(line, str):
                     yield f"data: {json.dumps({'type': 'output', 'line': line})}\n\n"
+                elif isinstance(line, dict):
+                    payload = {"type": "tag"}
+                    payload.update(line)
+                    yield f"data: {json.dumps(payload)}\n\n"
                 else:
                     result = line
 
@@ -242,6 +246,8 @@ def run_plugin_command(plugin_id: str, command_id: str):
                     "success": result.success,
                     "message": result.message
                 }
+                if result.data:
+                    payload["data"] = result.data
                 yield f"data: {json.dumps(payload)}\n\n"
         except Exception as exc:
             yield f"data: {json.dumps({'type': 'error', 'error': str(exc)})}\n\n"
