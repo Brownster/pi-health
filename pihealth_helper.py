@@ -337,6 +337,69 @@ def cmd_fstab_remove(params):
         return {'success': False, 'error': str(e)}
 
 
+def cmd_fstab_set_section(params):
+    """Replace a managed section in fstab."""
+    marker = params.get('marker', '').strip()
+    lines = params.get('lines', [])
+    path = params.get('path', '/etc/fstab')
+
+    allowed_markers = {'mergerfs'}
+    if marker not in allowed_markers:
+        return {'success': False, 'error': 'Invalid marker'}
+
+    if path != '/etc/fstab' and not (path.startswith('/tmp/') or path.startswith('/var/tmp/')):
+        return {'success': False, 'error': 'Path not allowed'}
+
+    if not isinstance(lines, list):
+        return {'success': False, 'error': 'lines must be a list'}
+
+    start = f"# pi-health {marker} start"
+    end = f"# pi-health {marker} end"
+
+    try:
+        existing = []
+        if os.path.exists(path):
+            with open(path, 'r') as handle:
+                existing = handle.read().splitlines()
+
+        updated = []
+        in_section = False
+        for line in existing:
+            if line.strip() == start:
+                in_section = True
+                continue
+            if in_section:
+                if line.strip() == end:
+                    in_section = False
+                continue
+            updated.append(line.rstrip('\n'))
+
+        cleaned_lines = [line.rstrip('\n') for line in lines if str(line).strip()]
+        if cleaned_lines:
+            if updated and updated[-1].strip():
+                updated.append('')
+            updated.append(start)
+            updated.extend(cleaned_lines)
+            updated.append(end)
+            updated.append('')
+
+        if os.path.exists(path):
+            backup_path = f"{path}.backup.{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            shutil.copy(path, backup_path)
+            logger.info(f"Backed up fstab to {backup_path}")
+        else:
+            backup_path = None
+
+        content = "\n".join(updated).rstrip("\n") + "\n"
+        with open(path, 'w') as handle:
+            handle.write(content)
+
+        return {'success': True, 'backup': backup_path, 'path': path}
+    except Exception as e:
+        logger.error(f"Failed to update fstab section: {e}")
+        return {'success': False, 'error': str(e)}
+
+
 def cmd_mount(params):
     """Mount a filesystem."""
     mountpoint = params.get('mountpoint', '')
@@ -2284,6 +2347,7 @@ COMMANDS = {
     'fstab_read': cmd_fstab_read,
     'fstab_add': cmd_fstab_add,
     'fstab_remove': cmd_fstab_remove,
+    'fstab_set_section': cmd_fstab_set_section,
     'mounts_read': cmd_mounts_read,
     'mount': cmd_mount,
     'umount': cmd_umount,

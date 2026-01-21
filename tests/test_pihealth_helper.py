@@ -59,6 +59,41 @@ class TestCommandParsing:
         assert result["success"] is True
         assert result["data"][0]["mountpoint"] == "/mnt/storage"
 
+    def test_cmd_fstab_set_section_writes(self, tmp_path):
+        path = tmp_path / "fstab"
+        path.write_text("UUID=abc /mnt/data ext4 defaults 0 2\n")
+        result = helper.cmd_fstab_set_section({
+            "marker": "mergerfs",
+            "lines": [
+                "# mergerfs pool: storage",
+                "/mnt/a:/mnt/b /mnt/storage fuse.mergerfs defaults 0 0"
+            ],
+            "path": str(path)
+        })
+        assert result["success"] is True
+        content = path.read_text()
+        assert "# pi-health mergerfs start" in content
+        assert "fuse.mergerfs" in content
+
+    def test_cmd_fstab_set_section_removes(self, tmp_path):
+        path = tmp_path / "fstab"
+        path.write_text(
+            "UUID=abc /mnt/data ext4 defaults 0 2\n"
+            "# pi-health mergerfs start\n"
+            "# mergerfs pool: storage\n"
+            "/mnt/a:/mnt/b /mnt/storage fuse.mergerfs defaults 0 0\n"
+            "# pi-health mergerfs end\n"
+        )
+        result = helper.cmd_fstab_set_section({
+            "marker": "mergerfs",
+            "lines": [],
+            "path": str(path)
+        })
+        assert result["success"] is True
+        content = path.read_text()
+        assert "# pi-health mergerfs start" not in content
+        assert "fuse.mergerfs" not in content
+
     def test_cmd_mounts_read_parses(self):
         content = "/dev/sda1 /mnt/storage ext4 rw,relatime 0 0\n"
         with patch("builtins.open", mock_open(read_data=content)):

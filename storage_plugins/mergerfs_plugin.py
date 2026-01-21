@@ -128,16 +128,33 @@ class MergerFSPlugin(StoragePlugin):
 
         try:
             pools = config.get("pools", [])
-            for pool in pools:
-                if not pool.get("enabled", True):
-                    continue
-                self._generate_fstab_entry(pool)
-            return CommandResult(
-                success=True,
-                message=f"Configuration ready for {len(pools)} pool(s)"
-            )
+            enabled_pools = [pool for pool in pools if pool.get("enabled", True)]
+            lines = self._build_fstab_lines(enabled_pools)
+
+            if helper_available():
+                try:
+                    result = helper_call('fstab_set_section', {
+                        'marker': 'mergerfs',
+                        'lines': lines
+                    })
+                    if not result.get('success'):
+                        return CommandResult(success=False, message="", error=result.get('error', 'Helper failed'))
+                    return CommandResult(
+                        success=True,
+                        message=self._apply_message(enabled_pools)
+                    )
+                except HelperError as exc:
+                    return CommandResult(success=False, message="", error=str(exc))
+
+            self._write_fstab_section(lines)
+            return CommandResult(success=True, message=self._apply_message(enabled_pools))
         except Exception as exc:
             return CommandResult(success=False, message="", error=str(exc))
+
+    def _apply_message(self, enabled_pools: list[dict]) -> str:
+        if not enabled_pools:
+            return "MergerFS entries removed from fstab"
+        return f"MergerFS entries updated for {len(enabled_pools)} pool(s)"
 
     def _generate_fstab_entry(self, pool: dict) -> str:
         branches = ":".join(pool["branches"])
@@ -168,6 +185,49 @@ class MergerFSPlugin(StoragePlugin):
 
         opts_str = ",".join(opts)
         return f"{branches} {mount_point} fuse.mergerfs {opts_str} 0 0"
+
+    def _build_fstab_lines(self, pools: list[dict]) -> list[str]:
+        lines: list[str] = []
+        for pool in pools:
+            name = pool.get("name") or "unnamed"
+            lines.append(f"# mergerfs pool: {name}")
+            lines.append(self._generate_fstab_entry(pool))
+        return lines
+
+    def _write_fstab_section(self, lines: list[str]) -> None:
+        start = "# pi-health mergerfs start"
+        end = "# pi-health mergerfs end"
+        path = self.FSTAB_PATH
+
+        existing = []
+        if os.path.exists(path):
+            with open(path) as handle:
+                existing = handle.read().splitlines()
+
+        updated = []
+        in_section = False
+        for line in existing:
+            if line.strip() == start:
+                in_section = True
+                continue
+            if in_section:
+                if line.strip() == end:
+                    in_section = False
+                continue
+            updated.append(line.rstrip('\n'))
+
+        cleaned_lines = [line.rstrip('\n') for line in lines if str(line).strip()]
+        if cleaned_lines:
+            if updated and updated[-1].strip():
+                updated.append("")
+            updated.append(start)
+            updated.extend(cleaned_lines)
+            updated.append(end)
+            updated.append("")
+
+        content = "\n".join(updated).rstrip("\n") + "\n"
+        with open(path, "w") as handle:
+            handle.write(content)
 
     def get_status(self) -> dict:
         config = self.get_config()

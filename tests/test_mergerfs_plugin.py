@@ -164,3 +164,41 @@ class TestMergerFSCommands:
         mergerfs_plugin.set_config(valid_config)
         outputs = list(mergerfs_plugin.run_command("status"))
         assert any("Pool" in line for line in outputs)
+
+
+class TestMergerFSApplyConfig:
+    def test_apply_config_writes_fstab_section(self, mergerfs_plugin, valid_config, tmp_path, monkeypatch):
+        fstab_path = tmp_path / "fstab"
+        fstab_path.write_text("UUID=abc /mnt/data ext4 defaults 0 2\n")
+        monkeypatch.setattr(mergerfs_plugin, "FSTAB_PATH", str(fstab_path))
+        mergerfs_plugin.set_config(valid_config)
+
+        with patch("storage_plugins.mergerfs_plugin.helper_available", return_value=False):
+            result = mergerfs_plugin.apply_config()
+
+        assert result.success is True
+        content = fstab_path.read_text()
+        assert "# pi-health mergerfs start" in content
+        assert "fuse.mergerfs" in content
+
+    def test_apply_config_removes_section_when_disabled(self, mergerfs_plugin, valid_config, tmp_path, monkeypatch):
+        fstab_path = tmp_path / "fstab"
+        fstab_path.write_text(
+            "UUID=abc /mnt/data ext4 defaults 0 2\n"
+            "# pi-health mergerfs start\n"
+            "# mergerfs pool: storage\n"
+            "/mnt/a:/mnt/b /mnt/storage fuse.mergerfs defaults 0 0\n"
+            "# pi-health mergerfs end\n"
+        )
+        monkeypatch.setattr(mergerfs_plugin, "FSTAB_PATH", str(fstab_path))
+        disabled = dict(valid_config)
+        disabled["pools"] = [dict(valid_config["pools"][0], enabled=False)]
+        mergerfs_plugin.set_config(disabled)
+
+        with patch("storage_plugins.mergerfs_plugin.helper_available", return_value=False):
+            result = mergerfs_plugin.apply_config()
+
+        assert result.success is True
+        content = fstab_path.read_text()
+        assert "# pi-health mergerfs start" not in content
+        assert "fuse.mergerfs" not in content
