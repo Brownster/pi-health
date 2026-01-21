@@ -115,6 +115,24 @@
         </div>
     </div>
 
+    <!-- Command Params Modal -->
+    <div id="command-param-modal" class="hidden fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4" onclick="if(event.target === this) closeCommandParamModal()">
+        <div class="bg-gray-900 w-full max-w-md rounded-lg shadow-xl border border-purple-900 flex flex-col" onclick="event.stopPropagation()">
+            <div class="flex justify-between items-center p-4 border-b border-purple-800">
+                <h3 id="command-param-title" class="text-lg font-semibold">Select Pool</h3>
+                <button onclick="closeCommandParamModal()" class="text-gray-400 hover:text-white text-2xl font-bold leading-none">&times;</button>
+            </div>
+            <div class="p-4">
+                <label class="block text-sm text-gray-300 mb-2">Pool</label>
+                <select id="command-pool-select" class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white text-sm"></select>
+            </div>
+            <div class="p-4 border-t border-purple-800 flex justify-end gap-2">
+                <button onclick="closeCommandParamModal()" class="px-4 py-2 bg-gray-700 text-white rounded hover:bg-gray-600">Cancel</button>
+                <button onclick="confirmCommandParams()" class="px-4 py-2 coraline-button text-white rounded">Run</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Configure Modal -->
     <div id="config-modal" class="hidden fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4" onclick="if(event.target === this) closeConfigModal()">
         <div class="bg-gray-900 w-full max-w-2xl rounded-lg shadow-xl border border-purple-900 flex flex-col max-h-[90vh] overflow-hidden" onclick="event.stopPropagation()">
@@ -137,6 +155,8 @@
 
     <script>
         let poolPlugins = [];
+        let pluginDetailsMap = {};
+        let pendingCommand = null;
         let currentPoolFilter = "all";
         let currentPlugin = null;
         let currentPluginSchema = null;
@@ -196,12 +216,14 @@
             }
 
             let html = '';
+            pluginDetailsMap = {};
             for (const plugin of poolPlugins) {
                 // Fetch full plugin details
                 let details = { status: { status: 'unknown' }, commands: [] };
                 try {
                     const res = await apiFetch(`/api/storage/plugins/${plugin.id}`);
                     details = await res.json();
+                    pluginDetailsMap[plugin.id] = details;
                 } catch (e) {
                     console.error(`Failed to load ${plugin.id}:`, e);
                 }
@@ -234,7 +256,7 @@
                             <!-- Plugin commands -->
                             <div class="flex flex-wrap gap-2">
                                 ${(details.commands || []).map(cmd => `
-                                    <button onclick="runPluginCommand('${plugin.id}', '${cmd.id}', '${escapeHtml(cmd.name)}')"
+                                    <button onclick="runPluginCommand('${plugin.id}', '${cmd.id}', '${escapeHtml(cmd.name)}', ${JSON.stringify(cmd.params || [])})"
                                             class="coraline-button py-2 px-4 rounded text-sm">
                                         ${escapeHtml(cmd.name)}
                                     </button>
@@ -348,7 +370,15 @@
         }
 
         // ========== Command Execution ==========
-        async function runPluginCommand(pluginId, commandId, commandName) {
+        async function runPluginCommand(pluginId, commandId, commandName, params = []) {
+            if (params.includes('pool_name')) {
+                openCommandParamModal(pluginId, commandId, commandName);
+                return;
+            }
+            await executePluginCommand(pluginId, commandId, commandName, {});
+        }
+
+        async function executePluginCommand(pluginId, commandId, commandName, payload) {
             const modal = document.getElementById('output-modal');
             const title = document.getElementById('output-modal-title');
             const content = document.getElementById('output-content');
@@ -361,7 +391,7 @@
                 const res = await fetch(`/api/storage/plugins/${pluginId}/commands/${commandId}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({})
+                    body: JSON.stringify(payload || {})
                 });
 
                 const reader = res.body.getReader();
@@ -403,6 +433,45 @@
 
         function closeOutputModal() {
             document.getElementById('output-modal').classList.add('hidden');
+        }
+
+        function openCommandParamModal(pluginId, commandId, commandName) {
+            const details = pluginDetailsMap[pluginId] || {};
+            const pools = details?.config?.pools || details?.status?.details?.pools || [];
+            const poolNames = pools.map(pool => pool.name).filter(Boolean);
+
+            if (!poolNames.length) {
+                showNotification('No pools configured for this plugin', 'error');
+                return;
+            }
+
+            pendingCommand = { pluginId, commandId, commandName };
+
+            const modal = document.getElementById('command-param-modal');
+            const title = document.getElementById('command-param-title');
+            const select = document.getElementById('command-pool-select');
+
+            title.textContent = `Select pool for ${commandName}`;
+            select.innerHTML = poolNames.map(name => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');
+            modal.classList.remove('hidden');
+        }
+
+        function closeCommandParamModal() {
+            pendingCommand = null;
+            document.getElementById('command-param-modal').classList.add('hidden');
+        }
+
+        async function confirmCommandParams() {
+            if (!pendingCommand) return;
+            const select = document.getElementById('command-pool-select');
+            const poolName = select?.value;
+            const { pluginId, commandId, commandName } = pendingCommand;
+            closeCommandParamModal();
+            if (!poolName) {
+                showNotification('Select a pool to continue', 'error');
+                return;
+            }
+            await executePluginCommand(pluginId, commandId, commandName, { pool_name: poolName });
         }
 
         // ========== Configuration ==========
