@@ -55,7 +55,7 @@ Each theme has its own unique icon style:
 ## Adding a New Theme
 
 1. Create a new folder: `themes/your-theme-name/`
-2. Create `theme.json` (see THEME_CREATION_GUIDE.md)
+2. Create `theme.json` (see Docs/THEME_CREATION_GUIDE.md)
 3. Create `icons.js` with your custom icon set
 4. Add `banner.jpg` (1920x400px recommended)
 5. Update `docker-compose.yml`: `THEME=your-theme-name`
@@ -131,6 +131,6 @@ docker compose down && docker compose up -d
 
 ## Need Help?
 
-- See `THEME_CREATION_GUIDE.md` for detailed theme creation instructions
-- See `AI_PROMPT_TEMPLATE.md` for AI-assisted theme generation
+- See `Docs/THEME_CREATION_GUIDE.md` for detailed theme creation instructions
+- See `Docs/AI_PROMPT_TEMPLATE.md` for AI-assisted theme generation
 - Check existing themes for reference examples

@@ -8,11 +8,13 @@ import json
 import os
 import re
 import subprocess
+import time
 from datetime import datetime
 from typing import Generator, Optional
 
 from storage_plugins.base import StoragePlugin, CommandResult, PluginStatus
 from helper_client import helper_call, helper_available, HelperError
+from storage_plugins.snapraid_logtags import parse_log_tags
 
 
 class SnapRAIDPlugin(StoragePlugin):
@@ -512,6 +514,10 @@ class SnapRAIDPlugin(StoragePlugin):
         params: dict = None
     ) -> Generator[str, None, CommandResult]:
         params = params or {}
+        log_tags = params.get("log_tags", True)
+        log_target = params.get("log_target")
+        gui = params.get("gui", True)
+        conf_path = params.get("conf_path")
 
         cmd_map = {
             "status": ["status"],
@@ -542,51 +548,96 @@ class SnapRAIDPlugin(StoragePlugin):
         if helper_available():
             try:
                 helper_params = {'command': command_id}
+                if conf_path:
+                    helper_params['conf_path'] = conf_path
+                if log_tags:
+                    helper_params['log_tags'] = True
+                    helper_params['log_target'] = log_target or ">&2"
+                    helper_params['gui'] = bool(gui)
                 if command_id == "scrub" and 'percent' in params:
                     helper_params['percent'] = params['percent']
+                if command_id == "scrub" and 'age_days' in params:
+                    helper_params['age_days'] = params['age_days']
                 result = helper_call('snapraid', helper_params)
                 stdout = result.get('stdout', '')
+                stderr = result.get('stderr', '')
                 for line in stdout.splitlines():
                     yield line
+                tag_data = None
+                if log_tags:
+                    tag_text = "\n".join([stderr, stdout])
+                    tag_data = parse_log_tags(tag_text).to_dict() if tag_text else None
                 if result.get('success'):
-                    return CommandResult(success=True, message="Complete")
+                    return CommandResult(success=True, message="Complete", data={"log_tags": tag_data})
                 return CommandResult(
                     success=False,
                     message="",
-                    error=result.get('stderr', 'Command failed')
+                    error=result.get('stderr', 'Command failed'),
+                    data={"log_tags": tag_data}
                 )
             except HelperError as exc:
                 yield f"ERROR: {str(exc)}"
                 return CommandResult(success=False, message="", error=str(exc))
 
-        yield f"Running: snapraid {' '.join(args)}"
+        tmp_log_path = None
+        base_args = []
+        if conf_path:
+            base_args.extend(["-c", conf_path])
+        if log_tags:
+            if not log_target:
+                tmp_log_path = f"/tmp/pihealth-snapraid-{command_id}-{int(time.time())}.log"
+                log_target = tmp_log_path
+            base_args.extend(["--log", log_target])
+            if gui:
+                base_args.append("--gui")
+
+        full_args = base_args + args
+
+        yield f"Running: snapraid {' '.join(full_args)}"
         yield ""
 
         try:
             process = subprocess.Popen(
-                [self.SNAPRAID_BIN] + args,
+                [self.SNAPRAID_BIN] + full_args,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1
             )
 
+            output_lines = []
             for line in iter(process.stdout.readline, ""):
-                yield line.rstrip()
+                output_lines.append(line.rstrip())
+                yield output_lines[-1]
 
             process.wait()
+
+            tag_data = None
+            if log_tags:
+                tag_text = ""
+                if log_target in (">&1", ">&2"):
+                    tag_text = "\n".join(output_lines)
+                elif log_target and os.path.exists(log_target):
+                    try:
+                        with open(log_target) as handle:
+                            tag_text = handle.read()
+                    except Exception:
+                        tag_text = ""
+                if tag_text:
+                    tag_data = parse_log_tags(tag_text).to_dict()
 
             if process.returncode == 0:
                 yield ""
                 yield "Command completed successfully"
-                return CommandResult(success=True, message="Complete")
+                return CommandResult(success=True, message="Complete", data={"log_tags": tag_data})
 
             yield ""
             yield f"Command failed with exit code {process.returncode}"
             return CommandResult(
                 success=False,
                 message="",
-                error=f"Exit code {process.returncode}"
+                error=f"Exit code {process.returncode}",
+                data={"log_tags": tag_data}
             )
 
         except FileNotFoundError:
@@ -599,6 +650,12 @@ class SnapRAIDPlugin(StoragePlugin):
         except Exception as exc:
             yield f"ERROR: {str(exc)}"
             return CommandResult(success=False, message="", error=str(exc))
+        finally:
+            if tmp_log_path and os.path.exists(tmp_log_path):
+                try:
+                    os.remove(tmp_log_path)
+                except Exception:
+                    pass
 
     def _check_diff_thresholds(self) -> Optional[str]:
         config = self.get_config()

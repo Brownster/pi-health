@@ -504,9 +504,24 @@ def cmd_snapraid(params):
     if cmd not in allowed_cmds:
         return {'success': False, 'error': f'Command not allowed: {cmd}'}
 
-    args = ['snapraid', cmd]
+    conf_path = params.get('conf_path')
+    log_tags = params.get('log_tags', True)
+    log_target = params.get('log_target', '>&2')
+    gui = params.get('gui', True)
+
+    args = ['snapraid']
+    if conf_path:
+        args.extend(['-c', conf_path])
+    if log_tags:
+        args.extend(['--log', log_target])
+        if gui:
+            args.append('--gui')
+
+    args.append(cmd)
     if cmd == 'scrub' and 'percent' in params:
         args.extend(['-p', str(params['percent'])])
+    if cmd == 'scrub' and 'age_days' in params:
+        args.extend(['-o', str(params['age_days'])])
 
     result = run_command(args, timeout=3600)
     return {

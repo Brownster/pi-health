@@ -1,0 +1,6 @@
+{
+  "downloads": "/mnt/downloads",
+  "storage": "/mnt/storage",
+  "backup": "/mnt/backup",
+  "config": "/home/pi/docker"
+}
