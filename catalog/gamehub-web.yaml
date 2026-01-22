@@ -1,0 +1,17 @@
+id: gamehub-web
+name: GameHub Web
+description: GameHub web frontend
+requires: ["gamehub-hub"]
+disabled_by_default: false
+fields:
+  - key: PORT
+    label: HTTP port
+    default: "8081"
+service:
+  image: ghcr.io/brownster/gamehub:latest
+  container_name: gamehub-web
+  restart: unless-stopped
+  ports:
+    - "{{PORT}}:80"
+  depends_on:
+    - gamehub-hub

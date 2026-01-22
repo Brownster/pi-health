@@ -1,0 +1,13 @@
+id: gamehub-redis
+name: GameHub Redis
+description: Redis for GameHub
+requires: []
+disabled_by_default: false
+service:
+  image: redis:7-alpine
+  container_name: gamehub-redis
+  restart: unless-stopped
+  volumes:
+    - gamehub-redis-data:/data
+volumes:
+  gamehub-redis-data: {}

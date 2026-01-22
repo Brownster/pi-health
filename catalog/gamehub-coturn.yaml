@@ -1,0 +1,22 @@
+id: gamehub-coturn
+name: GameHub TURN (coturn)
+description: TURN server for GameHub
+requires: []
+disabled_by_default: false
+fields:
+  - key: CONFIG_DIR
+    label: Config root directory
+    default: "/home/pi/docker"
+  - key: TURN_SECRET
+    label: TURN secret
+    default: "gamehub-turn-secret"
+service:
+  image: coturn/coturn:4.6
+  container_name: gamehub-coturn
+  network_mode: host
+  restart: unless-stopped
+  environment:
+    - TURN_SECRET={{TURN_SECRET}}
+  volumes:
+    - "{{CONFIG_DIR}}/gamehub/turnserver.conf:/etc/coturn/turnserver.conf:ro"
+  command: -c /etc/coturn/turnserver.conf

@@ -1,0 +1,33 @@
+id: gamehub-hub
+name: GameHub Hub
+description: GameHub backend service
+requires: ["gamehub-redis"]
+disabled_by_default: false
+fields:
+  - key: REDIS_URL
+    label: Redis URL
+    default: "redis://gamehub-redis:6379"
+  - key: AI_DELAY_MS
+    label: AI delay (ms)
+    default: "300"
+  - key: ROOM_TTL_SECONDS
+    label: Room TTL (seconds)
+    default: "86400"
+  - key: TURN_SECRET
+    label: TURN secret
+    default: "gamehub-turn-secret"
+  - key: TURN_SERVER
+    label: TURN server
+    default: "turn:localhost:3478"
+service:
+  image: ghcr.io/brownster/gamehub-hub:latest
+  container_name: gamehub-hub
+  restart: unless-stopped
+  environment:
+    - REDIS_URL={{REDIS_URL}}
+    - AI_DELAY_MS={{AI_DELAY_MS}}
+    - ROOM_TTL_SECONDS={{ROOM_TTL_SECONDS}}
+    - TURN_SECRET={{TURN_SECRET}}
+    - TURN_SERVER={{TURN_SERVER}}
+  depends_on:
+    - gamehub-redis
