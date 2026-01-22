@@ -206,6 +206,33 @@ def get_plugin_recovery(plugin_id: str):
     return jsonify(plugin.get_recovery_status())
 
 
+@storage_bp.route("/api/storage/plugins/<plugin_id>/logs/latest", methods=["GET"])
+@login_required
+def get_plugin_latest_log(plugin_id: str):
+    registry = get_registry()
+    plugin = registry.get(plugin_id)
+
+    if not plugin:
+        return jsonify({"error": f"Plugin not found: {plugin_id}"}), 404
+
+    if not hasattr(plugin, "get_latest_log"):
+        return jsonify({"error": "Logs not supported"}), 404
+
+    result = plugin.get_latest_log()
+    if not result:
+        return jsonify({"error": "No logs available"}), 404
+
+    return Response(
+        result.get("content", ""),
+        mimetype="text/plain",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Log-Path": result.get("path", ""),
+            "X-Log-Truncated": "true" if result.get("truncated") else "false"
+        }
+    )
+
+
 @storage_bp.route("/api/storage/plugins/<plugin_id>/commands/<command_id>", methods=["POST"])
 @login_required
 def run_plugin_command(plugin_id: str, command_id: str):

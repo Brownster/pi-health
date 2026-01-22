@@ -386,6 +386,12 @@
                     </div>
                 ` : '';
 
+                const logLink = status?.details?.last_log_path ? `
+                    <button onclick="viewSnapraidLog()" class="mt-3 text-xs text-purple-300 hover:text-purple-200">
+                        View last log
+                    </button>
+                ` : '';
+
                 const recoveryHtml = recovery?.recoverable === false ? `
                     <p class="mt-2 text-sm text-red-400">${escapeHtml(recovery.error || 'Recovery unavailable')}</p>
                 ` : (recovery && (recovery.missing_files || recovery.damaged_files)) ? `
@@ -423,6 +429,7 @@
                     ${status.message ? `<p class="mt-2 text-sm text-gray-400">${escapeHtml(status.message)}</p>` : ''}
                     ${summaryHtml}
                     ${recoveryHtml}
+                    ${logLink}
                 `;
             } else if (pluginId === 'mergerfs') {
                 // MergerFS specific status
@@ -477,6 +484,31 @@
                 return;
             }
             await executePluginCommand('snapraid', commandId, label, params || {});
+        }
+
+        async function viewSnapraidLog() {
+            const modal = document.getElementById('output-modal');
+            const title = document.getElementById('output-modal-title');
+            const content = document.getElementById('output-content');
+            const progressPanel = document.getElementById('snapraid-progress');
+
+            title.textContent = 'SnapRAID Log';
+            content.textContent = 'Loading log...';
+            modal.classList.remove('hidden');
+            progressPanel.classList.add('hidden');
+
+            try {
+                const res = await fetch('/api/storage/plugins/snapraid/logs/latest');
+                if (!res.ok) {
+                    content.textContent = 'No log available.';
+                    return;
+                }
+                const text = await res.text();
+                const truncated = res.headers.get('X-Log-Truncated') === 'true';
+                content.textContent = text + (truncated ? '\n\n--- Log truncated ---\n' : '');
+            } catch (e) {
+                content.textContent = `Failed to load log: ${e.message}`;
+            }
         }
 
         async function executePluginCommand(pluginId, commandId, commandName, payload) {

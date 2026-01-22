@@ -33,6 +33,7 @@ class SnapRAIDPlugin(StoragePlugin):
 
     SNAPRAID_BIN = "/usr/bin/snapraid"
     SNAPRAID_CONF = "/etc/snapraid.conf"
+    LOG_RETENTION = 10
 
     DEFAULT_EXCLUDES = [
         "*.tmp",
@@ -54,6 +55,8 @@ class SnapRAIDPlugin(StoragePlugin):
         super().__init__(config_dir)
         self._schema = None
         self._state_path = os.path.join(config_dir, "snapraid_state.json")
+        self._log_dir = os.path.join(config_dir, "snapraid-logs")
+        os.makedirs(self._log_dir, exist_ok=True)
 
     def get_schema(self) -> dict:
         if self._schema is None:
@@ -432,6 +435,7 @@ class SnapRAIDPlugin(StoragePlugin):
             details["last_summary"] = state.get("last_summary")
             details["last_command"] = state.get("last_command")
             details["last_run_at"] = state.get("last_run_at")
+            details["last_log_path"] = state.get("last_log_path")
 
         if not os.path.exists(self.SNAPRAID_CONF):
             return {
@@ -590,6 +594,7 @@ class SnapRAIDPlugin(StoragePlugin):
                             for event in tag_data.get("events", []):
                                 yield {"type": "tag", "name": event["name"], "values": event["values"]}
                         self._persist_last_summary(command_id, tag_data)
+                        self._persist_last_log(command_id, tag_text)
                 if result.get('success'):
                     return CommandResult(success=True, message="Complete", data={"log_tags": tag_data})
                 return CommandResult(
@@ -658,6 +663,7 @@ class SnapRAIDPlugin(StoragePlugin):
                     tag_result = parsed
                     tag_data = parsed.to_dict()
                     self._persist_last_summary(command_id, tag_data)
+                    self._persist_last_log(command_id, tag_text)
 
             if process.returncode == 0:
                 yield ""
@@ -716,6 +722,65 @@ class SnapRAIDPlugin(StoragePlugin):
                 json.dump(state, handle, indent=2)
         except Exception:
             pass
+
+    def _persist_last_log(self, command_id: str, log_text: str) -> None:
+        if not log_text:
+            return
+        log_path = self._write_log(command_id, log_text)
+        if not log_path:
+            return
+        state = self._load_state()
+        state.update({
+            "last_log_path": log_path
+        })
+        try:
+            with open(self._state_path, "w") as handle:
+                json.dump(state, handle, indent=2)
+        except Exception:
+            pass
+
+    def _write_log(self, command_id: str, log_text: str) -> str | None:
+        try:
+            timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            filename = f"{command_id}-{timestamp}.log"
+            path = os.path.join(self._log_dir, filename)
+            with open(path, "w") as handle:
+                handle.write(log_text)
+            self._rotate_logs()
+            return path
+        except Exception:
+            return None
+
+    def _rotate_logs(self) -> None:
+        try:
+            entries = [
+                os.path.join(self._log_dir, name)
+                for name in os.listdir(self._log_dir)
+                if name.endswith(".log")
+            ]
+            entries.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+            for old_path in entries[self.LOG_RETENTION:]:
+                try:
+                    os.remove(old_path)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    def get_latest_log(self, max_bytes: int = 200000) -> dict | None:
+        state = self._load_state()
+        path = state.get("last_log_path")
+        if not path or not os.path.exists(path):
+            return None
+        try:
+            with open(path, "r") as handle:
+                content = handle.read(max_bytes + 1)
+            truncated = len(content) > max_bytes
+            if truncated:
+                content = content[:max_bytes]
+            return {"path": path, "content": content, "truncated": truncated}
+        except Exception:
+            return None
 
     def _check_diff_thresholds(self) -> Optional[str]:
         config = self.get_config()
