@@ -76,10 +76,10 @@ function showToast(message, type = 'info', duration = 4000) {
     const container = getToastContainer();
 
     const colors = {
-        success: 'bg-green-600 border-green-500',
-        error: 'bg-red-600 border-red-500',
-        warning: 'bg-yellow-600 border-yellow-500',
-        info: 'bg-blue-600 border-blue-500'
+        success: 'toast-success bg-green-600 border-green-500',
+        error: 'toast-error bg-red-600 border-red-500',
+        warning: 'toast-warning bg-yellow-600 border-yellow-500',
+        info: 'toast-info bg-blue-600 border-blue-500'
     };
 
     const icons = {

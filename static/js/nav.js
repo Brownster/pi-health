@@ -176,21 +176,21 @@ function injectNavStyles() {
         .nav-link {
             padding: 0.5rem 0.75rem;
             border-radius: 0.375rem;
-            color: #bfdbfe;
+            color: var(--theme-nav-link-color, #bfdbfe);
             font-weight: 500;
-            transition: all 0.15s ease;
+            transition: all var(--theme-transition-speed, 0.15s) ease;
             cursor: pointer;
             background: transparent;
             border: none;
         }
         .nav-link:hover {
-            background-color: rgba(107, 33, 168, 0.8);
-            color: white;
+            background-color: var(--theme-nav-active-bg, rgba(107, 33, 168, 0.8));
+            color: var(--theme-nav-link-hover, white);
         }
         .nav-active {
-            color: white;
-            background-color: #1e40af;
-            border: 1px solid #60a5fa;
+            color: var(--theme-nav-active-color, white) !important;
+            background-color: var(--theme-nav-active-bg, #1e40af) !important;
+            border: 1px solid var(--theme-nav-active-border, #60a5fa) !important;
         }
         .nav-dropdown-menu {
             left: 0;

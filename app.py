@@ -87,7 +87,7 @@ def verify_credentials(username, password):
     return False
 
 # Load theme configuration
-THEME_NAME = os.getenv('THEME', 'professional')
+THEME_NAME = os.getenv('THEME', 'modern')
 THEME_PATH = os.path.join('themes', THEME_NAME)
 THEME_CONFIG_PATH = os.path.join(THEME_PATH, 'theme.json')
 
