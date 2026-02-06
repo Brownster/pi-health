@@ -24,9 +24,9 @@
 - [ ] Validate logout redirect path.
 
 ### 2) Dashboard (`static/index.html`)
-- [ ] Build dashboard service-card grid with reusable card component.
-- [ ] Preserve service icon mapping behavior.
-- [ ] Preserve launch/open actions.
+- [x] Build dashboard service-card grid with reusable card component.
+- [x] Preserve service icon mapping behavior.
+- [x] Preserve launch/open actions.
 
 ### 3) System (`static/system.html`)
 - [ ] Build metric cards with shared `MetricCard` component.
