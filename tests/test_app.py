@@ -190,6 +190,12 @@ class TestStaticPages:
         """Test login page loads."""
         response = client.get('/login.html')
         assert response.status_code == 200
+        body = response.data.decode('utf-8')
+        assert '/css/foundation.css' in body
+        assert '/css/login.css' in body
+        assert 'type="module" src="/js/pages/login.js"' in body
+        assert 'onclick=' not in body
+        assert 'onkeydown=' not in body
 
     def test_storage_page_redirects(self, client):
         """Test storage page redirects to pools.html."""

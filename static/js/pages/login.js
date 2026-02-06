@@ -7,10 +7,25 @@ const passwordInput = document.getElementById('password');
 const submitButton = document.getElementById('login-button');
 const alertEl = document.getElementById('login-error');
 const cardEl = document.getElementById('login-card');
+let isBusy = false;
+
+function getFormValues() {
+    return {
+        username: usernameInput.value.trim(),
+        password: passwordInput.value,
+    };
+}
+
+function updateFormState() {
+    const { username, password } = getFormValues();
+    submitButton.disabled = isBusy || !username || !password;
+}
 
 function showError(message) {
     alertEl.textContent = message;
     alertEl.dataset.visible = 'true';
+    usernameInput.setAttribute('aria-invalid', 'true');
+    passwordInput.setAttribute('aria-invalid', 'true');
 
     cardEl.classList.remove('shake-animation');
     void cardEl.offsetWidth;
@@ -20,15 +35,19 @@ function showError(message) {
 function clearError() {
     alertEl.textContent = '';
     alertEl.dataset.visible = 'false';
+    usernameInput.setAttribute('aria-invalid', 'false');
+    passwordInput.setAttribute('aria-invalid', 'false');
 }
 
-function setBusy(isBusy) {
-    submitButton.disabled = isBusy;
+function setBusy(busy) {
+    isBusy = Boolean(busy);
     if (isBusy) {
         submitButton.innerHTML = '<span class="ph-spinner" aria-hidden="true"></span><span>Signing in...</span>';
+        updateFormState();
         return;
     }
     submitButton.innerHTML = '<span>Sign in</span>';
+    updateFormState();
 }
 
 async function checkAuth() {
@@ -48,11 +67,15 @@ async function submitLogin(event) {
     event.preventDefault();
     clearError();
 
-    const username = usernameInput.value.trim();
-    const password = passwordInput.value;
+    const { username, password } = getFormValues();
 
     if (!username || !password) {
         showError('Username and password are required.');
+        if (!username) {
+            usernameInput.focus();
+        } else {
+            passwordInput.focus();
+        }
         return;
     }
 
@@ -89,6 +112,15 @@ async function submitLogin(event) {
         // User is not authenticated yet.
     }
 
+    [usernameInput, passwordInput].forEach((input) => {
+        input.addEventListener('input', () => {
+            clearError();
+            updateFormState();
+        });
+    });
+
+    clearError();
+    updateFormState();
     form.addEventListener('submit', submitLogin);
     usernameInput.focus();
 })();
