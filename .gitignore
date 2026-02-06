@@ -3,6 +3,10 @@ __pycache__/
 .pytest_cache/
 .coverage
 .tox/
+node_modules/
+dist/
+.vite/
+.DS_Store
 config/plugins.json
 config/copyparty.json
 config/pihealth_update.json
