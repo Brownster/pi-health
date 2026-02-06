@@ -1,6 +1,15 @@
 import { ensureAuthenticated, logoutToLogin } from '/js/lib/auth.js';
+import { requestJson } from '/js/lib/http.js';
 
 window.logout = logoutToLogin;
+
+async function requestApiJson(url, options = {}) {
+    const { response, payload } = await requestJson(url, options);
+    if (!response.ok) {
+        throw new Error(payload?.error || `Request failed (${response.status})`);
+    }
+    return payload;
+}
 
         // Format timestamp
         function formatDateTime(date) {
@@ -163,8 +172,7 @@ window.logout = logoutToLogin;
             try {
                 // First fetch: get containers without stats (fast)
                 const statsParam = includeStats ? 'true' : 'false';
-                const response = await apiFetch(`/api/containers?stats=${statsParam}`);
-                const newContainerList = await response.json();
+                const newContainerList = await requestApiJson(`/api/containers?stats=${statsParam}`);
 
                 // Update timestamp for network rate calculation
                 lastFetchTime = Date.now();
@@ -210,8 +218,7 @@ window.logout = logoutToLogin;
             const ids = runningContainers.map(c => c.id).join(',');
 
             try {
-                const response = await apiFetch(`/api/containers/stats?ids=${ids}`);
-                const stats = await response.json();
+                const stats = await requestApiJson(`/api/containers/stats?ids=${ids}`);
 
                 // Update container list with stats
                 containerList.forEach(container => {
@@ -461,9 +468,7 @@ window.logout = logoutToLogin;
             showNotification(`${actionNames[action] || action} ${containerName}...`, 'info');
 
             try {
-                const response = await fetch(`/api/containers/${id}/${action}`, { method: 'POST' });
-                const result = await response.json();
-
+                const result = await requestApiJson(`/api/containers/${id}/${action}`, { method: 'POST' });
                 if (result.error) {
                     showNotification(`Error: ${result.error}`, 'error');
                 } else {
@@ -499,8 +504,7 @@ window.logout = logoutToLogin;
         // Update a single container's status
         async function updateContainerStatus(id) {
             try {
-                const response = await apiFetch('/api/containers');
-                const containers = await response.json();
+                const containers = await requestApiJson('/api/containers');
                 lastFetchTime = Date.now();
                 const container = containers.find(c => c.id === id);
                 
@@ -589,9 +593,7 @@ window.logout = logoutToLogin;
             modal.classList.add('flex');
 
             try {
-                const response = await fetch(`/api/containers/${id}/logs`);
-                const result = await response.json();
-
+                const result = await requestApiJson(`/api/containers/${id}/logs`);
                 if (result.error) {
                     content.textContent = `Error: ${result.error}`;
                 } else {
@@ -633,10 +635,8 @@ window.logout = logoutToLogin;
             modal.classList.add('flex');
 
             try {
-                const response = await fetch(`/api/containers/${id}/network-test`, { method: 'POST' });
-                const result = await response.json();
-
-                if (!response.ok || result.error) {
+                const result = await requestApiJson(`/api/containers/${id}/network-test`, { method: 'POST' });
+                if (result.error) {
                     const message = result.error || 'Unable to run network test.';
                     statusEl.textContent = 'Error';
                     statusEl.classList.add('text-red-400');
@@ -678,8 +678,7 @@ window.logout = logoutToLogin;
             publicEl.textContent = '-';
 
             try {
-                const response = await fetch('/api/network-test', { method: 'POST' });
-                const result = await response.json();
+                const result = await requestApiJson('/api/network-test', { method: 'POST' });
 
                 statusEl.textContent = result.ping_success ? 'Ping successful' : 'Ping failed';
                 statusEl.classList.toggle('text-green-400', !!result.ping_success);

@@ -1,94 +1,66 @@
-# UI Modernization Plan (Shadcn-Based)
+# UI Modernization Plan
 
-## Vision
+## Final stack decision
 
-Build a modern UI that is:
+For this migration wave, the UI stack is:
 
-- DRY: shared components and shared data-fetch layer.
-- Modular: page features isolated by domain.
-- Easy to extend: predictable conventions for new pages and APIs.
+- Flask-served HTML routes in `static/*.html`
+- Page modules in vanilla ES modules (`static/js/pages/*`)
+- Shared browser utilities in `static/js/lib/*`
+- Shared design tokens/components in CSS (`static/css/foundation.css` + page CSS)
+- Tailwind utility classes where useful
 
-## Current state summary
+`shadcn/ui` remains a future option that requires a React build pipeline. It is explicitly out of scope for the current parity-focused migration.
 
-- Flask serves static pages directly from `static/*.html`.
-- Shared scripts exist in `static/js/api.js`, `static/js/nav.js`, `static/js/theme.js`.
-- Per-page logic is mostly inline script in each HTML file.
-- Tailwind is loaded via CDN (no typed component system, no build pipeline for UI source).
+## Goals
 
-## Target architecture
+- DRY: shared auth, API, and state rendering helpers.
+- Modular: one module per page, shared helpers in `static/js/lib`.
+- Easy to extend: predictable structure for new pages and low-coupling page logic.
 
-Use a hybrid rollout to avoid breaking backend routes:
+## Current implementation baseline
 
-1. Keep Flask API routes intact.
-2. Introduce a new frontend app (React + TypeScript + Tailwind + shadcn/ui).
-3. Mount one migrated page at a time while legacy pages remain available.
-4. Move shared behavior to reusable modules:
-   - `ui/lib/api-client.ts`
-   - `ui/lib/auth.ts`
-   - `ui/lib/theme.ts`
-   - `ui/components/layout/*`
-   - `ui/components/domain/*`
+- Login, Dashboard, System, and Containers are migrated to module-based page scripts.
+- Shared auth/session helpers exist in `static/js/lib/auth.js` and `static/js/lib/session.js`.
+- Shared HTTP helper exists in `static/js/lib/http.js`.
+- Legacy utility script `static/js/api.js` still exists for older pages and shared toast UI.
 
-## Design direction
+## Standards for migrated pages
 
-Direction name: **Operational Clarity**
+- Use `requestJson` from `static/js/lib/http.js` for API calls.
+- Do not interpolate API/user data into `innerHTML` without escaping.
+- Keep all behavior in page modules; no inline `<script>` blocks for migrated routes.
+- Preserve route behavior and API compatibility.
 
-- Density: medium-dense for dashboard workflows.
-- Surfaces: soft contrast panels with clear section boundaries.
-- Typography: strong numeric readability for metrics and logs.
-- Color: neutral base + functional semantic colors for state.
-- Motion: minimal, purpose-driven transitions only for load/state changes.
+## Migration order
 
-## Technical standards
-
-- TypeScript strict mode for UI code.
-- Zod schemas for API response validation at boundaries.
-- React Query (or equivalent) for cache and polling behavior.
-- shadcn/ui primitives as base; compose domain components on top.
-- No inline JS in HTML pages for migrated routes.
-- No duplicate API calls across sibling components.
-
-## Page migration order
-
-Order is based on risk and shared-component yield.
-
-1. `login.html` (small, isolated, auth baseline)
-2. `index.html` (dashboard shell and navigation)
-3. `system.html` (metrics cards establish reusable status components)
-4. `containers.html` (table/actions patterns)
-5. `stacks.html` (forms + logs patterns)
-6. `apps.html` (catalog cards/search/filter patterns)
-7. `settings.html` (settings form system)
+1. `login.html`
+2. `index.html`
+3. `system.html`
+4. `containers.html`
+5. `stacks.html`
+6. `apps.html`
+7. `settings.html`
 8. storage/network/tools pages (`pools`, `mounts`, `shares`, `plugins`, `disks`, `network`, `tailscale`, `tools`)
 
-## Definition of done (per page)
+## Definition of done per page
 
-- Pixel-consistent with chosen design system.
 - Existing API behavior preserved.
-- Error/loading/empty states implemented.
-- Mobile breakpoint verified.
-- Keyboard accessibility and focus states verified.
-- Old page route either replaced or redirected intentionally.
+- Loading/error/empty states handled.
+- Keyboard and focus behavior verified.
+- Mobile layout checked.
+- Shared utilities used instead of duplicated fetch/auth logic.
 
-## PR slicing strategy
+## PR strategy
 
-- PR 1: UI tooling bootstrap + shell layout + login migration.
-- PR 2: dashboard (`index`) migration.
-- PR 3: system metrics migration.
-- PR 4+: one page per PR, plus shared components when needed.
+- One page-focused PR at a time on top of migration foundation.
+- Keep PRs small and composable.
+- Include route impact and test notes in each PR.
 
-Each PR includes:
+## Future phase: React + shadcn evaluation
 
-- before/after screenshots
-- route impact
-- reused vs new components
-- test notes
+After page parity is complete and stable:
 
-## Risks and mitigations
-
-- Risk: duplicated logic between legacy and new pages.
-  - Mitigation: move API/auth/theme logic first into shared UI libs.
-- Risk: theming drift across pages.
-  - Mitigation: central design tokens and component variants.
-- Risk: long-lived migration branch.
-  - Mitigation: small PRs merged continuously into `main`.
+- Evaluate introducing a React + TypeScript frontend app.
+- Evaluate `shadcn/ui` for component primitives.
+- Migrate from static route-by-route only if it reduces complexity and maintenance burden.

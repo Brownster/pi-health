@@ -4,15 +4,15 @@
 
 - One page-focused branch at a time.
 - Keep legacy route available until replacement is validated.
-- Merge only when page Definition of Done is met.
+- Merge only when page definition of done is met.
 
 ## Shared foundation checklist
 
-- [ ] Choose final UI stack (React + TS + Tailwind + shadcn/ui).
+- [x] Choose final UI stack (Flask + static HTML + vanilla ES modules + shared CSS tokens).
 - [x] Establish design tokens (color, spacing, radius, typography).
-- [ ] Create shared API client with typed responses.
+- [x] Create shared API client baseline (`static/js/lib/http.js`).
 - [ ] Create shared layout shell (header/nav/content/footer).
-- [x] Create shared state components (`LoadingState`, `ErrorState`, `EmptyState`).
+- [ ] Create reusable shared state components (`LoadingState`, `ErrorState`, `EmptyState`).
 - [ ] Add UI smoke tests for core routes.
 
 ## Page checklist
@@ -24,12 +24,12 @@
 - [ ] Validate logout redirect path.
 
 ### 2) Dashboard (`static/index.html`)
-- [x] Build dashboard service-card grid with reusable card component.
+- [x] Build dashboard service-card grid with reusable card patterns.
 - [x] Preserve service icon mapping behavior.
 - [x] Preserve launch/open actions.
 
 ### 3) System (`static/system.html`)
-- [x] Build metric cards with shared `MetricCard` component.
+- [x] Build metric cards with shared metric styling patterns.
 - [x] Preserve refresh cadence and rate calculations.
 - [x] Preserve system action controls (shutdown/reboot/network tests).
 

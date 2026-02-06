@@ -1,4 +1,5 @@
 import { ensureAuthenticated, logoutToLogin } from '/js/lib/auth.js';
+import { requestJson } from '/js/lib/http.js';
 
 const els = {
     cpuUsage: document.getElementById('cpu-usage'),
@@ -131,8 +132,11 @@ function updatePiMetrics(data) {
 
 async function fetchSystemMetrics() {
     try {
-        const response = await fetch('/api/stats');
-        const data = await response.json();
+        const { response, payload } = await requestJson('/api/stats');
+        if (!response.ok) {
+            throw new Error(payload?.error || `Request failed (${response.status})`);
+        }
+        const data = payload;
 
         const cpuPercent = data.cpu_usage_percent ? Number(data.cpu_usage_percent.toFixed(1)) : 0;
         applyValue(els.cpuUsage, `${cpuPercent}%`, cpuPercent);
@@ -201,8 +205,8 @@ async function sendSystemAction(action) {
 
     try {
         showNotification(`Sending ${action} command...`, 'info');
-        const response = await fetch(`/api/${action}`, { method: 'POST' });
-        const data = await response.json();
+        const { response, payload } = await requestJson(`/api/${action}`, { method: 'POST' });
+        const data = payload || {};
 
         if (!response.ok) {
             showNotification(`Error during ${action}: ${data.error || 'Unknown error'}`, 'error');
