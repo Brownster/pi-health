@@ -1,4 +1,5 @@
 import { ensureAuthenticated, logoutToLogin } from '/js/lib/auth.js';
+import { requestJson } from '/js/lib/http.js';
 
 const serviceGrid = document.getElementById('service-grid');
 const serviceCount = document.getElementById('service-count');
@@ -23,15 +24,27 @@ function formatRefreshTime(date) {
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
-function renderState(message, tone = 'info', extraAction = '') {
-    serviceGrid.innerHTML = `
-        <section class="ph-state" data-tone="${tone}">
-            <div>
-                <p>${message}</p>
-                ${extraAction}
-            </div>
-        </section>
-    `;
+function renderState(message, tone = 'info', action = null) {
+    serviceGrid.textContent = '';
+    const section = document.createElement('section');
+    section.className = 'ph-state';
+    section.dataset.tone = tone;
+
+    const content = document.createElement('div');
+    const messageEl = document.createElement('p');
+    messageEl.textContent = message;
+    content.appendChild(messageEl);
+
+    if (action?.href && action?.label) {
+        const link = document.createElement('a');
+        link.className = 'ph-action-link';
+        link.href = action.href;
+        link.textContent = action.label;
+        content.appendChild(link);
+    }
+
+    section.appendChild(content);
+    serviceGrid.appendChild(section);
 }
 
 function getDefaultIcons() {
@@ -120,11 +133,18 @@ function buildServiceCard(container) {
             ${icon}
         </div>
         <div class="ph-service-content">
-            <h3 class="ph-service-title">${friendlyName}</h3>
-            <p class="ph-service-port">port:${port}</p>
-            <a class="ph-service-link" href="http://${window.location.hostname}:${port}" target="_blank" rel="noopener noreferrer">Open Service</a>
+            <h3 class="ph-service-title"></h3>
+            <p class="ph-service-port"></p>
+            <a class="ph-service-link" target="_blank" rel="noopener noreferrer">Open Service</a>
         </div>
     `;
+
+    const title = card.querySelector('.ph-service-title');
+    const portLabel = card.querySelector('.ph-service-port');
+    const openLink = card.querySelector('.ph-service-link');
+    title.textContent = friendlyName;
+    portLabel.textContent = `port:${port}`;
+    openLink.href = `http://${window.location.hostname}:${port}`;
 
     return card;
 }
@@ -132,8 +152,11 @@ function buildServiceCard(container) {
 async function fetchDockerWebServices() {
     try {
         renderState('Loading services...');
-        const response = await window.apiFetch('/api/containers?stats=false');
-        const containers = await response.json();
+        const { response, payload } = await requestJson('/api/containers?stats=false');
+        if (!response.ok) {
+            throw new Error(payload?.error || `Request failed (${response.status})`);
+        }
+        const containers = payload;
 
         if (!Array.isArray(containers)) {
             throw new Error(containers.error || 'Invalid response while loading containers.');
@@ -147,7 +170,7 @@ async function fetchDockerWebServices() {
             renderState(
                 'No running web services found.',
                 'info',
-                '<a class="ph-action-link" href="/containers.html">Manage Containers</a>'
+                { href: '/containers.html', label: 'Manage Containers' }
             );
             return;
         }

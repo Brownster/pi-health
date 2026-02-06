@@ -52,7 +52,7 @@ function setBusy(busy) {
 
 async function checkAuth() {
     const { response, payload } = await requestJson('/api/auth/check');
-    if (!response.ok) {
+    if (!response.ok || !payload?.authenticated) {
         return;
     }
 

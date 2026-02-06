@@ -180,6 +180,11 @@ class TestStaticPages:
         """Test containers page loads."""
         response = client.get('/containers.html')
         assert response.status_code == 200
+        body = response.data.decode('utf-8')
+        assert '/css/foundation.css' in body
+        assert '/css/containers.css' in body
+        assert 'type="module" src="/js/pages/containers.js"' in body
+        assert 'Docker Containers' in body
 
     def test_system_page(self, client):
         """Test system page loads."""
