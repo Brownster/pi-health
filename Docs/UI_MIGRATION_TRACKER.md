@@ -29,9 +29,9 @@
 - [x] Preserve launch/open actions.
 
 ### 3) System (`static/system.html`)
-- [ ] Build metric cards with shared `MetricCard` component.
-- [ ] Preserve refresh cadence and rate calculations.
-- [ ] Preserve system action controls (shutdown/reboot/network tests).
+- [x] Build metric cards with shared `MetricCard` component.
+- [x] Preserve refresh cadence and rate calculations.
+- [x] Preserve system action controls (shutdown/reboot/network tests).
 
 ### 4) Containers (`static/containers.html`)
 - [ ] Build container table/list with status badges.

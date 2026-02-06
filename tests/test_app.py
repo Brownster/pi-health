@@ -185,6 +185,11 @@ class TestStaticPages:
         """Test system page loads."""
         response = client.get('/system.html')
         assert response.status_code == 200
+        body = response.data.decode('utf-8')
+        assert '/css/foundation.css' in body
+        assert '/css/system.css' in body
+        assert 'type="module" src="/js/pages/system.js"' in body
+        assert 'System Metrics' in body
 
     def test_edit_page(self, client):
         """Test edit page loads."""
