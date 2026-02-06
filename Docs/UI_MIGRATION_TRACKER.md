@@ -34,9 +34,9 @@
 - [x] Preserve system action controls (shutdown/reboot/network tests).
 
 ### 4) Containers (`static/containers.html`)
-- [ ] Build container table/list with status badges.
-- [ ] Preserve start/stop/restart/log actions.
-- [ ] Preserve stats polling behavior.
+- [x] Build container table/list with status badges.
+- [x] Preserve start/stop/restart/log actions.
+- [x] Preserve stats polling behavior.
 
 ### 5) Stacks (`static/stacks.html`)
 - [ ] Build stack list/details view.

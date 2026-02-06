@@ -1,0 +1,790 @@
+import { ensureAuthenticated, logoutToLogin } from '/js/lib/auth.js';
+
+window.logout = logoutToLogin;
+
+        // Format timestamp
+        function formatDateTime(date) {
+            const hours = String(date.getHours()).padStart(2, '0');
+            const minutes = String(date.getMinutes()).padStart(2, '0');
+            const seconds = String(date.getSeconds()).padStart(2, '0');
+            return `${hours}:${minutes}:${seconds}`;
+        }
+
+        // Format bytes to human readable
+        function formatBytes(bytes) {
+            if (bytes === null || bytes === undefined) return '—';
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+        }
+
+        // Get color class based on percentage
+        function getStatColorClass(percent) {
+            if (percent === null || percent === undefined) return 'text-gray-500';
+            if (percent < 50) return 'text-green-400';
+            if (percent < 80) return 'text-yellow-400';
+            return 'text-red-400';
+        }
+
+        // Loading spinner HTML
+        function loadingSpinner() {
+            return '<div class="loading-spinner"></div>';
+        }
+
+        // Format stats display with mini progress bars
+        function formatCpuCell(cpuPercent, loading = false) {
+            if (loading) return loadingSpinner();
+            if (cpuPercent === null || cpuPercent === undefined) return '<span class="text-gray-500">—</span>';
+            const colorClass = getStatColorClass(cpuPercent);
+            const barColor = cpuPercent < 50 ? 'bg-green-500' : cpuPercent < 80 ? 'bg-yellow-500' : 'bg-red-500';
+            return `
+                <span class="${colorClass} text-sm">${cpuPercent.toFixed(1)}%</span>
+                <div class="w-full bg-gray-700 rounded-full h-1.5 mt-1">
+                    <div class="${barColor} h-1.5 rounded-full" style="width: ${Math.min(cpuPercent, 100)}%"></div>
+                </div>`;
+        }
+
+        function formatMemoryCell(memPercent, memUsed, memLimit, loading = false) {
+            if (loading) return loadingSpinner();
+            if (memPercent === null || memPercent === undefined) return '<span class="text-gray-500">—</span>';
+            const colorClass = getStatColorClass(memPercent);
+            const barColor = memPercent < 50 ? 'bg-green-500' : memPercent < 80 ? 'bg-yellow-500' : 'bg-red-500';
+            return `
+                <span class="${colorClass} text-sm">${memPercent.toFixed(1)}%</span>
+                <div class="text-xs text-gray-400">${formatBytes(memUsed)} / ${formatBytes(memLimit)}</div>
+                <div class="w-full bg-gray-700 rounded-full h-1.5 mt-1">
+                    <div class="${barColor} h-1.5 rounded-full" style="width: ${Math.min(memPercent, 100)}%"></div>
+                </div>`;
+        }
+
+        // Calculate network rate (bytes/sec) from cumulative values
+        function calculateNetworkRate(containerId, currentRx, currentTx) {
+            const now = Date.now();
+            const prev = previousNetworkStats[containerId];
+
+            if (!prev || !lastFetchTime) {
+                // First fetch - store values and return null (will show cumulative)
+                previousNetworkStats[containerId] = { rx: currentRx, tx: currentTx };
+                return null;
+            }
+
+            const timeDelta = (now - lastFetchTime) / 1000; // seconds
+            if (timeDelta <= 0) return null;
+
+            const rxRate = Math.max(0, (currentRx - prev.rx) / timeDelta);
+            const txRate = Math.max(0, (currentTx - prev.tx) / timeDelta);
+
+            // Update stored values
+            previousNetworkStats[containerId] = { rx: currentRx, tx: currentTx };
+
+            return { rxRate, txRate };
+        }
+
+        function formatNetworkCell(rx, tx, containerId, loading = false) {
+            if (loading) return loadingSpinner();
+            if (rx === null || rx === undefined) return '<span class="text-gray-500">—</span>';
+
+            const rates = containerId ? calculateNetworkRate(containerId, rx, tx) : null;
+
+            if (rates) {
+                return `<span class="text-blue-300">↓${formatBytes(rates.rxRate)}/s</span><br><span class="text-green-300">↑${formatBytes(rates.txRate)}/s</span>`;
+            }
+            // First fetch - show cumulative with indicator
+            return `<span class="text-blue-300">↓${formatBytes(rx)}</span><br><span class="text-green-300">↑${formatBytes(tx)}</span>`;
+        }
+
+        // Show notification function (uses shared toast system from api.js)
+        function showNotification(message, type = 'info') {
+            showToast(message, type);
+        }
+
+        // Filter state
+        let currentFilter = 'all';
+
+        // Store the container list
+        let containerList = [];
+
+        // Track if initial load has completed
+        let initialLoadComplete = false;
+
+        // Track previous network stats for rate calculation
+        let previousNetworkStats = {};
+        let lastFetchTime = null;
+
+        function getContainerNameById(id) {
+            const cached = containerList.find(c => c.id === id);
+            if (cached) return cached.name;
+
+            const row = document.querySelector(`tr[data-container-id="${id}"]`);
+            return row ? row.getAttribute('data-container-name') : id;
+        }
+
+        function getWebUIPort(container) {
+            if (!container.ports || container.ports.length === 0) {
+                return null;
+            }
+
+            const tcpPorts = container.ports.filter(port => port.protocol !== 'udp');
+
+            const hostTcp = tcpPorts.find(port => port.host_port);
+            if (hostTcp) {
+                return hostTcp.host_port;
+            }
+
+            const anyHost = container.ports.find(port => port.host_port);
+            if (anyHost) {
+                return anyHost.host_port;
+            }
+
+            const tcpContainer = tcpPorts.find(port => port.container_port);
+            if (tcpContainer) {
+                return tcpContainer.container_port;
+            }
+
+            const fallback = container.ports.find(port => port.container_port);
+            return fallback ? fallback.container_port : null;
+        }
+
+        // Track stats loading state
+        let statsLoading = false;
+
+        // Fetch Docker containers and update the table
+        async function fetchDockerContainers(forceFullRender = false, includeStats = false) {
+            const containerListEl = document.getElementById('container-list');
+            const lastUpdatedEl = document.getElementById('last-updated');
+
+            // Only show loading indicator on initial load
+            if (!initialLoadComplete) {
+                containerListEl.innerHTML = '<tr><td colspan="8" class="text-center py-4">Loading...</td></tr>';
+            }
+
+            try {
+                // First fetch: get containers without stats (fast)
+                const statsParam = includeStats ? 'true' : 'false';
+                const response = await apiFetch(`/api/containers?stats=${statsParam}`);
+                const newContainerList = await response.json();
+
+                // Update timestamp for network rate calculation
+                lastFetchTime = Date.now();
+
+                // Update last updated timestamp
+                const now = new Date();
+                lastUpdatedEl.textContent = `Last updated: ${formatDateTime(now)}`;
+
+                // Check if we need a full re-render or can do smart update
+                const needsFullRender = forceFullRender ||
+                    !initialLoadComplete ||
+                    hasContainerListChanged(containerList, newContainerList);
+
+                containerList = newContainerList;
+
+                if (needsFullRender) {
+                    renderContainers(!includeStats); // Pass true to show loading spinners
+                } else {
+                    updateContainerRows();
+                }
+
+                initialLoadComplete = true;
+
+                // Lazy load stats for running containers if not already included
+                if (!includeStats) {
+                    fetchContainerStats();
+                }
+            } catch (error) {
+                console.error('Error fetching Docker containers:', error);
+                if (!initialLoadComplete) {
+                    containerListEl.innerHTML = '<tr><td colspan="8" class="text-center py-4 text-red-500">Error loading containers</td></tr>';
+                }
+                showNotification('Error fetching containers', 'error');
+            }
+        }
+
+        // Fetch stats for running containers lazily
+        async function fetchContainerStats() {
+            const runningContainers = containerList.filter(c => c.status === 'running');
+            if (runningContainers.length === 0) return;
+
+            statsLoading = true;
+            const ids = runningContainers.map(c => c.id).join(',');
+
+            try {
+                const response = await apiFetch(`/api/containers/stats?ids=${ids}`);
+                const stats = await response.json();
+
+                // Update container list with stats
+                containerList.forEach(container => {
+                    const containerStats = stats[container.id];
+                    if (containerStats) {
+                        container.cpu_percent = containerStats.cpu_percent;
+                        container.memory_percent = containerStats.memory_percent;
+                        container.memory_used = containerStats.memory_used;
+                        container.memory_limit = containerStats.memory_limit;
+                        container.net_rx = containerStats.net_rx;
+                        container.net_tx = containerStats.net_tx;
+                    }
+                });
+
+                // Update the display
+                updateContainerRows();
+                lastFetchTime = Date.now();
+            } catch (error) {
+                console.error('Error fetching container stats:', error);
+            } finally {
+                statsLoading = false;
+            }
+        }
+
+        // Check if container list has structurally changed (added/removed containers)
+        function hasContainerListChanged(oldList, newList) {
+            if (oldList.length !== newList.length) return true;
+            const oldIds = new Set(oldList.map(c => c.id));
+            const newIds = new Set(newList.map(c => c.id));
+            for (const id of newIds) {
+                if (!oldIds.has(id)) return true;
+            }
+            return false;
+        }
+
+        // Update existing rows in-place without destroying DOM
+        function updateContainerRows() {
+            containerList.forEach(container => {
+                const row = document.querySelector(`tr[data-container-id="${container.id}"]`);
+                if (!row) return;
+
+                // Update status badge
+                const statusCell = row.querySelector('td:nth-child(3)');
+                if (statusCell) {
+                    const statusClass = container.status === 'running' ? 'status-running' :
+                        container.status === 'stopped' ? 'status-stopped' : 'status-other';
+                    statusCell.innerHTML = `
+                        <span class="px-2 py-1 text-white rounded ${statusClass}">
+                            ${container.status}
+                        </span>
+                    `;
+                }
+
+                // Update name cell (for update indicator)
+                const nameCell = row.querySelector('td:nth-child(1)');
+                if (nameCell) {
+                    nameCell.innerHTML = `${container.name}${container.update_available ? '<span class="ml-1 text-yellow-400" title="Update available">&#x21bb;</span>' : ''}`;
+                }
+
+                // Update stats cells
+                const cpuCell = row.querySelector('td[data-stat="cpu"]');
+                if (cpuCell) {
+                    cpuCell.innerHTML = formatCpuCell(container.cpu_percent);
+                }
+
+                const memoryCell = row.querySelector('td[data-stat="memory"]');
+                if (memoryCell) {
+                    memoryCell.innerHTML = formatMemoryCell(container.memory_percent, container.memory_used, container.memory_limit);
+                }
+
+                const networkCell = row.querySelector('td[data-stat="network"]');
+                if (networkCell) {
+                    networkCell.innerHTML = formatNetworkCell(container.net_rx, container.net_tx, container.id);
+                }
+
+                // Update button states
+                const startBtn = row.querySelector('button[data-action="start"]');
+                const stopBtn = row.querySelector('button[data-action="stop"]');
+
+                if (startBtn) {
+                    startBtn.disabled = container.status === 'running';
+                    startBtn.classList.toggle('opacity-50', container.status === 'running');
+                    startBtn.classList.toggle('cursor-not-allowed', container.status === 'running');
+                }
+
+                if (stopBtn) {
+                    const isStopped = ['stopped', 'exited'].includes(container.status);
+                    stopBtn.disabled = isStopped;
+                    stopBtn.classList.toggle('opacity-50', isStopped);
+                    stopBtn.classList.toggle('cursor-not-allowed', isStopped);
+                }
+            });
+        }
+
+        // Render containers based on filter
+        function renderContainers(showStatsLoading = false) {
+            const containerListEl = document.getElementById('container-list');
+            containerListEl.innerHTML = '';
+
+            // Filter containers based on current filter
+            const filteredContainers = containerList.filter(container => {
+                if (currentFilter === 'all') return true;
+                return container.status === currentFilter;
+            });
+
+            if (filteredContainers.length === 0) {
+                containerListEl.innerHTML = `<tr><td colspan="8" class="text-center py-4">No ${currentFilter} containers found</td></tr>`;
+                return;
+            }
+
+            // Special case for when Docker is not available
+            if (filteredContainers.length === 1 &&
+                (filteredContainers[0].status === 'unavailable' || filteredContainers[0].status === 'error')) {
+                const row = `
+                    <tr data-container-id="${filteredContainers[0].id}" data-container-name="${filteredContainers[0].name}">
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">${filteredContainers[0].name}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm">${filteredContainers[0].image}</td>
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            <span class="px-2 py-1 text-white rounded status-other">
+                                ${filteredContainers[0].status}
+                            </span>
+                        </td>
+                        <td class="px-4 py-4 whitespace-nowrap text-sm text-gray-500">—</td>
+                        <td class="px-4 py-4 whitespace-nowrap text-sm text-gray-500">—</td>
+                        <td class="px-4 py-4 whitespace-nowrap text-sm text-gray-500">—</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm">N/A</td>
+                        <td class="px-4 py-4 whitespace-nowrap text-sm">—</td>
+                    </tr>
+                `;
+                containerListEl.innerHTML = row;
+                return;
+            }
+
+            // Create rows for each container
+            filteredContainers.forEach(container => {
+                const statusClass = container.status === 'running' ? 'status-running' :
+                    container.status === 'stopped' ? 'status-stopped' : 'status-other';
+
+                // Show loading spinners for running containers that don't have stats yet
+                const isRunning = container.status === 'running';
+                const hasStats = container.cpu_percent !== null && container.cpu_percent !== undefined;
+                const loading = showStatsLoading && isRunning && !hasStats;
+
+                // Determine if the container has a Web UI
+                const port = getWebUIPort(container);
+                const webUILink = port
+                    ? `<a href="http://${window.location.hostname}:${port}" target="_blank" class="text-blue-500 hover:text-blue-400 underline">Open</a>`
+                    : 'N/A';
+
+                const row = `
+                    <tr data-container-id="${container.id}" data-container-name="${container.name}">
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                            ${container.name}
+                            ${container.update_available ? '<span class="ml-1 text-yellow-400" title="Update available">&#x21bb;</span>' : ''}
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-400 max-w-xs truncate" title="${container.image}">${container.image}</td>
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            <span class="px-2 py-1 text-white rounded ${statusClass}">
+                                ${container.status}
+                            </span>
+                        </td>
+                        <td class="px-4 py-4 whitespace-nowrap text-sm" data-stat="cpu">${formatCpuCell(container.cpu_percent, loading)}</td>
+                        <td class="px-4 py-4 whitespace-nowrap text-sm" data-stat="memory">${formatMemoryCell(container.memory_percent, container.memory_used, container.memory_limit, loading)}</td>
+                        <td class="px-4 py-4 whitespace-nowrap text-sm" data-stat="network">${formatNetworkCell(container.net_rx, container.net_tx, container.id, loading)}</td>
+                        <td class="px-4 py-4 whitespace-nowrap text-sm">${webUILink}</td>
+                        <td class="px-4 py-4 whitespace-nowrap text-sm">
+                            <div class="flex items-center gap-1">
+                                <button data-action="start" class="action-btn bg-green-700 hover:bg-green-600 text-white py-1 px-2 rounded text-xs ${container.status === 'running' ? 'opacity-50 cursor-not-allowed' : ''}"
+                                        onclick="controlContainer('${container.id}', 'start')"
+                                        ${container.status === 'running' ? 'disabled' : ''}>Start</button>
+                                <button data-action="stop" class="action-btn bg-yellow-700 hover:bg-yellow-600 text-white py-1 px-2 rounded text-xs ${['stopped', 'exited'].includes(container.status) ? 'opacity-50 cursor-not-allowed' : ''}"
+                                        onclick="controlContainer('${container.id}', 'stop')"
+                                        ${['stopped', 'exited'].includes(container.status) ? 'disabled' : ''}>Stop</button>
+                                <button data-action="restart" class="action-btn bg-blue-700 hover:bg-blue-600 text-white py-1 px-2 rounded text-xs"
+                                        onclick="controlContainer('${container.id}', 'restart')">Restart</button>
+                                <div class="relative">
+                                    <button class="bg-gray-600 hover:bg-gray-500 text-white py-1 px-2 rounded text-xs"
+                                            onclick="toggleDropdown('${container.id}')">⋮</button>
+                                    <div id="dropdown-${container.id}" class="dropdown-menu hidden absolute mt-1 w-36 bg-gray-700 rounded shadow-lg z-50 border border-gray-600">
+                                        <button class="w-full text-left px-3 py-2 text-xs hover:bg-gray-600 text-white rounded-t"
+                                                onclick="controlContainer('${container.id}', 'check_update'); closeDropdown('${container.id}')">Check Update</button>
+                                        <button class="w-full text-left px-3 py-2 text-xs hover:bg-gray-600 text-white"
+                                                onclick="controlContainer('${container.id}', 'update'); closeDropdown('${container.id}')">Update</button>
+                                        <button class="w-full text-left px-3 py-2 text-xs hover:bg-gray-600 text-white"
+                                                onclick="viewLogs('${container.id}'); closeDropdown('${container.id}')">Logs</button>
+                                        <button class="w-full text-left px-3 py-2 text-xs hover:bg-gray-600 text-white rounded-b"
+                                                onclick="openContainerNetworkTest('${container.id}'); closeDropdown('${container.id}')">Network Test</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+                containerListEl.innerHTML += row;
+            });
+        }
+
+        // Toggle dropdown menu
+        function toggleDropdown(containerId) {
+            // Close all other dropdowns first
+            document.querySelectorAll('[id^="dropdown-"]').forEach(el => {
+                if (el.id !== `dropdown-${containerId}`) {
+                    el.classList.add('hidden');
+                }
+            });
+            const dropdown = document.getElementById(`dropdown-${containerId}`);
+            dropdown.classList.toggle('hidden');
+        }
+
+        function closeDropdown(containerId) {
+            document.getElementById(`dropdown-${containerId}`).classList.add('hidden');
+        }
+
+        // Close dropdowns when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('[id^="dropdown-"]') && !e.target.closest('button')) {
+                document.querySelectorAll('[id^="dropdown-"]').forEach(el => el.classList.add('hidden'));
+            }
+        });
+
+        // Control Docker container (start/stop/restart)
+        async function controlContainer(id, action) {
+            const containerRow = document.querySelector(`tr[data-container-id="${id}"]`);
+            const containerName = containerRow ? containerRow.getAttribute('data-container-name') : id;
+
+            // Show loading state on the button
+            let actionBtn = null;
+            let originalText = '';
+            if (containerRow) {
+                actionBtn = containerRow.querySelector(`button[data-action="${action}"]`);
+                if (actionBtn) {
+                    originalText = actionBtn.textContent;
+                    actionBtn.disabled = true;
+                    actionBtn.classList.add('opacity-75');
+                    actionBtn.textContent = '...';
+                }
+            }
+
+            // Show toast immediately so user knows action started
+            const actionNames = {
+                'start': 'Starting',
+                'stop': 'Stopping',
+                'restart': 'Restarting',
+                'check_update': 'Checking',
+                'update': 'Updating'
+            };
+            showNotification(`${actionNames[action] || action} ${containerName}...`, 'info');
+
+            try {
+                const response = await fetch(`/api/containers/${id}/${action}`, { method: 'POST' });
+                const result = await response.json();
+
+                if (result.error) {
+                    showNotification(`Error: ${result.error}`, 'error');
+                } else {
+                    let message = `${containerName} ${action}ed successfully`;
+                    if (action === 'check_update') {
+                        message = result.update_available
+                            ? `${containerName}: Update available!`
+                            : `${containerName}: Up to date`;
+                    }
+                    if (action === 'update') message = `${containerName} update triggered`;
+                    showNotification(message, 'success');
+                }
+
+                // Refresh container status
+                if (containerRow) {
+                    await updateContainerStatus(id);
+                } else {
+                    await fetchDockerContainers(true);
+                }
+            } catch (error) {
+                console.error(`Error controlling container ${id}:`, error);
+                showNotification(`Error ${action}ing container: ${error.message}`, 'error');
+            } finally {
+                // Reset button state
+                if (actionBtn) {
+                    actionBtn.disabled = false;
+                    actionBtn.classList.remove('opacity-75');
+                    actionBtn.textContent = originalText;
+                }
+            }
+        }
+        
+        // Update a single container's status
+        async function updateContainerStatus(id) {
+            try {
+                const response = await apiFetch('/api/containers');
+                const containers = await response.json();
+                lastFetchTime = Date.now();
+                const container = containers.find(c => c.id === id);
+                
+                if (container && document.querySelector(`tr[data-container-id="${id}"]`)) {
+                    const row = document.querySelector(`tr[data-container-id="${id}"]`);
+                    const nameCell = row.querySelector('td:nth-child(1)');
+                    const statusCell = row.querySelector('td:nth-child(3)');
+                    
+                    const statusClass = container.status === 'running' ? 'status-running' :
+                        container.status === 'stopped' ? 'status-stopped' : 'status-other';
+                    
+                    nameCell.innerHTML = `${container.name}${container.update_available ? '<span class="ml-1 text-yellow-400" title="Update available">&#x21bb;</span>' : ''}`;
+
+                    statusCell.innerHTML = `
+                        <span class="px-2 py-1 text-white rounded ${statusClass}">
+                            ${container.status}
+                        </span>
+                    `;
+
+                    // Update stats cells
+                    const cpuCell = row.querySelector('td[data-stat="cpu"]');
+                    if (cpuCell) cpuCell.innerHTML = formatCpuCell(container.cpu_percent);
+
+                    const memoryCell = row.querySelector('td[data-stat="memory"]');
+                    if (memoryCell) memoryCell.innerHTML = formatMemoryCell(container.memory_percent, container.memory_used, container.memory_limit);
+
+                    const networkCell = row.querySelector('td[data-stat="network"]');
+                    if (networkCell) networkCell.innerHTML = formatNetworkCell(container.net_rx, container.net_tx, container.id);
+
+                    // Update the container in our cached list
+                    for (let i = 0; i < containerList.length; i++) {
+                        if (containerList[i].id === id) {
+                            containerList[i] = container;
+                            break;
+                        }
+                    }
+                    
+                    // Re-render if filter might exclude this container now
+                    if (currentFilter !== 'all' && container.status !== currentFilter) {
+                        renderContainers();
+                    } else {
+                        // Just update button states
+                        const startButton = row.querySelector('button[data-action="start"]');
+                        const stopButton = row.querySelector('button[data-action="stop"]');
+                        const restartButton = row.querySelector('button[data-action="restart"]');
+                        const checkButton = row.querySelector('button[data-action="check_update"]');
+                        const updateButton = row.querySelector('button[data-action="update"]');
+                        const logsButton = row.querySelector('button[data-action="logs"]');
+                        const networkButton = row.querySelector('button[data-action="network-test"]');
+
+                        if (startButton) {
+                            startButton.disabled = container.status === 'running';
+                            startButton.classList.toggle('opacity-50', container.status === 'running');
+                            startButton.classList.toggle('cursor-not-allowed', container.status === 'running');
+                        }
+                        
+                        if (stopButton) {
+                            const isStopped = ['stopped', 'exited'].includes(container.status);
+                            stopButton.disabled = isStopped;
+                            stopButton.classList.toggle('opacity-50', isStopped);
+                            stopButton.classList.toggle('cursor-not-allowed', isStopped);
+                        }
+
+                        if (restartButton) restartButton.disabled = false;
+                        if (checkButton) checkButton.disabled = false;
+                        if (updateButton) updateButton.disabled = false;
+                        if (logsButton) logsButton.disabled = false;
+                        if (networkButton) networkButton.disabled = false;
+                    }
+                }
+            } catch (error) {
+                console.error(`Error updating container status:`, error);
+                showNotification('Error updating container status', 'error');
+            }
+        }
+
+        async function viewLogs(id) {
+            const modal = document.getElementById('logs-modal');
+            const content = document.getElementById('logs-content');
+            const title = document.getElementById('logs-modal-title');
+            const containerName = getContainerNameById(id);
+
+            title.textContent = `Logs for ${containerName}`;
+            content.textContent = 'Loading logs...';
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+
+            try {
+                const response = await fetch(`/api/containers/${id}/logs`);
+                const result = await response.json();
+
+                if (result.error) {
+                    content.textContent = `Error: ${result.error}`;
+                } else {
+                    const nameFromServer = result.container || containerName;
+                    title.textContent = `Logs for ${nameFromServer}`;
+                    content.textContent = result.logs || 'No logs available.';
+                }
+            } catch (error) {
+                console.error('Error fetching logs:', error);
+                content.textContent = `Error loading logs: ${error.message}`;
+            }
+        }
+
+        function closeLogsModal() {
+            const modal = document.getElementById('logs-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        async function openContainerNetworkTest(id) {
+            const modal = document.getElementById('container-network-modal');
+            const title = document.getElementById('container-network-title');
+            const statusEl = document.getElementById('container-network-status');
+            const localEl = document.getElementById('container-network-local');
+            const publicEl = document.getElementById('container-network-public');
+            const outputEl = document.getElementById('container-network-output');
+            const methodEl = document.getElementById('container-network-method');
+
+            const containerName = getContainerNameById(id);
+            title.textContent = `Network Test: ${containerName}`;
+            statusEl.textContent = 'Running test...';
+            statusEl.classList.remove('text-green-400', 'text-red-400');
+            localEl.textContent = '-';
+            publicEl.textContent = '-';
+            methodEl.textContent = '-';
+            outputEl.textContent = 'Collecting diagnostics...';
+
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+
+            try {
+                const response = await fetch(`/api/containers/${id}/network-test`, { method: 'POST' });
+                const result = await response.json();
+
+                if (!response.ok || result.error) {
+                    const message = result.error || 'Unable to run network test.';
+                    statusEl.textContent = 'Error';
+                    statusEl.classList.add('text-red-400');
+                    outputEl.textContent = message;
+                    showNotification(message, 'error');
+                    return;
+                }
+
+                statusEl.textContent = result.ping_success ? 'Success' : 'Failed';
+                statusEl.classList.toggle('text-green-400', !!result.ping_success);
+                statusEl.classList.toggle('text-red-400', !result.ping_success);
+                localEl.textContent = result.local_ip || 'Unavailable';
+                publicEl.textContent = result.public_ip || 'Unavailable';
+                methodEl.textContent = result.probe_method || 'unknown';
+                outputEl.textContent = result.ping_output || 'No output provided.';
+
+                showNotification(`Network test ${result.ping_success ? 'passed' : 'completed'}`, result.ping_success ? 'success' : 'info');
+            } catch (error) {
+                console.error('Container network test failed:', error);
+                statusEl.textContent = 'Error';
+                statusEl.classList.add('text-red-400');
+                outputEl.textContent = error.message;
+                showNotification('Network test failed', 'error');
+            }
+        }
+
+        async function runNetworkTest() {
+            const card = document.getElementById('network-test-card');
+            const statusEl = document.getElementById('network-test-status');
+            const outputEl = document.getElementById('network-test-output');
+            const localEl = document.getElementById('network-test-local');
+            const publicEl = document.getElementById('network-test-public');
+
+            card.classList.remove('hidden');
+            statusEl.textContent = 'Running test...';
+            statusEl.classList.remove('text-green-400', 'text-red-400');
+            outputEl.textContent = 'Executing ping...';
+            localEl.textContent = '-';
+            publicEl.textContent = '-';
+
+            try {
+                const response = await fetch('/api/network-test', { method: 'POST' });
+                const result = await response.json();
+
+                statusEl.textContent = result.ping_success ? 'Ping successful' : 'Ping failed';
+                statusEl.classList.toggle('text-green-400', !!result.ping_success);
+                statusEl.classList.toggle('text-red-400', !result.ping_success);
+                outputEl.textContent = result.ping_output || 'No ping output returned.';
+                localEl.textContent = result.local_ip || 'Unavailable';
+                publicEl.textContent = result.public_ip || 'Unavailable';
+
+                showNotification('Network test complete', result.ping_success ? 'success' : 'info');
+            } catch (error) {
+                console.error('Network test error:', error);
+                statusEl.textContent = 'Network test failed';
+                statusEl.classList.add('text-red-400');
+                outputEl.textContent = error.message;
+                showNotification('Network test failed', 'error');
+            }
+        }
+
+        // Logs modal controls
+        document.getElementById('logs-modal-close').addEventListener('click', closeLogsModal);
+        document.getElementById('logs-modal').addEventListener('click', function(event) {
+            if (event.target === this) {
+                closeLogsModal();
+            }
+        });
+
+        // Container network modal controls
+        document.getElementById('container-network-close').addEventListener('click', () => {
+            const modal = document.getElementById('container-network-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        });
+        document.getElementById('container-network-modal').addEventListener('click', function(event) {
+            if (event.target === this) {
+                this.classList.add('hidden');
+                this.classList.remove('flex');
+            }
+        });
+
+        // Network test controls
+        const networkTestButton = document.getElementById('network-test-button');
+        const hideNetworkTestButton = document.getElementById('hide-network-test');
+        networkTestButton.addEventListener('click', function() {
+            this.classList.add('animate-pulse');
+            runNetworkTest().finally(() => this.classList.remove('animate-pulse'));
+        });
+        hideNetworkTestButton.addEventListener('click', () => {
+            document.getElementById('network-test-card').classList.add('hidden');
+        });
+
+        // Set up filter buttons
+        document.getElementById('filter-all').addEventListener('click', function() {
+            setFilter('all', this);
+        });
+        
+        document.getElementById('filter-running').addEventListener('click', function() {
+            setFilter('running', this);
+        });
+        
+        document.getElementById('filter-stopped').addEventListener('click', function() {
+            setFilter('stopped', this);
+        });
+        
+        // Set filter and update UI
+        function setFilter(filter, button) {
+            if (currentFilter === filter) return;
+            
+            currentFilter = filter;
+            
+            // Update button styles
+            document.querySelectorAll('#filter-all, #filter-running, #filter-stopped').forEach(btn => {
+                btn.classList.remove('coraline-button');
+                btn.classList.add('bg-gray-700', 'hover:bg-gray-600');
+            });
+            
+            button.classList.remove('bg-gray-700', 'hover:bg-gray-600');
+            button.classList.add('coraline-button');
+            
+            // Re-render containers with the new filter
+            renderContainers();
+        }
+        
+        // Set up refresh button
+        document.getElementById('refresh-button').addEventListener('click', function() {
+            this.classList.add('animate-pulse');
+            fetchDockerContainers(true).then(() => {
+                this.classList.remove('animate-pulse');
+            });
+        });
+        
+        // Expose handlers referenced by dynamic row button onclick attributes.
+        window.toggleDropdown = toggleDropdown;
+        window.closeDropdown = closeDropdown;
+        window.controlContainer = controlContainer;
+        window.viewLogs = viewLogs;
+        window.openContainerNetworkTest = openContainerNetworkTest;
+
+        async function initContainersPage() {
+            const authenticated = await ensureAuthenticated();
+            if (!authenticated) return;
+
+            await fetchDockerContainers();
+
+            // Periodic refresh with stats (after initial load, stats are included).
+            setInterval(() => fetchDockerContainers(false, true), 10000);
+        }
+
+        initContainersPage();
