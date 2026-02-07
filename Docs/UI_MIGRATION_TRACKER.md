@@ -48,8 +48,8 @@
 - [x] Preserve app install flow and status feedback.
 
 ### 7) Settings (`static/settings.html`)
-- [ ] Build settings sections with reusable field groups.
-- [ ] Preserve save/reset and plugin toggles.
+- [x] Build settings sections with reusable field groups.
+- [x] Preserve save/reset and plugin toggles.
 
 ### 8) Storage/Network/Tools pages
 - [ ] Migrate `pools`, `mounts`, `shares`, `plugins`.
