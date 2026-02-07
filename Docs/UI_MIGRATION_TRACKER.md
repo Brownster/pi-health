@@ -11,8 +11,8 @@
 - [x] Choose final UI stack (Flask + static HTML + vanilla ES modules + shared CSS tokens).
 - [x] Establish design tokens (color, spacing, radius, typography).
 - [x] Create shared API client baseline (`static/js/lib/http.js`).
-- [ ] Create shared layout shell (header/nav/content/footer).
-- [ ] Create reusable shared state components (`LoadingState`, `ErrorState`, `EmptyState`).
+- [x] Create shared layout shell (header/nav/content/footer).
+- [x] Create reusable shared state components (`LoadingState`, `ErrorState`, `EmptyState`).
 - [ ] Add UI smoke tests for core routes.
 
 ## Page checklist
