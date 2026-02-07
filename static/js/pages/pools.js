@@ -1,0 +1,1120 @@
+import { ensureAuthenticated, logoutToLogin } from '/js/lib/auth.js';
+import { ensureDashboardShell } from '/js/lib/layout.js';
+import { clearClientSession } from '/js/lib/session.js';
+
+ensureDashboardShell({
+    notificationClass: 'fixed top-4 right-4 z-50 w-80 flex flex-col items-end',
+    includeFooter: true,
+});
+
+async function apiFetch(url, options = {}) {
+    const response = await fetch(url, options);
+    if (response.status === 401) {
+        clearClientSession();
+        window.location.href = '/login.html';
+        throw new Error('Authentication required');
+    }
+    return response;
+}
+
+let poolPlugins = [];
+let pluginDetailsMap = {};
+let pendingCommand = null;
+let currentPoolFilter = "all";
+let currentPlugin = null;
+let currentPluginSchema = null;
+let snapraidLogTagsByPlugin = {};
+let snapraidProgressState = {};
+let snapraidSyncContext = null;
+
+function showNotification(message, type = 'info') {
+    const area = document.getElementById('notification-area');
+    const notification = document.createElement('div');
+    notification.className = 'p-3 mb-2 rounded shadow-lg transform transition-all duration-300 opacity-0';
+    if (type === 'success') notification.classList.add('bg-green-600');
+    else if (type === 'error') notification.classList.add('bg-red-600');
+    else notification.classList.add('bg-blue-600');
+    notification.textContent = message;
+    area.appendChild(notification);
+    setTimeout(() => notification.classList.replace('opacity-0', 'opacity-100'), 10);
+    setTimeout(() => {
+        notification.classList.replace('opacity-100', 'opacity-0');
+        setTimeout(() => notification.remove(), 300);
+    }, 3000);
+}
+
+function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function encodeDataAttr(value) {
+    return escapeHtml(String(value ?? ''));
+}
+
+async function loadPage() {
+    const res = await apiFetch('/api/storage/plugins');
+    const data = await res.json();
+
+    // Filter to storage-category plugins that are enabled
+    poolPlugins = (data.plugins || []).filter(p =>
+        p.category === 'storage' && p.enabled
+    );
+
+    if (poolPlugins.length && currentPoolFilter !== "all" && !poolPlugins.find(p => p.id === currentPoolFilter)) {
+        currentPoolFilter = poolPlugins[0].id;
+    }
+    await renderPoolPluginSections();
+}
+
+async function renderPoolPluginSections() {
+    const container = document.getElementById('pool-plugins');
+
+    if (!poolPlugins.length) {
+        container.innerHTML = `
+            <div class="text-center py-10">
+                <p class="text-gray-500 mb-2">No storage plugins enabled.</p>
+                <a href="/plugins.html" class="text-purple-400 hover:underline">Enable plugins &rarr;</a>
+            </div>
+        `;
+        updatePoolFilterVisibility(false);
+        return;
+    }
+
+    let html = '';
+    pluginDetailsMap = {};
+    const recoveryMap = {};
+    for (const plugin of poolPlugins) {
+        // Fetch full plugin details
+        let details = { status: { status: 'unknown' }, commands: [] };
+        try {
+            const res = await apiFetch(`/api/storage/plugins/${plugin.id}`);
+            details = await res.json();
+            pluginDetailsMap[plugin.id] = details;
+        } catch (e) {
+            console.error(`Failed to load ${plugin.id}:`, e);
+        }
+        if (plugin.id === 'snapraid') {
+            try {
+                const res = await apiFetch(`/api/storage/plugins/${plugin.id}/recovery`);
+                recoveryMap[plugin.id] = await res.json();
+            } catch (e) {
+                recoveryMap[plugin.id] = null;
+            }
+        }
+
+        const statusClass = details.status?.status === 'healthy' ? 'status-healthy' :
+                           details.status?.status === 'degraded' ? 'status-degraded' :
+                           details.status?.status === 'error' ? 'status-error' : 'status-unconfigured';
+
+        html += `
+            <section class="pool-plugin-section bg-gray-800 border border-purple-900/40 rounded-lg p-5 mb-6" data-plugin-id="${plugin.id}">
+                <div class="flex items-center justify-between mb-4">
+                    <div>
+                        <h3 class="text-lg font-semibold">${escapeHtml(plugin.name)}</h3>
+                        <p class="text-sm text-gray-400">${escapeHtml(plugin.description)}</p>
+                    </div>
+                    <span class="status-pill ${statusClass}">${escapeHtml(details.status?.status || 'unknown')}</span>
+                </div>
+
+                ${!plugin.installed ? `
+                    <div class="p-3 bg-yellow-900/20 border border-yellow-800 rounded mb-4">
+                        <p class="text-sm text-yellow-300 mb-1">Install required packages:</p>
+                        <code class="text-xs bg-gray-900 px-2 py-1 rounded">${escapeHtml(plugin.install_instructions)}</code>
+                    </div>
+                ` : `
+                    <!-- Plugin status summary -->
+                    <div class="bg-gray-900 rounded p-4 mb-4">
+                        ${renderPluginStatus(plugin.id, details.status, recoveryMap[plugin.id])}
+                    </div>
+
+                    <!-- Plugin commands -->
+                    <div class="flex flex-wrap gap-2">
+                        ${(details.commands || []).map(cmd => `
+                            <button
+                                    type="button"
+                                    class="coraline-button py-2 px-4 rounded text-sm js-run-command"
+                                    data-plugin-id="${encodeDataAttr(plugin.id)}"
+                                    data-command-id="${encodeDataAttr(cmd.id)}"
+                                    data-command-name="${encodeDataAttr(cmd.name)}"
+                                    data-command-params="${encodeDataAttr(JSON.stringify(cmd.params || []))}">
+                                ${escapeHtml(cmd.name)}
+                            </button>
+                        `).join('')}
+                        ${(plugin.id === 'snapraid' && recoveryMap[plugin.id]?.recovery_options?.length) ? `
+                            ${recoveryMap[plugin.id].recovery_options.map(option => `
+                                <button
+                                        type="button"
+                                        class="py-2 px-4 rounded text-sm border border-red-700 text-red-300 hover:bg-red-900 js-run-recovery"
+                                        data-command-id="${encodeDataAttr(option.command)}"
+                                        data-command-params="${encodeDataAttr(JSON.stringify(option.params || {}))}"
+                                        data-command-label="${encodeDataAttr(option.name)}">
+                                    ${escapeHtml(option.name)}
+                                </button>
+                            `).join('')}
+                        ` : ''}
+                        <button
+                                type="button"
+                                class="py-2 px-4 rounded text-sm border border-purple-700 text-purple-300 hover:bg-purple-900 js-open-config"
+                                data-plugin-id="${encodeDataAttr(plugin.id)}">
+                            Configure
+                        </button>
+                    </div>
+                `}
+            </section>
+        `;
+    }
+
+    container.innerHTML = html;
+    bindPoolPluginActions();
+    renderPoolFilterOptions();
+    applyPoolFilter();
+}
+
+function parseDataJson(value, fallback) {
+    if (!value) return fallback;
+    try {
+        return JSON.parse(value);
+    } catch (err) {
+        return fallback;
+    }
+}
+
+function bindPoolPluginActions() {
+    const container = document.getElementById('pool-plugins');
+    if (!container) return;
+
+    container.querySelectorAll('.js-run-command').forEach(button => {
+        button.addEventListener('click', async () => {
+            const pluginId = button.dataset.pluginId || '';
+            const commandId = button.dataset.commandId || '';
+            const commandName = button.dataset.commandName || 'Command';
+            const params = parseDataJson(button.dataset.commandParams, []);
+            await runPluginCommand(pluginId, commandId, commandName, params);
+        });
+    });
+
+    container.querySelectorAll('.js-run-recovery').forEach(button => {
+        button.addEventListener('click', async () => {
+            const commandId = button.dataset.commandId || '';
+            const label = button.dataset.commandLabel || 'Recovery';
+            const params = parseDataJson(button.dataset.commandParams, {});
+            await runSnapraidRecovery(commandId, params, label);
+        });
+    });
+
+    container.querySelectorAll('.js-open-config').forEach(button => {
+        button.addEventListener('click', () => {
+            const pluginId = button.dataset.pluginId || '';
+            if (pluginId) {
+                openConfigModal(pluginId);
+            }
+        });
+    });
+}
+
+function renderPoolFilterOptions() {
+    const select = document.getElementById('pool-filter');
+    if (!select) return;
+    const options = [
+        '<option value="all">All</option>',
+        ...poolPlugins.map(plugin => `<option value="${plugin.id}">${escapeHtml(plugin.name)}</option>`)
+    ];
+    select.innerHTML = options.join('');
+    select.value = currentPoolFilter;
+    updatePoolFilterVisibility(poolPlugins.length > 1);
+}
+
+function updatePoolFilterVisibility(show) {
+    const wrap = document.getElementById('pool-filter-wrap');
+    if (!wrap) return;
+    wrap.classList.toggle('hidden', !show);
+}
+
+function setPoolFilter(filterValue) {
+    currentPoolFilter = filterValue || 'all';
+    applyPoolFilter();
+}
+
+function applyPoolFilter() {
+    const sections = document.querySelectorAll('.pool-plugin-section');
+    sections.forEach(section => {
+        const pluginId = section.getAttribute('data-plugin-id');
+        const visible = currentPoolFilter === 'all' || currentPoolFilter === pluginId;
+        section.classList.toggle('hidden', !visible);
+    });
+}
+
+function renderPluginStatus(pluginId, status, recovery) {
+    if (!status) return '<p class="text-gray-500">No status available</p>';
+
+    if (pluginId === 'snapraid') {
+        const logTags = snapraidLogTagsByPlugin[pluginId]?.summary || {};
+        const summaryRows = [
+            ['Added', logTags.added],
+            ['Removed', logTags.removed],
+            ['Updated', logTags.updated],
+            ['Moved', logTags.moved],
+            ['Copied', logTags.copied],
+            ['Restored', logTags.restored],
+        ].filter(([, value]) => value !== undefined);
+
+        const summaryHtml = summaryRows.length ? `
+            <div class="mt-3 border-t border-purple-900/40 pt-3">
+                <p class="text-xs text-gray-400 mb-2">Last command summary</p>
+                <div class="grid grid-cols-2 md:grid-cols-3 gap-2 text-xs">
+                    ${summaryRows.map(([label, value]) => `
+                        <div class="bg-gray-950 rounded px-2 py-1">
+                            <span class="text-gray-400">${escapeHtml(String(label))}:</span>
+                            <span class="ml-1 text-gray-200">${escapeHtml(String(value))}</span>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        ` : '';
+
+        const logLink = status?.details?.last_log_path ? `
+            <button onclick="viewSnapraidLog()" class="mt-3 text-xs text-purple-300 hover:text-purple-200">
+                View last log
+            </button>
+        ` : '';
+
+        const recoveryHtml = recovery?.recoverable === false ? `
+            <p class="mt-2 text-sm text-red-400">${escapeHtml(recovery.error || 'Recovery unavailable')}</p>
+        ` : (recovery && (recovery.missing_files || recovery.damaged_files)) ? `
+            <p class="mt-2 text-sm text-yellow-300">
+                Missing: ${recovery.missing_files || 0} • Damaged: ${recovery.damaged_files || 0}
+            </p>
+        ` : '';
+
+        // SnapRAID specific status
+        return `
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                <div>
+                    <span class="text-gray-400">Status:</span>
+                    <span class="ml-2 ${status.status === 'healthy' ? 'text-green-400' : 'text-yellow-400'}">${escapeHtml(status.status || 'Unknown')}</span>
+                </div>
+                ${status.last_sync ? `
+                <div>
+                    <span class="text-gray-400">Last Sync:</span>
+                    <span class="ml-2">${escapeHtml(status.last_sync)}</span>
+                </div>
+                ` : ''}
+                ${status.last_scrub ? `
+                <div>
+                    <span class="text-gray-400">Last Scrub:</span>
+                    <span class="ml-2">${escapeHtml(status.last_scrub)}</span>
+                </div>
+                ` : ''}
+                ${status.data_disks !== undefined ? `
+                <div>
+                    <span class="text-gray-400">Data Disks:</span>
+                    <span class="ml-2">${escapeHtml(String(status.data_disks))}</span>
+                </div>
+                ` : ''}
+            </div>
+            ${status.message ? `<p class="mt-2 text-sm text-gray-400">${escapeHtml(status.message)}</p>` : ''}
+            ${summaryHtml}
+            ${recoveryHtml}
+            ${logLink}
+        `;
+    } else if (pluginId === 'mergerfs') {
+        // MergerFS specific status
+        const pools = status?.details?.pools || [];
+        const poolCards = pools.map(pool => {
+            const mounted = pool.mounted ? 'Mounted' : 'Not mounted';
+            const usage = pool.used_percent !== undefined ? `${pool.used_percent}%` : 'n/a';
+            return `
+                <div class="bg-gray-950 border border-purple-900/40 rounded p-3">
+                    <div class="flex items-center justify-between text-sm">
+                        <span class="text-gray-300 font-medium">${escapeHtml(pool.name || 'Unnamed')}</span>
+                        <span class="${pool.mounted ? 'text-green-400' : 'text-yellow-400'}">${mounted}</span>
+                    </div>
+                    <div class="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs text-gray-400">
+                        <div>Mount: <span class="text-gray-200">${escapeHtml(pool.mount_point || 'n/a')}</span></div>
+                        <div>Branches: <span class="text-gray-200">${pool.branches ?? 'n/a'}</span></div>
+                        <div>Used: <span class="text-gray-200">${usage}</span></div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        return `
+            <div class="text-sm mb-3">
+                <span class="text-gray-400">Status:</span>
+                <span class="ml-2 ${status.status === 'healthy' ? 'text-green-400' : 'text-yellow-400'}">${escapeHtml(status.status || 'Unknown')}</span>
+            </div>
+            ${poolCards ? `<div class="space-y-3">${poolCards}</div>` : '<p class="text-sm text-gray-500">No pools configured</p>'}
+            ${status.message ? `<p class="mt-2 text-sm text-gray-400">${escapeHtml(status.message)}</p>` : ''}
+        `;
+    }
+
+    // Generic status
+    return `<p class="text-sm text-gray-400">${escapeHtml(status.message || 'Status OK')}</p>`;
+}
+
+// ========== Command Execution ==========
+async function runPluginCommand(pluginId, commandId, commandName, params = []) {
+    if (pluginId === 'snapraid' && commandId === 'sync') {
+        await prepareSnapraidSync(pluginId, commandName);
+        return;
+    }
+    if (Array.isArray(params) && params.includes('pool_name')) {
+        openCommandParamModal(pluginId, commandId, commandName);
+        return;
+    }
+    await executePluginCommand(pluginId, commandId, commandName, {});
+}
+
+async function runSnapraidRecovery(commandId, params, label) {
+    if (!confirm(`${label}? This will attempt recovery using parity data.`)) {
+        return;
+    }
+    await executePluginCommand('snapraid', commandId, label, params || {});
+}
+
+async function viewSnapraidLog() {
+    const modal = document.getElementById('output-modal');
+    const title = document.getElementById('output-modal-title');
+    const content = document.getElementById('output-content');
+    const progressPanel = document.getElementById('snapraid-progress');
+
+    title.textContent = 'SnapRAID Log';
+    content.textContent = 'Loading log...';
+    modal.classList.remove('hidden');
+    progressPanel.classList.add('hidden');
+
+    try {
+        const res = await apiFetch('/api/storage/plugins/snapraid/logs/latest');
+        if (!res.ok) {
+            content.textContent = 'No log available.';
+            return;
+        }
+        const text = await res.text();
+        const truncated = res.headers.get('X-Log-Truncated') === 'true';
+        content.textContent = text + (truncated ? '\n\n--- Log truncated ---\n' : '');
+    } catch (e) {
+        content.textContent = `Failed to load log: ${e.message}`;
+    }
+}
+
+async function executePluginCommand(pluginId, commandId, commandName, payload) {
+    const modal = document.getElementById('output-modal');
+    const title = document.getElementById('output-modal-title');
+    const content = document.getElementById('output-content');
+    const progressPanel = document.getElementById('snapraid-progress');
+
+    title.textContent = `Running: ${commandName}`;
+    content.textContent = '';
+    modal.classList.remove('hidden');
+    resetSnapraidProgress();
+    if (pluginId === 'snapraid') {
+        progressPanel.classList.remove('hidden');
+    } else {
+        progressPanel.classList.add('hidden');
+    }
+
+    try {
+        const requestPayload = payload || {};
+        if (pluginId === 'snapraid') {
+            requestPayload.log_tags = true;
+            requestPayload.stream_tags = true;
+        }
+        const res = await apiFetch(`/api/storage/plugins/${pluginId}/commands/${commandId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestPayload)
+        });
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            const chunk = decoder.decode(value);
+            const lines = chunk.split('\n');
+
+            for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                    try {
+                        const data = JSON.parse(line.slice(6));
+                        if (data.type === 'output') {
+                            content.textContent += data.line + '\n';
+                            content.scrollTop = content.scrollHeight;
+                        } else if (data.type === 'tag') {
+                            if (pluginId === 'snapraid') {
+                                updateSnapraidProgressFromTagEvent(data);
+                            }
+                        } else if (data.type === 'complete') {
+                            content.textContent += `\n--- ${data.success ? 'Completed successfully' : 'Failed'} ---\n`;
+                            if (data.message) {
+                                content.textContent += data.message + '\n';
+                            }
+                            if (data.data && data.data.log_tags && pluginId === 'snapraid') {
+                                snapraidLogTagsByPlugin[pluginId] = data.data.log_tags;
+                                updateSnapraidProgressFromSummary(data.data.log_tags);
+                            }
+                            loadPage(); // Refresh status
+                        } else if (data.type === 'error') {
+                            content.textContent += `\nERROR: ${data.error}\n`;
+                        }
+                    } catch (e) {
+                        // Ignore parse errors
+                    }
+                }
+            }
+        }
+    } catch (e) {
+        content.textContent += `\nConnection error: ${e.message}\n`;
+    }
+}
+
+function closeOutputModal() {
+    document.getElementById('output-modal').classList.add('hidden');
+}
+
+function resetSnapraidProgress() {
+    snapraidProgressState = {
+        percent: 0,
+        meta: '',
+        summary: ''
+    };
+    const bar = document.getElementById('snapraid-progress-bar');
+    const percent = document.getElementById('snapraid-progress-percent');
+    const meta = document.getElementById('snapraid-progress-meta');
+    const summary = document.getElementById('snapraid-progress-summary');
+    if (bar) bar.style.width = '0%';
+    if (percent) percent.textContent = '0%';
+    if (meta) meta.textContent = '';
+    if (summary) summary.textContent = '';
+}
+
+function updateSnapraidProgressFromTagEvent(event) {
+    if (!event || !event.name || !Array.isArray(event.values)) return;
+
+    if (event.name === 'run' && event.values[0] === 'pos') {
+        const fields = event.values.slice(1);
+        const percent = parseInt(fields[3], 10);
+        const eta = parseInt(fields[4], 10);
+        const speed = parseFloat(fields[5]);
+        if (!Number.isNaN(percent)) {
+            snapraidProgressState.percent = percent;
+        }
+        const metaParts = [];
+        if (!Number.isNaN(speed)) metaParts.push(`Speed ${speed} MiB/s`);
+        if (!Number.isNaN(eta)) metaParts.push(`ETA ${formatSeconds(eta)}`);
+        snapraidProgressState.meta = metaParts.join(' • ');
+        renderSnapraidProgress();
+        return;
+    }
+
+    if (event.name === 'summary') {
+        updateSnapraidProgressFromSummary({ summary: buildSummaryFromTag(event) });
+    }
+}
+
+function updateSnapraidProgressFromSummary(tagData) {
+    const summary = tagData?.summary || {};
+    const pieces = [];
+    if (summary.added !== undefined) pieces.push(`Added ${summary.added}`);
+    if (summary.removed !== undefined) pieces.push(`Removed ${summary.removed}`);
+    if (summary.updated !== undefined) pieces.push(`Updated ${summary.updated}`);
+    if (summary.moved !== undefined) pieces.push(`Moved ${summary.moved}`);
+    if (summary.copied !== undefined) pieces.push(`Copied ${summary.copied}`);
+    if (summary.restored !== undefined) pieces.push(`Restored ${summary.restored}`);
+    if (summary.exit) pieces.push(`Exit ${summary.exit}`);
+    snapraidProgressState.summary = pieces.join(' • ');
+    renderSnapraidProgress();
+}
+
+function buildSummaryFromTag(parsed) {
+    const summary = {};
+    if (parsed.values.length < 2) return summary;
+    const key = parsed.values[0];
+    const value = parsed.values[1];
+    summary[key] = Number.isNaN(Number(value)) ? value : parseInt(value, 10);
+    return summary;
+}
+
+function renderSnapraidProgress() {
+    const bar = document.getElementById('snapraid-progress-bar');
+    const percent = document.getElementById('snapraid-progress-percent');
+    const meta = document.getElementById('snapraid-progress-meta');
+    const summary = document.getElementById('snapraid-progress-summary');
+    if (bar) bar.style.width = `${snapraidProgressState.percent || 0}%`;
+    if (percent) percent.textContent = `${snapraidProgressState.percent || 0}%`;
+    if (meta) meta.textContent = snapraidProgressState.meta || '';
+    if (summary) summary.textContent = snapraidProgressState.summary || '';
+}
+
+function formatSeconds(seconds) {
+    if (!Number.isFinite(seconds) || seconds < 0) return '0s';
+    const hrs = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+    if (hrs > 0) return `${hrs}h ${mins}m`;
+    if (mins > 0) return `${mins}m ${secs}s`;
+    return `${secs}s`;
+}
+
+async function prepareSnapraidSync(pluginId, commandName) {
+    const summary = await fetchSnapraidDiffSummary(pluginId);
+    snapraidSyncContext = { pluginId, commandName, summary };
+    const summaryEl = document.getElementById('snapraid-sync-summary');
+    const warningEl = document.getElementById('snapraid-sync-warning');
+
+    const rows = buildSnapraidSummaryRows(summary);
+    summaryEl.innerHTML = rows.length ? rows.map(row => `
+        <div class="bg-gray-950 rounded px-2 py-1">
+            <span class="text-gray-400">${escapeHtml(String(row.label))}:</span>
+            <span class="ml-1 text-gray-200">${escapeHtml(String(row.value))}</span>
+        </div>
+    `).join('') : '<p class="text-gray-500 col-span-2">No summary available</p>';
+
+    const warning = buildSnapraidSyncWarning(pluginId, summary);
+    if (warning) {
+        warningEl.textContent = warning;
+        warningEl.classList.remove('hidden');
+    } else {
+        warningEl.textContent = '';
+        warningEl.classList.add('hidden');
+    }
+
+    document.getElementById('snapraid-sync-modal').classList.remove('hidden');
+}
+
+function buildSnapraidSummaryRows(summary) {
+    if (!summary) return [];
+    const rows = [];
+    const keys = ['added', 'removed', 'updated', 'moved', 'copied', 'restored'];
+    keys.forEach(key => {
+        if (summary[key] !== undefined) {
+            rows.push({ label: key.charAt(0).toUpperCase() + key.slice(1), value: summary[key] });
+        }
+    });
+    if (summary.exit) {
+        rows.push({ label: 'Exit', value: summary.exit });
+    }
+    return rows;
+}
+
+function buildSnapraidSyncWarning(pluginId, summary) {
+    const thresholds = pluginDetailsMap[pluginId]?.config?.thresholds || {};
+    const deleteThreshold = thresholds.delete_threshold ?? null;
+    const updateThreshold = thresholds.update_threshold ?? null;
+    const removed = summary?.removed ?? 0;
+    const updated = summary?.updated ?? 0;
+    const warnings = [];
+
+    if (deleteThreshold !== null && removed > deleteThreshold) {
+        warnings.push(`Removed files exceed delete threshold (${removed} > ${deleteThreshold}).`);
+    }
+    if (updateThreshold !== null && updated > updateThreshold) {
+        warnings.push(`Updated files exceed update threshold (${updated} > ${updateThreshold}).`);
+    }
+
+    return warnings.join(' ');
+}
+
+async function fetchSnapraidDiffSummary(pluginId) {
+    try {
+        const res = await apiFetch(`/api/storage/plugins/${pluginId}/commands/diff`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ log_tags: true })
+        });
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let summary = null;
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            const chunk = decoder.decode(value);
+            const lines = chunk.split('\n');
+            for (const line of lines) {
+                if (!line.startsWith('data: ')) continue;
+                let data;
+                try {
+                    data = JSON.parse(line.slice(6));
+                } catch (err) {
+                    continue;
+                }
+                if (data.type === 'complete' && data.data?.log_tags?.summary) {
+                    summary = data.data.log_tags.summary;
+                }
+            }
+        }
+        return summary;
+    } catch (e) {
+        return null;
+    }
+}
+
+function closeSnapraidSyncModal() {
+    snapraidSyncContext = null;
+    document.getElementById('snapraid-sync-modal').classList.add('hidden');
+}
+
+async function confirmSnapraidSync() {
+    if (!snapraidSyncContext) return;
+    const { pluginId, commandName, summary } = snapraidSyncContext;
+    closeSnapraidSyncModal();
+    const warning = buildSnapraidSyncWarning(pluginId, summary);
+    const payload = warning ? { force: true } : {};
+    await executePluginCommand(pluginId, 'sync', commandName || 'Sync', payload);
+}
+
+function openCommandParamModal(pluginId, commandId, commandName) {
+    const details = pluginDetailsMap[pluginId] || {};
+    const pools = details?.config?.pools || details?.status?.details?.pools || [];
+    const poolNames = pools.map(pool => pool.name).filter(Boolean);
+
+    if (!poolNames.length) {
+        showNotification('No pools configured for this plugin', 'error');
+        return;
+    }
+
+    pendingCommand = { pluginId, commandId, commandName };
+
+    const modal = document.getElementById('command-param-modal');
+    const title = document.getElementById('command-param-title');
+    const select = document.getElementById('command-pool-select');
+
+    title.textContent = `Select pool for ${commandName}`;
+    select.innerHTML = poolNames.map(name => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');
+    modal.classList.remove('hidden');
+}
+
+function closeCommandParamModal() {
+    pendingCommand = null;
+    document.getElementById('command-param-modal').classList.add('hidden');
+}
+
+async function confirmCommandParams() {
+    if (!pendingCommand) return;
+    const select = document.getElementById('command-pool-select');
+    const poolName = select?.value;
+    const { pluginId, commandId, commandName } = pendingCommand;
+    closeCommandParamModal();
+    if (!poolName) {
+        showNotification('Select a pool to continue', 'error');
+        return;
+    }
+    await executePluginCommand(pluginId, commandId, commandName, { pool_name: poolName });
+}
+
+// ========== Configuration ==========
+let mergerfsPolicies = [];
+let mergerfsPresets = [];
+
+async function openConfigModal(pluginId) {
+    currentPlugin = pluginId;
+
+    try {
+        const res = await apiFetch(`/api/storage/plugins/${pluginId}`);
+        const data = await res.json();
+        currentPluginSchema = data.schema;
+        renderConfigForm(data.schema, data.config || {});
+        document.getElementById('config-modal-title').textContent = `Configure ${data.name}`;
+    } catch (e) {
+        showNotification('Failed to load config: ' + e.message, 'error');
+        return;
+    }
+
+    document.getElementById('config-modal').classList.remove('hidden');
+}
+
+function renderConfigForm(schema, values) {
+    if (currentPlugin === 'mergerfs') {
+        renderMergerFSConfigForm(schema, values);
+        return;
+    }
+    const form = document.getElementById('config-modal-form');
+    const properties = schema.properties || {};
+
+    let html = '';
+    for (const [key, prop] of Object.entries(properties)) {
+        const value = values[key] ?? prop.default ?? '';
+        const description = prop.description || key;
+
+        if (prop.type === 'array') {
+            // Array fields (like data disks, parity disks)
+            const items = Array.isArray(value) ? value : [];
+            html += `
+                <div class="mb-4">
+                    <label class="block text-sm text-gray-300 mb-1">${escapeHtml(description)}</label>
+                    <div id="array-${key}" class="space-y-2">
+                        ${items.map((item, i) => `
+                            <div class="flex gap-2">
+                                <input type="text" name="${key}[]" value="${escapeHtml(String(item))}"
+                                       class="flex-1 bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm">
+                                <button type="button" onclick="removeArrayItem('${key}', ${i})" class="px-2 text-red-400 hover:text-red-300">&times;</button>
+                            </div>
+                        `).join('')}
+                    </div>
+                    <button type="button" onclick="addArrayItem('${key}')" class="mt-2 text-sm text-purple-400 hover:text-purple-300">+ Add</button>
+                </div>
+            `;
+        } else if (prop.type === 'boolean') {
+            html += `
+                <div class="mb-4 flex items-center gap-3">
+                    <input type="checkbox" name="${key}" ${value ? 'checked' : ''} class="w-4 h-4 rounded">
+                    <label class="text-sm text-gray-300">${escapeHtml(description)}</label>
+                </div>
+            `;
+        } else if (prop.type === 'integer' || prop.type === 'number') {
+            html += `
+                <div class="mb-4">
+                    <label class="block text-sm text-gray-300 mb-1">${escapeHtml(description)}</label>
+                    <input type="number" name="${key}" value="${value}"
+                           class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm">
+                </div>
+            `;
+        } else if (prop.enum) {
+            html += `
+                <div class="mb-4">
+                    <label class="block text-sm text-gray-300 mb-1">${escapeHtml(description)}</label>
+                    <select name="${key}" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm">
+                        ${prop.enum.map(opt => `<option value="${opt}" ${value === opt ? 'selected' : ''}>${opt}</option>`).join('')}
+                    </select>
+                </div>
+            `;
+        } else {
+            html += `
+                <div class="mb-4">
+                    <label class="block text-sm text-gray-300 mb-1">${escapeHtml(description)}</label>
+                    <input type="text" name="${key}" value="${escapeHtml(String(value))}"
+                           class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm">
+                </div>
+            `;
+        }
+    }
+
+    form.innerHTML = html || '<p class="text-gray-400">No configuration options</p>';
+}
+
+function renderMergerFSConfigForm(schema, values) {
+    const form = document.getElementById('config-modal-form');
+    const poolSchema = schema?.properties?.pools?.items?.properties || {};
+    mergerfsPolicies = poolSchema?.create_policy?.enum || [
+        'epmfs', 'eplfs', 'eplus', 'mfs', 'lfs', 'lus', 'rand', 'pfrd', 'ff'
+    ];
+    mergerfsPresets = poolSchema?.preset?.enum || [
+        'linux_6_6_plus', 'linux_6_5_mmap', 'linux_6_5_no_mmap'
+    ];
+
+    const pools = Array.isArray(values.pools) ? values.pools : [];
+    const poolCards = pools.map((pool, idx) => renderMergerFSPoolCard(pool, idx)).join('');
+
+    form.innerHTML = `
+        <div class="space-y-4">
+            <div class="flex items-center justify-between">
+                <div class="text-sm text-gray-400">
+                    Configure MergerFS pools. Branches and mount points should be under /mnt/.
+                </div>
+                <button type="button" onclick="addMergerFSPool()" class="text-sm text-purple-400 hover:text-purple-300">+ Add Pool</button>
+            </div>
+            <div id="mergerfs-pools" class="space-y-4">
+                ${poolCards || '<p class="text-gray-500">No pools configured</p>'}
+            </div>
+        </div>
+    `;
+}
+
+function renderMergerFSPoolCard(pool, idx) {
+    const presetLabels = {
+        linux_6_6_plus: 'Linux 6.6+ (no mmap)',
+        linux_6_5_mmap: 'Linux 6.5 or below (mmap)',
+        linux_6_5_no_mmap: 'Linux 6.5 or below (no mmap)'
+    };
+    const name = pool?.name || '';
+    const mountPoint = pool?.mount_point || '';
+    const createPolicy = pool?.create_policy || 'epmfs';
+    const preset = pool?.preset || 'linux_6_5_no_mmap';
+    const minFree = pool?.min_free_space || '4G';
+    const options = pool?.options || '';
+    const enabled = pool?.enabled !== false;
+    const poolId = pool?.id || '';
+    const branches = Array.isArray(pool?.branches) ? pool.branches : [];
+
+    const branchRows = branches.map(branch => `
+        <div class="flex gap-2 mergerfs-branch-row">
+            <input type="text" name="branches[]" value="${escapeHtml(String(branch))}"
+                   class="flex-1 bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm">
+            <button type="button" onclick="removeMergerFSBranch(this)" class="px-2 text-red-400 hover:text-red-300">&times;</button>
+        </div>
+    `).join('');
+
+    const policyOptions = mergerfsPolicies.map(opt => `
+        <option value="${opt}" ${opt === createPolicy ? 'selected' : ''}>${opt}</option>
+    `).join('');
+    const presetOptions = mergerfsPresets.map(opt => `
+        <option value="${opt}" ${opt === preset ? 'selected' : ''}>${presetLabels[opt] || opt}</option>
+    `).join('');
+
+    return `
+        <div class="bg-gray-900 border border-purple-900/40 rounded p-4 mergerfs-pool">
+            <div class="flex items-center justify-between mb-3">
+                <h4 class="text-sm font-semibold text-gray-200">Pool ${idx + 1}</h4>
+                <button type="button" onclick="removeMergerFSPool(this)" class="text-xs text-red-300 hover:text-red-200">Remove</button>
+            </div>
+            <input type="hidden" name="pool_id" value="${escapeHtml(String(poolId))}">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <div>
+                    <label class="block text-sm text-gray-300 mb-1">Pool name</label>
+                    <input type="text" name="pool_name" value="${escapeHtml(String(name))}"
+                           class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm">
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-300 mb-1">Mount point</label>
+                    <input type="text" name="mount_point" value="${escapeHtml(String(mountPoint))}"
+                           class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm" placeholder="/mnt/storage">
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-300 mb-1">Create policy</label>
+                    <select name="create_policy" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm">
+                        ${policyOptions}
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-300 mb-1">Preset</label>
+                    <select name="preset" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm">
+                        ${presetOptions}
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-300 mb-1">Min free space</label>
+                    <input type="text" name="min_free_space" value="${escapeHtml(String(minFree))}"
+                           class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm" placeholder="4G">
+                </div>
+                <div class="md:col-span-2">
+                    <label class="block text-sm text-gray-300 mb-1">Options (override)</label>
+                    <input type="text" name="options" value="${escapeHtml(String(options))}"
+                           class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm">
+                </div>
+            </div>
+            <div class="mb-4">
+                <label class="block text-sm text-gray-300 mb-1">Branches</label>
+                <div class="space-y-2 mergerfs-branches">
+                    ${branchRows || `
+                        <div class="flex gap-2 mergerfs-branch-row">
+                            <input type="text" name="branches[]" value=""
+                                   class="flex-1 bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm">
+                            <button type="button" onclick="removeMergerFSBranch(this)" class="px-2 text-red-400 hover:text-red-300">&times;</button>
+                        </div>
+                    `}
+                </div>
+                <button type="button" onclick="addMergerFSBranch(this)" class="mt-2 text-sm text-purple-400 hover:text-purple-300">+ Add Branch</button>
+            </div>
+            <div class="flex items-center gap-3">
+                <input type="checkbox" name="enabled" ${enabled ? 'checked' : ''} class="w-4 h-4 rounded">
+                <label class="text-sm text-gray-300">Enabled</label>
+            </div>
+        </div>
+    `;
+}
+
+function addMergerFSPool() {
+    const container = document.getElementById('mergerfs-pools');
+    if (!container) return;
+    const idx = container.querySelectorAll('.mergerfs-pool').length + 1;
+    const pool = {
+        id: `pool-${Date.now()}-${idx}`,
+        name: `pool${idx}`,
+        branches: [],
+        mount_point: `/mnt/pool${idx}`,
+        create_policy: 'epmfs',
+        preset: 'linux_6_5_no_mmap',
+        min_free_space: '4G',
+        options: '',
+        enabled: true
+    };
+    const wrapper = document.createElement('div');
+    wrapper.innerHTML = renderMergerFSPoolCard(pool, idx);
+    container.appendChild(wrapper.firstElementChild);
+}
+
+function removeMergerFSPool(button) {
+    const poolCard = button.closest('.mergerfs-pool');
+    if (poolCard) poolCard.remove();
+}
+
+function addMergerFSBranch(button) {
+    const poolCard = button.closest('.mergerfs-pool');
+    if (!poolCard) return;
+    const container = poolCard.querySelector('.mergerfs-branches');
+    if (!container) return;
+    const row = document.createElement('div');
+    row.className = 'flex gap-2 mergerfs-branch-row';
+    row.innerHTML = `
+        <input type="text" name="branches[]" value=""
+               class="flex-1 bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm">
+        <button type="button" onclick="removeMergerFSBranch(this)" class="px-2 text-red-400 hover:text-red-300">&times;</button>
+    `;
+    container.appendChild(row);
+}
+
+function removeMergerFSBranch(button) {
+    const row = button.closest('.mergerfs-branch-row');
+    if (row) row.remove();
+}
+
+function addArrayItem(key) {
+    const container = document.getElementById(`array-${key}`);
+    const idx = container.children.length;
+    const div = document.createElement('div');
+    div.className = 'flex gap-2';
+    div.innerHTML = `
+        <input type="text" name="${key}[]" value=""
+               class="flex-1 bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm">
+        <button type="button" onclick="removeArrayItem('${key}', ${idx})" class="px-2 text-red-400 hover:text-red-300">&times;</button>
+    `;
+    container.appendChild(div);
+}
+
+function removeArrayItem(key, idx) {
+    const container = document.getElementById(`array-${key}`);
+    if (container.children[idx]) {
+        container.children[idx].remove();
+    }
+}
+
+function closeConfigModal() {
+    document.getElementById('config-modal').classList.add('hidden');
+    currentPlugin = null;
+    currentPluginSchema = null;
+}
+
+function getFormData() {
+    if (currentPlugin === 'mergerfs') {
+        return getMergerFSFormData();
+    }
+    const form = document.getElementById('config-modal-form');
+    const formData = {};
+    const properties = currentPluginSchema?.properties || {};
+
+    for (const [key, prop] of Object.entries(properties)) {
+        if (prop.type === 'array') {
+            const inputs = form.querySelectorAll(`input[name="${key}[]"]`);
+            formData[key] = Array.from(inputs).map(i => i.value).filter(v => v);
+        } else if (prop.type === 'boolean') {
+            const checkbox = form.querySelector(`input[name="${key}"]`);
+            formData[key] = checkbox?.checked || false;
+        } else if (prop.type === 'integer' || prop.type === 'number') {
+            const input = form.querySelector(`input[name="${key}"], select[name="${key}"]`);
+            formData[key] = parseInt(input?.value, 10) || 0;
+        } else {
+            const input = form.querySelector(`input[name="${key}"], select[name="${key}"]`);
+            formData[key] = input?.value || '';
+        }
+    }
+
+    return formData;
+}
+
+function getMergerFSFormData() {
+    const form = document.getElementById('config-modal-form');
+    const pools = [];
+    const poolCards = form.querySelectorAll('.mergerfs-pool');
+
+    poolCards.forEach(card => {
+        const poolId = card.querySelector('input[name="pool_id"]')?.value || '';
+        const name = card.querySelector('input[name="pool_name"]')?.value.trim() || '';
+        const mountPoint = card.querySelector('input[name="mount_point"]')?.value.trim() || '';
+        const createPolicy = card.querySelector('select[name="create_policy"]')?.value || 'epmfs';
+        const preset = card.querySelector('select[name="preset"]')?.value || 'linux_6_5_no_mmap';
+        const minFree = card.querySelector('input[name="min_free_space"]')?.value.trim() || '4G';
+        const options = card.querySelector('input[name="options"]')?.value.trim() || '';
+        const enabled = card.querySelector('input[name="enabled"]')?.checked || false;
+        const branches = Array.from(card.querySelectorAll('input[name="branches[]"]'))
+            .map(input => input.value.trim())
+            .filter(value => value);
+
+        pools.push({
+            id: poolId || `pool-${Date.now()}-${pools.length + 1}`,
+            name,
+            branches,
+            mount_point: mountPoint,
+            create_policy: createPolicy,
+            preset,
+            min_free_space: minFree,
+            options,
+            enabled
+        });
+    });
+
+    return { pools };
+}
+async function saveConfig() {
+    const formData = getFormData();
+
+    try {
+        const res = await apiFetch(`/api/storage/plugins/${currentPlugin}/config`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(formData)
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || data.details?.join(', '));
+        showNotification('Configuration saved', 'success');
+        closeConfigModal();
+        loadPage();
+    } catch (e) {
+        showNotification('Save failed: ' + e.message, 'error');
+    }
+}
+
+async function applyConfig() {
+    try {
+        const res = await apiFetch(`/api/storage/plugins/${currentPlugin}/apply`, {
+            method: 'POST'
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+        showNotification('Configuration applied to system', 'success');
+        loadPage();
+    } catch (e) {
+        showNotification('Apply failed: ' + e.message, 'error');
+    }
+}
+
+Object.assign(window, {
+    setPoolFilter,
+    runPluginCommand,
+    runSnapraidRecovery,
+    viewSnapraidLog,
+    closeOutputModal,
+    closeCommandParamModal,
+    confirmCommandParams,
+    closeSnapraidSyncModal,
+    confirmSnapraidSync,
+    openConfigModal,
+    closeConfigModal,
+    saveConfig,
+    applyConfig,
+    addMergerFSPool,
+    removeMergerFSPool,
+    addMergerFSBranch,
+    removeMergerFSBranch,
+    addArrayItem,
+    removeArrayItem,
+});
+
+(async function initPoolsPage() {
+    const authenticated = await ensureAuthenticated();
+    if (!authenticated) {
+        return;
+    }
+
+    window.logout = logoutToLogin;
+    await loadPage();
+})();

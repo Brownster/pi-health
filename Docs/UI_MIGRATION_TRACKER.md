@@ -52,8 +52,10 @@
 - [x] Preserve save/reset and plugin toggles.
 
 ### 8) Storage/Network/Tools pages
-- [ ] Migrate `pools`, `mounts`, `shares`, `plugins`.
+- [x] Migrate `pools`.
+- [ ] Migrate `mounts`, `shares`, `plugins`.
 - [ ] Migrate `disks`, `network`, `tailscale`, `tools`.
+- [ ] Backfill already-migrated pages that still use page-local shell/state markup instead of shared primitives.
 - [ ] Validate plugin-specific edge cases.
 
 ## Release readiness
