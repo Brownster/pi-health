@@ -66,7 +66,9 @@
 
 ## Release readiness
 
-- [ ] All legacy pages replaced or intentionally kept.
-- [ ] Theming parity validated.
+- [x] All legacy pages replaced or intentionally kept.
+  Intentionally kept: `static/storage.html` as redirect shim to `static/pools.html`.
+- [x] Theming parity validated.
+  Verified shared theme hooks on served pages (`/css/foundation.css`, `/js/theme.js`, `/theme-banner`, and nav shell wiring where applicable).
 - [ ] Mobile and desktop smoke checks completed.
 - [ ] Documentation updated.
