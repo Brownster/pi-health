@@ -1,7 +1,16 @@
 import { ensureAuthenticated, logoutToLogin } from '/js/lib/auth.js';
+import { ensureDashboardShell } from '/js/lib/layout.js';
+import { createErrorState, createLoadingState } from '/js/lib/states.js';
 import { requestJson } from '/js/lib/http.js';
 import { formatBytes } from '/js/lib/format.js';
 import { showNotification } from '/js/lib/notify.js';
+
+ensureDashboardShell({
+    bodyClass: 'ph-system bg-gray-900 text-blue-100 font-sans min-h-screen',
+    navClass: 'bg-slate-900/90 shadow-md',
+    notificationClass: 'fixed top-4 right-4 z-50 w-72 flex flex-col items-end',
+    includeFooter: true,
+});
 
 const els = {
     cpuUsage: document.getElementById('cpu-usage'),
@@ -31,6 +40,33 @@ const els = {
 };
 
 let networkSnapshot = { recv: null, sent: null, time: null };
+let hasLoadedMetrics = false;
+
+function setSystemState(stateNode = null) {
+    const stateEl = document.getElementById('system-state');
+    const metricsGrid = document.querySelector('main .ph-grid');
+    const actions = document.getElementById('actions');
+    const piSection = document.getElementById('pi-metrics-section');
+
+    if (!stateEl) {
+        return;
+    }
+
+    if (!stateNode) {
+        stateEl.classList.add('hidden');
+        stateEl.textContent = '';
+        metricsGrid?.classList.remove('hidden');
+        actions?.classList.remove('hidden');
+        return;
+    }
+
+    stateEl.classList.remove('hidden');
+    stateEl.textContent = '';
+    stateEl.appendChild(stateNode);
+    metricsGrid?.classList.add('hidden');
+    actions?.classList.add('hidden');
+    piSection?.classList.add('hidden');
+}
 
 function nowTime() {
     const date = new Date();
@@ -169,6 +205,7 @@ async function fetchSystemMetrics() {
             throw new Error(payload?.error || `Request failed (${response.status})`);
         }
         const data = payload;
+        setSystemState(null);
 
         const cpuPercent = data.cpu_usage_percent ? Number(data.cpu_usage_percent.toFixed(1)) : 0;
         applyValue(els.cpuUsage, `${cpuPercent}%`, cpuPercent);
@@ -217,8 +254,21 @@ async function fetchSystemMetrics() {
 
         updatePiMetrics(data);
         els.lastUpdated.textContent = `Last updated: ${nowTime()}`;
+        hasLoadedMetrics = true;
     } catch (error) {
         console.error('Error fetching system metrics:', error);
+
+        if (!hasLoadedMetrics) {
+            setSystemState(createErrorState({
+                title: 'Unable to load system metrics',
+                subtitle: error.message || 'Unknown error',
+                containerClass: 'text-center py-10',
+                titleClass: 'text-red-400',
+            }));
+            showNotification('Error fetching system metrics', 'error');
+            return;
+        }
+
         [els.cpuUsage, els.memoryUsage, els.temperature, els.diskUsage, els.diskUsage2].forEach((el) => {
             el.textContent = 'Error';
             el.classList.remove('ph-positive', 'ph-warn');
@@ -257,6 +307,12 @@ async function sendSystemAction(action) {
     if (!authenticated) return;
 
     window.logout = logoutToLogin;
+
+    setSystemState(createLoadingState({
+        message: 'Loading system metrics...',
+        containerClass: 'text-center py-10',
+        messageClass: 'text-gray-400',
+    }));
 
     document.querySelectorAll('[data-action]').forEach((button) => {
         button.addEventListener('click', () => sendSystemAction(button.dataset.action));

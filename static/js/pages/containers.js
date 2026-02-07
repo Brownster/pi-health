@@ -1,9 +1,14 @@
 import { ensureAuthenticated, logoutToLogin } from '/js/lib/auth.js';
+import { ensureDashboardShell } from '/js/lib/layout.js';
+import { createEmptyState, createErrorState, createLoadingState } from '/js/lib/states.js';
 import { requestApiJson } from '/js/lib/http.js';
 import { formatBytes as formatBaseBytes } from '/js/lib/format.js';
 import { showNotification as showBaseNotification } from '/js/lib/notify.js';
 
-window.logout = logoutToLogin;
+ensureDashboardShell({
+    notificationClass: 'fixed top-4 right-4 z-50 w-72 flex flex-col items-end',
+    includeFooter: true,
+});
 
 function showNotification(message, type = 'info') {
     showBaseNotification(message, type, {
@@ -162,7 +167,7 @@ function clearContainerList() {
     list.textContent = '';
 }
 
-function appendTableMessage(message, className = '') {
+function appendTableState(stateNode) {
     const list = getContainerListEl();
     if (!list) return;
 
@@ -171,10 +176,34 @@ function appendTableMessage(message, className = '') {
     const row = document.createElement('tr');
     const cell = document.createElement('td');
     cell.colSpan = 8;
-    cell.className = `text-center py-4 ${className}`.trim();
-    cell.textContent = message;
+    cell.className = 'px-4 py-4';
+    cell.appendChild(stateNode);
     row.appendChild(cell);
     list.appendChild(row);
+}
+
+function showContainersLoadingState(message = 'Loading containers...') {
+    appendTableState(createLoadingState({
+        message,
+        containerClass: 'text-center py-2',
+        messageClass: 'text-gray-400',
+    }));
+}
+
+function showContainersEmptyState(title) {
+    appendTableState(createEmptyState({
+        title,
+        containerClass: 'text-center py-2',
+        titleClass: 'text-gray-400',
+    }));
+}
+
+function showContainersErrorState(title) {
+    appendTableState(createErrorState({
+        title,
+        containerClass: 'text-center py-2',
+        titleClass: 'text-red-500',
+    }));
 }
 
 function renderContainerNameCell(cell, container) {
@@ -496,7 +525,7 @@ function renderContainers(showStatsLoading = false) {
     });
 
     if (filteredContainers.length === 0) {
-        appendTableMessage(`No ${currentFilter} containers found`);
+        showContainersEmptyState(`No ${currentFilter} containers found`);
         return;
     }
 
@@ -517,7 +546,7 @@ async function fetchDockerContainers(forceFullRender = false, includeStats = fal
     const lastUpdatedEl = document.getElementById('last-updated');
 
     if (!initialLoadComplete) {
-        appendTableMessage('Loading...');
+        showContainersLoadingState('Loading containers...');
     }
 
     try {
@@ -550,7 +579,7 @@ async function fetchDockerContainers(forceFullRender = false, includeStats = fal
     } catch (error) {
         console.error('Error fetching Docker containers:', error);
         if (!initialLoadComplete) {
-            appendTableMessage('Error loading containers', 'text-red-500');
+            showContainersErrorState('Error loading containers');
         }
         showNotification('Error fetching containers', 'error');
     }
@@ -953,6 +982,7 @@ async function initContainersPage() {
     const authenticated = await ensureAuthenticated();
     if (!authenticated) return;
 
+    window.logout = logoutToLogin;
     bindModalHandlers();
     bindStaticControls();
     bindContainerTableActions();
