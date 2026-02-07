@@ -39,9 +39,9 @@
 - [x] Preserve stats polling behavior.
 
 ### 5) Stacks (`static/stacks.html`)
-- [ ] Build stack list/details view.
-- [ ] Preserve deploy/update/remove behavior.
-- [ ] Preserve log and error handling.
+- [x] Build stack list/details view.
+- [x] Preserve deploy/update/remove behavior.
+- [x] Preserve log and error handling.
 
 ### 6) Apps (`static/apps.html`)
 - [ ] Build catalog browser with search/filter/sort.
