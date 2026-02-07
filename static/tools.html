@@ -4,9 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Tools - Pi-Health Dashboard</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="/css/styles.css">
-    <script src="/js/auth.js"></script>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <link rel="stylesheet" href="/css/foundation.css">
+    <link rel="stylesheet" href="/css/tools.css">
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <script src="/js/api.js"></script>
     <script src="/js/theme.js"></script>
     <script src="/js/nav.js"></script>
 </head>
@@ -78,103 +80,6 @@
         </div>
     </main>
 
-    <script>
-        function showNotification(message, type = 'info') {
-            const notificationArea = document.getElementById('notification-area') || (() => {
-                const area = document.createElement('div');
-                area.id = 'notification-area';
-                area.className = 'fixed top-4 right-4 z-50 w-80 flex flex-col items-end';
-                document.body.appendChild(area);
-                return area;
-            })();
-
-            const notification = document.createElement('div');
-            notification.className = `mb-3 p-4 rounded shadow-lg text-white max-w-sm ${
-                type === 'error' ? 'bg-red-600' :
-                type === 'success' ? 'bg-green-600' : 'bg-blue-600'
-            }`;
-            notification.textContent = message;
-            notificationArea.appendChild(notification);
-            setTimeout(() => notification.remove(), 4000);
-        }
-
-        function statusPill(status) {
-            if (status === 'active') return 'status-healthy';
-            if (status === 'inactive') return 'status-degraded';
-            return 'status-unconfigured';
-        }
-
-        async function loadCopyParty() {
-            try {
-                const res = await fetch('/api/tools/copyparty/status');
-                const data = await res.json();
-                if (!res.ok) {
-                    throw new Error(data.error || 'Failed to load');
-                }
-
-                document.getElementById('copyparty-share-path').value = data.config.share_path || '/srv/copyparty';
-                document.getElementById('copyparty-port').value = data.config.port || 3923;
-                document.getElementById('copyparty-extra-args').value = data.config.extra_args || '';
-
-                document.getElementById('copyparty-service-status').textContent = data.service_status || 'unknown';
-                document.getElementById('copyparty-installed').textContent = data.installed ? 'Yes' : 'No';
-
-                const pill = document.getElementById('copyparty-status-pill');
-                pill.className = `status-pill ${statusPill(data.service_status)}`;
-                pill.textContent = data.service_status || 'unknown';
-
-                const link = document.getElementById('copyparty-link');
-                link.href = data.url || '#';
-                link.classList.toggle('opacity-50', !data.installed);
-                link.classList.toggle('pointer-events-none', !data.installed);
-            } catch (e) {
-                showNotification(`CopyParty error: ${e.message}`, 'error');
-            }
-        }
-
-        async function installCopyParty() {
-            try {
-                const res = await fetch('/api/tools/copyparty/install', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' }
-                });
-                const data = await res.json();
-                if (!res.ok) {
-                    throw new Error(data.error || 'Install failed');
-                }
-                showNotification('CopyParty installed', 'success');
-                await loadCopyParty();
-            } catch (e) {
-                showNotification(`Install failed: ${e.message}`, 'error');
-            }
-        }
-
-        async function saveCopyPartyConfig() {
-            const payload = {
-                share_path: document.getElementById('copyparty-share-path').value.trim(),
-                port: parseInt(document.getElementById('copyparty-port').value, 10),
-                extra_args: document.getElementById('copyparty-extra-args').value.trim()
-            };
-            try {
-                const res = await fetch('/api/tools/copyparty/config', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-                const data = await res.json();
-                if (!res.ok) {
-                    throw new Error(data.error || 'Save failed');
-                }
-                showNotification('CopyParty configuration saved', 'success');
-                await loadCopyParty();
-            } catch (e) {
-                showNotification(`Save failed: ${e.message}`, 'error');
-            }
-        }
-
-        document.addEventListener('DOMContentLoaded', () => {
-            loadCopyParty();
-        });
-    </script>
+    <script type="module" src="/js/pages/tools.js"></script>
 </body>
 </html>
