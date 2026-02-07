@@ -25,7 +25,8 @@ For this migration wave, the UI stack is:
 - Shared HTTP helper exists in `static/js/lib/http.js`.
 - Shared layout helper exists in `static/js/lib/layout.js`.
 - Shared state components exist in `static/js/lib/states.js`.
-- Legacy utility script `static/js/api.js` still exists for older pages and shared toast UI.
+- All migrated routes now rely on page modules and shared libs; legacy `static/js/api.js` is no longer loaded by page HTML.
+- Dashboard (`index.html`) keeps its custom hero markup but now initializes `ensureDashboardShell` for shared nav/notification primitives.
 
 ## Standards for migrated pages
 

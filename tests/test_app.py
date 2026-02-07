@@ -99,6 +99,42 @@ class TestAuthentication:
         response = client.get('/api/auth/check')
         assert response.status_code == 401
 
+    def test_logout_clears_session(self, authenticated_client):
+        """Test logout clears authenticated session state."""
+        with authenticated_client.session_transaction() as sess:
+            assert sess.get('authenticated') is True
+            assert sess.get('username') == 'testuser'
+
+        response = authenticated_client.post('/api/logout')
+        assert response.status_code == 200
+
+        with authenticated_client.session_transaction() as sess:
+            assert sess.get('authenticated') is None
+            assert sess.get('username') is None
+
+    def test_auth_check_authenticated_without_username(self, client):
+        """Test auth check falls back to unknown username."""
+        with client.session_transaction() as sess:
+            sess['authenticated'] = True
+            sess.pop('username', None)
+
+        response = client.get('/api/auth/check')
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data['authenticated'] is True
+        assert data['username'] == 'unknown'
+
+    def test_auth_check_stale_session_is_unauthenticated(self, client):
+        """Test stale session data without auth flag is treated as unauthenticated."""
+        with client.session_transaction() as sess:
+            sess['username'] = 'stale-user'
+            sess.pop('authenticated', None)
+
+        response = client.get('/api/auth/check')
+        assert response.status_code == 401
+        data = json.loads(response.data)
+        assert data['authenticated'] is False
+
 
 class TestProtectedEndpoints:
     """Test that protected endpoints require authentication."""
@@ -142,6 +178,34 @@ class TestProtectedEndpoints:
         """Test that /api/network-test requires authentication."""
         response = client.post('/api/network-test')
         assert response.status_code == 401
+
+    def test_shutdown_with_auth_calls_system_action(self, authenticated_client, monkeypatch):
+        """Test authenticated shutdown delegates to system_action."""
+        monkeypatch.setattr('app.system_action', lambda action: {'status': f'{action}-ok'})
+        response = authenticated_client.post('/api/shutdown')
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data['status'] == 'shutdown-ok'
+
+    def test_reboot_with_auth_calls_system_action(self, authenticated_client, monkeypatch):
+        """Test authenticated reboot delegates to system_action."""
+        monkeypatch.setattr('app.system_action', lambda action: {'status': f'{action}-ok'})
+        response = authenticated_client.post('/api/reboot')
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data['status'] == 'reboot-ok'
+
+    def test_network_test_with_auth_calls_runner(self, authenticated_client, monkeypatch):
+        """Test authenticated network test delegates to run_network_test."""
+        monkeypatch.setattr(
+            'app.run_network_test',
+            lambda: {'ping_success': True, 'probe_method': 'socket'},
+        )
+        response = authenticated_client.post('/api/network-test')
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data['ping_success'] is True
+        assert data['probe_method'] == 'socket'
 
 
 class TestPublicEndpoints:

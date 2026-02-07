@@ -97,6 +97,33 @@ class DummyMountPlugin:
         return {"status": "connected"}
 
 
+class DummySharePlugin(DummyPlugin):
+    def __init__(self):
+        super().__init__()
+        self.shares = [{"name": "media", "enabled": True}]
+
+    def get_status(self):
+        return {
+            "status": "healthy",
+            "message": "ok",
+            "service_running": True,
+            "details": {"shares": self.shares},
+        }
+
+    def add_share(self, share):
+        self.shares.append(share)
+        return CommandResult(success=True, message="added")
+
+    def update_share(self, share_name, share):
+        return CommandResult(success=True, message=f"updated {share_name}")
+
+    def remove_share(self, share_name):
+        return CommandResult(success=True, message=f"removed {share_name}")
+
+    def toggle_share(self, share_name, enabled):
+        return CommandResult(success=True, message=f"toggled {share_name}={enabled}")
+
+
 class DummyRegistry:
     def __init__(self, plugin=None, mount_plugin=None):
         self._plugin = plugin
@@ -110,6 +137,8 @@ class DummyRegistry:
             return self._plugin
         if plugin_id == "mount":
             return self._mount_plugin
+        if plugin_id == "share":
+            return self._plugin
         return None
 
     def set_plugin_enabled(self, plugin_id, enabled):
@@ -323,3 +352,142 @@ def test_mount_endpoints(authenticated_client, monkeypatch):
 
     response = authenticated_client.delete("/api/storage/mounts/mount/m1")
     assert response.status_code == 200
+
+
+def test_validate_plugin_config(authenticated_client, monkeypatch):
+    registry = DummyRegistry(plugin=DummyPlugin())
+    monkeypatch.setattr("storage_plugins.get_registry", lambda: registry)
+
+    response = authenticated_client.post(
+        "/api/storage/plugins/dummy/validate",
+        data=json.dumps({"invalid": True}),
+        content_type="application/json",
+    )
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["valid"] is False
+    assert "invalid config" in data["errors"][0]
+
+
+def test_apply_plugin_config_success(authenticated_client, monkeypatch):
+    registry = DummyRegistry(plugin=DummyPlugin())
+    monkeypatch.setattr("storage_plugins.get_registry", lambda: registry)
+
+    response = authenticated_client.post("/api/storage/plugins/dummy/apply")
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["status"] == "applied"
+
+
+def test_apply_plugin_config_failure(authenticated_client, monkeypatch):
+    class FailingPlugin(DummyPlugin):
+        def apply_config(self):
+            return CommandResult(success=False, message="nope", error="apply failed")
+
+    registry = DummyRegistry(plugin=FailingPlugin())
+    monkeypatch.setattr("storage_plugins.get_registry", lambda: registry)
+
+    response = authenticated_client.post("/api/storage/plugins/dummy/apply")
+    assert response.status_code == 400
+    assert response.get_json()["error"] == "apply failed"
+
+
+def test_get_plugin_status(authenticated_client, monkeypatch):
+    registry = DummyRegistry(plugin=DummyPlugin())
+    monkeypatch.setattr("storage_plugins.get_registry", lambda: registry)
+
+    response = authenticated_client.get("/api/storage/plugins/dummy/status")
+    assert response.status_code == 200
+    assert response.get_json()["status"] == "healthy"
+
+
+def test_get_plugin_recovery_not_supported(authenticated_client, monkeypatch):
+    registry = DummyRegistry(plugin=DummyPlugin())
+    monkeypatch.setattr("storage_plugins.get_registry", lambda: registry)
+
+    response = authenticated_client.get("/api/storage/plugins/dummy/recovery")
+    assert response.status_code == 404
+
+
+def test_get_plugin_recovery_supported(authenticated_client, monkeypatch):
+    class RecoverablePlugin(DummyPlugin):
+        def get_recovery_status(self):
+            return {"recoverable": True}
+
+    registry = DummyRegistry(plugin=RecoverablePlugin())
+    monkeypatch.setattr("storage_plugins.get_registry", lambda: registry)
+
+    response = authenticated_client.get("/api/storage/plugins/dummy/recovery")
+    assert response.status_code == 200
+    assert response.get_json()["recoverable"] is True
+
+
+def test_get_plugin_latest_log(authenticated_client, monkeypatch):
+    class LogPlugin(DummyPlugin):
+        def get_latest_log(self):
+            return {"content": "hello\n", "path": "/tmp/test.log", "truncated": False}
+
+    registry = DummyRegistry(plugin=LogPlugin())
+    monkeypatch.setattr("storage_plugins.get_registry", lambda: registry)
+
+    response = authenticated_client.get("/api/storage/plugins/dummy/logs/latest")
+    assert response.status_code == 200
+    assert "hello" in response.get_data(as_text=True)
+    assert response.headers["X-Log-Path"] == "/tmp/test.log"
+    assert response.headers["X-Log-Truncated"] == "false"
+
+
+def test_detect_mounts_success(authenticated_client, monkeypatch):
+    class DetectingMountPlugin(DummyMountPlugin):
+        def import_existing_mounts(self):
+            return CommandResult(success=True, message="Imported", data={"imported": 1})
+
+    registry = DummyRegistry(mount_plugin=DetectingMountPlugin())
+    monkeypatch.setattr("storage_plugins.get_registry", lambda: registry)
+
+    response = authenticated_client.post("/api/storage/mounts/mount/detect")
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["status"] == "ok"
+    assert data["imported"] == 1
+
+
+def test_share_endpoints(authenticated_client, monkeypatch):
+    registry = DummyRegistry(plugin=DummySharePlugin())
+    monkeypatch.setattr("storage_plugins.get_registry", lambda: registry)
+
+    response = authenticated_client.get("/api/storage/shares/share")
+    assert response.status_code == 200
+    shares_payload = response.get_json()
+    assert shares_payload["service_running"] is True
+    assert shares_payload["shares"][0]["name"] == "media"
+
+    response = authenticated_client.post(
+        "/api/storage/shares/share",
+        data=json.dumps({"name": "downloads", "path": "/mnt/downloads"}),
+        content_type="application/json",
+    )
+    assert response.status_code == 200
+    assert response.get_json()["status"] == "created"
+
+    response = authenticated_client.put(
+        "/api/storage/shares/share/media",
+        data=json.dumps({"path": "/mnt/media"}),
+        content_type="application/json",
+    )
+    assert response.status_code == 200
+    assert response.get_json()["status"] == "updated"
+
+    response = authenticated_client.post(
+        "/api/storage/shares/share/media/toggle",
+        data=json.dumps({"enabled": False}),
+        content_type="application/json",
+    )
+    assert response.status_code == 200
+    toggle_data = response.get_json()
+    assert toggle_data["status"] == "toggled"
+    assert toggle_data["enabled"] is False
+
+    response = authenticated_client.delete("/api/storage/shares/share/media")
+    assert response.status_code == 200
+    assert response.get_json()["status"] == "deleted"

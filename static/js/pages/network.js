@@ -1,31 +1,14 @@
 import { ensureAuthenticated, logoutToLogin } from '/js/lib/auth.js';
 import { ensureDashboardShell } from '/js/lib/layout.js';
-import { clearClientSession } from '/js/lib/session.js';
+import { clearElement, createEmptyState, createErrorState, createLoadingState } from '/js/lib/states.js';
+import { requestApiResponse } from '/js/lib/http.js';
+import { escapeHtml } from '/js/lib/format.js';
+import { setNodeContent } from '/js/lib/dom.js';
 
 ensureDashboardShell({
     notificationClass: 'fixed top-4 right-4 z-50 w-80 flex flex-col items-end',
     includeFooter: true,
 });
-
-async function apiFetch(url, options = {}) {
-    const response = await fetch(url, options);
-    if (response.status === 401) {
-        clearClientSession();
-        window.location.href = '/login.html';
-        throw new Error('Authentication required');
-    }
-    return response;
-}
-
-function escapeHtml(text) {
-    if (!text) return '';
-    return String(text)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-}
 
 function showLoadError(message) {
     const loadingState = document.getElementById('loading-state');
@@ -33,12 +16,16 @@ function showLoadError(message) {
         return;
     }
 
-    loadingState.innerHTML = `<p class="text-red-400">Failed to load network info: ${escapeHtml(message)}</p>`;
+    setNodeContent('loading-state', createErrorState({
+        title: `Failed to load network info: ${message}`,
+        containerClass: 'text-center py-10',
+        titleClass: 'text-red-400',
+    }));
 }
 
 async function loadNetworkInfo() {
     try {
-        const response = await apiFetch('/api/network/info');
+        const response = await requestApiResponse('/api/network/info');
         const data = await response.json().catch(() => ({}));
 
         if (!response.ok) {
@@ -88,7 +75,12 @@ function renderNetworkInfo(data) {
                 </div>
             `).join('');
         } else {
-            dnsContainer.innerHTML = '<p class="text-gray-500">No DNS servers configured</p>';
+            clearElement(dnsContainer);
+            dnsContainer.appendChild(createEmptyState({
+                title: 'No DNS servers configured',
+                containerClass: 'text-center py-2',
+                titleClass: 'text-gray-500',
+            }));
         }
     }
 
@@ -98,7 +90,12 @@ function renderNetworkInfo(data) {
         if (interfaces.length > 0) {
             interfacesContainer.innerHTML = interfaces.map((iface) => renderInterface(iface)).join('');
         } else {
-            interfacesContainer.innerHTML = '<p class="text-gray-500">No network interfaces found</p>';
+            clearElement(interfacesContainer);
+            interfacesContainer.appendChild(createEmptyState({
+                title: 'No network interfaces found',
+                containerClass: 'text-center py-2',
+                titleClass: 'text-gray-500',
+            }));
         }
     }
 }
@@ -158,13 +155,11 @@ function refreshNetworkInfo() {
 
     if (loadingState) {
         loadingState.classList.remove('hidden');
-        loadingState.innerHTML = `
-            <svg class="animate-spin h-8 w-8 mx-auto mb-4 text-purple-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-            </svg>
-            Loading network information...
-        `;
+        setNodeContent('loading-state', createLoadingState({
+            message: 'Loading network information...',
+            containerClass: 'text-center py-10',
+            messageClass: 'text-gray-400',
+        }));
     }
 
     if (networkContent) {
@@ -174,10 +169,6 @@ function refreshNetworkInfo() {
     loadNetworkInfo();
 }
 
-Object.assign(window, {
-    refreshNetworkInfo,
-});
-
 (async function initNetworkPage() {
     const authenticated = await ensureAuthenticated();
     if (!authenticated) {
@@ -185,5 +176,6 @@ Object.assign(window, {
     }
 
     window.logout = logoutToLogin;
+    document.getElementById('refresh-network-info')?.addEventListener('click', refreshNetworkInfo);
     await loadNetworkInfo();
 })();

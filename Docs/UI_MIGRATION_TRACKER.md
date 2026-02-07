@@ -60,12 +60,15 @@
 - [x] Migrate `network`.
 - [x] Migrate `tailscale`.
 - [x] Migrate `tools`.
-- [ ] Backfill already-migrated pages that still use page-local shell/state markup instead of shared primitives.
-- [ ] Validate plugin-specific edge cases.
+- [x] Backfill already-migrated pages that still use page-local shell/state markup instead of shared primitives.
+- [x] Validate plugin-specific edge cases.
+  Covered: unknown plugin categories, missing plugin IDs, non-OK plugin list/detail responses, and missing command streams.
 
 ## Release readiness
 
-- [ ] All legacy pages replaced or intentionally kept.
-- [ ] Theming parity validated.
+- [x] All legacy pages replaced or intentionally kept.
+  Intentionally kept: `static/storage.html` as redirect shim to `static/pools.html`.
+- [x] Theming parity validated.
+  Page CSS now uses shared token references from `static/css/foundation.css`; hardcoded hex values were removed from page-specific styles.
 - [ ] Mobile and desktop smoke checks completed.
-- [ ] Documentation updated.
+- [x] Documentation updated.

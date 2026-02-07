@@ -1,7 +1,8 @@
 import { ensureAuthenticated, logoutToLogin } from '/js/lib/auth.js';
 import { ensureDashboardShell } from '/js/lib/layout.js';
 import { clearElement, createEmptyState, createErrorState } from '/js/lib/states.js';
-import { requestJson } from '/js/lib/http.js';
+import { requestApiJson } from '/js/lib/http.js';
+import { showNotification } from '/js/lib/notify.js';
 
 ensureDashboardShell({
     notificationClass: 'fixed top-4 right-4 z-50 w-80 flex flex-col items-end',
@@ -13,29 +14,6 @@ let currentStack = null;
 let eventSource = null;
 let editComposeEditor = null;
 let newComposeEditor = null;
-
-function showNotification(message, type = 'info') {
-    if (typeof window.showToast === 'function') {
-        window.showToast(message, type);
-        return;
-    }
-    console.log(`[${type}] ${message}`);
-}
-
-async function requestApiJson(url, options = {}) {
-    const { response, payload } = await requestJson(url, options);
-
-    if (response.status === 401) {
-        window.location.href = '/login.html';
-        throw new Error('Authentication required');
-    }
-
-    if (!response.ok) {
-        throw new Error(payload?.error || payload?.stderr || `Request failed (${response.status})`);
-    }
-
-    return payload || {};
-}
 
 function statusClass(status) {
     const value = status || 'unknown';
@@ -643,25 +621,88 @@ async function restoreBackup() {
     }
 }
 
-Object.assign(window, {
-    loadStacks,
-    quickAction,
-    openStack,
-    hideStackModal,
-    showTab,
-    stackAction,
-    saveCompose,
-    saveEnv,
-    deployStack,
-    loadStackLogs,
-    showCreateStackModal,
-    hideCreateStackModal,
-    createStack,
-    confirmDeleteStack,
-    refreshBackups,
-    loadBackup,
-    restoreBackup,
-});
+function bindStacksPageActions() {
+    const refreshBtn = document.getElementById('refresh-btn');
+    if (refreshBtn) {
+        refreshBtn.addEventListener('click', loadStacks);
+    }
+
+    const newStackBtn = document.getElementById('new-stack-btn');
+    if (newStackBtn) {
+        newStackBtn.addEventListener('click', showCreateStackModal);
+    }
+
+    document.querySelectorAll('[data-action="hide-create-modal"]').forEach((button) => {
+        button.addEventListener('click', hideCreateStackModal);
+    });
+
+    const createStackBtn = document.getElementById('create-stack-btn');
+    if (createStackBtn) {
+        createStackBtn.addEventListener('click', createStack);
+    }
+
+    document.querySelectorAll('[data-action="hide-stack-modal"]').forEach((button) => {
+        button.addEventListener('click', hideStackModal);
+    });
+
+    document.querySelectorAll('.tab-btn').forEach((button) => {
+        button.addEventListener('click', () => {
+            const tab = button.dataset.tab;
+            if (tab) {
+                showTab(tab);
+            }
+        });
+    });
+
+    const saveComposeBtn = document.getElementById('stack-save-compose');
+    if (saveComposeBtn) {
+        saveComposeBtn.addEventListener('click', saveCompose);
+    }
+
+    const deployBtn = document.getElementById('stack-deploy');
+    if (deployBtn) {
+        deployBtn.addEventListener('click', deployStack);
+    }
+
+    const refreshBackupsBtn = document.getElementById('stack-refresh-backups');
+    if (refreshBackupsBtn) {
+        refreshBackupsBtn.addEventListener('click', refreshBackups);
+    }
+
+    const loadBackupBtn = document.getElementById('stack-load-backup');
+    if (loadBackupBtn) {
+        loadBackupBtn.addEventListener('click', loadBackup);
+    }
+
+    const restoreBackupBtn = document.getElementById('stack-restore-backup');
+    if (restoreBackupBtn) {
+        restoreBackupBtn.addEventListener('click', restoreBackup);
+    }
+
+    const saveEnvBtn = document.getElementById('stack-save-env');
+    if (saveEnvBtn) {
+        saveEnvBtn.addEventListener('click', saveEnv);
+    }
+
+    const refreshLogsBtn = document.getElementById('stack-refresh-logs');
+    if (refreshLogsBtn) {
+        refreshLogsBtn.addEventListener('click', loadStackLogs);
+    }
+
+    document.querySelectorAll('[data-stack-action]').forEach((button) => {
+        button.addEventListener('click', () => {
+            const action = button.dataset.stackAction;
+            if (action) {
+                stackAction(action);
+            }
+        });
+    });
+
+    const deleteBtn = document.getElementById('stack-delete');
+    if (deleteBtn) {
+        deleteBtn.addEventListener('click', confirmDeleteStack);
+    }
+}
 
 (async function initStacksPage() {
     const authenticated = await ensureAuthenticated();
@@ -672,6 +713,7 @@ Object.assign(window, {
     window.logout = logoutToLogin;
 
     initEditors();
+    bindStacksPageActions();
     await loadStacks();
     window.setInterval(loadStacks, 30000);
 })();

@@ -3,7 +3,7 @@
     background:
         radial-gradient(1000px 560px at -8% -20%, rgba(14, 165, 233, 0.2), transparent 62%),
         radial-gradient(920px 540px at 108% -24%, rgba(20, 184, 166, 0.2), transparent 62%),
-        linear-gradient(180deg, #f6fbff 0%, #e9f3fb 100%);
+        linear-gradient(180deg, var(--gradient-page-top) 0%, var(--gradient-page-bottom-alt) 100%);
 }
 
 .ph-system-shell {
@@ -31,7 +31,7 @@
     font-size: 0.78rem;
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    color: #64748b;
+    color: var(--text-slate-500);
 }
 
 .ph-system-title {
@@ -42,7 +42,7 @@
 
 .ph-system-updated {
     font-size: 0.88rem;
-    color: #475569;
+    color: var(--text-slate-600);
     font-family: var(--font-mono);
 }
 
@@ -63,19 +63,19 @@
 .ph-card-title {
     margin: 0;
     font-size: 1rem;
-    color: #1e293b;
+    color: var(--text-slate-800);
 }
 
 .ph-value {
     margin-top: 8px;
     font-size: 1.3rem;
     font-weight: 700;
-    color: #0f172a;
+    color: var(--text-primary);
 }
 
 .ph-metric-row {
     margin-top: 8px;
-    color: #334155;
+    color: var(--text-slate-700);
 }
 
 .ph-progress {
@@ -112,8 +112,8 @@
 .ph-btn {
     border: 1px solid rgba(15, 23, 42, 0.2);
     border-radius: 13px;
-    background: linear-gradient(135deg, #0f766e, #0b8a80);
-    color: #f0fdfa;
+    background: linear-gradient(135deg, var(--accent), var(--accent-alt));
+    color: var(--accent-contrast);
     font: inherit;
     font-weight: 600;
     padding: 10px 14px;
@@ -121,27 +121,27 @@
 }
 
 .ph-btn[data-action='shutdown'] {
-    background: linear-gradient(135deg, #b91c1c, #991b1b);
+    background: linear-gradient(135deg, var(--danger), var(--danger-700));
 }
 
 .ph-btn[data-action='reboot'] {
-    background: linear-gradient(135deg, #b45309, #92400e);
+    background: linear-gradient(135deg, var(--warning-700), var(--warning-800));
 }
 
 .ph-muted {
-    color: #64748b;
+    color: var(--text-slate-500);
 }
 
 .ph-positive {
-    color: #15803d;
+    color: var(--success-700);
 }
 
 .ph-warn {
-    color: #b45309;
+    color: var(--warning-700);
 }
 
 .ph-danger {
-    color: #b91c1c;
+    color: var(--danger);
 }
 
 .fade-in {

@@ -3,7 +3,7 @@
     background:
         radial-gradient(1200px 680px at -8% -18%, rgba(14, 165, 233, 0.18), transparent 62%),
         radial-gradient(900px 580px at 108% -24%, rgba(251, 146, 60, 0.18), transparent 62%),
-        linear-gradient(180deg, #f6fbff 0%, #ebf4fb 100%);
+        linear-gradient(180deg, var(--gradient-page-top) 0%, var(--gradient-page-bottom) 100%);
 }
 
 .ph-home-hero {
@@ -26,7 +26,7 @@
     font-size: 0.78rem;
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    color: #6b7280;
+    color: var(--text-gray-500);
 }
 
 .ph-home-title {
@@ -37,12 +37,12 @@
 
 .ph-home-subtitle {
     margin: 6px 0 0;
-    color: #64748b;
+    color: var(--text-slate-500);
     font-size: 0.92rem;
 }
 
 .ph-home-meta {
-    color: #475569;
+    color: var(--text-slate-600);
     font-size: 0.86rem;
     font-family: var(--font-mono);
 }
@@ -67,13 +67,13 @@
     display: grid;
     place-items: center;
     text-align: center;
-    color: #475569;
+    color: var(--text-slate-600);
     padding: 16px;
 }
 
 .ph-state[data-tone='error'] {
     border-color: rgba(185, 28, 28, 0.32);
-    color: #991b1b;
+    color: var(--danger-700);
 }
 
 .ph-service-card {
@@ -96,7 +96,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    color: #f8fafc;
+    color: var(--text-inverse);
 }
 
 .ph-service-banner svg {
@@ -118,7 +118,7 @@
 .ph-service-port {
     margin: 8px 0 14px;
     font-size: 0.84rem;
-    color: #64748b;
+    color: var(--text-slate-500);
     font-family: var(--font-mono);
 }
 
@@ -129,8 +129,8 @@
     justify-content: center;
     border-radius: 13px;
     padding: 10px 14px;
-    background: linear-gradient(135deg, #0f766e, #0b8a80);
-    color: #f0fdfa;
+    background: linear-gradient(135deg, var(--accent), var(--accent-alt));
+    color: var(--accent-contrast);
     font-weight: 600;
     letter-spacing: 0.01em;
     box-shadow: 0 12px 24px rgba(15, 118, 110, 0.24);
@@ -146,7 +146,7 @@
     border-radius: 12px;
     padding: 9px 14px;
     border: 1px solid rgba(15, 23, 42, 0.18);
-    color: #0f172a;
+    color: var(--text-primary);
     text-decoration: none;
     font-weight: 600;
     background: rgba(255, 255, 255, 0.92);

@@ -226,6 +226,27 @@ class TestContainerNetworkTest:
         data = json.loads(response.data)
         assert 'error' in data or 'container_name' in data
 
+    def test_container_network_test_docker_unavailable(self, authenticated_client, monkeypatch):
+        """Test container network endpoint returns 503 when Docker is unavailable."""
+        monkeypatch.setattr('app.docker_available', False)
+        response = authenticated_client.post('/api/containers/test-container/network-test')
+        assert response.status_code == 503
+        data = json.loads(response.data)
+        assert data['error'] == 'Docker is not available'
+
+    def test_container_network_test_with_auth_calls_runner(self, authenticated_client, monkeypatch):
+        """Test container network endpoint delegates to run_container_network_test when available."""
+        monkeypatch.setattr('app.docker_available', True)
+        monkeypatch.setattr(
+            'app.run_container_network_test',
+            lambda container_id: {'container_name': container_id, 'ping_success': True},
+        )
+        response = authenticated_client.post('/api/containers/test-container/network-test')
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data['container_name'] == 'test-container'
+        assert data['ping_success'] is True
+
 
 class TestHostNetworkTest:
     """Test host-level network test functionality."""

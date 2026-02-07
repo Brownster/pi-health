@@ -8,7 +8,6 @@
     <link rel="stylesheet" href="/css/foundation.css">
     <link rel="stylesheet" href="/css/plugins.css">
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
-    <script src="/js/api.js"></script>
     <script src="/js/theme.js"></script>
     <script src="/js/nav.js"></script>
 </head>
@@ -38,7 +37,7 @@
 
         <div class="mb-6 flex items-center justify-between">
             <p class="text-sm text-gray-400">Install third-party plugins from GitHub or pip.</p>
-            <button onclick="openInstallModal()" class="coraline-button text-blue-100 font-bold py-2 px-4 rounded">+ Add Plugin</button>
+            <button id="plugin-open-install" class="coraline-button text-blue-100 font-bold py-2 px-4 rounded">+ Add Plugin</button>
         </div>
 
         <div id="plugins-list" class="space-y-4">
@@ -50,12 +49,12 @@
         <div class="bg-gray-800 w-full max-w-lg rounded-lg shadow-xl border border-purple-900">
             <div class="p-4 border-b border-purple-800 flex justify-between items-center">
                 <h3 class="text-xl font-semibold">Install Plugin</h3>
-                <button onclick="closeInstallModal()" class="text-gray-400 hover:text-white">&times;</button>
+                <button id="plugin-close-install-top" class="text-gray-400 hover:text-white">&times;</button>
             </div>
             <form id="install-form" class="p-4 space-y-4">
                 <div>
                     <label class="block text-sm text-gray-400 mb-1">Source Type</label>
-                    <select name="type" onchange="toggleInstallType(this.value)"
+                    <select id="plugin-install-type" name="type"
                             class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white">
                         <option value="github">GitHub Repo</option>
                         <option value="pip">pip Package</option>
@@ -88,8 +87,8 @@
                 </div>
             </form>
             <div class="p-4 border-t border-purple-800 flex justify-end gap-3">
-                <button onclick="closeInstallModal()" class="px-4 py-2 text-gray-400 hover:text-white">Cancel</button>
-                <button onclick="submitInstall()" class="coraline-button px-4 py-2 rounded">Install</button>
+                <button id="plugin-close-install-bottom" class="px-4 py-2 text-gray-400 hover:text-white">Cancel</button>
+                <button id="plugin-submit-install" class="coraline-button px-4 py-2 rounded">Install</button>
             </div>
         </div>
     </div>

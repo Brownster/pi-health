@@ -8,7 +8,6 @@
     <link rel="stylesheet" href="/css/foundation.css">
     <link rel="stylesheet" href="/css/system.css">
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
-    <script src="/js/api.js"></script>
     <script src="/js/theme.js"></script>
     <script src="/js/nav.js"></script>
 </head>
@@ -18,13 +17,15 @@
     <div id="notification-area" class="fixed top-4 right-4 z-50 w-72 flex flex-col items-end"></div>
 
     <main class="ph-system-shell">
-        <header class="ph-system-header">
+        <div class="ph-system-header">
             <div>
                 <p class="ph-system-kicker">Host Telemetry</p>
                 <h2 class="ph-system-title">System Metrics</h2>
             </div>
             <span id="last-updated" class="ph-system-updated">Last updated: Never</span>
-        </header>
+        </div>
+
+        <section id="system-state" class="hidden"></section>
 
         <section class="ph-grid">
             <article class="ph-card">

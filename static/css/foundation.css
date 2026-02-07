@@ -16,8 +16,63 @@
 
     --accent: #0f766e;
     --accent-strong: #115e59;
+    --accent-alt: #0b8a80;
     --accent-contrast: #f0fdfa;
     --danger: #b91c1c;
+    --danger-700: #991b1b;
+    --warning-700: #b45309;
+    --warning-800: #92400e;
+    --success-700: #15803d;
+
+    --coraline-600: #6f58a3;
+    --coraline-700: #5f4b8b;
+    --coraline-800: #372b53;
+    --coraline-900: #413162;
+    --coraline-border: #8a6cbd;
+    --coraline-accent: #7c3aed;
+    --coraline-accent-2: #8b5cf6;
+    --coraline-accent-dark: #553c9a;
+
+    --status-success: #34d399;
+    --status-success-strong: #38a169;
+    --status-warning: #fbbf24;
+    --status-warning-strong: #dd6b20;
+    --status-danger: #f87171;
+    --status-danger-strong: #e53e3e;
+    --status-neutral: #9ca3af;
+    --status-neutral-strong: #718096;
+
+    --surface-white: #ffffff;
+    --surface-gray-900: #1a1a2e;
+    --surface-gray-850: #1a202c;
+    --surface-gray-800: #2d3748;
+    --surface-gray-700: #374151;
+    --surface-gray-600: #4b5563;
+    --surface-gray-550: #4a5568;
+    --surface-gray-500: #5a6578;
+    --surface-gray-200: #e5e7eb;
+    --surface-gray-100: #e2e8f0;
+
+    --text-slate-800: #1e293b;
+    --text-slate-700: #334155;
+    --text-slate-600: #475569;
+    --text-slate-500: #64748b;
+    --text-gray-500: #6b7280;
+    --text-placeholder: #8b96ab;
+
+    --border-gray-400: #a0aec0;
+
+    --gradient-page-top: #f6fbff;
+    --gradient-page-bottom: #ebf4fb;
+    --gradient-page-bottom-alt: #e9f3fb;
+
+    --syntax-danger-soft: #f56565;
+    --syntax-danger-light: #feb2b2;
+    --syntax-orange: #f6ad55;
+    --syntax-red: #fc8181;
+    --syntax-green: #68d391;
+    --syntax-blue: #90cdf4;
+    --syntax-purple: #b794f4;
 
     --radius-sm: 12px;
     --radius-md: 18px;
@@ -124,7 +179,7 @@ body {
 }
 
 .ph-input::placeholder {
-    color: #8b96ab;
+    color: var(--text-placeholder);
 }
 
 .ph-button {
@@ -136,7 +191,7 @@ body {
     letter-spacing: 0.01em;
     padding: 14px 16px;
     cursor: pointer;
-    background: linear-gradient(135deg, var(--accent), #0b8a80);
+    background: linear-gradient(135deg, var(--accent), var(--accent-alt));
     transition: transform 150ms ease, box-shadow 150ms ease, filter 150ms ease;
     box-shadow: 0 12px 24px rgba(15, 118, 110, 0.28);
     display: inline-flex;
@@ -187,7 +242,7 @@ body {
     width: 1rem;
     height: 1rem;
     border: 2px solid rgba(240, 253, 250, 0.35);
-    border-top-color: #f0fdfa;
+    border-top-color: var(--accent-contrast);
     border-radius: 999px;
     animation: ph-spin 700ms linear infinite;
 }

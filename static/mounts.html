@@ -8,7 +8,6 @@
     <link rel="stylesheet" href="/css/foundation.css">
     <link rel="stylesheet" href="/css/mounts.css">
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
-    <script src="/js/api.js"></script>
     <script src="/js/theme.js"></script>
     <script src="/js/nav.js"></script>
 </head>
@@ -39,7 +38,7 @@
                     <h3 class="text-lg font-semibold">Media Paths</h3>
                     <p class="text-gray-400 text-sm">Default paths used by app templates</p>
                 </div>
-                <button onclick="saveMediaPaths()" class="coraline-button text-blue-100 py-2 px-4 rounded text-sm">Save Paths</button>
+                <button id="save-media-paths" type="button" class="coraline-button text-blue-100 py-2 px-4 rounded text-sm">Save Paths</button>
             </div>
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div>
@@ -60,7 +59,7 @@
                 </div>
             </div>
             <div class="mt-4 pt-4 border-t border-purple-900/40">
-                <button onclick="previewStartupService()" class="text-sm text-purple-400 hover:text-purple-300">
+                <button id="preview-startup-service" type="button" class="text-sm text-purple-400 hover:text-purple-300">
                     Regenerate Startup Service...
                 </button>
             </div>
@@ -77,24 +76,24 @@
         <div class="bg-gray-900 w-full max-w-lg rounded-lg shadow-xl border border-purple-900 flex flex-col max-h-[90vh]">
             <div class="flex justify-between items-center p-4 border-b border-purple-800 flex-shrink-0">
                 <h3 id="mount-modal-title" class="text-xl font-semibold">Add Mount</h3>
-                <button onclick="closeMountModal()" class="text-gray-400 hover:text-white text-2xl">&times;</button>
+                <button type="button" data-action="close-mount-modal" class="text-gray-400 hover:text-white text-2xl">&times;</button>
             </div>
             <div class="p-4 overflow-y-auto flex-1 min-h-0" id="mount-modal-form">
                 <!-- Form fields populated by JS -->
             </div>
             <div class="p-4 border-t border-purple-800 flex justify-end gap-3 flex-shrink-0">
-                <button onclick="closeMountModal()" class="px-4 py-2 text-gray-400 hover:text-white">Cancel</button>
-                <button id="mount-modal-submit" onclick="submitMountForm()" class="coraline-button px-4 py-2 rounded text-white">Save</button>
+                <button type="button" data-action="close-mount-modal" class="px-4 py-2 text-gray-400 hover:text-white">Cancel</button>
+                <button id="mount-modal-submit" type="button" data-action="submit-mount-form" class="coraline-button px-4 py-2 rounded text-white">Save</button>
             </div>
         </div>
     </div>
 
     <!-- Diff Preview Modal -->
-    <div id="diff-modal" class="hidden fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4 overflow-y-auto" onclick="if(event.target === this) closeDiffModal()">
-        <div class="bg-gray-800 w-full max-w-4xl rounded-lg shadow-xl border border-purple-900 flex flex-col my-auto" style="max-height: calc(100vh - 2rem);" onclick="event.stopPropagation()">
+    <div id="diff-modal" class="hidden fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4 overflow-y-auto" data-overlay-close="diff-modal">
+        <div class="bg-gray-800 w-full max-w-4xl rounded-lg shadow-xl border border-purple-900 flex flex-col my-auto" style="max-height: calc(100vh - 2rem);" data-modal-panel>
             <div class="flex justify-between items-center p-4 border-b border-purple-800 flex-shrink-0">
                 <h3 class="text-xl font-semibold">Startup Service Changes</h3>
-                <button onclick="closeDiffModal()" class="text-gray-400 hover:text-white text-2xl font-bold leading-none">&times;</button>
+                <button type="button" data-action="close-diff-modal" class="text-gray-400 hover:text-white text-2xl font-bold leading-none">&times;</button>
             </div>
             <div class="p-4 overflow-y-auto flex-1" style="min-height: 0;">
                 <div id="diff-content" class="space-y-6">
@@ -102,8 +101,8 @@
                 </div>
             </div>
             <div class="p-4 border-t border-purple-800 flex justify-end gap-3 flex-shrink-0">
-                <button onclick="closeDiffModal()" class="px-4 py-2 text-gray-400 hover:text-white">Cancel</button>
-                <button onclick="applyStartupService()" class="coraline-button px-4 py-2 rounded text-white">Apply Changes</button>
+                <button type="button" data-action="close-diff-modal" class="px-4 py-2 text-gray-400 hover:text-white">Cancel</button>
+                <button type="button" data-action="apply-startup-service" class="coraline-button px-4 py-2 rounded text-white">Apply Changes</button>
             </div>
         </div>
     </div>

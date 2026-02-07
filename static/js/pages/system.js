@@ -1,5 +1,16 @@
 import { ensureAuthenticated, logoutToLogin } from '/js/lib/auth.js';
+import { ensureDashboardShell } from '/js/lib/layout.js';
+import { createErrorState, createLoadingState } from '/js/lib/states.js';
 import { requestJson } from '/js/lib/http.js';
+import { formatBytes } from '/js/lib/format.js';
+import { showNotification } from '/js/lib/notify.js';
+
+ensureDashboardShell({
+    bodyClass: 'ph-system bg-gray-900 text-blue-100 font-sans min-h-screen',
+    navClass: 'bg-slate-900/90 shadow-md',
+    notificationClass: 'fixed top-4 right-4 z-50 w-72 flex flex-col items-end',
+    includeFooter: true,
+});
 
 const els = {
     cpuUsage: document.getElementById('cpu-usage'),
@@ -26,17 +37,35 @@ const els = {
     wifiInterface: document.getElementById('wifi-interface'),
     wifiSignal: document.getElementById('wifi-signal'),
     wifiBar: document.getElementById('wifi-bar'),
-    notificationArea: document.getElementById('notification-area'),
 };
 
 let networkSnapshot = { recv: null, sent: null, time: null };
+let hasLoadedMetrics = false;
 
-function formatBytes(bytes, decimals = 2) {
-    if (!Number.isFinite(bytes) || bytes <= 0) return '0 Bytes';
-    const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return `${parseFloat((bytes / Math.pow(k, i)).toFixed(decimals))} ${sizes[i]}`;
+function setSystemState(stateNode = null) {
+    const stateEl = document.getElementById('system-state');
+    const metricsGrid = document.querySelector('main .ph-grid');
+    const actions = document.getElementById('actions');
+    const piSection = document.getElementById('pi-metrics-section');
+
+    if (!stateEl) {
+        return;
+    }
+
+    if (!stateNode) {
+        stateEl.classList.add('hidden');
+        stateEl.textContent = '';
+        metricsGrid?.classList.remove('hidden');
+        actions?.classList.remove('hidden');
+        return;
+    }
+
+    stateEl.classList.remove('hidden');
+    stateEl.textContent = '';
+    stateEl.appendChild(stateNode);
+    metricsGrid?.classList.add('hidden');
+    actions?.classList.add('hidden');
+    piSection?.classList.add('hidden');
 }
 
 function nowTime() {
@@ -50,36 +79,46 @@ function colorClass(percent) {
     return 'ph-danger';
 }
 
-function showNotification(message, type = 'info') {
-    if (!els.notificationArea) return;
-
-    const notification = document.createElement('div');
-    notification.className = 'rounded shadow-lg px-3 py-2 mb-2 text-white opacity-95';
-    if (type === 'success') notification.classList.add('bg-green-600');
-    else if (type === 'error') notification.classList.add('bg-red-600');
-    else notification.classList.add('bg-blue-600');
-
-    notification.textContent = message;
-    els.notificationArea.appendChild(notification);
-    window.setTimeout(() => notification.remove(), 3200);
-}
-
 function renderCoreBreakdown(cores = []) {
     if (!cores.length) {
-        els.cpuCores.innerHTML = '<div class="ph-muted">Per-core stats unavailable</div>';
+        els.cpuCores.textContent = '';
+        const empty = document.createElement('div');
+        empty.className = 'ph-muted';
+        empty.textContent = 'Per-core stats unavailable';
+        els.cpuCores.appendChild(empty);
         return;
     }
 
-    els.cpuCores.innerHTML = cores.map((core) => {
-        const pct = core.usage_percent ? core.usage_percent.toFixed(1) : '0.0';
-        return `
-            <div class="flex items-center justify-between gap-3 ph-metric-row">
-                <span class="w-16">${core.core}</span>
-                <div class="flex-1 ph-progress"><div style="width:${pct}%;background:#0ea5e9"></div></div>
-                <span class="w-12 text-right">${pct}%</span>
-            </div>
-        `;
-    }).join('');
+    els.cpuCores.textContent = '';
+
+    cores.forEach((core) => {
+        const usage = Number(core?.usage_percent);
+        const pct = Number.isFinite(usage) ? usage : 0;
+        const pctText = pct.toFixed(1);
+
+        const row = document.createElement('div');
+        row.className = 'flex items-center justify-between gap-3 ph-metric-row';
+
+        const label = document.createElement('span');
+        label.className = 'w-16';
+        label.textContent = core?.core || 'Core';
+
+        const progress = document.createElement('div');
+        progress.className = 'flex-1 ph-progress';
+        const progressFill = document.createElement('div');
+        progressFill.style.width = `${Math.max(0, Math.min(pct, 100))}%`;
+        progressFill.style.background = '#0ea5e9';
+        progress.appendChild(progressFill);
+
+        const value = document.createElement('span');
+        value.className = 'w-12 text-right';
+        value.textContent = `${pctText}%`;
+
+        row.appendChild(label);
+        row.appendChild(progress);
+        row.appendChild(value);
+        els.cpuCores.appendChild(row);
+    });
 }
 
 function applyValue(el, value, percent) {
@@ -97,25 +136,54 @@ function updatePiMetrics(data) {
     }
 
     const t = data.throttling;
+    els.throttleStatus.textContent = '';
+
     if (!t) {
-        els.throttleStatus.innerHTML = '<p class="ph-muted">N/A</p>';
+        const item = document.createElement('p');
+        item.className = 'ph-muted';
+        item.textContent = 'N/A';
+        els.throttleStatus.appendChild(item);
     } else if (t.has_issues) {
         const issues = [];
-        if (t.under_voltage_now) issues.push('<p class="ph-danger">Under-voltage detected</p>');
-        if (t.throttled_now) issues.push('<p class="ph-danger">CPU throttled</p>');
-        if (t.freq_capped_now) issues.push('<p class="ph-warn">Frequency capped</p>');
-        if (t.soft_temp_limit_now) issues.push('<p class="ph-warn">Soft temp limit</p>');
-        els.throttleStatus.innerHTML = issues.join('');
+        if (t.under_voltage_now) issues.push({ className: 'ph-danger', text: 'Under-voltage detected' });
+        if (t.throttled_now) issues.push({ className: 'ph-danger', text: 'CPU throttled' });
+        if (t.freq_capped_now) issues.push({ className: 'ph-warn', text: 'Frequency capped' });
+        if (t.soft_temp_limit_now) issues.push({ className: 'ph-warn', text: 'Soft temp limit' });
+
+        issues.forEach((issue) => {
+            const item = document.createElement('p');
+            item.className = issue.className;
+            item.textContent = issue.text;
+            els.throttleStatus.appendChild(item);
+        });
     } else {
-        els.throttleStatus.innerHTML = '<p class="ph-positive">All OK</p>';
+        const item = document.createElement('p');
+        item.className = 'ph-positive';
+        item.textContent = 'All OK';
+        els.throttleStatus.appendChild(item);
     }
 
     if (t?.has_historical_issues && !t.has_issues) {
-        els.throttleStatus.innerHTML += '<p class="ph-muted">Historical issues detected since boot</p>';
+        const historical = document.createElement('p');
+        historical.className = 'ph-muted';
+        historical.textContent = 'Historical issues detected since boot';
+        els.throttleStatus.appendChild(historical);
     }
 
-    els.cpuFreq.innerHTML = `Frequency: <span class="ph-muted">${data.cpu_freq_mhz ? `${data.cpu_freq_mhz} MHz` : '—'}</span>`;
-    els.cpuVoltage.innerHTML = `Voltage: <span class="ph-muted">${data.cpu_voltage ? `${data.cpu_voltage.toFixed(4)} V` : '—'}</span>`;
+    const cpuFreq = Number(data.cpu_freq_mhz);
+    const cpuVoltage = Number(data.cpu_voltage);
+
+    els.cpuFreq.textContent = 'Frequency: ';
+    const freqValue = document.createElement('span');
+    freqValue.className = 'ph-muted';
+    freqValue.textContent = Number.isFinite(cpuFreq) ? `${cpuFreq} MHz` : '—';
+    els.cpuFreq.appendChild(freqValue);
+
+    els.cpuVoltage.textContent = 'Voltage: ';
+    const voltageValue = document.createElement('span');
+    voltageValue.className = 'ph-muted';
+    voltageValue.textContent = Number.isFinite(cpuVoltage) ? `${cpuVoltage.toFixed(4)} V` : '—';
+    els.cpuVoltage.appendChild(voltageValue);
 
     if (!data.wifi_signal) {
         els.wifiCard.classList.add('hidden');
@@ -137,6 +205,7 @@ async function fetchSystemMetrics() {
             throw new Error(payload?.error || `Request failed (${response.status})`);
         }
         const data = payload;
+        setSystemState(null);
 
         const cpuPercent = data.cpu_usage_percent ? Number(data.cpu_usage_percent.toFixed(1)) : 0;
         applyValue(els.cpuUsage, `${cpuPercent}%`, cpuPercent);
@@ -185,8 +254,21 @@ async function fetchSystemMetrics() {
 
         updatePiMetrics(data);
         els.lastUpdated.textContent = `Last updated: ${nowTime()}`;
+        hasLoadedMetrics = true;
     } catch (error) {
         console.error('Error fetching system metrics:', error);
+
+        if (!hasLoadedMetrics) {
+            setSystemState(createErrorState({
+                title: 'Unable to load system metrics',
+                subtitle: error.message || 'Unknown error',
+                containerClass: 'text-center py-10',
+                titleClass: 'text-red-400',
+            }));
+            showNotification('Error fetching system metrics', 'error');
+            return;
+        }
+
         [els.cpuUsage, els.memoryUsage, els.temperature, els.diskUsage, els.diskUsage2].forEach((el) => {
             el.textContent = 'Error';
             el.classList.remove('ph-positive', 'ph-warn');
@@ -225,6 +307,12 @@ async function sendSystemAction(action) {
     if (!authenticated) return;
 
     window.logout = logoutToLogin;
+
+    setSystemState(createLoadingState({
+        message: 'Loading system metrics...',
+        containerClass: 'text-center py-10',
+        messageClass: 'text-gray-400',
+    }));
 
     document.querySelectorAll('[data-action]').forEach((button) => {
         button.addEventListener('click', () => sendSystemAction(button.dataset.action));

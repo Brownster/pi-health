@@ -1,21 +1,12 @@
 import { ensureAuthenticated, logoutToLogin } from '/js/lib/auth.js';
 import { ensureDashboardShell } from '/js/lib/layout.js';
-import { clearClientSession } from '/js/lib/session.js';
+import { requestApiResponse } from '/js/lib/http.js';
+import { showNotification } from '/js/lib/notify.js';
 
 ensureDashboardShell({
     notificationClass: 'fixed top-4 right-4 z-50 w-80 flex flex-col items-end',
     includeFooter: true,
 });
-
-async function apiFetch(url, options = {}) {
-    const response = await fetch(url, options);
-    if (response.status === 401) {
-        clearClientSession();
-        window.location.href = '/login.html';
-        throw new Error('Authentication required');
-    }
-    return response;
-}
 
 function statusPill(status) {
     if (status === 'active') return 'status-healthy';
@@ -23,25 +14,9 @@ function statusPill(status) {
     return 'status-unconfigured';
 }
 
-function showNotification(message, type = 'info') {
-    const notificationArea = document.getElementById('notification-area');
-    if (!notificationArea) {
-        return;
-    }
-
-    const notification = document.createElement('div');
-    notification.className = `mb-3 p-4 rounded shadow-lg text-white max-w-sm ${
-        type === 'error' ? 'bg-red-600' :
-        type === 'success' ? 'bg-green-600' : 'bg-blue-600'
-    }`;
-    notification.textContent = message;
-    notificationArea.appendChild(notification);
-    setTimeout(() => notification.remove(), 4000);
-}
-
 async function loadCopyParty() {
     try {
-        const res = await apiFetch('/api/tools/copyparty/status');
+        const res = await requestApiResponse('/api/tools/copyparty/status');
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
             throw new Error(data.error || 'Failed to load');
@@ -79,7 +54,7 @@ async function loadCopyParty() {
 
 async function installCopyParty() {
     try {
-        const res = await apiFetch('/api/tools/copyparty/install', {
+        const res = await requestApiResponse('/api/tools/copyparty/install', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
         });
@@ -103,7 +78,7 @@ async function saveCopyPartyConfig() {
     };
 
     try {
-        const res = await apiFetch('/api/tools/copyparty/config', {
+        const res = await requestApiResponse('/api/tools/copyparty/config', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
@@ -120,11 +95,6 @@ async function saveCopyPartyConfig() {
     }
 }
 
-Object.assign(window, {
-    installCopyParty,
-    saveCopyPartyConfig,
-});
-
 (async function initToolsPage() {
     const authenticated = await ensureAuthenticated();
     if (!authenticated) {
@@ -132,5 +102,7 @@ Object.assign(window, {
     }
 
     window.logout = logoutToLogin;
+    document.getElementById('copyparty-install-btn')?.addEventListener('click', installCopyParty);
+    document.getElementById('copyparty-save-config')?.addEventListener('click', saveCopyPartyConfig);
     await loadCopyParty();
 })();
