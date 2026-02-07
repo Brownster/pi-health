@@ -66,20 +66,44 @@ function showNotification(message, type = 'info') {
 
 function renderCoreBreakdown(cores = []) {
     if (!cores.length) {
-        els.cpuCores.innerHTML = '<div class="ph-muted">Per-core stats unavailable</div>';
+        els.cpuCores.textContent = '';
+        const empty = document.createElement('div');
+        empty.className = 'ph-muted';
+        empty.textContent = 'Per-core stats unavailable';
+        els.cpuCores.appendChild(empty);
         return;
     }
 
-    els.cpuCores.innerHTML = cores.map((core) => {
-        const pct = core.usage_percent ? core.usage_percent.toFixed(1) : '0.0';
-        return `
-            <div class="flex items-center justify-between gap-3 ph-metric-row">
-                <span class="w-16">${core.core}</span>
-                <div class="flex-1 ph-progress"><div style="width:${pct}%;background:#0ea5e9"></div></div>
-                <span class="w-12 text-right">${pct}%</span>
-            </div>
-        `;
-    }).join('');
+    els.cpuCores.textContent = '';
+
+    cores.forEach((core) => {
+        const usage = Number(core?.usage_percent);
+        const pct = Number.isFinite(usage) ? usage : 0;
+        const pctText = pct.toFixed(1);
+
+        const row = document.createElement('div');
+        row.className = 'flex items-center justify-between gap-3 ph-metric-row';
+
+        const label = document.createElement('span');
+        label.className = 'w-16';
+        label.textContent = core?.core || 'Core';
+
+        const progress = document.createElement('div');
+        progress.className = 'flex-1 ph-progress';
+        const progressFill = document.createElement('div');
+        progressFill.style.width = `${Math.max(0, Math.min(pct, 100))}%`;
+        progressFill.style.background = '#0ea5e9';
+        progress.appendChild(progressFill);
+
+        const value = document.createElement('span');
+        value.className = 'w-12 text-right';
+        value.textContent = `${pctText}%`;
+
+        row.appendChild(label);
+        row.appendChild(progress);
+        row.appendChild(value);
+        els.cpuCores.appendChild(row);
+    });
 }
 
 function applyValue(el, value, percent) {
@@ -97,25 +121,54 @@ function updatePiMetrics(data) {
     }
 
     const t = data.throttling;
+    els.throttleStatus.textContent = '';
+
     if (!t) {
-        els.throttleStatus.innerHTML = '<p class="ph-muted">N/A</p>';
+        const item = document.createElement('p');
+        item.className = 'ph-muted';
+        item.textContent = 'N/A';
+        els.throttleStatus.appendChild(item);
     } else if (t.has_issues) {
         const issues = [];
-        if (t.under_voltage_now) issues.push('<p class="ph-danger">Under-voltage detected</p>');
-        if (t.throttled_now) issues.push('<p class="ph-danger">CPU throttled</p>');
-        if (t.freq_capped_now) issues.push('<p class="ph-warn">Frequency capped</p>');
-        if (t.soft_temp_limit_now) issues.push('<p class="ph-warn">Soft temp limit</p>');
-        els.throttleStatus.innerHTML = issues.join('');
+        if (t.under_voltage_now) issues.push({ className: 'ph-danger', text: 'Under-voltage detected' });
+        if (t.throttled_now) issues.push({ className: 'ph-danger', text: 'CPU throttled' });
+        if (t.freq_capped_now) issues.push({ className: 'ph-warn', text: 'Frequency capped' });
+        if (t.soft_temp_limit_now) issues.push({ className: 'ph-warn', text: 'Soft temp limit' });
+
+        issues.forEach((issue) => {
+            const item = document.createElement('p');
+            item.className = issue.className;
+            item.textContent = issue.text;
+            els.throttleStatus.appendChild(item);
+        });
     } else {
-        els.throttleStatus.innerHTML = '<p class="ph-positive">All OK</p>';
+        const item = document.createElement('p');
+        item.className = 'ph-positive';
+        item.textContent = 'All OK';
+        els.throttleStatus.appendChild(item);
     }
 
     if (t?.has_historical_issues && !t.has_issues) {
-        els.throttleStatus.innerHTML += '<p class="ph-muted">Historical issues detected since boot</p>';
+        const historical = document.createElement('p');
+        historical.className = 'ph-muted';
+        historical.textContent = 'Historical issues detected since boot';
+        els.throttleStatus.appendChild(historical);
     }
 
-    els.cpuFreq.innerHTML = `Frequency: <span class="ph-muted">${data.cpu_freq_mhz ? `${data.cpu_freq_mhz} MHz` : '—'}</span>`;
-    els.cpuVoltage.innerHTML = `Voltage: <span class="ph-muted">${data.cpu_voltage ? `${data.cpu_voltage.toFixed(4)} V` : '—'}</span>`;
+    const cpuFreq = Number(data.cpu_freq_mhz);
+    const cpuVoltage = Number(data.cpu_voltage);
+
+    els.cpuFreq.textContent = 'Frequency: ';
+    const freqValue = document.createElement('span');
+    freqValue.className = 'ph-muted';
+    freqValue.textContent = Number.isFinite(cpuFreq) ? `${cpuFreq} MHz` : '—';
+    els.cpuFreq.appendChild(freqValue);
+
+    els.cpuVoltage.textContent = 'Voltage: ';
+    const voltageValue = document.createElement('span');
+    voltageValue.className = 'ph-muted';
+    voltageValue.textContent = Number.isFinite(cpuVoltage) ? `${cpuVoltage.toFixed(4)} V` : '—';
+    els.cpuVoltage.appendChild(voltageValue);
 
     if (!data.wifi_signal) {
         els.wifiCard.classList.add('hidden');

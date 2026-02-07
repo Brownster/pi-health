@@ -5,785 +5,995 @@ window.logout = logoutToLogin;
 
 async function requestApiJson(url, options = {}) {
     const { response, payload } = await requestJson(url, options);
+
     if (!response.ok) {
         throw new Error(payload?.error || `Request failed (${response.status})`);
     }
-    return payload;
+
+    return payload || {};
 }
 
-        // Format timestamp
-        function formatDateTime(date) {
-            const hours = String(date.getHours()).padStart(2, '0');
-            const minutes = String(date.getMinutes()).padStart(2, '0');
-            const seconds = String(date.getSeconds()).padStart(2, '0');
-            return `${hours}:${minutes}:${seconds}`;
+function showNotification(message, type = 'info') {
+    const area = document.getElementById('notification-area');
+    if (!area) {
+        return;
+    }
+
+    const notification = document.createElement('div');
+    notification.className = 'bg-opacity-90 p-3 mb-2 rounded shadow-lg transform transition-all duration-500 opacity-0 text-white';
+
+    if (type === 'success') {
+        notification.classList.add('bg-green-600');
+    } else if (type === 'error') {
+        notification.classList.add('bg-red-600');
+    } else {
+        notification.classList.add('bg-blue-600');
+    }
+
+    notification.textContent = message;
+    area.appendChild(notification);
+
+    window.setTimeout(() => notification.classList.replace('opacity-0', 'opacity-100'), 10);
+    window.setTimeout(() => {
+        notification.classList.replace('opacity-100', 'opacity-0');
+        window.setTimeout(() => notification.remove(), 300);
+    }, 3000);
+}
+
+function formatDateTime(date) {
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const seconds = String(date.getSeconds()).padStart(2, '0');
+    return `${hours}:${minutes}:${seconds}`;
+}
+
+function formatBytes(bytes) {
+    const value = Number(bytes);
+    if (!Number.isFinite(value) || value < 0) return '—';
+    if (value === 0) return '0 B';
+
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.min(Math.floor(Math.log(value) / Math.log(k)), sizes.length - 1);
+    return `${parseFloat((value / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
+}
+
+function getStatColorClass(percent) {
+    if (!Number.isFinite(percent)) return 'text-gray-500';
+    if (percent < 50) return 'text-green-400';
+    if (percent < 80) return 'text-yellow-400';
+    return 'text-red-400';
+}
+
+function loadingSpinner() {
+    return '<div class="loading-spinner"></div>';
+}
+
+function normalizePercent(value) {
+    const num = Number(value);
+    return Number.isFinite(num) ? num : null;
+}
+
+function formatCpuCell(cpuPercent, loading = false) {
+    if (loading) return loadingSpinner();
+    const pct = normalizePercent(cpuPercent);
+    if (pct === null) return '<span class="text-gray-500">—</span>';
+
+    const colorClass = getStatColorClass(pct);
+    const barColor = pct < 50 ? 'bg-green-500' : pct < 80 ? 'bg-yellow-500' : 'bg-red-500';
+    return `
+        <span class="${colorClass} text-sm">${pct.toFixed(1)}%</span>
+        <div class="w-full bg-gray-700 rounded-full h-1.5 mt-1">
+            <div class="${barColor} h-1.5 rounded-full" style="width: ${Math.min(pct, 100)}%"></div>
+        </div>
+    `;
+}
+
+function formatMemoryCell(memPercent, memUsed, memLimit, loading = false) {
+    if (loading) return loadingSpinner();
+    const pct = normalizePercent(memPercent);
+    if (pct === null) return '<span class="text-gray-500">—</span>';
+
+    const colorClass = getStatColorClass(pct);
+    const barColor = pct < 50 ? 'bg-green-500' : pct < 80 ? 'bg-yellow-500' : 'bg-red-500';
+    return `
+        <span class="${colorClass} text-sm">${pct.toFixed(1)}%</span>
+        <div class="text-xs text-gray-400">${formatBytes(memUsed)} / ${formatBytes(memLimit)}</div>
+        <div class="w-full bg-gray-700 rounded-full h-1.5 mt-1">
+            <div class="${barColor} h-1.5 rounded-full" style="width: ${Math.min(pct, 100)}%"></div>
+        </div>
+    `;
+}
+
+let currentFilter = 'all';
+let containerList = [];
+let initialLoadComplete = false;
+let previousNetworkStats = {};
+let lastFetchTime = null;
+let statsLoading = false;
+
+function getContainerListEl() {
+    return document.getElementById('container-list');
+}
+
+function findContainerRow(containerId) {
+    const list = getContainerListEl();
+    if (!list) return null;
+    const id = String(containerId);
+    return Array.from(list.querySelectorAll('tr[data-container-id]')).find((row) => row.dataset.containerId === id) || null;
+}
+
+function getContainerNameById(id) {
+    const containerId = String(id);
+    const cached = containerList.find((item) => String(item.id) === containerId);
+    if (cached) return cached.name || containerId;
+
+    const row = findContainerRow(containerId);
+    return row ? (row.dataset.containerName || containerId) : containerId;
+}
+
+function getWebUIPort(container) {
+    if (!container.ports || container.ports.length === 0) return null;
+
+    const tcpPorts = container.ports.filter((port) => port.protocol !== 'udp');
+    const hostTcp = tcpPorts.find((port) => port.host_port);
+    const anyHost = container.ports.find((port) => port.host_port);
+    const tcpContainer = tcpPorts.find((port) => port.container_port);
+    const fallback = container.ports.find((port) => port.container_port);
+
+    const candidate = hostTcp?.host_port || anyHost?.host_port || tcpContainer?.container_port || fallback?.container_port;
+    const port = Number(candidate);
+    if (!Number.isInteger(port) || port <= 0 || port > 65535) return null;
+    return port;
+}
+
+function calculateNetworkRate(containerId, currentRx, currentTx) {
+    const rx = Number(currentRx);
+    const tx = Number(currentTx);
+    if (!Number.isFinite(rx) || !Number.isFinite(tx)) {
+        return null;
+    }
+
+    const now = Date.now();
+    const key = String(containerId);
+    const prev = previousNetworkStats[key];
+
+    if (!prev || !lastFetchTime) {
+        previousNetworkStats[key] = { rx, tx };
+        return null;
+    }
+
+    const timeDelta = (now - lastFetchTime) / 1000;
+    if (timeDelta <= 0) return null;
+
+    const rxRate = Math.max(0, (rx - prev.rx) / timeDelta);
+    const txRate = Math.max(0, (tx - prev.tx) / timeDelta);
+
+    previousNetworkStats[key] = { rx, tx };
+    return { rxRate, txRate };
+}
+
+function formatNetworkCell(rx, tx, containerId, loading = false) {
+    if (loading) return loadingSpinner();
+
+    const rxValue = Number(rx);
+    const txValue = Number(tx);
+    if (!Number.isFinite(rxValue) || !Number.isFinite(txValue)) {
+        return '<span class="text-gray-500">—</span>';
+    }
+
+    const rates = containerId ? calculateNetworkRate(containerId, rxValue, txValue) : null;
+    if (rates) {
+        return `<span class="text-blue-300">↓${formatBytes(rates.rxRate)}/s</span><br><span class="text-green-300">↑${formatBytes(rates.txRate)}/s</span>`;
+    }
+
+    return `<span class="text-blue-300">↓${formatBytes(rxValue)}</span><br><span class="text-green-300">↑${formatBytes(txValue)}</span>`;
+}
+
+function clearContainerList() {
+    const list = getContainerListEl();
+    if (!list) return;
+    list.textContent = '';
+}
+
+function appendTableMessage(message, className = '') {
+    const list = getContainerListEl();
+    if (!list) return;
+
+    clearContainerList();
+
+    const row = document.createElement('tr');
+    const cell = document.createElement('td');
+    cell.colSpan = 8;
+    cell.className = `text-center py-4 ${className}`.trim();
+    cell.textContent = message;
+    row.appendChild(cell);
+    list.appendChild(row);
+}
+
+function renderContainerNameCell(cell, container) {
+    cell.textContent = '';
+    cell.appendChild(document.createTextNode(container.name || 'Unnamed'));
+
+    if (container.update_available) {
+        const indicator = document.createElement('span');
+        indicator.className = 'ml-1 text-yellow-400';
+        indicator.title = 'Update available';
+        indicator.textContent = '↻';
+        cell.appendChild(indicator);
+    }
+}
+
+function createStatusBadge(status) {
+    const normalized = status || 'unknown';
+    const statusClass = normalized === 'running' ? 'status-running' : normalized === 'stopped' ? 'status-stopped' : 'status-other';
+
+    const badge = document.createElement('span');
+    badge.className = `px-2 py-1 text-white rounded ${statusClass}`;
+    badge.textContent = normalized;
+    return badge;
+}
+
+function buildActionButton({ label, action, containerId, disabled = false, className }) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.dataset.action = action;
+    button.dataset.containerId = String(containerId);
+    button.className = className;
+    button.textContent = label;
+    button.disabled = disabled;
+
+    if (disabled) {
+        button.classList.add('opacity-50', 'cursor-not-allowed');
+    }
+
+    return button;
+}
+
+function buildMenuButton({ label, action, containerId, roundedClass }) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.dataset.menuAction = action;
+    button.dataset.containerId = String(containerId);
+    button.className = `w-full text-left px-3 py-2 text-xs hover:bg-gray-600 text-white ${roundedClass}`.trim();
+    button.textContent = label;
+    return button;
+}
+
+function buildUnavailableRow(container) {
+    const row = document.createElement('tr');
+    row.dataset.containerId = String(container.id || 'unavailable');
+    row.dataset.containerName = container.name || 'Docker';
+
+    const nameCell = document.createElement('td');
+    nameCell.className = 'px-6 py-4 whitespace-nowrap text-sm font-medium';
+    nameCell.textContent = container.name || 'Docker unavailable';
+    row.appendChild(nameCell);
+
+    const imageCell = document.createElement('td');
+    imageCell.className = 'px-6 py-4 whitespace-nowrap text-sm';
+    imageCell.textContent = container.image || 'N/A';
+    row.appendChild(imageCell);
+
+    const statusCell = document.createElement('td');
+    statusCell.className = 'px-6 py-4 whitespace-nowrap';
+    statusCell.appendChild(createStatusBadge(container.status || 'unavailable'));
+    row.appendChild(statusCell);
+
+    for (let i = 0; i < 3; i += 1) {
+        const cell = document.createElement('td');
+        cell.className = 'px-4 py-4 whitespace-nowrap text-sm text-gray-500';
+        cell.textContent = '—';
+        row.appendChild(cell);
+    }
+
+    const webCell = document.createElement('td');
+    webCell.className = 'px-6 py-4 whitespace-nowrap text-sm';
+    webCell.textContent = 'N/A';
+    row.appendChild(webCell);
+
+    const actionsCell = document.createElement('td');
+    actionsCell.className = 'px-4 py-4 whitespace-nowrap text-sm text-gray-500';
+    actionsCell.textContent = '—';
+    row.appendChild(actionsCell);
+
+    return row;
+}
+
+function buildContainerRow(container, showStatsLoading = false) {
+    const row = document.createElement('tr');
+    row.dataset.containerId = String(container.id);
+    row.dataset.containerName = container.name || String(container.id);
+
+    const isRunning = container.status === 'running';
+    const hasStats = container.cpu_percent !== null && container.cpu_percent !== undefined;
+    const loading = showStatsLoading && isRunning && !hasStats;
+
+    const nameCell = document.createElement('td');
+    nameCell.className = 'px-6 py-4 whitespace-nowrap text-sm font-medium';
+    nameCell.dataset.cell = 'name';
+    renderContainerNameCell(nameCell, container);
+    row.appendChild(nameCell);
+
+    const imageCell = document.createElement('td');
+    imageCell.className = 'px-6 py-4 whitespace-nowrap text-sm text-gray-400 max-w-xs truncate';
+    imageCell.title = container.image || '';
+    imageCell.textContent = container.image || '—';
+    row.appendChild(imageCell);
+
+    const statusCell = document.createElement('td');
+    statusCell.className = 'px-6 py-4 whitespace-nowrap';
+    statusCell.dataset.cell = 'status';
+    statusCell.appendChild(createStatusBadge(container.status));
+    row.appendChild(statusCell);
+
+    const cpuCell = document.createElement('td');
+    cpuCell.className = 'px-4 py-4 whitespace-nowrap text-sm';
+    cpuCell.dataset.stat = 'cpu';
+    cpuCell.innerHTML = formatCpuCell(container.cpu_percent, loading);
+    row.appendChild(cpuCell);
+
+    const memoryCell = document.createElement('td');
+    memoryCell.className = 'px-4 py-4 whitespace-nowrap text-sm';
+    memoryCell.dataset.stat = 'memory';
+    memoryCell.innerHTML = formatMemoryCell(container.memory_percent, container.memory_used, container.memory_limit, loading);
+    row.appendChild(memoryCell);
+
+    const networkCell = document.createElement('td');
+    networkCell.className = 'px-4 py-4 whitespace-nowrap text-sm';
+    networkCell.dataset.stat = 'network';
+    networkCell.innerHTML = formatNetworkCell(container.net_rx, container.net_tx, container.id, loading);
+    row.appendChild(networkCell);
+
+    const webCell = document.createElement('td');
+    webCell.className = 'px-4 py-4 whitespace-nowrap text-sm';
+    const webPort = getWebUIPort(container);
+    if (webPort) {
+        const link = document.createElement('a');
+        link.href = `http://${window.location.hostname}:${webPort}`;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.className = 'text-blue-500 hover:text-blue-400 underline';
+        link.textContent = 'Open';
+        webCell.appendChild(link);
+    } else {
+        webCell.textContent = 'N/A';
+    }
+    row.appendChild(webCell);
+
+    const actionsCell = document.createElement('td');
+    actionsCell.className = 'px-4 py-4 whitespace-nowrap text-sm';
+
+    const actionWrap = document.createElement('div');
+    actionWrap.className = 'flex items-center gap-1';
+
+    actionWrap.appendChild(buildActionButton({
+        label: 'Start',
+        action: 'start',
+        containerId: container.id,
+        disabled: container.status === 'running',
+        className: 'action-btn bg-green-700 hover:bg-green-600 text-white py-1 px-2 rounded text-xs',
+    }));
+
+    actionWrap.appendChild(buildActionButton({
+        label: 'Stop',
+        action: 'stop',
+        containerId: container.id,
+        disabled: ['stopped', 'exited'].includes(container.status),
+        className: 'action-btn bg-yellow-700 hover:bg-yellow-600 text-white py-1 px-2 rounded text-xs',
+    }));
+
+    actionWrap.appendChild(buildActionButton({
+        label: 'Restart',
+        action: 'restart',
+        containerId: container.id,
+        className: 'action-btn bg-blue-700 hover:bg-blue-600 text-white py-1 px-2 rounded text-xs',
+    }));
+
+    const dropdownWrap = document.createElement('div');
+    dropdownWrap.className = 'relative';
+    dropdownWrap.dataset.dropdownContainer = String(container.id);
+
+    const dropdownToggle = document.createElement('button');
+    dropdownToggle.type = 'button';
+    dropdownToggle.className = 'bg-gray-600 hover:bg-gray-500 text-white py-1 px-2 rounded text-xs';
+    dropdownToggle.dataset.dropdownToggle = String(container.id);
+    dropdownToggle.dataset.containerId = String(container.id);
+    dropdownToggle.textContent = '⋮';
+    dropdownWrap.appendChild(dropdownToggle);
+
+    const dropdownMenu = document.createElement('div');
+    dropdownMenu.className = 'dropdown-menu hidden absolute mt-1 w-36 bg-gray-700 rounded shadow-lg z-50 border border-gray-600';
+    dropdownMenu.dataset.dropdownMenu = String(container.id);
+    dropdownMenu.dataset.dropdownMenuFor = String(container.id);
+    dropdownMenu.appendChild(buildMenuButton({ label: 'Check Update', action: 'check_update', containerId: container.id, roundedClass: 'rounded-t' }));
+    dropdownMenu.appendChild(buildMenuButton({ label: 'Update', action: 'update', containerId: container.id, roundedClass: '' }));
+    dropdownMenu.appendChild(buildMenuButton({ label: 'Logs', action: 'logs', containerId: container.id, roundedClass: '' }));
+    dropdownMenu.appendChild(buildMenuButton({ label: 'Network Test', action: 'network-test', containerId: container.id, roundedClass: 'rounded-b' }));
+    dropdownWrap.appendChild(dropdownMenu);
+
+    actionWrap.appendChild(dropdownWrap);
+    actionsCell.appendChild(actionWrap);
+    row.appendChild(actionsCell);
+
+    return row;
+}
+
+function hasContainerListChanged(oldList, newList) {
+    if (oldList.length !== newList.length) return true;
+    const oldIds = new Set(oldList.map((container) => String(container.id)));
+    const newIds = new Set(newList.map((container) => String(container.id)));
+    for (const id of newIds) {
+        if (!oldIds.has(id)) return true;
+    }
+    return false;
+}
+
+function closeAllDropdowns(exceptId = null) {
+    document.querySelectorAll('[data-dropdown-menu-for]').forEach((menu) => {
+        if (exceptId !== null && menu.dataset.dropdownMenuFor === String(exceptId)) {
+            return;
+        }
+        menu.classList.add('hidden');
+    });
+}
+
+function toggleDropdown(containerId) {
+    const row = findContainerRow(containerId);
+    if (!row) return;
+
+    const menu = row.querySelector('[data-dropdown-menu-for]');
+    if (!menu) return;
+
+    const willOpen = menu.classList.contains('hidden');
+    closeAllDropdowns();
+    if (willOpen) {
+        menu.classList.remove('hidden');
+    }
+}
+
+function closeDropdown(containerId) {
+    const row = findContainerRow(containerId);
+    if (!row) return;
+
+    const menu = row.querySelector('[data-dropdown-menu-for]');
+    if (menu) {
+        menu.classList.add('hidden');
+    }
+}
+
+function updateActionButtons(row, container) {
+    const startBtn = row.querySelector('button[data-action="start"]');
+    const stopBtn = row.querySelector('button[data-action="stop"]');
+
+    if (startBtn) {
+        const disabled = container.status === 'running';
+        startBtn.disabled = disabled;
+        startBtn.classList.toggle('opacity-50', disabled);
+        startBtn.classList.toggle('cursor-not-allowed', disabled);
+    }
+
+    if (stopBtn) {
+        const disabled = ['stopped', 'exited'].includes(container.status);
+        stopBtn.disabled = disabled;
+        stopBtn.classList.toggle('opacity-50', disabled);
+        stopBtn.classList.toggle('cursor-not-allowed', disabled);
+    }
+}
+
+function updateContainerRows() {
+    containerList.forEach((container) => {
+        const row = findContainerRow(container.id);
+        if (!row) return;
+
+        row.dataset.containerName = container.name || String(container.id);
+
+        const statusCell = row.querySelector('[data-cell="status"]');
+        if (statusCell) {
+            statusCell.textContent = '';
+            statusCell.appendChild(createStatusBadge(container.status));
         }
 
-        // Format bytes to human readable
-        function formatBytes(bytes) {
-            if (bytes === null || bytes === undefined) return '—';
-            if (bytes === 0) return '0 B';
-            const k = 1024;
-            const sizes = ['B', 'KB', 'MB', 'GB'];
-            const i = Math.floor(Math.log(bytes) / Math.log(k));
-            return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+        const nameCell = row.querySelector('[data-cell="name"]');
+        if (nameCell) {
+            renderContainerNameCell(nameCell, container);
         }
 
-        // Get color class based on percentage
-        function getStatColorClass(percent) {
-            if (percent === null || percent === undefined) return 'text-gray-500';
-            if (percent < 50) return 'text-green-400';
-            if (percent < 80) return 'text-yellow-400';
-            return 'text-red-400';
+        const cpuCell = row.querySelector('td[data-stat="cpu"]');
+        if (cpuCell) {
+            cpuCell.innerHTML = formatCpuCell(container.cpu_percent);
         }
 
-        // Loading spinner HTML
-        function loadingSpinner() {
-            return '<div class="loading-spinner"></div>';
+        const memoryCell = row.querySelector('td[data-stat="memory"]');
+        if (memoryCell) {
+            memoryCell.innerHTML = formatMemoryCell(container.memory_percent, container.memory_used, container.memory_limit);
         }
 
-        // Format stats display with mini progress bars
-        function formatCpuCell(cpuPercent, loading = false) {
-            if (loading) return loadingSpinner();
-            if (cpuPercent === null || cpuPercent === undefined) return '<span class="text-gray-500">—</span>';
-            const colorClass = getStatColorClass(cpuPercent);
-            const barColor = cpuPercent < 50 ? 'bg-green-500' : cpuPercent < 80 ? 'bg-yellow-500' : 'bg-red-500';
-            return `
-                <span class="${colorClass} text-sm">${cpuPercent.toFixed(1)}%</span>
-                <div class="w-full bg-gray-700 rounded-full h-1.5 mt-1">
-                    <div class="${barColor} h-1.5 rounded-full" style="width: ${Math.min(cpuPercent, 100)}%"></div>
-                </div>`;
+        const networkCell = row.querySelector('td[data-stat="network"]');
+        if (networkCell) {
+            networkCell.innerHTML = formatNetworkCell(container.net_rx, container.net_tx, container.id);
         }
 
-        function formatMemoryCell(memPercent, memUsed, memLimit, loading = false) {
-            if (loading) return loadingSpinner();
-            if (memPercent === null || memPercent === undefined) return '<span class="text-gray-500">—</span>';
-            const colorClass = getStatColorClass(memPercent);
-            const barColor = memPercent < 50 ? 'bg-green-500' : memPercent < 80 ? 'bg-yellow-500' : 'bg-red-500';
-            return `
-                <span class="${colorClass} text-sm">${memPercent.toFixed(1)}%</span>
-                <div class="text-xs text-gray-400">${formatBytes(memUsed)} / ${formatBytes(memLimit)}</div>
-                <div class="w-full bg-gray-700 rounded-full h-1.5 mt-1">
-                    <div class="${barColor} h-1.5 rounded-full" style="width: ${Math.min(memPercent, 100)}%"></div>
-                </div>`;
+        updateActionButtons(row, container);
+    });
+}
+
+function renderContainers(showStatsLoading = false) {
+    const list = getContainerListEl();
+    if (!list) return;
+
+    clearContainerList();
+
+    const filteredContainers = containerList.filter((container) => {
+        if (currentFilter === 'all') return true;
+        return container.status === currentFilter;
+    });
+
+    if (filteredContainers.length === 0) {
+        appendTableMessage(`No ${currentFilter} containers found`);
+        return;
+    }
+
+    if (
+        filteredContainers.length === 1 &&
+        (filteredContainers[0].status === 'unavailable' || filteredContainers[0].status === 'error')
+    ) {
+        list.appendChild(buildUnavailableRow(filteredContainers[0]));
+        return;
+    }
+
+    filteredContainers.forEach((container) => {
+        list.appendChild(buildContainerRow(container, showStatsLoading));
+    });
+}
+
+async function fetchDockerContainers(forceFullRender = false, includeStats = false) {
+    const lastUpdatedEl = document.getElementById('last-updated');
+
+    if (!initialLoadComplete) {
+        appendTableMessage('Loading...');
+    }
+
+    try {
+        const statsParam = includeStats ? 'true' : 'false';
+        const newContainerList = await requestApiJson(`/api/containers?stats=${statsParam}`);
+        if (lastUpdatedEl) {
+            lastUpdatedEl.textContent = `Last updated: ${formatDateTime(new Date())}`;
         }
 
-        // Calculate network rate (bytes/sec) from cumulative values
-        function calculateNetworkRate(containerId, currentRx, currentTx) {
-            const now = Date.now();
-            const prev = previousNetworkStats[containerId];
+        const needsFullRender =
+            forceFullRender ||
+            !initialLoadComplete ||
+            hasContainerListChanged(containerList, newContainerList);
 
-            if (!prev || !lastFetchTime) {
-                // First fetch - store values and return null (will show cumulative)
-                previousNetworkStats[containerId] = { rx: currentRx, tx: currentTx };
-                return null;
-            }
+        containerList = newContainerList;
 
-            const timeDelta = (now - lastFetchTime) / 1000; // seconds
-            if (timeDelta <= 0) return null;
-
-            const rxRate = Math.max(0, (currentRx - prev.rx) / timeDelta);
-            const txRate = Math.max(0, (currentTx - prev.tx) / timeDelta);
-
-            // Update stored values
-            previousNetworkStats[containerId] = { rx: currentRx, tx: currentTx };
-
-            return { rxRate, txRate };
+        if (needsFullRender) {
+            renderContainers(!includeStats);
+        } else {
+            updateContainerRows();
         }
 
-        function formatNetworkCell(rx, tx, containerId, loading = false) {
-            if (loading) return loadingSpinner();
-            if (rx === null || rx === undefined) return '<span class="text-gray-500">—</span>';
+        lastFetchTime = Date.now();
 
-            const rates = containerId ? calculateNetworkRate(containerId, rx, tx) : null;
+        initialLoadComplete = true;
 
-            if (rates) {
-                return `<span class="text-blue-300">↓${formatBytes(rates.rxRate)}/s</span><br><span class="text-green-300">↑${formatBytes(rates.txRate)}/s</span>`;
-            }
-            // First fetch - show cumulative with indicator
-            return `<span class="text-blue-300">↓${formatBytes(rx)}</span><br><span class="text-green-300">↑${formatBytes(tx)}</span>`;
+        if (!includeStats) {
+            fetchContainerStats();
         }
-
-        // Show notification function (uses shared toast system from api.js)
-        function showNotification(message, type = 'info') {
-            showToast(message, type);
+    } catch (error) {
+        console.error('Error fetching Docker containers:', error);
+        if (!initialLoadComplete) {
+            appendTableMessage('Error loading containers', 'text-red-500');
         }
+        showNotification('Error fetching containers', 'error');
+    }
+}
 
-        // Filter state
-        let currentFilter = 'all';
+async function fetchContainerStats() {
+    const runningContainers = containerList.filter((container) => container.status === 'running');
+    if (runningContainers.length === 0) return;
 
-        // Store the container list
-        let containerList = [];
+    statsLoading = true;
+    const ids = runningContainers.map((container) => container.id).join(',');
 
-        // Track if initial load has completed
-        let initialLoadComplete = false;
+    try {
+        const stats = await requestApiJson(`/api/containers/stats?ids=${encodeURIComponent(ids)}`);
 
-        // Track previous network stats for rate calculation
-        let previousNetworkStats = {};
-        let lastFetchTime = null;
-
-        function getContainerNameById(id) {
-            const cached = containerList.find(c => c.id === id);
-            if (cached) return cached.name;
-
-            const row = document.querySelector(`tr[data-container-id="${id}"]`);
-            return row ? row.getAttribute('data-container-name') : id;
-        }
-
-        function getWebUIPort(container) {
-            if (!container.ports || container.ports.length === 0) {
-                return null;
-            }
-
-            const tcpPorts = container.ports.filter(port => port.protocol !== 'udp');
-
-            const hostTcp = tcpPorts.find(port => port.host_port);
-            if (hostTcp) {
-                return hostTcp.host_port;
-            }
-
-            const anyHost = container.ports.find(port => port.host_port);
-            if (anyHost) {
-                return anyHost.host_port;
-            }
-
-            const tcpContainer = tcpPorts.find(port => port.container_port);
-            if (tcpContainer) {
-                return tcpContainer.container_port;
-            }
-
-            const fallback = container.ports.find(port => port.container_port);
-            return fallback ? fallback.container_port : null;
-        }
-
-        // Track stats loading state
-        let statsLoading = false;
-
-        // Fetch Docker containers and update the table
-        async function fetchDockerContainers(forceFullRender = false, includeStats = false) {
-            const containerListEl = document.getElementById('container-list');
-            const lastUpdatedEl = document.getElementById('last-updated');
-
-            // Only show loading indicator on initial load
-            if (!initialLoadComplete) {
-                containerListEl.innerHTML = '<tr><td colspan="8" class="text-center py-4">Loading...</td></tr>';
-            }
-
-            try {
-                // First fetch: get containers without stats (fast)
-                const statsParam = includeStats ? 'true' : 'false';
-                const newContainerList = await requestApiJson(`/api/containers?stats=${statsParam}`);
-
-                // Update timestamp for network rate calculation
-                lastFetchTime = Date.now();
-
-                // Update last updated timestamp
-                const now = new Date();
-                lastUpdatedEl.textContent = `Last updated: ${formatDateTime(now)}`;
-
-                // Check if we need a full re-render or can do smart update
-                const needsFullRender = forceFullRender ||
-                    !initialLoadComplete ||
-                    hasContainerListChanged(containerList, newContainerList);
-
-                containerList = newContainerList;
-
-                if (needsFullRender) {
-                    renderContainers(!includeStats); // Pass true to show loading spinners
-                } else {
-                    updateContainerRows();
-                }
-
-                initialLoadComplete = true;
-
-                // Lazy load stats for running containers if not already included
-                if (!includeStats) {
-                    fetchContainerStats();
-                }
-            } catch (error) {
-                console.error('Error fetching Docker containers:', error);
-                if (!initialLoadComplete) {
-                    containerListEl.innerHTML = '<tr><td colspan="8" class="text-center py-4 text-red-500">Error loading containers</td></tr>';
-                }
-                showNotification('Error fetching containers', 'error');
-            }
-        }
-
-        // Fetch stats for running containers lazily
-        async function fetchContainerStats() {
-            const runningContainers = containerList.filter(c => c.status === 'running');
-            if (runningContainers.length === 0) return;
-
-            statsLoading = true;
-            const ids = runningContainers.map(c => c.id).join(',');
-
-            try {
-                const stats = await requestApiJson(`/api/containers/stats?ids=${ids}`);
-
-                // Update container list with stats
-                containerList.forEach(container => {
-                    const containerStats = stats[container.id];
-                    if (containerStats) {
-                        container.cpu_percent = containerStats.cpu_percent;
-                        container.memory_percent = containerStats.memory_percent;
-                        container.memory_used = containerStats.memory_used;
-                        container.memory_limit = containerStats.memory_limit;
-                        container.net_rx = containerStats.net_rx;
-                        container.net_tx = containerStats.net_tx;
-                    }
-                });
-
-                // Update the display
-                updateContainerRows();
-                lastFetchTime = Date.now();
-            } catch (error) {
-                console.error('Error fetching container stats:', error);
-            } finally {
-                statsLoading = false;
-            }
-        }
-
-        // Check if container list has structurally changed (added/removed containers)
-        function hasContainerListChanged(oldList, newList) {
-            if (oldList.length !== newList.length) return true;
-            const oldIds = new Set(oldList.map(c => c.id));
-            const newIds = new Set(newList.map(c => c.id));
-            for (const id of newIds) {
-                if (!oldIds.has(id)) return true;
-            }
-            return false;
-        }
-
-        // Update existing rows in-place without destroying DOM
-        function updateContainerRows() {
-            containerList.forEach(container => {
-                const row = document.querySelector(`tr[data-container-id="${container.id}"]`);
-                if (!row) return;
-
-                // Update status badge
-                const statusCell = row.querySelector('td:nth-child(3)');
-                if (statusCell) {
-                    const statusClass = container.status === 'running' ? 'status-running' :
-                        container.status === 'stopped' ? 'status-stopped' : 'status-other';
-                    statusCell.innerHTML = `
-                        <span class="px-2 py-1 text-white rounded ${statusClass}">
-                            ${container.status}
-                        </span>
-                    `;
-                }
-
-                // Update name cell (for update indicator)
-                const nameCell = row.querySelector('td:nth-child(1)');
-                if (nameCell) {
-                    nameCell.innerHTML = `${container.name}${container.update_available ? '<span class="ml-1 text-yellow-400" title="Update available">&#x21bb;</span>' : ''}`;
-                }
-
-                // Update stats cells
-                const cpuCell = row.querySelector('td[data-stat="cpu"]');
-                if (cpuCell) {
-                    cpuCell.innerHTML = formatCpuCell(container.cpu_percent);
-                }
-
-                const memoryCell = row.querySelector('td[data-stat="memory"]');
-                if (memoryCell) {
-                    memoryCell.innerHTML = formatMemoryCell(container.memory_percent, container.memory_used, container.memory_limit);
-                }
-
-                const networkCell = row.querySelector('td[data-stat="network"]');
-                if (networkCell) {
-                    networkCell.innerHTML = formatNetworkCell(container.net_rx, container.net_tx, container.id);
-                }
-
-                // Update button states
-                const startBtn = row.querySelector('button[data-action="start"]');
-                const stopBtn = row.querySelector('button[data-action="stop"]');
-
-                if (startBtn) {
-                    startBtn.disabled = container.status === 'running';
-                    startBtn.classList.toggle('opacity-50', container.status === 'running');
-                    startBtn.classList.toggle('cursor-not-allowed', container.status === 'running');
-                }
-
-                if (stopBtn) {
-                    const isStopped = ['stopped', 'exited'].includes(container.status);
-                    stopBtn.disabled = isStopped;
-                    stopBtn.classList.toggle('opacity-50', isStopped);
-                    stopBtn.classList.toggle('cursor-not-allowed', isStopped);
-                }
-            });
-        }
-
-        // Render containers based on filter
-        function renderContainers(showStatsLoading = false) {
-            const containerListEl = document.getElementById('container-list');
-            containerListEl.innerHTML = '';
-
-            // Filter containers based on current filter
-            const filteredContainers = containerList.filter(container => {
-                if (currentFilter === 'all') return true;
-                return container.status === currentFilter;
-            });
-
-            if (filteredContainers.length === 0) {
-                containerListEl.innerHTML = `<tr><td colspan="8" class="text-center py-4">No ${currentFilter} containers found</td></tr>`;
-                return;
-            }
-
-            // Special case for when Docker is not available
-            if (filteredContainers.length === 1 &&
-                (filteredContainers[0].status === 'unavailable' || filteredContainers[0].status === 'error')) {
-                const row = `
-                    <tr data-container-id="${filteredContainers[0].id}" data-container-name="${filteredContainers[0].name}">
-                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">${filteredContainers[0].name}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm">${filteredContainers[0].image}</td>
-                        <td class="px-6 py-4 whitespace-nowrap">
-                            <span class="px-2 py-1 text-white rounded status-other">
-                                ${filteredContainers[0].status}
-                            </span>
-                        </td>
-                        <td class="px-4 py-4 whitespace-nowrap text-sm text-gray-500">—</td>
-                        <td class="px-4 py-4 whitespace-nowrap text-sm text-gray-500">—</td>
-                        <td class="px-4 py-4 whitespace-nowrap text-sm text-gray-500">—</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm">N/A</td>
-                        <td class="px-4 py-4 whitespace-nowrap text-sm">—</td>
-                    </tr>
-                `;
-                containerListEl.innerHTML = row;
-                return;
-            }
-
-            // Create rows for each container
-            filteredContainers.forEach(container => {
-                const statusClass = container.status === 'running' ? 'status-running' :
-                    container.status === 'stopped' ? 'status-stopped' : 'status-other';
-
-                // Show loading spinners for running containers that don't have stats yet
-                const isRunning = container.status === 'running';
-                const hasStats = container.cpu_percent !== null && container.cpu_percent !== undefined;
-                const loading = showStatsLoading && isRunning && !hasStats;
-
-                // Determine if the container has a Web UI
-                const port = getWebUIPort(container);
-                const webUILink = port
-                    ? `<a href="http://${window.location.hostname}:${port}" target="_blank" class="text-blue-500 hover:text-blue-400 underline">Open</a>`
-                    : 'N/A';
-
-                const row = `
-                    <tr data-container-id="${container.id}" data-container-name="${container.name}">
-                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                            ${container.name}
-                            ${container.update_available ? '<span class="ml-1 text-yellow-400" title="Update available">&#x21bb;</span>' : ''}
-                        </td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-400 max-w-xs truncate" title="${container.image}">${container.image}</td>
-                        <td class="px-6 py-4 whitespace-nowrap">
-                            <span class="px-2 py-1 text-white rounded ${statusClass}">
-                                ${container.status}
-                            </span>
-                        </td>
-                        <td class="px-4 py-4 whitespace-nowrap text-sm" data-stat="cpu">${formatCpuCell(container.cpu_percent, loading)}</td>
-                        <td class="px-4 py-4 whitespace-nowrap text-sm" data-stat="memory">${formatMemoryCell(container.memory_percent, container.memory_used, container.memory_limit, loading)}</td>
-                        <td class="px-4 py-4 whitespace-nowrap text-sm" data-stat="network">${formatNetworkCell(container.net_rx, container.net_tx, container.id, loading)}</td>
-                        <td class="px-4 py-4 whitespace-nowrap text-sm">${webUILink}</td>
-                        <td class="px-4 py-4 whitespace-nowrap text-sm">
-                            <div class="flex items-center gap-1">
-                                <button data-action="start" class="action-btn bg-green-700 hover:bg-green-600 text-white py-1 px-2 rounded text-xs ${container.status === 'running' ? 'opacity-50 cursor-not-allowed' : ''}"
-                                        onclick="controlContainer('${container.id}', 'start')"
-                                        ${container.status === 'running' ? 'disabled' : ''}>Start</button>
-                                <button data-action="stop" class="action-btn bg-yellow-700 hover:bg-yellow-600 text-white py-1 px-2 rounded text-xs ${['stopped', 'exited'].includes(container.status) ? 'opacity-50 cursor-not-allowed' : ''}"
-                                        onclick="controlContainer('${container.id}', 'stop')"
-                                        ${['stopped', 'exited'].includes(container.status) ? 'disabled' : ''}>Stop</button>
-                                <button data-action="restart" class="action-btn bg-blue-700 hover:bg-blue-600 text-white py-1 px-2 rounded text-xs"
-                                        onclick="controlContainer('${container.id}', 'restart')">Restart</button>
-                                <div class="relative">
-                                    <button class="bg-gray-600 hover:bg-gray-500 text-white py-1 px-2 rounded text-xs"
-                                            onclick="toggleDropdown('${container.id}')">⋮</button>
-                                    <div id="dropdown-${container.id}" class="dropdown-menu hidden absolute mt-1 w-36 bg-gray-700 rounded shadow-lg z-50 border border-gray-600">
-                                        <button class="w-full text-left px-3 py-2 text-xs hover:bg-gray-600 text-white rounded-t"
-                                                onclick="controlContainer('${container.id}', 'check_update'); closeDropdown('${container.id}')">Check Update</button>
-                                        <button class="w-full text-left px-3 py-2 text-xs hover:bg-gray-600 text-white"
-                                                onclick="controlContainer('${container.id}', 'update'); closeDropdown('${container.id}')">Update</button>
-                                        <button class="w-full text-left px-3 py-2 text-xs hover:bg-gray-600 text-white"
-                                                onclick="viewLogs('${container.id}'); closeDropdown('${container.id}')">Logs</button>
-                                        <button class="w-full text-left px-3 py-2 text-xs hover:bg-gray-600 text-white rounded-b"
-                                                onclick="openContainerNetworkTest('${container.id}'); closeDropdown('${container.id}')">Network Test</button>
-                                    </div>
-                                </div>
-                            </div>
-                        </td>
-                    </tr>
-                `;
-                containerListEl.innerHTML += row;
-            });
-        }
-
-        // Toggle dropdown menu
-        function toggleDropdown(containerId) {
-            // Close all other dropdowns first
-            document.querySelectorAll('[id^="dropdown-"]').forEach(el => {
-                if (el.id !== `dropdown-${containerId}`) {
-                    el.classList.add('hidden');
-                }
-            });
-            const dropdown = document.getElementById(`dropdown-${containerId}`);
-            dropdown.classList.toggle('hidden');
-        }
-
-        function closeDropdown(containerId) {
-            document.getElementById(`dropdown-${containerId}`).classList.add('hidden');
-        }
-
-        // Close dropdowns when clicking outside
-        document.addEventListener('click', (e) => {
-            if (!e.target.closest('[id^="dropdown-"]') && !e.target.closest('button')) {
-                document.querySelectorAll('[id^="dropdown-"]').forEach(el => el.classList.add('hidden'));
-            }
+        containerList.forEach((container) => {
+            const containerStats = stats[container.id];
+            if (!containerStats) return;
+            container.cpu_percent = containerStats.cpu_percent;
+            container.memory_percent = containerStats.memory_percent;
+            container.memory_used = containerStats.memory_used;
+            container.memory_limit = containerStats.memory_limit;
+            container.net_rx = containerStats.net_rx;
+            container.net_tx = containerStats.net_tx;
         });
 
-        // Control Docker container (start/stop/restart)
-        async function controlContainer(id, action) {
-            const containerRow = document.querySelector(`tr[data-container-id="${id}"]`);
-            const containerName = containerRow ? containerRow.getAttribute('data-container-name') : id;
+        updateContainerRows();
+        lastFetchTime = Date.now();
+    } catch (error) {
+        console.error('Error fetching container stats:', error);
+    } finally {
+        statsLoading = false;
+    }
+}
 
-            // Show loading state on the button
-            let actionBtn = null;
-            let originalText = '';
-            if (containerRow) {
-                actionBtn = containerRow.querySelector(`button[data-action="${action}"]`);
-                if (actionBtn) {
-                    originalText = actionBtn.textContent;
-                    actionBtn.disabled = true;
-                    actionBtn.classList.add('opacity-75');
-                    actionBtn.textContent = '...';
-                }
-            }
+async function controlContainer(id, action) {
+    const containerId = String(id);
+    const containerRow = findContainerRow(containerId);
+    const containerName = containerRow ? (containerRow.dataset.containerName || containerId) : containerId;
 
-            // Show toast immediately so user knows action started
-            const actionNames = {
-                'start': 'Starting',
-                'stop': 'Stopping',
-                'restart': 'Restarting',
-                'check_update': 'Checking',
-                'update': 'Updating'
-            };
-            showNotification(`${actionNames[action] || action} ${containerName}...`, 'info');
-
-            try {
-                const result = await requestApiJson(`/api/containers/${id}/${action}`, { method: 'POST' });
-                if (result.error) {
-                    showNotification(`Error: ${result.error}`, 'error');
-                } else {
-                    let message = `${containerName} ${action}ed successfully`;
-                    if (action === 'check_update') {
-                        message = result.update_available
-                            ? `${containerName}: Update available!`
-                            : `${containerName}: Up to date`;
-                    }
-                    if (action === 'update') message = `${containerName} update triggered`;
-                    showNotification(message, 'success');
-                }
-
-                // Refresh container status
-                if (containerRow) {
-                    await updateContainerStatus(id);
-                } else {
-                    await fetchDockerContainers(true);
-                }
-            } catch (error) {
-                console.error(`Error controlling container ${id}:`, error);
-                showNotification(`Error ${action}ing container: ${error.message}`, 'error');
-            } finally {
-                // Reset button state
-                if (actionBtn) {
-                    actionBtn.disabled = false;
-                    actionBtn.classList.remove('opacity-75');
-                    actionBtn.textContent = originalText;
-                }
-            }
+    let actionBtn = null;
+    let originalText = '';
+    if (containerRow) {
+        actionBtn = containerRow.querySelector(`button[data-action="${action}"]`);
+        if (actionBtn) {
+            originalText = actionBtn.textContent || '';
+            actionBtn.disabled = true;
+            actionBtn.classList.add('opacity-75');
+            actionBtn.textContent = '...';
         }
-        
-        // Update a single container's status
-        async function updateContainerStatus(id) {
-            try {
-                const containers = await requestApiJson('/api/containers');
-                lastFetchTime = Date.now();
-                const container = containers.find(c => c.id === id);
-                
-                if (container && document.querySelector(`tr[data-container-id="${id}"]`)) {
-                    const row = document.querySelector(`tr[data-container-id="${id}"]`);
-                    const nameCell = row.querySelector('td:nth-child(1)');
-                    const statusCell = row.querySelector('td:nth-child(3)');
-                    
-                    const statusClass = container.status === 'running' ? 'status-running' :
-                        container.status === 'stopped' ? 'status-stopped' : 'status-other';
-                    
-                    nameCell.innerHTML = `${container.name}${container.update_available ? '<span class="ml-1 text-yellow-400" title="Update available">&#x21bb;</span>' : ''}`;
+    }
 
-                    statusCell.innerHTML = `
-                        <span class="px-2 py-1 text-white rounded ${statusClass}">
-                            ${container.status}
-                        </span>
-                    `;
+    const actionNames = {
+        start: 'Starting',
+        stop: 'Stopping',
+        restart: 'Restarting',
+        check_update: 'Checking',
+        update: 'Updating',
+    };
+    showNotification(`${actionNames[action] || action} ${containerName}...`, 'info');
 
-                    // Update stats cells
-                    const cpuCell = row.querySelector('td[data-stat="cpu"]');
-                    if (cpuCell) cpuCell.innerHTML = formatCpuCell(container.cpu_percent);
+    try {
+        const encodedId = encodeURIComponent(containerId);
+        const result = await requestApiJson(`/api/containers/${encodedId}/${action}`, { method: 'POST' });
 
-                    const memoryCell = row.querySelector('td[data-stat="memory"]');
-                    if (memoryCell) memoryCell.innerHTML = formatMemoryCell(container.memory_percent, container.memory_used, container.memory_limit);
+        if (result.error) {
+            showNotification(`Error: ${result.error}`, 'error');
+        } else {
+            let message = `${containerName} ${action}ed successfully`;
+            if (action === 'check_update') {
+                message = result.update_available ? `${containerName}: Update available!` : `${containerName}: Up to date`;
+            }
+            if (action === 'update') {
+                message = `${containerName} update triggered`;
+            }
+            showNotification(message, 'success');
+        }
 
-                    const networkCell = row.querySelector('td[data-stat="network"]');
-                    if (networkCell) networkCell.innerHTML = formatNetworkCell(container.net_rx, container.net_tx, container.id);
+        if (containerRow) {
+            await updateContainerStatus(containerId);
+        } else {
+            await fetchDockerContainers(true);
+        }
+    } catch (error) {
+        console.error(`Error controlling container ${containerId}:`, error);
+        showNotification(`Error ${action}ing container: ${error.message}`, 'error');
+    } finally {
+        if (actionBtn) {
+            actionBtn.disabled = false;
+            actionBtn.classList.remove('opacity-75');
+            actionBtn.textContent = originalText;
+        }
+    }
+}
 
-                    // Update the container in our cached list
-                    for (let i = 0; i < containerList.length; i++) {
-                        if (containerList[i].id === id) {
-                            containerList[i] = container;
-                            break;
-                        }
-                    }
-                    
-                    // Re-render if filter might exclude this container now
-                    if (currentFilter !== 'all' && container.status !== currentFilter) {
-                        renderContainers();
-                    } else {
-                        // Just update button states
-                        const startButton = row.querySelector('button[data-action="start"]');
-                        const stopButton = row.querySelector('button[data-action="stop"]');
-                        const restartButton = row.querySelector('button[data-action="restart"]');
-                        const checkButton = row.querySelector('button[data-action="check_update"]');
-                        const updateButton = row.querySelector('button[data-action="update"]');
-                        const logsButton = row.querySelector('button[data-action="logs"]');
-                        const networkButton = row.querySelector('button[data-action="network-test"]');
+async function updateContainerStatus(id) {
+    const containerId = String(id);
 
-                        if (startButton) {
-                            startButton.disabled = container.status === 'running';
-                            startButton.classList.toggle('opacity-50', container.status === 'running');
-                            startButton.classList.toggle('cursor-not-allowed', container.status === 'running');
-                        }
-                        
-                        if (stopButton) {
-                            const isStopped = ['stopped', 'exited'].includes(container.status);
-                            stopButton.disabled = isStopped;
-                            stopButton.classList.toggle('opacity-50', isStopped);
-                            stopButton.classList.toggle('cursor-not-allowed', isStopped);
-                        }
+    try {
+        const containers = await requestApiJson('/api/containers');
+        const container = containers.find((item) => String(item.id) === containerId);
+        const row = findContainerRow(containerId);
 
-                        if (restartButton) restartButton.disabled = false;
-                        if (checkButton) checkButton.disabled = false;
-                        if (updateButton) updateButton.disabled = false;
-                        if (logsButton) logsButton.disabled = false;
-                        if (networkButton) networkButton.disabled = false;
-                    }
-                }
-            } catch (error) {
-                console.error(`Error updating container status:`, error);
-                showNotification('Error updating container status', 'error');
+        if (!container || !row) return;
+
+        row.dataset.containerName = container.name || containerId;
+
+        const nameCell = row.querySelector('[data-cell="name"]');
+        const statusCell = row.querySelector('[data-cell="status"]');
+        const cpuCell = row.querySelector('td[data-stat="cpu"]');
+        const memoryCell = row.querySelector('td[data-stat="memory"]');
+        const networkCell = row.querySelector('td[data-stat="network"]');
+
+        if (nameCell) renderContainerNameCell(nameCell, container);
+        if (statusCell) {
+            statusCell.textContent = '';
+            statusCell.appendChild(createStatusBadge(container.status));
+        }
+        if (cpuCell) cpuCell.innerHTML = formatCpuCell(container.cpu_percent);
+        if (memoryCell) memoryCell.innerHTML = formatMemoryCell(container.memory_percent, container.memory_used, container.memory_limit);
+        if (networkCell) networkCell.innerHTML = formatNetworkCell(container.net_rx, container.net_tx, container.id);
+
+        for (let i = 0; i < containerList.length; i += 1) {
+            if (String(containerList[i].id) === containerId) {
+                containerList[i] = container;
+                break;
             }
         }
 
-        async function viewLogs(id) {
-            const modal = document.getElementById('logs-modal');
-            const content = document.getElementById('logs-content');
-            const title = document.getElementById('logs-modal-title');
-            const containerName = getContainerNameById(id);
-
-            title.textContent = `Logs for ${containerName}`;
-            content.textContent = 'Loading logs...';
-            modal.classList.remove('hidden');
-            modal.classList.add('flex');
-
-            try {
-                const result = await requestApiJson(`/api/containers/${id}/logs`);
-                if (result.error) {
-                    content.textContent = `Error: ${result.error}`;
-                } else {
-                    const nameFromServer = result.container || containerName;
-                    title.textContent = `Logs for ${nameFromServer}`;
-                    content.textContent = result.logs || 'No logs available.';
-                }
-            } catch (error) {
-                console.error('Error fetching logs:', error);
-                content.textContent = `Error loading logs: ${error.message}`;
-            }
-        }
-
-        function closeLogsModal() {
-            const modal = document.getElementById('logs-modal');
-            modal.classList.add('hidden');
-            modal.classList.remove('flex');
-        }
-
-        async function openContainerNetworkTest(id) {
-            const modal = document.getElementById('container-network-modal');
-            const title = document.getElementById('container-network-title');
-            const statusEl = document.getElementById('container-network-status');
-            const localEl = document.getElementById('container-network-local');
-            const publicEl = document.getElementById('container-network-public');
-            const outputEl = document.getElementById('container-network-output');
-            const methodEl = document.getElementById('container-network-method');
-
-            const containerName = getContainerNameById(id);
-            title.textContent = `Network Test: ${containerName}`;
-            statusEl.textContent = 'Running test...';
-            statusEl.classList.remove('text-green-400', 'text-red-400');
-            localEl.textContent = '-';
-            publicEl.textContent = '-';
-            methodEl.textContent = '-';
-            outputEl.textContent = 'Collecting diagnostics...';
-
-            modal.classList.remove('hidden');
-            modal.classList.add('flex');
-
-            try {
-                const result = await requestApiJson(`/api/containers/${id}/network-test`, { method: 'POST' });
-                if (result.error) {
-                    const message = result.error || 'Unable to run network test.';
-                    statusEl.textContent = 'Error';
-                    statusEl.classList.add('text-red-400');
-                    outputEl.textContent = message;
-                    showNotification(message, 'error');
-                    return;
-                }
-
-                statusEl.textContent = result.ping_success ? 'Success' : 'Failed';
-                statusEl.classList.toggle('text-green-400', !!result.ping_success);
-                statusEl.classList.toggle('text-red-400', !result.ping_success);
-                localEl.textContent = result.local_ip || 'Unavailable';
-                publicEl.textContent = result.public_ip || 'Unavailable';
-                methodEl.textContent = result.probe_method || 'unknown';
-                outputEl.textContent = result.ping_output || 'No output provided.';
-
-                showNotification(`Network test ${result.ping_success ? 'passed' : 'completed'}`, result.ping_success ? 'success' : 'info');
-            } catch (error) {
-                console.error('Container network test failed:', error);
-                statusEl.textContent = 'Error';
-                statusEl.classList.add('text-red-400');
-                outputEl.textContent = error.message;
-                showNotification('Network test failed', 'error');
-            }
-        }
-
-        async function runNetworkTest() {
-            const card = document.getElementById('network-test-card');
-            const statusEl = document.getElementById('network-test-status');
-            const outputEl = document.getElementById('network-test-output');
-            const localEl = document.getElementById('network-test-local');
-            const publicEl = document.getElementById('network-test-public');
-
-            card.classList.remove('hidden');
-            statusEl.textContent = 'Running test...';
-            statusEl.classList.remove('text-green-400', 'text-red-400');
-            outputEl.textContent = 'Executing ping...';
-            localEl.textContent = '-';
-            publicEl.textContent = '-';
-
-            try {
-                const result = await requestApiJson('/api/network-test', { method: 'POST' });
-
-                statusEl.textContent = result.ping_success ? 'Ping successful' : 'Ping failed';
-                statusEl.classList.toggle('text-green-400', !!result.ping_success);
-                statusEl.classList.toggle('text-red-400', !result.ping_success);
-                outputEl.textContent = result.ping_output || 'No ping output returned.';
-                localEl.textContent = result.local_ip || 'Unavailable';
-                publicEl.textContent = result.public_ip || 'Unavailable';
-
-                showNotification('Network test complete', result.ping_success ? 'success' : 'info');
-            } catch (error) {
-                console.error('Network test error:', error);
-                statusEl.textContent = 'Network test failed';
-                statusEl.classList.add('text-red-400');
-                outputEl.textContent = error.message;
-                showNotification('Network test failed', 'error');
-            }
-        }
-
-        // Logs modal controls
-        document.getElementById('logs-modal-close').addEventListener('click', closeLogsModal);
-        document.getElementById('logs-modal').addEventListener('click', function(event) {
-            if (event.target === this) {
-                closeLogsModal();
-            }
-        });
-
-        // Container network modal controls
-        document.getElementById('container-network-close').addEventListener('click', () => {
-            const modal = document.getElementById('container-network-modal');
-            modal.classList.add('hidden');
-            modal.classList.remove('flex');
-        });
-        document.getElementById('container-network-modal').addEventListener('click', function(event) {
-            if (event.target === this) {
-                this.classList.add('hidden');
-                this.classList.remove('flex');
-            }
-        });
-
-        // Network test controls
-        const networkTestButton = document.getElementById('network-test-button');
-        const hideNetworkTestButton = document.getElementById('hide-network-test');
-        networkTestButton.addEventListener('click', function() {
-            this.classList.add('animate-pulse');
-            runNetworkTest().finally(() => this.classList.remove('animate-pulse'));
-        });
-        hideNetworkTestButton.addEventListener('click', () => {
-            document.getElementById('network-test-card').classList.add('hidden');
-        });
-
-        // Set up filter buttons
-        document.getElementById('filter-all').addEventListener('click', function() {
-            setFilter('all', this);
-        });
-        
-        document.getElementById('filter-running').addEventListener('click', function() {
-            setFilter('running', this);
-        });
-        
-        document.getElementById('filter-stopped').addEventListener('click', function() {
-            setFilter('stopped', this);
-        });
-        
-        // Set filter and update UI
-        function setFilter(filter, button) {
-            if (currentFilter === filter) return;
-            
-            currentFilter = filter;
-            
-            // Update button styles
-            document.querySelectorAll('#filter-all, #filter-running, #filter-stopped').forEach(btn => {
-                btn.classList.remove('coraline-button');
-                btn.classList.add('bg-gray-700', 'hover:bg-gray-600');
-            });
-            
-            button.classList.remove('bg-gray-700', 'hover:bg-gray-600');
-            button.classList.add('coraline-button');
-            
-            // Re-render containers with the new filter
+        if (currentFilter !== 'all' && container.status !== currentFilter) {
             renderContainers();
-        }
-        
-        // Set up refresh button
-        document.getElementById('refresh-button').addEventListener('click', function() {
-            this.classList.add('animate-pulse');
-            fetchDockerContainers(true).then(() => {
-                this.classList.remove('animate-pulse');
+        } else {
+            updateActionButtons(row, container);
+
+            const otherActions = ['restart', 'check_update', 'update'];
+            otherActions.forEach((name) => {
+                const button = row.querySelector(`button[data-action="${name}"], button[data-menu-action="${name}"]`);
+                if (button) button.disabled = false;
             });
-        });
-        
-        // Expose handlers referenced by dynamic row button onclick attributes.
-        window.toggleDropdown = toggleDropdown;
-        window.closeDropdown = closeDropdown;
-        window.controlContainer = controlContainer;
-        window.viewLogs = viewLogs;
-        window.openContainerNetworkTest = openContainerNetworkTest;
-
-        async function initContainersPage() {
-            const authenticated = await ensureAuthenticated();
-            if (!authenticated) return;
-
-            await fetchDockerContainers();
-
-            // Periodic refresh with stats (after initial load, stats are included).
-            setInterval(() => fetchDockerContainers(false, true), 10000);
         }
 
-        initContainersPage();
+        lastFetchTime = Date.now();
+    } catch (error) {
+        console.error('Error updating container status:', error);
+        showNotification('Error updating container status', 'error');
+    }
+}
+
+async function viewLogs(id) {
+    const containerId = String(id);
+    const modal = document.getElementById('logs-modal');
+    const content = document.getElementById('logs-content');
+    const title = document.getElementById('logs-modal-title');
+    const containerName = getContainerNameById(containerId);
+
+    if (!modal || !content || !title) return;
+
+    title.textContent = `Logs for ${containerName}`;
+    content.textContent = 'Loading logs...';
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+
+    try {
+        const result = await requestApiJson(`/api/containers/${encodeURIComponent(containerId)}/logs`);
+        if (result.error) {
+            content.textContent = `Error: ${result.error}`;
+        } else {
+            const nameFromServer = result.container || containerName;
+            title.textContent = `Logs for ${nameFromServer}`;
+            content.textContent = result.logs || 'No logs available.';
+        }
+    } catch (error) {
+        console.error('Error fetching logs:', error);
+        content.textContent = `Error loading logs: ${error.message}`;
+    }
+}
+
+function closeLogsModal() {
+    const modal = document.getElementById('logs-modal');
+    if (!modal) return;
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+}
+
+async function openContainerNetworkTest(id) {
+    const containerId = String(id);
+    const modal = document.getElementById('container-network-modal');
+    const title = document.getElementById('container-network-title');
+    const statusEl = document.getElementById('container-network-status');
+    const localEl = document.getElementById('container-network-local');
+    const publicEl = document.getElementById('container-network-public');
+    const outputEl = document.getElementById('container-network-output');
+    const methodEl = document.getElementById('container-network-method');
+    const containerName = getContainerNameById(containerId);
+
+    if (!modal || !title || !statusEl || !localEl || !publicEl || !outputEl || !methodEl) {
+        return;
+    }
+
+    title.textContent = `Network Test: ${containerName}`;
+    statusEl.textContent = 'Running test...';
+    statusEl.classList.remove('text-green-400', 'text-red-400');
+    localEl.textContent = '-';
+    publicEl.textContent = '-';
+    methodEl.textContent = '-';
+    outputEl.textContent = 'Collecting diagnostics...';
+
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+
+    try {
+        const result = await requestApiJson(`/api/containers/${encodeURIComponent(containerId)}/network-test`, { method: 'POST' });
+        if (result.error) {
+            const message = result.error || 'Unable to run network test.';
+            statusEl.textContent = 'Error';
+            statusEl.classList.add('text-red-400');
+            outputEl.textContent = message;
+            showNotification(message, 'error');
+            return;
+        }
+
+        statusEl.textContent = result.ping_success ? 'Success' : 'Failed';
+        statusEl.classList.toggle('text-green-400', !!result.ping_success);
+        statusEl.classList.toggle('text-red-400', !result.ping_success);
+        localEl.textContent = result.local_ip || 'Unavailable';
+        publicEl.textContent = result.public_ip || 'Unavailable';
+        methodEl.textContent = result.probe_method || 'unknown';
+        outputEl.textContent = result.ping_output || 'No output provided.';
+
+        showNotification(`Network test ${result.ping_success ? 'passed' : 'completed'}`, result.ping_success ? 'success' : 'info');
+    } catch (error) {
+        console.error('Container network test failed:', error);
+        statusEl.textContent = 'Error';
+        statusEl.classList.add('text-red-400');
+        outputEl.textContent = error.message;
+        showNotification('Network test failed', 'error');
+    }
+}
+
+async function runNetworkTest() {
+    const card = document.getElementById('network-test-card');
+    const statusEl = document.getElementById('network-test-status');
+    const outputEl = document.getElementById('network-test-output');
+    const localEl = document.getElementById('network-test-local');
+    const publicEl = document.getElementById('network-test-public');
+
+    if (!card || !statusEl || !outputEl || !localEl || !publicEl) return;
+
+    card.classList.remove('hidden');
+    statusEl.textContent = 'Running test...';
+    statusEl.classList.remove('text-green-400', 'text-red-400');
+    outputEl.textContent = 'Executing ping...';
+    localEl.textContent = '-';
+    publicEl.textContent = '-';
+
+    try {
+        const result = await requestApiJson('/api/network-test', { method: 'POST' });
+
+        statusEl.textContent = result.ping_success ? 'Ping successful' : 'Ping failed';
+        statusEl.classList.toggle('text-green-400', !!result.ping_success);
+        statusEl.classList.toggle('text-red-400', !result.ping_success);
+        outputEl.textContent = result.ping_output || 'No ping output returned.';
+        localEl.textContent = result.local_ip || 'Unavailable';
+        publicEl.textContent = result.public_ip || 'Unavailable';
+
+        showNotification('Network test complete', result.ping_success ? 'success' : 'info');
+    } catch (error) {
+        console.error('Network test error:', error);
+        statusEl.textContent = 'Network test failed';
+        statusEl.classList.add('text-red-400');
+        outputEl.textContent = error.message;
+        showNotification('Network test failed', 'error');
+    }
+}
+
+function setFilter(filter, button) {
+    if (currentFilter === filter) return;
+
+    currentFilter = filter;
+
+    document.querySelectorAll('#filter-all, #filter-running, #filter-stopped').forEach((btn) => {
+        btn.classList.remove('coraline-button');
+        btn.classList.add('bg-gray-700', 'hover:bg-gray-600');
+    });
+
+    button.classList.remove('bg-gray-700', 'hover:bg-gray-600');
+    button.classList.add('coraline-button');
+
+    renderContainers();
+}
+
+function bindModalHandlers() {
+    const logsClose = document.getElementById('logs-modal-close');
+    const logsModal = document.getElementById('logs-modal');
+    const containerNetworkClose = document.getElementById('container-network-close');
+    const containerNetworkModal = document.getElementById('container-network-modal');
+
+    logsClose?.addEventListener('click', closeLogsModal);
+    logsModal?.addEventListener('click', (event) => {
+        if (event.target === logsModal) {
+            closeLogsModal();
+        }
+    });
+
+    containerNetworkClose?.addEventListener('click', () => {
+        if (!containerNetworkModal) return;
+        containerNetworkModal.classList.add('hidden');
+        containerNetworkModal.classList.remove('flex');
+    });
+
+    containerNetworkModal?.addEventListener('click', (event) => {
+        if (event.target === containerNetworkModal) {
+            containerNetworkModal.classList.add('hidden');
+            containerNetworkModal.classList.remove('flex');
+        }
+    });
+}
+
+function bindStaticControls() {
+    const networkTestButton = document.getElementById('network-test-button');
+    const hideNetworkTestButton = document.getElementById('hide-network-test');
+    const refreshButton = document.getElementById('refresh-button');
+    const filterAll = document.getElementById('filter-all');
+    const filterRunning = document.getElementById('filter-running');
+    const filterStopped = document.getElementById('filter-stopped');
+
+    networkTestButton?.addEventListener('click', function onNetworkTestClick() {
+        this.classList.add('animate-pulse');
+        runNetworkTest().finally(() => this.classList.remove('animate-pulse'));
+    });
+
+    hideNetworkTestButton?.addEventListener('click', () => {
+        document.getElementById('network-test-card')?.classList.add('hidden');
+    });
+
+    filterAll?.addEventListener('click', function onFilterAll() {
+        setFilter('all', this);
+    });
+    filterRunning?.addEventListener('click', function onFilterRunning() {
+        setFilter('running', this);
+    });
+    filterStopped?.addEventListener('click', function onFilterStopped() {
+        setFilter('stopped', this);
+    });
+
+    refreshButton?.addEventListener('click', function onRefreshClick() {
+        this.classList.add('animate-pulse');
+        fetchDockerContainers(true).finally(() => this.classList.remove('animate-pulse'));
+    });
+}
+
+function bindContainerTableActions() {
+    const list = getContainerListEl();
+    if (!list) return;
+
+    list.addEventListener('click', async (event) => {
+        const toggleButton = event.target.closest('button[data-dropdown-toggle]');
+        if (toggleButton) {
+            event.preventDefault();
+            const { containerId } = toggleButton.dataset;
+            toggleDropdown(containerId);
+            return;
+        }
+
+        const menuActionButton = event.target.closest('button[data-menu-action]');
+        if (menuActionButton) {
+            event.preventDefault();
+            const { containerId, menuAction } = menuActionButton.dataset;
+
+            if (menuAction === 'logs') {
+                await viewLogs(containerId);
+            } else if (menuAction === 'network-test') {
+                await openContainerNetworkTest(containerId);
+            } else if (menuAction) {
+                await controlContainer(containerId, menuAction);
+            }
+
+            closeDropdown(containerId);
+            return;
+        }
+
+        const actionButton = event.target.closest('button[data-action]');
+        if (actionButton) {
+            event.preventDefault();
+            const { containerId, action } = actionButton.dataset;
+            if (containerId && action) {
+                await controlContainer(containerId, action);
+            }
+        }
+    });
+
+    document.addEventListener('click', (event) => {
+        if (!event.target.closest('[data-dropdown-container]')) {
+            closeAllDropdowns();
+        }
+    });
+}
+
+async function initContainersPage() {
+    const authenticated = await ensureAuthenticated();
+    if (!authenticated) return;
+
+    bindModalHandlers();
+    bindStaticControls();
+    bindContainerTableActions();
+
+    await fetchDockerContainers();
+
+    window.setInterval(() => fetchDockerContainers(false, true), 10000);
+}
+
+initContainersPage();
