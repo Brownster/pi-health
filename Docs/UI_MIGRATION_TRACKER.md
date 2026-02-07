@@ -54,7 +54,8 @@
 ### 8) Storage/Network/Tools pages
 - [x] Migrate `pools`.
 - [x] Migrate `mounts`.
-- [ ] Migrate `shares`, `plugins`.
+- [x] Migrate `shares`.
+- [ ] Migrate `plugins`.
 - [ ] Migrate `disks`, `network`, `tailscale`, `tools`.
 - [ ] Backfill already-migrated pages that still use page-local shell/state markup instead of shared primitives.
 - [ ] Validate plugin-specific edge cases.
