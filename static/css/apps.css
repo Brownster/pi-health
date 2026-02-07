@@ -1,0 +1,12 @@
+.coraline-button {
+    background: linear-gradient(to bottom, #5f4b8b, #372b53);
+    border: 1px solid #8a6cbd;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.25);
+    transition: all 0.3s ease;
+}
+
+.coraline-button:hover {
+    background: linear-gradient(to bottom, #6f58a3, #413162);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 10px rgba(0, 0, 0, 0.3);
+}
