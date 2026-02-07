@@ -1,6 +1,7 @@
 import { ensureAuthenticated, logoutToLogin } from '/js/lib/auth.js';
 import { ensureDashboardShell } from '/js/lib/layout.js';
 import { clearClientSession } from '/js/lib/session.js';
+import { clearElement, createEmptyState, createErrorState, createLoadingState } from '/js/lib/states.js';
 
 ensureDashboardShell({
     notificationClass: 'fixed top-4 right-4 z-50 w-80 flex flex-col items-end',
@@ -18,6 +19,33 @@ async function apiFetch(url, options = {}) {
 }
 
 let sharePlugins = [];
+
+function setNodeContent(containerId, node) {
+    const container = document.getElementById(containerId);
+    if (!container) {
+        return;
+    }
+    clearElement(container);
+    container.appendChild(node);
+}
+
+function showSharesLoading() {
+    const loadingState = document.getElementById('loading-state');
+    const sharesContent = document.getElementById('shares-content');
+
+    if (loadingState) {
+        loadingState.classList.remove('hidden');
+    }
+    if (sharesContent) {
+        sharesContent.classList.add('hidden');
+    }
+
+    setNodeContent('loading-state', createLoadingState({
+        message: 'Loading share plugins...',
+        containerClass: 'text-center py-10',
+        messageClass: 'text-gray-400',
+    }));
+}
 
 function statusClass(status) {
     if (status === 'healthy') return 'status-healthy';
@@ -59,6 +87,8 @@ function showNotification(message, type = 'info') {
 }
 
 async function loadSharePlugins() {
+    showSharesLoading();
+
     try {
         const res = await apiFetch('/api/storage/plugins');
         const data = await res.json();
@@ -68,19 +98,23 @@ async function loadSharePlugins() {
         document.getElementById('shares-content').classList.remove('hidden');
 
         if (sharePlugins.length === 0) {
-            document.getElementById('shares-content').innerHTML = `
-                <div class="bg-gray-800 border border-purple-900/40 rounded-lg p-6 text-center">
-                    <p class="text-gray-400 mb-4">No share plugins enabled.</p>
-                    <a href="/plugins.html" class="text-purple-400 hover:underline">Enable plugins on the Plugins page</a>
-                </div>
-            `;
+            setNodeContent('shares-content', createEmptyState({
+                title: 'No share plugins enabled.',
+                action: { href: '/plugins.html', label: 'Enable plugins on the Plugins page' },
+                containerClass: 'bg-gray-800 border border-purple-900/40 rounded-lg p-6 text-center',
+                titleClass: 'text-gray-400 mb-4',
+                actionClass: 'text-purple-400 hover:underline',
+            }));
             return;
         }
 
         await renderSharePlugins();
     } catch (e) {
-        document.getElementById('loading-state').innerHTML =
-            `<p class="text-red-400">Failed to load shares: ${e.message}</p>`;
+        setNodeContent('loading-state', createErrorState({
+            title: `Failed to load shares: ${e.message}`,
+            containerClass: 'text-center py-10',
+            titleClass: 'text-red-400',
+        }));
     }
 }
 

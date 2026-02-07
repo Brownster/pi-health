@@ -1,7 +1,7 @@
 import { ensureAuthenticated, logoutToLogin } from '/js/lib/auth.js';
 import { ensureDashboardShell } from '/js/lib/layout.js';
 import { clearClientSession } from '/js/lib/session.js';
-import { clearElement, createEmptyState, createErrorState } from '/js/lib/states.js';
+import { clearElement, createEmptyState, createErrorState, createLoadingState } from '/js/lib/states.js';
 
 ensureDashboardShell({
     notificationClass: 'fixed top-4 right-4 z-50 w-80 flex flex-col items-end',
@@ -91,6 +91,12 @@ function setContainerNode(node) {
 }
 
 async function loadPlugins() {
+    setContainerNode(createLoadingState({
+        message: 'Loading plugins...',
+        containerClass: 'text-center py-10',
+        messageClass: 'text-gray-400',
+    }));
+
     try {
         const response = await apiFetch('/api/storage/plugins');
         const payload = await response.json();

@@ -1,6 +1,7 @@
 import { ensureAuthenticated, logoutToLogin } from '/js/lib/auth.js';
 import { ensureDashboardShell } from '/js/lib/layout.js';
 import { clearClientSession } from '/js/lib/session.js';
+import { clearElement, createEmptyState, createLoadingState } from '/js/lib/states.js';
 
 ensureDashboardShell({
     notificationClass: 'fixed top-4 right-4 z-50 w-80 flex flex-col items-end',
@@ -26,6 +27,15 @@ let currentPluginSchema = null;
 let snapraidLogTagsByPlugin = {};
 let snapraidProgressState = {};
 let snapraidSyncContext = null;
+
+function setNodeContent(containerId, node) {
+    const container = document.getElementById(containerId);
+    if (!container) {
+        return;
+    }
+    clearElement(container);
+    container.appendChild(node);
+}
 
 function showNotification(message, type = 'info') {
     const area = document.getElementById('notification-area');
@@ -58,6 +68,12 @@ function encodeDataAttr(value) {
 }
 
 async function loadPage() {
+    setNodeContent('pool-plugins', createLoadingState({
+        message: 'Loading storage plugins...',
+        containerClass: 'text-center py-10',
+        messageClass: 'text-gray-400',
+    }));
+
     const res = await apiFetch('/api/storage/plugins');
     const data = await res.json();
 
@@ -76,12 +92,13 @@ async function renderPoolPluginSections() {
     const container = document.getElementById('pool-plugins');
 
     if (!poolPlugins.length) {
-        container.innerHTML = `
-            <div class="text-center py-10">
-                <p class="text-gray-500 mb-2">No storage plugins enabled.</p>
-                <a href="/plugins.html" class="text-purple-400 hover:underline">Enable plugins &rarr;</a>
-            </div>
-        `;
+        setNodeContent('pool-plugins', createEmptyState({
+            title: 'No storage plugins enabled.',
+            action: { href: '/plugins.html', label: 'Enable plugins →' },
+            containerClass: 'text-center py-10',
+            titleClass: 'text-gray-500 mb-2',
+            actionClass: 'text-purple-400 hover:underline',
+        }));
         updatePoolFilterVisibility(false);
         return;
     }

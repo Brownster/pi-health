@@ -1,6 +1,7 @@
 import { ensureAuthenticated, logoutToLogin } from '/js/lib/auth.js';
 import { ensureDashboardShell } from '/js/lib/layout.js';
 import { clearClientSession } from '/js/lib/session.js';
+import { clearElement, createEmptyState, createErrorState, createLoadingState } from '/js/lib/states.js';
 
 ensureDashboardShell({
     notificationClass: 'fixed top-4 right-4 z-50 w-80 flex flex-col items-end',
@@ -21,6 +22,15 @@ let mountPlugins = [];
 let currentMountPlugin = null;
 let currentMountId = null;
 let mediaPaths = {};
+
+function setNodeContent(containerId, node) {
+    const container = document.getElementById(containerId);
+    if (!container) {
+        return;
+    }
+    clearElement(container);
+    container.appendChild(node);
+}
 
 function showNotification(message, type = 'info') {
     const area = document.getElementById('notification-area');
@@ -192,6 +202,12 @@ async function applyStartupService() {
 
 // ========== Mount Plugins ==========
 async function loadMountPlugins() {
+    setNodeContent('mount-plugins', createLoadingState({
+        message: 'Loading mount plugins...',
+        containerClass: 'text-center py-10',
+        messageClass: 'text-gray-400',
+    }));
+
     try {
         const res = await apiFetch('/api/storage/plugins');
         const data = await res.json();
@@ -203,8 +219,11 @@ async function loadMountPlugins() {
 
         await renderMountPluginSections();
     } catch (e) {
-        document.getElementById('mount-plugins').innerHTML =
-            `<p class="text-red-400">Failed to load plugins: ${e.message}</p>`;
+        setNodeContent('mount-plugins', createErrorState({
+            title: `Failed to load plugins: ${e.message}`,
+            containerClass: 'text-center py-10',
+            titleClass: 'text-red-400',
+        }));
     }
 }
 
@@ -212,12 +231,13 @@ async function renderMountPluginSections() {
     const container = document.getElementById('mount-plugins');
 
     if (!mountPlugins.length) {
-        container.innerHTML = `
-            <div class="text-center py-10">
-                <p class="text-gray-500 mb-2">No mount plugins enabled.</p>
-                <a href="/plugins.html" class="text-purple-400 hover:underline">Enable plugins &rarr;</a>
-            </div>
-        `;
+        setNodeContent('mount-plugins', createEmptyState({
+            title: 'No mount plugins enabled.',
+            action: { href: '/plugins.html', label: 'Enable plugins →' },
+            containerClass: 'text-center py-10',
+            titleClass: 'text-gray-500 mb-2',
+            actionClass: 'text-purple-400 hover:underline',
+        }));
         return;
     }
 
