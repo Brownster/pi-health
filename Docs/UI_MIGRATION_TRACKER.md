@@ -56,7 +56,10 @@
 - [x] Migrate `mounts`.
 - [x] Migrate `shares`.
 - [x] Migrate `plugins`.
-- [ ] Migrate `disks`, `network`, `tailscale`, `tools`.
+- [x] Migrate `disks`.
+- [ ] Migrate `network`.
+- [ ] Migrate `tailscale`.
+- [ ] Migrate `tools`.
 - [ ] Backfill already-migrated pages that still use page-local shell/state markup instead of shared primitives.
 - [ ] Validate plugin-specific edge cases.
 
