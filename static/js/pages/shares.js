@@ -13,6 +13,21 @@ ensureDashboardShell({
 
 let sharePlugins = [];
 
+function normalizeSharePlugins(rawPlugins) {
+    if (!Array.isArray(rawPlugins)) {
+        return [];
+    }
+
+    return rawPlugins
+        .filter((plugin) => plugin && typeof plugin === 'object')
+        .map((plugin) => ({
+            ...plugin,
+            id: typeof plugin.id === 'string' ? plugin.id.trim() : '',
+            category: typeof plugin.category === 'string' ? plugin.category : '',
+        }))
+        .filter((plugin) => plugin.id && plugin.category === 'share' && plugin.enabled);
+}
+
 function showSharesLoading() {
     const loadingState = document.getElementById('loading-state');
     const sharesContent = document.getElementById('shares-content');
@@ -43,8 +58,11 @@ async function loadSharePlugins() {
 
     try {
         const res = await requestApiResponse('/api/storage/plugins');
-        const data = await res.json();
-        sharePlugins = (data.plugins || []).filter(p => p.category === 'share' && p.enabled);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            throw new Error(data.error || `Failed to load plugins (${res.status})`);
+        }
+        sharePlugins = normalizeSharePlugins(data.plugins);
 
         document.getElementById('loading-state').classList.add('hidden');
         document.getElementById('shares-content').classList.remove('hidden');
@@ -78,8 +96,12 @@ async function renderSharePlugins() {
         // Fetch detailed share info
         let shareData = { shares: [], service_running: false, status: 'unknown' };
         try {
-            const res = await requestApiResponse(`/api/storage/shares/${plugin.id}`);
-            shareData = await res.json();
+            const res = await requestApiResponse(`/api/storage/shares/${encodeURIComponent(plugin.id)}`);
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                throw new Error(data.error || `Failed to load shares (${res.status})`);
+            }
+            shareData = data;
         } catch (e) {
             console.error(`Failed to load shares for ${plugin.id}:`, e);
         }
@@ -315,13 +337,13 @@ async function saveShare(event) {
     try {
         let res;
         if (isEdit) {
-            res = await requestApiResponse(`/api/storage/shares/${pluginId}/${encodeURIComponent(originalName)}`, {
+            res = await requestApiResponse(`/api/storage/shares/${encodeURIComponent(pluginId)}/${encodeURIComponent(originalName)}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(share)
             });
         } else {
-            res = await requestApiResponse(`/api/storage/shares/${pluginId}`, {
+            res = await requestApiResponse(`/api/storage/shares/${encodeURIComponent(pluginId)}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(share)
@@ -343,7 +365,7 @@ async function saveShare(event) {
 
 async function toggleShare(pluginId, shareName, enabled) {
     try {
-        const res = await requestApiResponse(`/api/storage/shares/${pluginId}/${encodeURIComponent(shareName)}/toggle`, {
+        const res = await requestApiResponse(`/api/storage/shares/${encodeURIComponent(pluginId)}/${encodeURIComponent(shareName)}/toggle`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ enabled })
@@ -368,7 +390,7 @@ async function deleteShare(pluginId, shareName) {
     }
 
     try {
-        const res = await requestApiResponse(`/api/storage/shares/${pluginId}/${encodeURIComponent(shareName)}`, {
+        const res = await requestApiResponse(`/api/storage/shares/${encodeURIComponent(pluginId)}/${encodeURIComponent(shareName)}`, {
             method: 'DELETE'
         });
 
@@ -385,6 +407,11 @@ async function deleteShare(pluginId, shareName) {
 }
 
 async function runPluginCommand(pluginId, commandId) {
+    if (!pluginId || !commandId) {
+        showNotification('Plugin command metadata is missing', 'error');
+        return;
+    }
+
     if (commandId === 'restart' && !confirm('Restart Samba service? This will briefly disconnect clients.')) {
         return;
     }
@@ -395,10 +422,17 @@ async function runPluginCommand(pluginId, commandId) {
     document.getElementById('output-modal').classList.remove('hidden');
 
     try {
-        const res = await requestApiResponse(`/api/storage/plugins/${pluginId}/commands/${commandId}`, {
+        const res = await requestApiResponse(`/api/storage/plugins/${encodeURIComponent(pluginId)}/commands/${encodeURIComponent(commandId)}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }
         });
+        if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            throw new Error(data.error || `Command failed (${res.status})`);
+        }
+        if (!res.body) {
+            throw new Error('Command output stream unavailable');
+        }
 
         const reader = res.body.getReader();
         const decoder = new TextDecoder();

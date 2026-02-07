@@ -36,6 +36,21 @@ const CATEGORY_SECTIONS = [
         iconPath: 'M3 7h8m-8 5h18m-10 5h10',
     },
 ];
+const KNOWN_CATEGORY_KEYS = new Set(CATEGORY_SECTIONS.map((section) => section.key));
+
+function normalizePluginList(rawPlugins) {
+    if (!Array.isArray(rawPlugins)) {
+        return [];
+    }
+
+    return rawPlugins
+        .filter((plugin) => plugin && typeof plugin === 'object')
+        .map((plugin) => ({
+            ...plugin,
+            id: typeof plugin.id === 'string' ? plugin.id.trim() : '',
+            category: typeof plugin.category === 'string' ? plugin.category.trim() : '',
+        }));
+}
 
 function statusClass(status) {
     if (status === 'healthy') return 'status-healthy';
@@ -61,11 +76,11 @@ async function loadPlugins() {
 
     try {
         const response = await requestApiResponse('/api/storage/plugins');
-        const payload = await response.json();
+        const payload = await response.json().catch(() => ({}));
         if (!response.ok) {
             throw new Error(payload?.error || `Failed to load plugins (${response.status})`);
         }
-        renderPlugins(payload.plugins || []);
+        renderPlugins(payload.plugins);
     } catch (error) {
         setContainerNode(createErrorState({
             title: `Failed to load plugins: ${error.message}`,
@@ -81,7 +96,8 @@ function renderPlugins(plugins) {
         return;
     }
 
-    if (!plugins.length) {
+    const normalizedPlugins = normalizePluginList(plugins);
+    if (!normalizedPlugins.length) {
         setContainerNode(createEmptyState({
             title: 'No plugins available',
             containerClass: 'text-center py-10',
@@ -92,7 +108,7 @@ function renderPlugins(plugins) {
 
     let html = '';
     for (const section of CATEGORY_SECTIONS) {
-        const sectionPlugins = plugins.filter((plugin) => plugin.category === section.key);
+        const sectionPlugins = normalizedPlugins.filter((plugin) => plugin.category === section.key);
         if (!sectionPlugins.length) {
             continue;
         }
@@ -111,6 +127,31 @@ function renderPlugins(plugins) {
         `;
     }
 
+    const uncategorizedPlugins = normalizedPlugins.filter((plugin) => !KNOWN_CATEGORY_KEYS.has(plugin.category));
+    if (uncategorizedPlugins.length) {
+        html += `
+            <div class="mb-6">
+                <h3 class="text-lg font-semibold mb-3 flex items-center">
+                    <svg class="w-5 h-5 mr-2 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5h16M4 12h16M4 19h16"></path>
+                    </svg>
+                    Other Plugins
+                </h3>
+                <p class="text-sm text-gray-400 mb-3">These plugins use a custom category and may provide their own workflows.</p>
+                ${uncategorizedPlugins.map((plugin) => renderPluginCard(plugin)).join('')}
+            </div>
+        `;
+    }
+
+    if (!html) {
+        setContainerNode(createEmptyState({
+            title: 'No plugins available',
+            containerClass: 'text-center py-10',
+            titleClass: 'text-gray-500',
+        }));
+        return;
+    }
+
     container.innerHTML = html;
     bindPluginActions(container);
 }
@@ -119,6 +160,7 @@ function renderPluginCard(plugin) {
     const statusValue = String(plugin.status || 'unconfigured');
     const statusCss = statusClass(statusValue);
     const pluginId = String(plugin.id || '');
+    const hasPluginId = pluginId.length > 0;
     const categoryLink = CATEGORY_LINKS[plugin.category] || '';
 
     return `
@@ -132,6 +174,7 @@ function renderPluginCard(plugin) {
                     <p class="text-sm text-gray-400 mb-2">${escapeHtml(plugin.description || '')}</p>
                     <p class="text-xs text-gray-500">Version ${escapeHtml(plugin.version || 'unknown')}</p>
                     ${plugin.source ? `<p class="text-xs text-gray-500 mt-1">Source: ${escapeHtml(plugin.source)}</p>` : ''}
+                    ${!hasPluginId ? '<p class="text-xs text-yellow-400 mt-2">Plugin ID missing; management actions unavailable.</p>' : ''}
 
                     ${!plugin.installed ? `
                         <div class="mt-3 p-3 bg-yellow-900/20 border border-yellow-800 rounded">
@@ -148,7 +191,7 @@ function renderPluginCard(plugin) {
                 </div>
 
                 <div class="flex items-center gap-4 ml-4">
-                    ${plugin.type && plugin.type !== 'builtin' ? `
+                    ${hasPluginId && plugin.type && plugin.type !== 'builtin' ? `
                         <button type="button"
                                 class="text-xs text-red-300 hover:text-red-200 js-remove-plugin"
                                 data-plugin-id="${encodeDataAttr(pluginId)}">
@@ -159,6 +202,7 @@ function renderPluginCard(plugin) {
                         <input type="checkbox"
                                class="js-plugin-toggle"
                                data-plugin-id="${encodeDataAttr(pluginId)}"
+                               ${hasPluginId ? '' : 'disabled'}
                                ${plugin.enabled ? 'checked' : ''}>
                         <span class="toggle-slider"></span>
                     </label>

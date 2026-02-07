@@ -1,6 +1,6 @@
 import { ensureAuthenticated, logoutToLogin } from '/js/lib/auth.js';
 import { ensureDashboardShell } from '/js/lib/layout.js';
-import { createEmptyState, createLoadingState } from '/js/lib/states.js';
+import { createEmptyState, createErrorState, createLoadingState } from '/js/lib/states.js';
 import { requestApiResponse } from '/js/lib/http.js';
 import { escapeHtml, encodeDataAttr } from '/js/lib/format.js';
 import { showNotification } from '/js/lib/notify.js';
@@ -21,6 +21,21 @@ let snapraidLogTagsByPlugin = {};
 let snapraidProgressState = {};
 let snapraidSyncContext = null;
 
+function normalizeStoragePlugins(rawPlugins) {
+    if (!Array.isArray(rawPlugins)) {
+        return [];
+    }
+
+    return rawPlugins
+        .filter((plugin) => plugin && typeof plugin === 'object')
+        .map((plugin) => ({
+            ...plugin,
+            id: typeof plugin.id === 'string' ? plugin.id.trim() : '',
+            category: typeof plugin.category === 'string' ? plugin.category : '',
+        }))
+        .filter((plugin) => plugin.id && plugin.category === 'storage' && plugin.enabled);
+}
+
 async function loadPage() {
     setNodeContent('pool-plugins', createLoadingState({
         message: 'Loading storage plugins...',
@@ -28,18 +43,27 @@ async function loadPage() {
         messageClass: 'text-gray-400',
     }));
 
-    const res = await requestApiResponse('/api/storage/plugins');
-    const data = await res.json();
+    try {
+        const res = await requestApiResponse('/api/storage/plugins');
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            throw new Error(data.error || `Failed to load plugins (${res.status})`);
+        }
 
-    // Filter to storage-category plugins that are enabled
-    poolPlugins = (data.plugins || []).filter(p =>
-        p.category === 'storage' && p.enabled
-    );
+        poolPlugins = normalizeStoragePlugins(data.plugins);
 
-    if (poolPlugins.length && currentPoolFilter !== "all" && !poolPlugins.find(p => p.id === currentPoolFilter)) {
-        currentPoolFilter = poolPlugins[0].id;
+        if (poolPlugins.length && currentPoolFilter !== "all" && !poolPlugins.find((plugin) => plugin.id === currentPoolFilter)) {
+            currentPoolFilter = poolPlugins[0].id;
+        }
+        await renderPoolPluginSections();
+    } catch (error) {
+        setNodeContent('pool-plugins', createErrorState({
+            title: `Failed to load storage plugins: ${error.message}`,
+            containerClass: 'text-center py-10',
+            titleClass: 'text-red-400',
+        }));
+        updatePoolFilterVisibility(false);
     }
-    await renderPoolPluginSections();
 }
 
 async function renderPoolPluginSections() {
@@ -64,27 +88,43 @@ async function renderPoolPluginSections() {
         // Fetch full plugin details
         let details = { status: { status: 'unknown' }, commands: [] };
         try {
-            const res = await requestApiResponse(`/api/storage/plugins/${plugin.id}`);
-            details = await res.json();
+            const res = await requestApiResponse(`/api/storage/plugins/${encodeURIComponent(plugin.id)}`);
+            const payload = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                throw new Error(payload.error || `Failed to load plugin details (${res.status})`);
+            }
+            details = payload;
             pluginDetailsMap[plugin.id] = details;
         } catch (e) {
             console.error(`Failed to load ${plugin.id}:`, e);
         }
         if (plugin.id === 'snapraid') {
             try {
-                const res = await requestApiResponse(`/api/storage/plugins/${plugin.id}/recovery`);
-                recoveryMap[plugin.id] = await res.json();
+                const res = await requestApiResponse(`/api/storage/plugins/${encodeURIComponent(plugin.id)}/recovery`);
+                const payload = await res.json().catch(() => ({}));
+                recoveryMap[plugin.id] = res.ok ? payload : null;
             } catch (e) {
                 recoveryMap[plugin.id] = null;
             }
         }
+
+        const commands = Array.isArray(details.commands)
+            ? details.commands
+                .filter((cmd) => cmd && typeof cmd === 'object')
+                .map((cmd) => ({
+                    ...cmd,
+                    id: typeof cmd.id === 'string' ? cmd.id.trim() : '',
+                    name: typeof cmd.name === 'string' ? cmd.name : '',
+                }))
+                .filter((cmd) => cmd.id)
+            : [];
 
         const statusClass = details.status?.status === 'healthy' ? 'status-healthy' :
                            details.status?.status === 'degraded' ? 'status-degraded' :
                            details.status?.status === 'error' ? 'status-error' : 'status-unconfigured';
 
         html += `
-            <section class="pool-plugin-section bg-gray-800 border border-purple-900/40 rounded-lg p-5 mb-6" data-plugin-id="${plugin.id}">
+            <section class="pool-plugin-section bg-gray-800 border border-purple-900/40 rounded-lg p-5 mb-6" data-plugin-id="${encodeDataAttr(plugin.id)}">
                 <div class="flex items-center justify-between mb-4">
                     <div>
                         <h3 class="text-lg font-semibold">${escapeHtml(plugin.name)}</h3>
@@ -106,15 +146,15 @@ async function renderPoolPluginSections() {
 
                     <!-- Plugin commands -->
                     <div class="flex flex-wrap gap-2">
-                        ${(details.commands || []).map(cmd => `
+                        ${commands.map(cmd => `
                             <button
                                     type="button"
                                     class="coraline-button py-2 px-4 rounded text-sm js-run-command"
                                     data-plugin-id="${encodeDataAttr(plugin.id)}"
                                     data-command-id="${encodeDataAttr(cmd.id)}"
-                                    data-command-name="${encodeDataAttr(cmd.name)}"
+                                    data-command-name="${encodeDataAttr(cmd.name || cmd.id)}"
                                     data-command-params="${encodeDataAttr(JSON.stringify(cmd.params || []))}">
-                                ${escapeHtml(cmd.name)}
+                                ${escapeHtml(cmd.name || cmd.id)}
                             </button>
                         `).join('')}
                         ${(plugin.id === 'snapraid' && recoveryMap[plugin.id]?.recovery_options?.length) ? `
@@ -198,7 +238,7 @@ function renderPoolFilterOptions() {
     if (!select) return;
     const options = [
         '<option value="all">All</option>',
-        ...poolPlugins.map(plugin => `<option value="${plugin.id}">${escapeHtml(plugin.name)}</option>`)
+        ...poolPlugins.map(plugin => `<option value="${encodeDataAttr(plugin.id)}">${escapeHtml(plugin.name)}</option>`)
     ];
     select.innerHTML = options.join('');
     select.value = currentPoolFilter;
@@ -400,11 +440,18 @@ async function executePluginCommand(pluginId, commandId, commandName, payload) {
             requestPayload.log_tags = true;
             requestPayload.stream_tags = true;
         }
-        const res = await requestApiResponse(`/api/storage/plugins/${pluginId}/commands/${commandId}`, {
+        const res = await requestApiResponse(`/api/storage/plugins/${encodeURIComponent(pluginId)}/commands/${encodeURIComponent(commandId)}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(requestPayload)
         });
+        if (!res.ok) {
+            const errorPayload = await res.json().catch(() => ({}));
+            throw new Error(errorPayload.error || `Command failed (${res.status})`);
+        }
+        if (!res.body) {
+            throw new Error('Command output stream unavailable');
+        }
 
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
@@ -600,11 +647,14 @@ function buildSnapraidSyncWarning(pluginId, summary) {
 
 async function fetchSnapraidDiffSummary(pluginId) {
     try {
-        const res = await requestApiResponse(`/api/storage/plugins/${pluginId}/commands/diff`, {
+        const res = await requestApiResponse(`/api/storage/plugins/${encodeURIComponent(pluginId)}/commands/diff`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ log_tags: true })
         });
+        if (!res.ok || !res.body) {
+            return null;
+        }
 
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
@@ -695,8 +745,11 @@ async function openConfigModal(pluginId) {
     currentPlugin = pluginId;
 
     try {
-        const res = await requestApiResponse(`/api/storage/plugins/${pluginId}`);
-        const data = await res.json();
+        const res = await requestApiResponse(`/api/storage/plugins/${encodeURIComponent(pluginId)}`);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            throw new Error(data.error || `Failed to load config (${res.status})`);
+        }
         currentPluginSchema = data.schema;
         renderConfigForm(data.schema, data.config || {});
         document.getElementById('config-modal-title').textContent = `Configure ${data.name}`;

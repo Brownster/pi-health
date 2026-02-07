@@ -61,7 +61,8 @@
 - [x] Migrate `tailscale`.
 - [x] Migrate `tools`.
 - [x] Backfill already-migrated pages that still use page-local shell/state markup instead of shared primitives.
-- [ ] Validate plugin-specific edge cases.
+- [x] Validate plugin-specific edge cases.
+  Covered: unknown plugin categories, missing plugin IDs, non-OK plugin list/detail responses, and missing command streams.
 
 ## Release readiness
 

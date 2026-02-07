@@ -16,6 +16,21 @@ let currentMountPlugin = null;
 let currentMountId = null;
 let mediaPaths = {};
 
+function normalizeMountPlugins(rawPlugins) {
+    if (!Array.isArray(rawPlugins)) {
+        return [];
+    }
+
+    return rawPlugins
+        .filter((plugin) => plugin && typeof plugin === 'object')
+        .map((plugin) => ({
+            ...plugin,
+            id: typeof plugin.id === 'string' ? plugin.id.trim() : '',
+            category: typeof plugin.category === 'string' ? plugin.category : '',
+        }))
+        .filter((plugin) => plugin.id && plugin.category === 'mount' && plugin.enabled);
+}
+
 async function loadPage() {
     await Promise.all([
         loadMediaPaths(),
@@ -27,7 +42,10 @@ async function loadPage() {
 async function loadMediaPaths() {
     try {
         const response = await requestApiResponse('/api/disks/media-paths');
-        const data = await response.json();
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(data.error || `Failed to load media paths (${response.status})`);
+        }
         mediaPaths = data.paths || {};
 
         document.getElementById('path-downloads').value = mediaPaths.downloads || '';
@@ -164,12 +182,12 @@ async function loadMountPlugins() {
 
     try {
         const res = await requestApiResponse('/api/storage/plugins');
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            throw new Error(data.error || `Failed to load plugins (${res.status})`);
+        }
 
-        // Filter to only mount-category plugins that are enabled
-        mountPlugins = (data.plugins || []).filter(p =>
-            p.category === 'mount' && p.enabled
-        );
+        mountPlugins = normalizeMountPlugins(data.plugins);
 
         await renderMountPluginSections();
     } catch (e) {
@@ -200,8 +218,11 @@ async function renderMountPluginSections() {
         // Fetch mounts for this plugin
         let mounts = [];
         try {
-            const res = await requestApiResponse(`/api/storage/mounts/${plugin.id}`);
-            const data = await res.json();
+            const res = await requestApiResponse(`/api/storage/mounts/${encodeURIComponent(plugin.id)}`);
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                throw new Error(data.error || `Failed to load mounts (${res.status})`);
+            }
             mounts = data.mounts || [];
         } catch (e) {
             console.error(`Failed to load mounts for ${plugin.id}:`, e);
@@ -331,7 +352,7 @@ function renderMountCard(pluginId, mount) {
 // ========== Mount Operations ==========
 async function mountRemote(pluginId, mountId) {
     try {
-        const res = await requestApiResponse(`/api/storage/mounts/${pluginId}/${mountId}/mount`, { method: 'POST' });
+        const res = await requestApiResponse(`/api/storage/mounts/${encodeURIComponent(pluginId)}/${encodeURIComponent(mountId)}/mount`, { method: 'POST' });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error);
         showNotification('Mounted successfully', 'success');
@@ -343,7 +364,7 @@ async function mountRemote(pluginId, mountId) {
 
 async function unmountRemote(pluginId, mountId) {
     try {
-        const res = await requestApiResponse(`/api/storage/mounts/${pluginId}/${mountId}/unmount`, { method: 'POST' });
+        const res = await requestApiResponse(`/api/storage/mounts/${encodeURIComponent(pluginId)}/${encodeURIComponent(mountId)}/unmount`, { method: 'POST' });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error);
         showNotification('Unmounted successfully', 'success');
@@ -356,7 +377,7 @@ async function unmountRemote(pluginId, mountId) {
 async function removeMount(pluginId, mountId) {
     if (!confirm('Remove this mount configuration?')) return;
     try {
-        const res = await requestApiResponse(`/api/storage/mounts/${pluginId}/${mountId}`, { method: 'DELETE' });
+        const res = await requestApiResponse(`/api/storage/mounts/${encodeURIComponent(pluginId)}/${encodeURIComponent(mountId)}`, { method: 'DELETE' });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error);
         showNotification('Mount removed', 'success');
@@ -369,7 +390,7 @@ async function removeMount(pluginId, mountId) {
 async function detectMounts(pluginId) {
     try {
         showNotification('Detecting existing mounts...', 'info');
-        const res = await requestApiResponse(`/api/storage/mounts/${pluginId}/detect`, { method: 'POST' });
+        const res = await requestApiResponse(`/api/storage/mounts/${encodeURIComponent(pluginId)}/detect`, { method: 'POST' });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error);
 
@@ -393,8 +414,11 @@ async function openAddMountModal(pluginId) {
 
     // Load schema for this plugin
     try {
-        const res = await requestApiResponse(`/api/storage/plugins/${pluginId}`);
-        const data = await res.json();
+        const res = await requestApiResponse(`/api/storage/plugins/${encodeURIComponent(pluginId)}`);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            throw new Error(data.error || `Failed to load plugin schema (${res.status})`);
+        }
         renderMountForm(data.schema, {});
     } catch (e) {
         showNotification('Failed to load form: ' + e.message, 'error');
@@ -413,11 +437,17 @@ async function editMount(pluginId, mountId) {
     // Load plugin schema and mount data
     try {
         const [schemaRes, mountsRes] = await Promise.all([
-            requestApiResponse(`/api/storage/plugins/${pluginId}`),
-            requestApiResponse(`/api/storage/mounts/${pluginId}`)
+            requestApiResponse(`/api/storage/plugins/${encodeURIComponent(pluginId)}`),
+            requestApiResponse(`/api/storage/mounts/${encodeURIComponent(pluginId)}`)
         ]);
-        const schemaData = await schemaRes.json();
-        const mountsData = await mountsRes.json();
+        const schemaData = await schemaRes.json().catch(() => ({}));
+        const mountsData = await mountsRes.json().catch(() => ({}));
+        if (!schemaRes.ok) {
+            throw new Error(schemaData.error || `Failed to load plugin schema (${schemaRes.status})`);
+        }
+        if (!mountsRes.ok) {
+            throw new Error(mountsData.error || `Failed to load mounts (${mountsRes.status})`);
+        }
         const mount = (mountsData.mounts || []).find(m => m.id === mountId);
         renderMountForm(schemaData.schema, mount || {});
     } catch (e) {
@@ -430,8 +460,9 @@ async function editMount(pluginId, mountId) {
 
 function renderMountForm(schema, values) {
     const form = document.getElementById('mount-modal-form');
-    const properties = schema.properties || {};
-    const required = schema.required || [];
+    const schemaObj = schema && typeof schema === 'object' ? schema : {};
+    const properties = schemaObj.properties && typeof schemaObj.properties === 'object' ? schemaObj.properties : {};
+    const required = Array.isArray(schemaObj.required) ? schemaObj.required : [];
 
     let html = '';
     for (const [key, prop] of Object.entries(properties)) {
@@ -487,6 +518,11 @@ function closeMountModal() {
 }
 
 async function submitMountForm() {
+    if (!currentMountPlugin) {
+        showNotification('No mount plugin selected', 'error');
+        return;
+    }
+
     const form = document.getElementById('mount-modal-form');
     const formData = {};
 
@@ -508,13 +544,13 @@ async function submitMountForm() {
     try {
         let res;
         if (currentMountId) {
-            res = await requestApiResponse(`/api/storage/mounts/${currentMountPlugin}/${currentMountId}`, {
+            res = await requestApiResponse(`/api/storage/mounts/${encodeURIComponent(currentMountPlugin)}/${encodeURIComponent(currentMountId)}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(formData)
             });
         } else {
-            res = await requestApiResponse(`/api/storage/mounts/${currentMountPlugin}`, {
+            res = await requestApiResponse(`/api/storage/mounts/${encodeURIComponent(currentMountPlugin)}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(formData)
