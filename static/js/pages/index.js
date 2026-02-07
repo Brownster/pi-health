@@ -1,5 +1,11 @@
 import { ensureAuthenticated, logoutToLogin } from '/js/lib/auth.js';
+import { ensureDashboardShell } from '/js/lib/layout.js';
 import { requestJson } from '/js/lib/http.js';
+
+ensureDashboardShell({
+    navClass: 'bg-slate-900/90 shadow-md',
+    notificationClass: 'fixed top-4 right-4 z-50 space-y-2',
+});
 
 const serviceGrid = document.getElementById('service-grid');
 const serviceCount = document.getElementById('service-count');

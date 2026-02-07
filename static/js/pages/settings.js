@@ -1,5 +1,6 @@
 import { ensureAuthenticated, logoutToLogin } from '/js/lib/auth.js';
 import { ensureDashboardShell } from '/js/lib/layout.js';
+import { clearClientSession } from '/js/lib/session.js';
 import { clearElement } from '/js/lib/states.js';
 import { requestApiJson, requestApiResponse } from '/js/lib/http.js';
 import { showNotification } from '/js/lib/notify.js';

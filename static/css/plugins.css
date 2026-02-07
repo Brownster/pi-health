@@ -1,12 +1,12 @@
 .coraline-button {
-    background: linear-gradient(to bottom, #5f4b8b, #372b53);
-    border: 1px solid #8a6cbd;
+    background: linear-gradient(to bottom, var(--coraline-700), var(--coraline-800));
+    border: 1px solid var(--coraline-border);
     box-shadow: 0 4px 6px rgba(0, 0, 0, 0.25);
     transition: all 0.3s ease;
 }
 
 .coraline-button:hover:not(:disabled) {
-    background: linear-gradient(to bottom, #6f58a3, #413162);
+    background: linear-gradient(to bottom, var(--coraline-600), var(--coraline-900));
     transform: translateY(-2px);
     box-shadow: 0 6px 10px rgba(0, 0, 0, 0.3);
 }
@@ -26,20 +26,20 @@
 
 .status-healthy {
     background-color: rgba(52, 211, 153, 0.2);
-    color: #34d399;
-    border: 1px solid #34d399;
+    color: var(--status-success);
+    border: 1px solid var(--status-success);
 }
 
 .status-error {
     background-color: rgba(248, 113, 113, 0.2);
-    color: #f87171;
-    border: 1px solid #f87171;
+    color: var(--status-danger);
+    border: 1px solid var(--status-danger);
 }
 
 .status-unconfigured {
     background-color: rgba(156, 163, 175, 0.2);
-    color: #9ca3af;
-    border: 1px solid #9ca3af;
+    color: var(--status-neutral);
+    border: 1px solid var(--status-neutral);
 }
 
 .toggle-switch {
@@ -62,7 +62,7 @@
     left: 0;
     right: 0;
     bottom: 0;
-    background-color: #4a5568;
+    background-color: var(--surface-gray-550);
     transition: 0.3s;
     border-radius: 24px;
 }
@@ -74,13 +74,13 @@
     width: 18px;
     left: 3px;
     bottom: 3px;
-    background-color: #fff;
+    background-color: var(--surface-white);
     transition: 0.3s;
     border-radius: 50%;
 }
 
 input:checked + .toggle-slider {
-    background-color: #7c3aed;
+    background-color: var(--coraline-accent);
 }
 
 input:checked + .toggle-slider:before {

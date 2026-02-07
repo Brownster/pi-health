@@ -68,7 +68,7 @@
 
 - [x] All legacy pages replaced or intentionally kept.
   Intentionally kept: `static/storage.html` as redirect shim to `static/pools.html`.
-- [ ] Theming parity validated.
-  Theme hooks are wired (`/css/foundation.css`, `/js/theme.js`, `/theme-banner`, nav shell), but page CSS still contains hardcoded colors that need token migration.
+- [x] Theming parity validated.
+  Page CSS now uses shared token references from `static/css/foundation.css`; hardcoded hex values were removed from page-specific styles.
 - [ ] Mobile and desktop smoke checks completed.
-- [ ] Documentation updated.
+- [x] Documentation updated.

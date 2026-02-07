@@ -1,12 +1,12 @@
 .coraline-button {
-    background: linear-gradient(to bottom, #5f4b8b, #372b53);
-    border: 1px solid #8a6cbd;
+    background: linear-gradient(to bottom, var(--coraline-700), var(--coraline-800));
+    border: 1px solid var(--coraline-border);
     box-shadow: 0 4px 6px rgba(0, 0, 0, 0.25);
     transition: all 0.3s ease;
 }
 
 .coraline-button:hover {
-    background: linear-gradient(to bottom, #6f58a3, #413162);
+    background: linear-gradient(to bottom, var(--coraline-600), var(--coraline-900));
     transform: translateY(-2px);
     box-shadow: 0 6px 10px rgba(0, 0, 0, 0.3);
 }
@@ -23,7 +23,7 @@
 .progress-bar {
     height: 8px;
     border-radius: 4px;
-    background: #374151;
+    background: var(--surface-gray-700);
     overflow: hidden;
 }
 
@@ -33,31 +33,31 @@
 }
 
 .mounted {
-    color: #34d399;
+    color: var(--status-success);
 }
 
 .unmounted {
-    color: #fbbf24;
+    color: var(--status-warning);
 }
 
 .missing {
-    color: #f87171;
+    color: var(--status-danger);
 }
 
 .smart-healthy {
-    color: #34d399;
+    color: var(--status-success);
 }
 
 .smart-warning {
-    color: #fbbf24;
+    color: var(--status-warning);
 }
 
 .smart-failing {
-    color: #f87171;
+    color: var(--status-danger);
 }
 
 .smart-unknown {
-    color: #9ca3af;
+    color: var(--status-neutral);
 }
 
 .smart-badge {
@@ -71,26 +71,26 @@
 
 .smart-badge.healthy {
     background-color: rgba(52, 211, 153, 0.2);
-    color: #34d399;
-    border: 1px solid #34d399;
+    color: var(--status-success);
+    border: 1px solid var(--status-success);
 }
 
 .smart-badge.warning {
     background-color: rgba(251, 191, 36, 0.2);
-    color: #fbbf24;
-    border: 1px solid #fbbf24;
+    color: var(--status-warning);
+    border: 1px solid var(--status-warning);
 }
 
 .smart-badge.failing {
     background-color: rgba(248, 113, 113, 0.2);
-    color: #f87171;
-    border: 1px solid #f87171;
+    color: var(--status-danger);
+    border: 1px solid var(--status-danger);
 }
 
 .smart-badge.unknown {
     background-color: rgba(156, 163, 175, 0.2);
-    color: #9ca3af;
-    border: 1px solid #9ca3af;
+    color: var(--status-neutral);
+    border: 1px solid var(--status-neutral);
 }
 
 .smart-attr-row:hover {

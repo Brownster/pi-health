@@ -1,12 +1,12 @@
 .coraline-button {
-    background: linear-gradient(to bottom, #5f4b8b, #372b53);
-    border: 1px solid #8a6cbd;
+    background: linear-gradient(to bottom, var(--coraline-700), var(--coraline-800));
+    border: 1px solid var(--coraline-border);
     box-shadow: 0 4px 6px rgba(0, 0, 0, 0.25);
     transition: all 0.3s ease;
 }
 
 .coraline-button:hover:not(:disabled) {
-    background: linear-gradient(to bottom, #6f58a3, #413162);
+    background: linear-gradient(to bottom, var(--coraline-600), var(--coraline-900));
     transform: translateY(-2px);
     box-shadow: 0 6px 10px rgba(0, 0, 0, 0.3);
 }
@@ -26,20 +26,20 @@
 
 .status-connected {
     background-color: rgba(52, 211, 153, 0.2);
-    color: #34d399;
-    border: 1px solid #34d399;
+    color: var(--status-success);
+    border: 1px solid var(--status-success);
 }
 
 .status-disconnected {
     background-color: rgba(248, 113, 113, 0.2);
-    color: #f87171;
-    border: 1px solid #f87171;
+    color: var(--status-danger);
+    border: 1px solid var(--status-danger);
 }
 
 .status-not-installed {
     background-color: rgba(156, 163, 175, 0.2);
-    color: #9ca3af;
-    border: 1px solid #9ca3af;
+    color: var(--status-neutral);
+    border: 1px solid var(--status-neutral);
 }
 
 .info-card {
@@ -50,14 +50,14 @@
 }
 
 .info-label {
-    color: #9ca3af;
+    color: var(--status-neutral);
     font-size: 0.75rem;
     text-transform: uppercase;
     letter-spacing: 0.05em;
 }
 
 .info-value {
-    color: #e5e7eb;
+    color: var(--surface-gray-200);
     font-size: 1rem;
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
 }

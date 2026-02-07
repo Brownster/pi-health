@@ -1,99 +1,98 @@
-        .status-running { background-color: #38a169; }
-        .status-stopped { background-color: #e53e3e; }
-        .status-other { background-color: #dd6b20; }
-        .button:active { transform: scale(0.95); } /* Add feedback on button click */
-        
-        /* Animation for container actions */
-        .animate-pulse {
-            animation: pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-        }
-        
-        @keyframes pulse {
-            0%, 100% {
-                opacity: 1;
-            }
-            50% {
-                opacity: 0.5;
-            }
-        }
-        
-        /* Notification styles */
-        .notification {
-            transition: opacity 0.3s, height 0.3s, margin 0.3s, padding 0.3s;
-            overflow: hidden;
-        }
-        
-        /* Container row hover effect */
-        tr:hover:not(.loading-row) {
-            background-color: rgba(255, 255, 255, 0.05);
-        }
-        
-        /* Fade transition for container status changes */
-        .status-transition {
-            transition: background-color 0.5s ease;
-        }
-        
-        /* Disable text selection on buttons */
-        button {
-            user-select: none;
-        }
-        
-        /* Custom Coraline button */
-        .coraline-button {
-            background: linear-gradient(to bottom, #5f4b8b, #372b53);
-            border: 1px solid #8a6cbd;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.25);
-            transition: all 0.3s ease;
-        }
-        
-        .coraline-button:hover {
-            background: linear-gradient(to bottom, #6f58a3, #413162);
-            transform: translateY(-2px);
-            box-shadow: 0 6px 10px rgba(0, 0, 0, 0.3);
-        }
-        
-        /* Loading spinner */
-        .loading-spinner {
-            display: inline-block;
-            width: 1rem;
-            height: 1rem;
-            border: 2px solid rgba(255, 255, 255, 0.3);
-            border-radius: 50%;
-            border-top-color: white;
-            animation: spin 1s ease-in-out infinite;
-        }
-        
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
+.status-running { background-color: var(--status-success-strong); }
+.status-stopped { background-color: var(--status-danger-strong); }
+.status-other { background-color: var(--status-warning-strong); }
+.button:active { transform: scale(0.95); } /* Add feedback on button click */
 
-        /* Action button styles */
-        .action-btn {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            min-width: 50px;
-            transition: all 0.2s;
-        }
+/* Animation for container actions */
+.animate-pulse {
+    animation: pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
 
-        .action-btn:active:not(:disabled) {
-            transform: scale(0.95);
-        }
+@keyframes pulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.5;
+    }
+}
 
-        /* Dropdown menu - vertical list positioned to the left */
-        .dropdown-menu {
-            display: none;
-            flex-direction: column;
-            right: 0;
-        }
+/* Notification styles */
+.notification {
+    transition: opacity 0.3s, height 0.3s, margin 0.3s, padding 0.3s;
+    overflow: hidden;
+}
 
-        .dropdown-menu:not(.hidden) {
-            display: flex;
-        }
+/* Container row hover effect */
+tr:hover:not(.loading-row) {
+    background-color: rgba(255, 255, 255, 0.05);
+}
 
-        .dropdown-menu button {
-            display: block;
-            width: 100%;
-            white-space: nowrap;
-        }
-    </style>
+/* Fade transition for container status changes */
+.status-transition {
+    transition: background-color 0.5s ease;
+}
+
+/* Disable text selection on buttons */
+button {
+    user-select: none;
+}
+
+/* Custom Coraline button */
+.coraline-button {
+    background: linear-gradient(to bottom, var(--coraline-700), var(--coraline-800));
+    border: 1px solid var(--coraline-border);
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.25);
+    transition: all 0.3s ease;
+}
+
+.coraline-button:hover {
+    background: linear-gradient(to bottom, var(--coraline-600), var(--coraline-900));
+    transform: translateY(-2px);
+    box-shadow: 0 6px 10px rgba(0, 0, 0, 0.3);
+}
+
+/* Loading spinner */
+.loading-spinner {
+    display: inline-block;
+    width: 1rem;
+    height: 1rem;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-radius: 50%;
+    border-top-color: white;
+    animation: spin 1s ease-in-out infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Action button styles */
+.action-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 50px;
+    transition: all 0.2s;
+}
+
+.action-btn:active:not(:disabled) {
+    transform: scale(0.95);
+}
+
+/* Dropdown menu - vertical list positioned to the left */
+.dropdown-menu {
+    display: none;
+    flex-direction: column;
+    right: 0;
+}
+
+.dropdown-menu:not(.hidden) {
+    display: flex;
+}
+
+.dropdown-menu button {
+    display: block;
+    width: 100%;
+    white-space: nowrap;
+}
