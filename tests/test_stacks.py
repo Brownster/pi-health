@@ -766,5 +766,150 @@ class TestStackEnvFile:
             stack_manager.STACKS_PATH = original_path
 
 
+class TestStackAdditionalRoutes:
+    """Test additional stack API routes with focused coverage."""
+
+    def test_scan_stacks(self, authenticated_client, temp_stacks_dir):
+        import stack_manager
+        original_path = stack_manager.STACKS_PATH
+        stack_manager.STACKS_PATH = temp_stacks_dir
+
+        stack_dir = os.path.join(temp_stacks_dir, "alpha")
+        os.makedirs(stack_dir, exist_ok=True)
+        with open(os.path.join(stack_dir, "compose.yaml"), "w") as f:
+            f.write("services: {}\n")
+
+        try:
+            response = authenticated_client.post("/api/stacks/scan")
+            assert response.status_code == 200
+            data = response.get_json()
+            assert data["count"] == 1
+            assert data["stacks"][0]["name"] == "alpha"
+        finally:
+            stack_manager.STACKS_PATH = original_path
+
+    def test_get_compose(self, authenticated_client, temp_stacks_dir):
+        import stack_manager
+        original_path = stack_manager.STACKS_PATH
+        stack_manager.STACKS_PATH = temp_stacks_dir
+
+        stack_dir = os.path.join(temp_stacks_dir, "alpha")
+        os.makedirs(stack_dir, exist_ok=True)
+        compose_content = "services:\n  web:\n    image: nginx\n"
+        with open(os.path.join(stack_dir, "compose.yaml"), "w") as f:
+            f.write(compose_content)
+
+        try:
+            response = authenticated_client.get("/api/stacks/alpha/compose")
+            assert response.status_code == 200
+            data = response.get_json()
+            assert data["filename"] == "compose.yaml"
+            assert data["content"] == compose_content
+        finally:
+            stack_manager.STACKS_PATH = original_path
+
+    def test_stack_status_endpoint(self, authenticated_client, monkeypatch):
+        monkeypatch.setattr(
+            "stack_manager.get_stack_status",
+            lambda _name: ({"status": "running", "container_count": 2, "running_count": 2}, None),
+        )
+
+        response = authenticated_client.get("/api/stacks/alpha/status")
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data["status"] == "running"
+        assert data["container_count"] == 2
+
+    def test_stack_restart_and_pull(self, authenticated_client, monkeypatch):
+        monkeypatch.setattr(
+            "stack_manager.run_compose_command",
+            lambda _name, _command: ({"success": True, "returncode": 0}, None),
+        )
+
+        restart_response = authenticated_client.post("/api/stacks/alpha/restart")
+        assert restart_response.status_code == 200
+        assert restart_response.get_json()["success"] is True
+
+        pull_response = authenticated_client.post("/api/stacks/alpha/pull")
+        assert pull_response.status_code == 200
+        assert pull_response.get_json()["success"] is True
+
+    def test_stack_logs(self, authenticated_client, temp_stacks_dir, monkeypatch):
+        import stack_manager
+        original_path = stack_manager.STACKS_PATH
+        stack_manager.STACKS_PATH = temp_stacks_dir
+
+        stack_dir = os.path.join(temp_stacks_dir, "alpha")
+        os.makedirs(stack_dir, exist_ok=True)
+        with open(os.path.join(stack_dir, "compose.yaml"), "w") as f:
+            f.write("services: {}\n")
+
+        mock_run = MagicMock(returncode=0, stdout="log line\n", stderr="")
+        monkeypatch.setattr("stack_manager.subprocess.run", lambda *args, **kwargs: mock_run)
+
+        try:
+            response = authenticated_client.get("/api/stacks/alpha/logs?tail=20&service=web")
+            assert response.status_code == 200
+            data = response.get_json()
+            assert "log line" in data["logs"]
+            assert data["returncode"] == 0
+        finally:
+            stack_manager.STACKS_PATH = original_path
+
+    def test_stack_backups_and_restore(self, authenticated_client, temp_stacks_dir, monkeypatch):
+        import stack_manager
+        original_path = stack_manager.STACKS_PATH
+        original_backup = stack_manager.BACKUP_DIR
+        stack_manager.STACKS_PATH = temp_stacks_dir
+        stack_manager.BACKUP_DIR = os.path.join(temp_stacks_dir, ".backups")
+
+        stack_dir = os.path.join(temp_stacks_dir, "alpha")
+        os.makedirs(stack_dir, exist_ok=True)
+        with open(os.path.join(stack_dir, "compose.yaml"), "w") as f:
+            f.write("services:\n  web:\n    image: nginx\n")
+
+        backup_dir = os.path.join(stack_manager.BACKUP_DIR, "alpha")
+        os.makedirs(backup_dir, exist_ok=True)
+        backup_name = "compose-20240101010101.yaml"
+        with open(os.path.join(backup_dir, backup_name), "w") as f:
+            f.write("services:\n  web:\n    image: redis\n")
+
+        monkeypatch.setattr("stack_manager.backup_stack", lambda _name: "/tmp/backup")
+
+        try:
+            list_response = authenticated_client.get("/api/stacks/alpha/backups")
+            assert list_response.status_code == 200
+            assert backup_name in list_response.get_json()["backups"]
+
+            get_response = authenticated_client.get(f"/api/stacks/alpha/backups/{backup_name}")
+            assert get_response.status_code == 200
+            assert "redis" in get_response.get_json()["content"]
+
+            restore_response = authenticated_client.post(
+                "/api/stacks/alpha/restore",
+                data=json.dumps({"backup": backup_name}),
+                content_type="application/json",
+            )
+            assert restore_response.status_code == 200
+            assert restore_response.get_json()["status"] == "restored"
+        finally:
+            stack_manager.STACKS_PATH = original_path
+            stack_manager.BACKUP_DIR = original_backup
+
+    def test_stack_stream_routes(self, authenticated_client, monkeypatch):
+        monkeypatch.setattr(
+            "stack_manager.stream_compose_command",
+            lambda _name, _command: iter(['data: {"line":"ok"}\n\n', 'data: {"done":true}\n\n']),
+        )
+
+        up_response = authenticated_client.get("/api/stacks/alpha/up/stream")
+        assert up_response.status_code == 200
+        assert "done" in up_response.get_data(as_text=True)
+
+        pull_response = authenticated_client.get("/api/stacks/alpha/pull/stream")
+        assert pull_response.status_code == 200
+        assert "ok" in pull_response.get_data(as_text=True)
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
