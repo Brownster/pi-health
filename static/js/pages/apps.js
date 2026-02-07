@@ -1,5 +1,12 @@
 import { ensureAuthenticated, logoutToLogin } from '/js/lib/auth.js';
+import { ensureDashboardShell } from '/js/lib/layout.js';
+import { clearElement, createEmptyState, createErrorState, createLoadingState } from '/js/lib/states.js';
 import { requestJson } from '/js/lib/http.js';
+
+ensureDashboardShell({
+    notificationClass: 'fixed top-4 right-4 z-50 w-72 flex flex-col items-end',
+    includeFooter: true,
+});
 
 let catalogItems = [];
 let installedServices = [];
@@ -55,20 +62,10 @@ async function requestApiJson(url, options = {}) {
     return payload;
 }
 
-function clearElement(node) {
-    while (node.firstChild) {
-        node.removeChild(node.firstChild);
-    }
-}
-
 function showLoadingState(message = 'Loading catalog...') {
     const grid = document.getElementById('catalog-grid');
     clearElement(grid);
-
-    const item = document.createElement('div');
-    item.className = 'col-span-full text-center py-10 text-gray-400';
-    item.textContent = message;
-    grid.appendChild(item);
+    grid.appendChild(createLoadingState({ message }));
 }
 
 function getItemStacks(itemId) {
@@ -92,7 +89,12 @@ async function loadCatalog() {
 
         renderCatalog();
     } catch (_error) {
-        showLoadingState('Failed to load catalog.');
+        const grid = document.getElementById('catalog-grid');
+        clearElement(grid);
+        grid.appendChild(createErrorState({
+            title: 'Failed to load catalog.',
+            subtitle: 'Refresh the page and try again.',
+        }));
     }
 }
 
@@ -175,10 +177,11 @@ function renderCatalog() {
     clearElement(grid);
 
     if (!catalogItems.length) {
-        const empty = document.createElement('div');
-        empty.className = 'col-span-full text-center py-10 text-gray-400';
-        empty.textContent = 'No catalog items found. Add templates under catalog/.';
-        grid.appendChild(empty);
+        grid.appendChild(createEmptyState({
+            title: 'No catalog items found.',
+            subtitle: 'Add templates under catalog/.',
+            titleClass: 'text-gray-300 text-lg',
+        }));
         return;
     }
 

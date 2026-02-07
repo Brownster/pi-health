@@ -1,6 +1,13 @@
 import { ensureAuthenticated, logoutToLogin } from '/js/lib/auth.js';
+import { ensureDashboardShell } from '/js/lib/layout.js';
+import { clearElement } from '/js/lib/states.js';
 import { requestJson } from '/js/lib/http.js';
 import { clearClientSession } from '/js/lib/session.js';
+
+ensureDashboardShell({
+    notificationClass: 'fixed top-4 right-4 z-50 space-y-2',
+    includeFooter: true,
+});
 
 let currentConfig = {};
 let backupConfig = {};
@@ -57,12 +64,6 @@ async function requestApiJson(url, options = {}) {
     }
 
     return payload;
-}
-
-function clearElement(node) {
-    while (node.firstChild) {
-        node.removeChild(node.firstChild);
-    }
 }
 
 function setButtonBusy(button, busy) {

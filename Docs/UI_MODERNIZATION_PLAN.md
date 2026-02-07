@@ -23,6 +23,8 @@ For this migration wave, the UI stack is:
 - Login, Dashboard, System, and Containers are migrated to module-based page scripts.
 - Shared auth/session helpers exist in `static/js/lib/auth.js` and `static/js/lib/session.js`.
 - Shared HTTP helper exists in `static/js/lib/http.js`.
+- Shared layout helper exists in `static/js/lib/layout.js`.
+- Shared state components exist in `static/js/lib/states.js`.
 - Legacy utility script `static/js/api.js` still exists for older pages and shared toast UI.
 
 ## Standards for migrated pages

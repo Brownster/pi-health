@@ -1,5 +1,12 @@
 import { ensureAuthenticated, logoutToLogin } from '/js/lib/auth.js';
+import { ensureDashboardShell } from '/js/lib/layout.js';
+import { clearElement, createEmptyState, createErrorState } from '/js/lib/states.js';
 import { requestJson } from '/js/lib/http.js';
+
+ensureDashboardShell({
+    notificationClass: 'fixed top-4 right-4 z-50 w-80 flex flex-col items-end',
+    includeFooter: true,
+});
 
 let stacks = [];
 let currentStack = null;
@@ -35,31 +42,6 @@ function statusClass(status) {
     return `status-${value}`;
 }
 
-function clearElement(node) {
-    while (node.firstChild) {
-        node.removeChild(node.firstChild);
-    }
-}
-
-function createEmptyState({ title, subtitle, error = false }) {
-    const wrapper = document.createElement('div');
-    wrapper.className = 'col-span-full text-center py-10';
-
-    const titleEl = document.createElement('p');
-    titleEl.className = error ? 'text-red-400' : 'mt-4 text-xl';
-    titleEl.textContent = title;
-    wrapper.appendChild(titleEl);
-
-    if (subtitle) {
-        const subtitleEl = document.createElement('p');
-        subtitleEl.className = 'text-gray-400 mt-2';
-        subtitleEl.textContent = subtitle;
-        wrapper.appendChild(subtitleEl);
-    }
-
-    return wrapper;
-}
-
 function formatNowTime() {
     return new Date().toLocaleTimeString();
 }
@@ -84,10 +66,9 @@ async function loadStacks() {
     } catch (error) {
         console.error('Error loading stacks:', error);
         clearElement(grid);
-        grid.appendChild(createEmptyState({
+        grid.appendChild(createErrorState({
             title: `Error loading stacks: ${error.message}`,
             subtitle: 'Make sure STACKS_PATH is configured and accessible.',
-            error: true,
         }));
     } finally {
         refreshBtn.classList.remove('animate-pulse');
@@ -102,6 +83,7 @@ function renderStacks() {
         grid.appendChild(createEmptyState({
             title: 'No stacks found',
             subtitle: 'Create a new stack or check your STACKS_PATH configuration.',
+            titleClass: 'mt-4 text-xl',
         }));
         return;
     }
