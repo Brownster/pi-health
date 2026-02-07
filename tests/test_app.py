@@ -236,6 +236,15 @@ class TestStaticPages:
         assert 'Media Paths' in body
         assert 'mount-plugins' in body
 
+    def test_shares_page(self, client):
+        """Test shares page loads."""
+        response = client.get('/shares.html')
+        assert response.status_code == 200
+        body = response.data.decode('utf-8')
+        assert 'Shares' in body
+        assert 'shares-content' in body
+        assert 'share-modal' in body
+
     def test_plugins_page(self, client):
         """Test plugins page loads."""
         response = client.get('/plugins.html')
