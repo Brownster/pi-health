@@ -1,50 +1,16 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <script>
-        if (!sessionStorage.getItem("loggedIn")) {
-            window.location.href = "/login.html";
-        }
-
-        const username = sessionStorage.getItem("username");
-        if (username) {
-            document.addEventListener('DOMContentLoaded', () => {
-                const userEl = document.getElementById('logged-in-user');
-                if (userEl) userEl.textContent = username;
-            });
-        }
-
-        async function logout() {
-            try {
-                await fetch('/api/logout', { method: 'POST' });
-            } catch (e) {
-            }
-            sessionStorage.clear();
-            window.location.href = '/login.html';
-        }
-    </script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Apps - Pi-Health Dashboard</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <link rel="stylesheet" href="/css/foundation.css">
+    <link rel="stylesheet" href="/css/apps.css">
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <script src="/js/api.js"></script>
     <script src="/js/theme.js"></script>
     <script src="/js/nav.js"></script>
-    <style>
-        .coraline-button {
-            background: linear-gradient(to bottom, #5f4b8b, #372b53);
-            border: 1px solid #8a6cbd;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.25);
-            transition: all 0.3s ease;
-        }
-
-        .coraline-button:hover {
-            background: linear-gradient(to bottom, #6f58a3, #413162);
-            transform: translateY(-2px);
-            box-shadow: 0 6px 10px rgba(0, 0, 0, 0.3);
-        }
-    </style>
 </head>
 <body class="bg-gray-900 text-blue-100 font-sans min-h-screen">
     <header class="bg-gradient-to-r from-purple-900 to-blue-900 shadow-lg relative overflow-hidden">
@@ -62,7 +28,7 @@
     <main class="container mx-auto p-6">
         <div class="mb-6 flex justify-between items-center">
             <h2 class="text-2xl font-semibold">App Catalog</h2>
-            <button onclick="loadCatalog()" class="coraline-button text-blue-100 font-bold py-2 px-4 rounded">Refresh</button>
+            <button id="refresh-catalog-btn" class="coraline-button text-blue-100 font-bold py-2 px-4 rounded">Refresh</button>
         </div>
 
         <div id="catalog-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -74,15 +40,15 @@
         <div class="bg-gray-900 w-full max-w-2xl rounded-lg shadow-xl border border-purple-900 flex flex-col max-h-[90vh] my-auto">
             <div class="flex justify-between items-center p-4 border-b border-purple-800 flex-shrink-0">
                 <h3 id="install-title" class="text-xl font-semibold">Install App</h3>
-                <button onclick="closeInstallModal()" class="text-gray-400 hover:text-gray-200">Close</button>
+                <button id="install-close-btn" class="text-gray-400 hover:text-gray-200">Close</button>
             </div>
             <div class="p-4 space-y-4 overflow-y-auto flex-1 min-h-0">
                 <div id="install-description" class="text-sm text-gray-300"></div>
                 <div id="install-fields" class="space-y-3"></div>
             </div>
             <div class="p-4 border-t border-purple-800 flex justify-end space-x-2 flex-shrink-0">
-                <button onclick="closeInstallModal()" class="px-4 py-2 bg-gray-700 text-white rounded">Cancel</button>
-                <button onclick="submitInstall()" class="coraline-button px-4 py-2 text-white rounded">Install</button>
+                <button id="install-cancel-btn" class="px-4 py-2 bg-gray-700 text-white rounded">Cancel</button>
+                <button id="install-submit-btn" class="coraline-button px-4 py-2 text-white rounded">Install</button>
             </div>
         </div>
     </div>
@@ -91,7 +57,7 @@
         <div class="bg-gray-900 w-full max-w-lg rounded-lg shadow-xl border border-purple-900 flex flex-col">
             <div class="flex justify-between items-center p-4 border-b border-purple-800">
                 <h3 id="remove-title" class="text-xl font-semibold">Remove App</h3>
-                <button onclick="closeRemoveModal()" class="text-gray-400 hover:text-gray-200">Close</button>
+                <button id="remove-close-btn" class="text-gray-400 hover:text-gray-200">Close</button>
             </div>
             <div class="p-4 space-y-4">
                 <p class="text-sm text-gray-300">Choose which stack to remove this service from.</p>
@@ -101,8 +67,8 @@
                 </div>
             </div>
             <div class="p-4 border-t border-purple-800 flex justify-end space-x-2">
-                <button onclick="closeRemoveModal()" class="px-4 py-2 bg-gray-700 text-white rounded">Cancel</button>
-                <button onclick="submitRemove()" class="px-4 py-2 bg-red-700 hover:bg-red-600 text-white rounded">Remove</button>
+                <button id="remove-cancel-btn" class="px-4 py-2 bg-gray-700 text-white rounded">Cancel</button>
+                <button id="remove-submit-btn" class="px-4 py-2 bg-red-700 hover:bg-red-600 text-white rounded">Remove</button>
             </div>
         </div>
     </div>
@@ -111,7 +77,7 @@
         <div class="bg-gray-900 w-full max-w-lg rounded-lg shadow-xl border border-purple-900 flex flex-col">
             <div class="flex justify-between items-center p-4 border-b border-purple-800">
                 <h3 class="text-xl font-semibold">Configure Gluetun VPN</h3>
-                <button onclick="closeVpnModal()" class="text-gray-400 hover:text-gray-200">Close</button>
+                <button id="vpn-close-btn" class="text-gray-400 hover:text-gray-200">Close</button>
             </div>
             <div class="p-4 space-y-4">
                 <p class="text-sm text-gray-400">Creates the VPN network and writes a Gluetun env file.</p>
@@ -133,355 +99,12 @@
                 </div>
             </div>
             <div class="p-4 border-t border-purple-800 flex justify-end space-x-2">
-                <button onclick="closeVpnModal()" class="px-4 py-2 bg-gray-700 text-white rounded">Cancel</button>
-                <button onclick="submitVpnConfig()" class="coraline-button px-4 py-2 text-white rounded">Save Config</button>
+                <button id="vpn-cancel-btn" class="px-4 py-2 bg-gray-700 text-white rounded">Cancel</button>
+                <button id="vpn-submit-btn" class="coraline-button px-4 py-2 text-white rounded">Save Config</button>
             </div>
         </div>
     </div>
 
-    <script>
-        let catalogItems = [];
-        let installedServices = [];
-        let serviceStacks = {};
-        let availableStacks = [];
-        let activeInstall = null;
-        let activeRemove = null;
-
-        function showNotification(message, type = 'info') {
-            const notificationArea = document.getElementById('notification-area');
-            const notification = document.createElement('div');
-            notification.className = `notification ${type} bg-opacity-90 p-3 mb-2 rounded shadow-lg transform transition-all duration-500 opacity-0`;
-            if (type === 'success') notification.classList.add('bg-green-600');
-            else if (type === 'error') notification.classList.add('bg-red-600');
-            else notification.classList.add('bg-blue-600');
-
-            notification.innerHTML = message;
-            notificationArea.appendChild(notification);
-            setTimeout(() => notification.classList.replace('opacity-0', 'opacity-100'), 10);
-            setTimeout(() => {
-                notification.classList.replace('opacity-100', 'opacity-0');
-                setTimeout(() => notification.remove(), 300);
-            }, 3000);
-        }
-
-        async function loadCatalog() {
-            const grid = document.getElementById('catalog-grid');
-            grid.innerHTML = '<div class="col-span-full text-center py-10 text-gray-400">Loading catalog...</div>';
-
-            try {
-                const [catalogRes, statusRes, stacksRes] = await Promise.all([
-                    fetch('/api/catalog'),
-                    fetch('/api/catalog/status'),
-                    fetch('/api/stacks')
-                ]);
-                const catalogData = await catalogRes.json();
-                const statusData = await statusRes.json();
-                const stacksData = await stacksRes.json();
-
-                catalogItems = catalogData.items || [];
-                installedServices = statusData.services || [];
-                serviceStacks = statusData.service_stacks || {};
-                availableStacks = (stacksData.stacks || []).map(stack => stack.name);
-                renderCatalog();
-            } catch (error) {
-                grid.innerHTML = '<div class="col-span-full text-center py-10 text-red-400">Failed to load catalog.</div>';
-            }
-        }
-
-        function escapeHtml(value) {
-            return String(value)
-                .replace(/&/g, '&amp;')
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;')
-                .replace(/"/g, '&quot;')
-                .replace(/'/g, '&#39;');
-        }
-
-        function renderCatalog() {
-            const grid = document.getElementById('catalog-grid');
-            if (!catalogItems.length) {
-                grid.innerHTML = '<div class="col-span-full text-center py-10 text-gray-400">No catalog items found. Add templates under catalog/.</div>';
-                return;
-            }
-
-            grid.innerHTML = catalogItems.map(item => {
-                const installed = installedServices.includes(item.id);
-                const stacks = serviceStacks[item.id] || [];
-                const name = escapeHtml(item.name || item.id);
-                const description = escapeHtml(item.description || 'No description');
-                const requires = item.requires && item.requires.length
-                    ? `<p class="text-xs text-yellow-300 mt-2">Requires: ${escapeHtml(item.requires.join(', '))}</p>`
-                    : '';
-                const stackInfo = stacks.length
-                    ? `<p class="text-xs text-green-300 mt-1">Stack: ${escapeHtml(stacks.join(', '))}</p>`
-                    : '';
-                return `
-                    <div class="bg-gray-800 rounded-lg shadow-lg p-4 border border-purple-900/40">
-                        <div class="flex justify-between items-start">
-                            <h3 class="text-lg font-semibold">${name}</h3>
-                            ${installed ? '<span class="text-green-400 text-xs">Installed</span>' : ''}
-                        </div>
-                        <p class="text-sm text-gray-400 mt-2">${description}</p>
-                        ${requires}
-                        ${stackInfo}
-                        <div class="mt-4 flex space-x-2">
-                            ${installed
-                                ? `<button onclick="openRemoveModal('${item.id}')" class="px-3 py-1 text-sm rounded bg-red-700 hover:bg-red-600 text-white">Remove</button>`
-                                : `<button onclick="openInstallModal('${item.id}')" class="coraline-button px-3 py-1 text-sm rounded text-white">Install</button>`
-                            }
-                            ${item.id === 'vpn'
-                                ? `<button onclick="openVpnModal()" class="px-3 py-1 text-sm rounded bg-purple-700 hover:bg-purple-600 text-white">Configure</button>`
-                                : ''
-                            }
-                        </div>
-                    </div>
-                `;
-            }).join('');
-        }
-
-        async function openInstallModal(id) {
-            const modal = document.getElementById('install-modal');
-            const title = document.getElementById('install-title');
-            const description = document.getElementById('install-description');
-            const fieldsEl = document.getElementById('install-fields');
-
-            try {
-                const response = await fetch(`/api/catalog/${id}?apply_media_paths=true`);
-                const data = await response.json();
-                if (data.error) throw new Error(data.error);
-
-                activeInstall = data.item;
-                title.textContent = `Install ${activeInstall.name || activeInstall.id}`;
-                description.textContent = activeInstall.description || '';
-                fieldsEl.innerHTML = '';
-
-                const fields = activeInstall.fields || [];
-                if (!fields.length) {
-                    fieldsEl.innerHTML = '<p class="text-sm text-gray-400">No configuration fields for this app.</p>';
-                } else {
-                    fields.forEach(field => {
-                        const inputId = `field-${field.key}`;
-                        fieldsEl.innerHTML += `
-                            <div>
-                                <label class="block text-sm text-gray-300 mb-1">${field.label || field.key}</label>
-                                <input id="${inputId}" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white" value="${field.default || ''}">
-                            </div>
-                        `;
-                    });
-                }
-                fieldsEl.innerHTML += renderStackSelector(activeInstall);
-                const stackSelect = document.getElementById('install-stack-select');
-                if (stackSelect && activeInstall.defaultStack) {
-                    stackSelect.value = activeInstall.defaultStack;
-                }
-                toggleStackName();
-
-                modal.classList.remove('hidden');
-                modal.classList.add('flex');
-            } catch (error) {
-                showNotification(`Error: ${error.message}`, 'error');
-            }
-        }
-
-        function renderStackSelector(item) {
-            const requires = item.requires || [];
-            let defaultStack = 'new';
-            if (requires.includes('vpn') && serviceStacks.vpn && serviceStacks.vpn.length) {
-                defaultStack = serviceStacks.vpn[0];
-            }
-            item.defaultStack = defaultStack;
-
-            const options = [
-                `<option value="new">Create new stack</option>`,
-                ...availableStacks.map(name => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`)
-            ].join('');
-
-            return `
-                <div class="mt-4 pt-4 border-t border-gray-700">
-                    <label class="block text-sm text-gray-300 mb-1">Target stack</label>
-                    <select id="install-stack-select" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white" onchange="toggleStackName()">
-                        ${options}
-                    </select>
-                    <div id="new-stack-name-field" class="mt-3">
-                        <label class="block text-sm text-gray-300 mb-1">New stack name</label>
-                        <input id="install-stack-name" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white" value="${escapeHtml(item.id || '')}">
-                    </div>
-                </div>
-            `;
-        }
-
-        function toggleStackName() {
-            const select = document.getElementById('install-stack-select');
-            const nameField = document.getElementById('new-stack-name-field');
-            if (!select || !nameField) return;
-            nameField.style.display = select.value === 'new' ? 'block' : 'none';
-        }
-
-        function closeInstallModal() {
-            const modal = document.getElementById('install-modal');
-            modal.classList.add('hidden');
-            modal.classList.remove('flex');
-            activeInstall = null;
-        }
-
-        function openRemoveModal(id) {
-            const modal = document.getElementById('remove-modal');
-            const title = document.getElementById('remove-title');
-            const stackSelect = document.getElementById('remove-stack-select');
-            const stacks = serviceStacks[id] || [];
-            activeRemove = { id, stacks };
-
-            title.textContent = `Remove ${id}`;
-            stackSelect.innerHTML = stacks.map(name => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');
-
-            if (stacks.length <= 1) {
-                stackSelect.value = stacks[0] || '';
-                stackSelect.disabled = true;
-            } else {
-                stackSelect.disabled = false;
-            }
-
-            modal.classList.remove('hidden');
-            modal.classList.add('flex');
-        }
-
-        function closeRemoveModal() {
-            const modal = document.getElementById('remove-modal');
-            modal.classList.add('hidden');
-            modal.classList.remove('flex');
-            activeRemove = null;
-        }
-
-        async function openVpnModal() {
-            const modal = document.getElementById('vpn-modal');
-            try {
-                const response = await fetch('/api/setup/defaults');
-                if (response.ok) {
-                    const data = await response.json();
-                    document.getElementById('vpn-config-dir').value = data.config_dir || '/home/pi/docker';
-                    document.getElementById('vpn-network-name').value = data.network_name || 'vpn_network';
-                }
-            } catch (error) {
-                // ignore defaults
-            }
-            modal.classList.remove('hidden');
-            modal.classList.add('flex');
-        }
-
-        function closeVpnModal() {
-            const modal = document.getElementById('vpn-modal');
-            modal.classList.add('hidden');
-            modal.classList.remove('flex');
-        }
-
-        async function submitVpnConfig() {
-            const payload = {
-                config_dir: document.getElementById('vpn-config-dir').value.trim(),
-                pia_username: document.getElementById('vpn-username').value.trim(),
-                pia_password: document.getElementById('vpn-password').value.trim(),
-                network_name: document.getElementById('vpn-network-name').value.trim() || 'vpn_network'
-            };
-
-            try {
-                const response = await fetch('/api/setup/vpn', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-                const data = await response.json();
-                if (!response.ok) throw new Error(data.error || 'VPN setup failed');
-                showNotification('VPN setup complete', 'success');
-                closeVpnModal();
-            } catch (error) {
-                showNotification(`Error: ${error.message}`, 'error');
-            }
-        }
-
-        async function submitInstall() {
-            if (!activeInstall) return;
-            const values = {};
-            (activeInstall.fields || []).forEach(field => {
-                const input = document.getElementById(`field-${field.key}`);
-                if (input) values[field.key] = input.value;
-            });
-            const stackSelect = document.getElementById('install-stack-select');
-            const stackNameInput = document.getElementById('install-stack-name');
-            const target_stack = stackSelect ? stackSelect.value : 'new';
-            const stack_name = stackNameInput ? stackNameInput.value.trim() : '';
-
-            try {
-                const response = await fetch('/api/catalog/install', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        id: activeInstall.id,
-                        values,
-                        start_service: true,
-                        target_stack,
-                        stack_name
-                    })
-                });
-                const data = await response.json();
-                if (!response.ok) {
-                    // Check for missing dependencies
-                    if (data.missing_dependencies && data.missing_dependencies.length > 0) {
-                        const deps = data.missing_dependencies.join(', ');
-                        if (confirm(`This app requires: ${deps}\n\nWould you like to install ${deps} first?`)) {
-                            closeInstallModal();
-                            // Open install modal for the first missing dependency
-                            openInstallModal(data.missing_dependencies[0]);
-                            return;
-                        }
-                    }
-                    throw new Error(data.error || 'Install failed');
-                }
-                const msg = data.started ? `${data.name} installed and started` : `${data.name} installed`;
-                showNotification(msg, 'success');
-                closeInstallModal();
-                loadCatalog();
-            } catch (error) {
-                showNotification(`Error: ${error.message}`, 'error');
-            }
-        }
-
-        async function submitRemove() {
-            if (!activeRemove) return;
-            const stackSelect = document.getElementById('remove-stack-select');
-            const targetStack = stackSelect ? stackSelect.value : null;
-            await removeApp(activeRemove.id, targetStack);
-            closeRemoveModal();
-        }
-
-        async function removeApp(id, targetStack) {
-            if (!confirm(`Are you sure you want to remove ${id}? This will stop the container and remove it from the stack.`)) {
-                return;
-            }
-            try {
-                const response = await fetch('/api/catalog/remove', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id, stop_service: true, target_stack: targetStack })
-                });
-                const data = await response.json();
-                if (!response.ok) {
-                    // Check for dependent services
-                    if (data.dependents && data.dependents.length > 0) {
-                        const deps = data.dependents.join(', ');
-                        showNotification(`Cannot remove: ${deps} depend on this app. Remove them first.`, 'error');
-                        return;
-                    }
-                    throw new Error(data.error || 'Remove failed');
-                }
-                showNotification(`${id} removed successfully`, 'success');
-                loadCatalog();
-            } catch (error) {
-                showNotification(`Error: ${error.message}`, 'error');
-            }
-        }
-
-        document.addEventListener('DOMContentLoaded', () => {
-            loadCatalog();
-        });
-    </script>
+    <script type="module" src="/js/pages/apps.js"></script>
 </body>
 </html>

@@ -44,8 +44,8 @@
 - [x] Preserve log and error handling.
 
 ### 6) Apps (`static/apps.html`)
-- [ ] Build catalog browser with search/filter/sort.
-- [ ] Preserve app install flow and status feedback.
+- [x] Build catalog browser with search/filter/sort.
+- [x] Preserve app install flow and status feedback.
 
 ### 7) Settings (`static/settings.html`)
 - [ ] Build settings sections with reusable field groups.
