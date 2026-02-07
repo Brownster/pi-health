@@ -1,175 +1,29 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <script>
-        // Redirect to login if not logged in
-        if (!sessionStorage.getItem("loggedIn")) {
-            window.location.href = "/login.html";
-        }
-
-        // Display logged-in user
-        const username = sessionStorage.getItem("username");
-        if (username) {
-            document.addEventListener('DOMContentLoaded', () => {
-                const userEl = document.getElementById('logged-in-user');
-                if (userEl) userEl.textContent = username;
-            });
-        }
-
-        // Logout function
-        async function logout() {
-            try {
-                await fetch('/api/logout', { method: 'POST' });
-            } catch (e) {
-                // Ignore errors
-            }
-            sessionStorage.clear();
-            window.location.href = '/login.html';
-        }
-    </script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Settings - Pi-Health Dashboard</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <link rel="stylesheet" href="/css/foundation.css">
+    <link rel="stylesheet" href="/css/settings.css">
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <script src="/js/api.js"></script>
     <script src="/js/theme.js"></script>
     <script src="/js/nav.js"></script>
-    <style>
-        .coraline-button {
-            background: linear-gradient(to bottom, #5f4b8b, #372b53);
-            border: 1px solid #8a6cbd;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.25);
-            transition: all 0.3s ease;
-        }
-
-        .coraline-button:hover:not(:disabled) {
-            background: linear-gradient(to bottom, #6f58a3, #413162);
-            transform: translateY(-2px);
-            box-shadow: 0 6px 10px rgba(0, 0, 0, 0.3);
-        }
-
-        .coraline-button:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-
-        /* Toggle switch styles */
-        .toggle-switch {
-            position: relative;
-            display: inline-block;
-            width: 50px;
-            height: 26px;
-        }
-
-        .toggle-switch input {
-            opacity: 0;
-            width: 0;
-            height: 0;
-        }
-
-        .toggle-slider {
-            position: absolute;
-            cursor: pointer;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background-color: #4a5568;
-            transition: 0.3s;
-            border-radius: 26px;
-        }
-
-        .toggle-slider:before {
-            position: absolute;
-            content: "";
-            height: 20px;
-            width: 20px;
-            left: 3px;
-            bottom: 3px;
-            background-color: white;
-            transition: 0.3s;
-            border-radius: 50%;
-        }
-
-        input:checked + .toggle-slider {
-            background-color: #38a169;
-        }
-
-        input:checked + .toggle-slider:before {
-            transform: translateX(24px);
-        }
-
-        /* Schedule button styles */
-        .schedule-btn {
-            padding: 0.75rem 1.5rem;
-            background-color: #4a5568;
-            border: 2px solid transparent;
-            border-radius: 0.5rem;
-            transition: all 0.2s ease;
-        }
-
-        .schedule-btn:hover {
-            background-color: #5a6578;
-        }
-
-        .schedule-btn.selected {
-            background-color: #5f4b8b;
-            border-color: #8a6cbd;
-        }
-
-        /* Notification styles */
-        .notification {
-            position: fixed;
-            top: 1rem;
-            right: 1rem;
-            z-index: 50;
-            padding: 1rem;
-            border-radius: 0.5rem;
-            color: white;
-            max-width: 400px;
-        }
-
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-
-        .animate-pulse {
-            animation: pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-        }
-
-        .loading-spinner {
-            display: inline-block;
-            width: 1rem;
-            height: 1rem;
-            border: 2px solid rgba(255, 255, 255, 0.3);
-            border-radius: 50%;
-            border-top-color: white;
-            animation: spin 1s ease-in-out infinite;
-        }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-    </style>
 </head>
 <body class="bg-gray-900 text-blue-100 font-sans min-h-screen">
     <header class="bg-gradient-to-r from-purple-900 to-blue-900 shadow-lg relative overflow-hidden">
         <div class="absolute inset-0 overflow-hidden">
             <img src="/theme-banner" alt="Dashboard" class="w-full h-full object-cover opacity-40 blur-sm" style="filter: hue-rotate(-10deg) saturate(1.15);">
         </div>
-        <div class="container mx-auto px-8 py-12 relative">
-        </div>
+        <div class="container mx-auto px-8 py-12 relative"></div>
     </header>
 
-    <!-- Navigation bar -->
     <nav id="main-nav" class="bg-purple-900 shadow-md"></nav>
 
-    <!-- Notification area -->
     <div id="notification-area" class="fixed top-4 right-4 z-50 space-y-2"></div>
 
-    <!-- Main content -->
     <main class="container mx-auto px-4 py-8">
         <div class="flex flex-col gap-4 mb-8">
             <h2 class="text-3xl font-bold">Settings</h2>
@@ -183,7 +37,6 @@
             </div>
         </div>
 
-        <!-- Plugins Section -->
         <section id="settings-plugins" class="bg-gray-800 rounded-lg p-6 mb-6 border border-purple-800/30 hidden">
             <div class="flex justify-between items-center mb-6">
                 <div>
@@ -217,7 +70,6 @@
             </div>
         </section>
 
-        <!-- Backups Section -->
         <section id="settings-backups" class="bg-gray-800 rounded-lg p-6 mb-6 border border-purple-800/30 hidden">
             <div class="flex justify-between items-center mb-6">
                 <div>
@@ -232,7 +84,7 @@
                 <div class="flex items-center">
                     <span id="backup-status-badge" class="px-3 py-1 rounded-full text-sm mr-4 bg-gray-600">Disabled</span>
                     <label class="toggle-switch">
-                        <input type="checkbox" id="backup-enabled" onchange="toggleBackup()">
+                        <input type="checkbox" id="backup-enabled">
                         <span class="toggle-slider"></span>
                     </label>
                 </div>
@@ -254,30 +106,30 @@
                     <label class="block text-sm text-gray-300 mb-1">Retention (archives to keep)</label>
                     <input id="backup-retention" type="number" min="1" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm" placeholder="7">
 
-                <div class="flex items-center mt-4">
-                    <label class="toggle-switch mr-3">
-                        <input type="checkbox" id="backup-include-env" checked onchange="saveBackupConfig({ include_env: this.checked })">
-                        <span class="toggle-slider"></span>
-                    </label>
-                    <span class="text-sm text-gray-300">Include /etc/pi-health.env</span>
-                </div>
-                <div class="flex items-center mt-4">
-                    <label class="toggle-switch mr-3">
-                        <input type="checkbox" id="backup-plugins-enabled" checked onchange="saveBackupConfig({ plugin_backup_enabled: this.checked })">
-                        <span class="toggle-slider"></span>
-                    </label>
-                    <span class="text-sm text-gray-300">Backup storage plugins separately</span>
-                </div>
-                <label class="block text-sm text-gray-300 mt-3 mb-1">Plugin retention (archives to keep)</label>
-                <input id="backup-plugin-retention" type="number" min="1" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm" placeholder="10">
+                    <div class="flex items-center mt-4">
+                        <label class="toggle-switch mr-3">
+                            <input type="checkbox" id="backup-include-env" checked>
+                            <span class="toggle-slider"></span>
+                        </label>
+                        <span class="text-sm text-gray-300">Include /etc/pi-health.env</span>
+                    </div>
+                    <div class="flex items-center mt-4">
+                        <label class="toggle-switch mr-3">
+                            <input type="checkbox" id="backup-plugins-enabled" checked>
+                            <span class="toggle-slider"></span>
+                        </label>
+                        <span class="text-sm text-gray-300">Backup storage plugins separately</span>
+                    </div>
+                    <label class="block text-sm text-gray-300 mt-3 mb-1">Plugin retention (archives to keep)</label>
+                    <input id="backup-plugin-retention" type="number" min="1" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm" placeholder="10">
 
                     <label class="block text-sm text-gray-300 mt-4 mb-2">Schedule</label>
                     <div class="flex flex-wrap gap-4">
-                        <button id="backup-schedule-daily" onclick="setBackupSchedule('daily_2am')" class="schedule-btn" data-preset="daily_2am">
+                        <button id="backup-schedule-daily" class="schedule-btn" data-preset="daily_2am" type="button">
                             <div class="font-medium">Daily</div>
                             <div class="text-sm text-gray-400">2:00 AM</div>
                         </button>
-                        <button id="backup-schedule-weekly" onclick="setBackupSchedule('weekly_sunday_2am')" class="schedule-btn" data-preset="weekly_sunday_2am">
+                        <button id="backup-schedule-weekly" class="schedule-btn" data-preset="weekly_sunday_2am" type="button">
                             <div class="font-medium">Weekly</div>
                             <div class="text-sm text-gray-400">Sunday 2:00 AM</div>
                         </button>
@@ -287,13 +139,13 @@
             </div>
 
             <div class="flex flex-wrap gap-4 mt-6 pt-4 border-t border-gray-700">
-                <button onclick="saveBackupConfig()" class="coraline-button px-4 py-2 text-white rounded flex items-center">
+                <button id="backup-save-btn" class="coraline-button px-4 py-2 text-white rounded flex items-center" type="button">
                     <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
                     </svg>
                     Save Backup Settings
                 </button>
-                <button id="backup-run-now" onclick="runBackupNow()" class="coraline-button px-4 py-2 text-white rounded flex items-center">
+                <button id="backup-run-now" class="coraline-button px-4 py-2 text-white rounded flex items-center" type="button">
                     <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path>
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
@@ -317,7 +169,6 @@
             </div>
         </section>
 
-        <!-- Auto-Update Section -->
         <section id="settings-updates" class="bg-gray-800 rounded-lg p-6 mb-6 border border-purple-800/30 hidden">
             <div class="flex justify-between items-center mb-6">
                 <div>
@@ -332,21 +183,20 @@
                 <div class="flex items-center">
                     <span id="status-badge" class="px-3 py-1 rounded-full text-sm mr-4 bg-gray-600">Disabled</span>
                     <label class="toggle-switch">
-                        <input type="checkbox" id="auto-update-enabled" onchange="toggleAutoUpdate()">
+                        <input type="checkbox" id="auto-update-enabled">
                         <span class="toggle-slider"></span>
                     </label>
                 </div>
             </div>
 
-            <!-- Schedule Selection -->
             <div id="schedule-section" class="mb-6 hidden">
                 <label class="block text-sm font-medium mb-3">Schedule</label>
                 <div class="flex flex-wrap gap-4">
-                    <button onclick="setSchedule('daily_4am')" class="schedule-btn" data-preset="daily_4am">
+                    <button class="schedule-btn updates-schedule-btn" data-preset="daily_4am" type="button">
                         <div class="font-medium">Daily</div>
                         <div class="text-sm text-gray-400">4:00 AM</div>
                     </button>
-                    <button onclick="setSchedule('weekly_sunday_4am')" class="schedule-btn" data-preset="weekly_sunday_4am">
+                    <button class="schedule-btn updates-schedule-btn" data-preset="weekly_sunday_4am" type="button">
                         <div class="font-medium">Weekly</div>
                         <div class="text-sm text-gray-400">Sunday 4:00 AM</div>
                     </button>
@@ -354,7 +204,6 @@
                 <p id="next-run" class="text-sm text-gray-400 mt-3"></p>
             </div>
 
-            <!-- Excluded Stacks -->
             <div id="exclusions-section" class="mb-6 hidden">
                 <label class="block text-sm font-medium mb-2">Excluded Stacks</label>
                 <p class="text-gray-400 text-sm mb-3">Check to exclude stacks from automatic updates</p>
@@ -363,16 +212,15 @@
                 </div>
             </div>
 
-            <!-- Actions -->
             <div class="flex flex-wrap gap-4 mt-6 pt-4 border-t border-gray-700">
-                <button id="run-now-btn" onclick="runNow()" class="coraline-button px-4 py-2 text-white rounded flex items-center">
+                <button id="run-now-btn" class="coraline-button px-4 py-2 text-white rounded flex items-center" type="button">
                     <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path>
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                     </svg>
                     Run Update Now
                 </button>
-                <button onclick="toggleLogs()" class="px-4 py-2 bg-gray-700 rounded hover:bg-gray-600 flex items-center">
+                <button id="toggle-logs-btn" class="px-4 py-2 bg-gray-700 rounded hover:bg-gray-600 flex items-center" type="button">
                     <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
                     </svg>
@@ -381,7 +229,6 @@
             </div>
         </section>
 
-        <!-- Pi-Health Updates -->
         <section id="settings-pihealth-update" class="bg-gray-800 rounded-lg p-6 mb-6 border border-purple-800/30 hidden">
             <div class="flex justify-between items-center mb-6">
                 <div>
@@ -407,13 +254,13 @@
             </div>
 
             <div class="flex flex-wrap gap-4 mt-6 pt-4 border-t border-gray-700">
-                <button onclick="savePiHealthUpdateConfig()" class="coraline-button px-4 py-2 text-white rounded flex items-center">
+                <button id="pihealth-save-btn" class="coraline-button px-4 py-2 text-white rounded flex items-center" type="button">
                     <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
                     </svg>
                     Save Update Settings
                 </button>
-                <button onclick="runPiHealthUpdate()" class="coraline-button px-4 py-2 text-white rounded flex items-center">
+                <button id="pihealth-run-btn" class="coraline-button px-4 py-2 text-white rounded flex items-center" type="button">
                     <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
                     </svg>
@@ -422,11 +269,10 @@
             </div>
         </section>
 
-        <!-- Last Run Results -->
         <section id="settings-updates-logs" class="bg-gray-800 rounded-lg p-6 border border-purple-800/30 hidden">
             <div class="flex justify-between items-center mb-4">
                 <h3 class="text-lg font-semibold">Last Update Run</h3>
-                <button onclick="toggleLogs()" class="text-gray-400 hover:text-white">
+                <button id="close-logs-btn" class="text-gray-400 hover:text-white" type="button">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
                     </svg>
@@ -438,679 +284,6 @@
         </section>
     </main>
 
-    <script>
-        let currentConfig = {};
-        let backupConfig = {};
-        let logsVisible = false;
-        let pihealthUpdateConfig = {};
-
-        // Notification system
-        function showNotification(message, type = 'info') {
-            const notificationArea = document.getElementById('notification-area');
-            const notification = document.createElement('div');
-            notification.className = `notification transform transition-all duration-500 opacity-0`;
-
-            if (type === 'success') notification.classList.add('bg-green-600');
-            else if (type === 'error') notification.classList.add('bg-red-600');
-            else notification.classList.add('bg-blue-600');
-
-            notification.innerHTML = message;
-            notificationArea.appendChild(notification);
-
-            // Fade in
-            setTimeout(() => notification.classList.replace('opacity-0', 'opacity-100'), 10);
-
-            // Fade out and remove
-            setTimeout(() => {
-                notification.classList.replace('opacity-100', 'opacity-0');
-                setTimeout(() => notification.remove(), 500);
-            }, 3000);
-        }
-
-        async function loadBackupConfig() {
-            try {
-                const response = await fetch('/api/backups/config');
-                if (!response.ok) throw new Error('Failed to load backup config');
-                backupConfig = await response.json();
-                renderBackupConfig();
-            } catch (error) {
-                console.error('Error loading backup config:', error);
-                showNotification('Failed to load backup settings', 'error');
-            }
-        }
-
-        function setSettingsSection(section) {
-            const sections = ["plugins", "backups", "updates"];
-            sections.forEach(key => {
-                const block = document.getElementById(`settings-${key}`);
-                if (block) {
-                    block.classList.toggle("hidden", key !== section);
-                }
-            });
-            const updateBlock = document.getElementById("settings-pihealth-update");
-            if (updateBlock) {
-                updateBlock.classList.toggle("hidden", section !== "updates");
-            }
-            const logsBlock = document.getElementById("settings-updates-logs");
-            if (logsBlock) {
-                logsBlock.classList.toggle("hidden", section !== "updates" || !logsVisible);
-            }
-        }
-
-        async function loadPiHealthUpdateConfig() {
-            try {
-                const response = await fetch('/api/pihealth/update/config');
-                if (!response.ok) {
-                    return;
-                }
-                pihealthUpdateConfig = await response.json();
-                document.getElementById('pihealth-repo-path').value = pihealthUpdateConfig.repo_path || '';
-                document.getElementById('pihealth-service-name').value = pihealthUpdateConfig.service_name || '';
-            } catch (error) {
-                // ignore
-            }
-        }
-
-        async function savePiHealthUpdateConfig() {
-            const payload = {
-                repo_path: document.getElementById('pihealth-repo-path').value.trim(),
-                service_name: document.getElementById('pihealth-service-name').value.trim()
-            };
-
-            try {
-                const response = await fetch('/api/pihealth/update/config', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-                const data = await response.json();
-                if (!response.ok) {
-                    throw new Error(data.error || 'Failed to save update config');
-                }
-                pihealthUpdateConfig = data.config || payload;
-                showNotification('Update settings saved', 'success');
-            } catch (error) {
-                showNotification(`Error: ${error.message}`, 'error');
-            }
-        }
-
-        async function runPiHealthUpdate() {
-            showNotification('Updating Pi-Health...', 'info');
-            try {
-                const response = await fetch('/api/pihealth/update', { method: 'POST' });
-                const data = await response.json();
-                if (!response.ok) {
-                    throw new Error(data.error || 'Update failed');
-                }
-                showNotification('Update started. Reconnecting...', 'success');
-                sessionStorage.clear();
-                setTimeout(() => {
-                    window.location.href = '/login.html';
-                }, 3000);
-            } catch (error) {
-                showNotification(`Error: ${error.message}`, 'error');
-            }
-        }
-
-        function renderBackupConfig() {
-            document.getElementById('backup-enabled').checked = !!backupConfig.enabled;
-            document.getElementById('backup-dest-dir').value = backupConfig.dest_dir || '/mnt/backup';
-            document.getElementById('backup-config-dir').value = backupConfig.config_dir || '/home/pi/docker';
-            document.getElementById('backup-stacks-path').value = backupConfig.stacks_path || '/opt/stacks';
-            document.getElementById('backup-retention').value = backupConfig.retention_count || 7;
-            document.getElementById('backup-include-env').checked = backupConfig.include_env !== false;
-            document.getElementById('backup-plugins-enabled').checked = backupConfig.plugin_backup_enabled !== false;
-            document.getElementById('backup-plugin-retention').value = backupConfig.plugin_retention_count || 10;
-
-            const badge = document.getElementById('backup-status-badge');
-            if (backupConfig.enabled) {
-                badge.textContent = 'Enabled';
-                badge.className = 'px-3 py-1 rounded-full text-sm mr-4 bg-green-600';
-            } else {
-                badge.textContent = 'Disabled';
-                badge.className = 'px-3 py-1 rounded-full text-sm mr-4 bg-gray-600';
-            }
-
-            const schedulePreset = backupConfig.schedule_preset || 'daily_2am';
-            backupConfig.schedule_preset = schedulePreset;
-            document.querySelectorAll('#backup-schedule-daily, #backup-schedule-weekly').forEach(btn => {
-                if (btn.dataset.preset === schedulePreset) {
-                    btn.classList.add('selected');
-                } else {
-                    btn.classList.remove('selected');
-                }
-            });
-
-            loadBackupStatus();
-            loadBackupList();
-        }
-
-        async function saveBackupConfig(overrides = null) {
-            const payload = {
-                enabled: document.getElementById('backup-enabled').checked,
-                dest_dir: document.getElementById('backup-dest-dir').value.trim(),
-                config_dir: document.getElementById('backup-config-dir').value.trim(),
-                stacks_path: document.getElementById('backup-stacks-path').value.trim(),
-                retention_count: parseInt(document.getElementById('backup-retention').value || '7', 10),
-                plugin_backup_enabled: document.getElementById('backup-plugins-enabled').checked,
-                plugin_retention_count: parseInt(document.getElementById('backup-plugin-retention').value || '10', 10),
-                include_env: document.getElementById('backup-include-env').checked,
-                schedule_preset: backupConfig.schedule_preset || 'daily_2am'
-            };
-
-            if (overrides) {
-                Object.assign(payload, overrides);
-            }
-
-            try {
-                const response = await fetch('/api/backups/config', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-                const data = await response.json();
-                if (!response.ok) throw new Error(data.error || 'Failed to save backup config');
-                backupConfig = data.config || payload;
-                renderBackupConfig();
-                showNotification('Backup settings saved', 'success');
-            } catch (error) {
-                showNotification(`Error: ${error.message}`, 'error');
-            }
-        }
-
-        async function toggleBackup() {
-            await saveBackupConfig({ enabled: document.getElementById('backup-enabled').checked });
-        }
-
-        async function setBackupSchedule(preset) {
-            backupConfig.schedule_preset = preset;
-            await saveBackupConfig({ schedule_preset: preset });
-        }
-
-        async function loadBackupStatus() {
-            try {
-                const response = await fetch('/api/backups/status');
-                if (!response.ok) return;
-                const status = await response.json();
-
-                const nextRunEl = document.getElementById('backup-next-run');
-                if (status.next_run) {
-                    const nextRun = new Date(status.next_run);
-                    nextRunEl.innerHTML = `<span class="text-purple-400">Next scheduled run:</span> ${nextRun.toLocaleString()}`;
-                } else if (backupConfig.enabled) {
-                    nextRunEl.textContent = 'Schedule will be set after saving';
-                } else {
-                    nextRunEl.textContent = '';
-                }
-
-                const runBtn = document.getElementById('backup-run-now');
-                if (status.backup_running) {
-                    runBtn.disabled = true;
-                    runBtn.innerHTML = '<div class="loading-spinner mr-2"></div> Backup in progress...';
-                } else {
-                    runBtn.disabled = false;
-                    runBtn.innerHTML = `
-                        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path>
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                        </svg>
-                        Run Backup Now
-                    `;
-                }
-
-                const lastRunEl = document.getElementById('backup-last-run');
-                if (status.last_run) {
-                    const lastRun = new Date(status.last_run);
-                    lastRunEl.textContent = `Last run: ${lastRun.toLocaleString()}`;
-                } else {
-                    lastRunEl.textContent = 'No backups yet';
-                }
-
-                if (status.last_plugin_backup) {
-                    const lastPlugin = new Date(status.last_plugin_backup);
-                    lastRunEl.textContent += ` · plugins: ${lastPlugin.toLocaleString()}`;
-                }
-            } catch (error) {
-                // ignore
-            }
-        }
-
-        async function loadBackupList() {
-            try {
-                const response = await fetch('/api/backups/list');
-                if (!response.ok) return;
-                const data = await response.json();
-                const list = document.getElementById('backup-list');
-                const pluginList = document.getElementById('backup-plugins-list');
-                const backups = data.backups || [];
-                const primary = backups.filter(item => item.name.startsWith('pi-health-backup-'));
-                const plugins = backups.filter(item => item.name.startsWith('storage-plugins-'));
-
-                if (primary.length === 0) {
-                    list.innerHTML = '<p>No backups found</p>';
-                } else {
-                    list.innerHTML = primary.map(item => {
-                        const sizeMb = (item.size / (1024 * 1024)).toFixed(1);
-                        const date = new Date(item.mtime * 1000).toLocaleString();
-                        return `<div class="flex justify-between bg-gray-900/40 border border-gray-700 rounded px-3 py-2">
-                            <div>
-                                <div class="text-blue-100">${item.name}</div>
-                                <div class="text-xs text-gray-500">${sizeMb} MB · ${date}</div>
-                            </div>
-                            <button onclick="restoreBackup('${item.name}')" class="px-3 py-1 bg-red-700/70 hover:bg-red-700 text-white rounded text-xs">Restore</button>
-                        </div>`;
-                    }).join('');
-                }
-
-                if (plugins.length === 0) {
-                    pluginList.innerHTML = '<p>No plugin backups found</p>';
-                } else {
-                    pluginList.innerHTML = plugins.map(item => {
-                        const sizeMb = (item.size / (1024 * 1024)).toFixed(1);
-                        const date = new Date(item.mtime * 1000).toLocaleString();
-                        return `<div class="flex justify-between bg-gray-900/40 border border-gray-700 rounded px-3 py-2">
-                            <div>
-                                <div class="text-blue-100">${item.name}</div>
-                                <div class="text-xs text-gray-500">${sizeMb} MB · ${date}</div>
-                            </div>
-                            <button onclick="restorePluginBackup('${item.name}')" class="px-3 py-1 bg-red-700/70 hover:bg-red-700 text-white rounded text-xs">Restore Plugins</button>
-                        </div>`;
-                    }).join('');
-                }
-            } catch (error) {
-                // ignore
-            }
-        }
-
-        async function runBackupNow() {
-            try {
-                const response = await fetch('/api/backups/run', { method: 'POST' });
-                const data = await response.json();
-                if (!response.ok) throw new Error(data.error || 'Backup failed');
-                showNotification('Backup completed', 'success');
-                loadBackupList();
-                loadBackupStatus();
-            } catch (error) {
-                showNotification(`Error: ${error.message}`, 'error');
-            }
-        }
-
-        async function restoreBackup(archiveName) {
-            if (!confirm(`Restore backup ${archiveName}? This will overwrite existing files in config and stacks.`)) {
-                return;
-            }
-            try {
-                const response = await fetch('/api/backups/restore', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ archive_name: archiveName, stop_stacks: true, start_stacks: true })
-                });
-                const data = await response.json();
-                if (!response.ok) throw new Error(data.error || 'Restore failed');
-                showNotification('Restore completed', 'success');
-            } catch (error) {
-                showNotification(`Error: ${error.message}`, 'error');
-            }
-        }
-
-        async function restorePluginBackup(archiveName) {
-            if (!confirm(`Restore plugin backup ${archiveName}? This will overwrite storage plugin config files.`)) {
-                return;
-            }
-            try {
-                const response = await fetch('/api/backups/restore-plugins', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ archive_name: archiveName })
-                });
-                const data = await response.json();
-                if (!response.ok) throw new Error(data.error || 'Restore failed');
-                showNotification('Plugin restore completed', 'success');
-            } catch (error) {
-                showNotification(`Error: ${error.message}`, 'error');
-            }
-        }
-
-        // Load initial config
-        async function loadConfig() {
-            try {
-                const response = await fetch('/api/auto-update/config');
-                if (!response.ok) throw new Error('Failed to load config');
-                currentConfig = await response.json();
-                renderConfig();
-            } catch (error) {
-                console.error('Error loading config:', error);
-                showNotification('Failed to load settings', 'error');
-            }
-        }
-
-        // Render config to UI
-        function renderConfig() {
-            const enabledCheckbox = document.getElementById('auto-update-enabled');
-            enabledCheckbox.checked = currentConfig.enabled;
-
-            // Show/hide sections based on enabled state
-            const scheduleSection = document.getElementById('schedule-section');
-            const exclusionsSection = document.getElementById('exclusions-section');
-
-            if (currentConfig.enabled) {
-                scheduleSection.classList.remove('hidden');
-                exclusionsSection.classList.remove('hidden');
-            } else {
-                scheduleSection.classList.add('hidden');
-                exclusionsSection.classList.add('hidden');
-            }
-
-            // Update status badge
-            const badge = document.getElementById('status-badge');
-            if (currentConfig.enabled) {
-                badge.textContent = 'Enabled';
-                badge.className = 'px-3 py-1 rounded-full text-sm mr-4 bg-green-600';
-            } else {
-                badge.textContent = 'Disabled';
-                badge.className = 'px-3 py-1 rounded-full text-sm mr-4 bg-gray-600';
-            }
-
-            // Highlight selected schedule
-            document.querySelectorAll('.schedule-btn').forEach(btn => {
-                if (btn.dataset.preset === currentConfig.schedule_preset) {
-                    btn.classList.add('selected');
-                } else {
-                    btn.classList.remove('selected');
-                }
-            });
-
-            loadStatus();
-            loadStacks();
-        }
-
-        // Toggle auto-update enabled/disabled
-        async function toggleAutoUpdate() {
-            const enabled = document.getElementById('auto-update-enabled').checked;
-
-            // If enabling, set a default schedule
-            const updates = { enabled };
-            if (enabled && (!currentConfig.schedule_preset || currentConfig.schedule_preset === 'disabled')) {
-                updates.schedule_preset = 'daily_4am';
-            }
-
-            await saveConfig(updates);
-        }
-
-        // Set schedule preset
-        async function setSchedule(preset) {
-            await saveConfig({ schedule_preset: preset });
-        }
-
-        // Save config to server
-        async function saveConfig(updates) {
-            try {
-                const response = await fetch('/api/auto-update/config', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(updates)
-                });
-
-                if (!response.ok) throw new Error('Failed to save config');
-
-                const result = await response.json();
-                currentConfig = result.config;
-                renderConfig();
-                showNotification('Settings saved', 'success');
-            } catch (error) {
-                console.error('Error saving config:', error);
-                showNotification('Failed to save settings', 'error');
-                // Revert UI
-                renderConfig();
-            }
-        }
-
-        // Load scheduler status
-        async function loadStatus() {
-            try {
-                const response = await fetch('/api/auto-update/status');
-                if (!response.ok) return;
-
-                const status = await response.json();
-
-                const nextRunEl = document.getElementById('next-run');
-                if (status.next_run) {
-                    const nextRun = new Date(status.next_run);
-                    nextRunEl.innerHTML = `<span class="text-purple-400">Next scheduled run:</span> ${nextRun.toLocaleString()}`;
-                } else if (currentConfig.enabled) {
-                    nextRunEl.textContent = 'Schedule will be set after saving';
-                } else {
-                    nextRunEl.textContent = '';
-                }
-
-                // Update run button if update is in progress
-                const runBtn = document.getElementById('run-now-btn');
-                if (status.update_running) {
-                    runBtn.disabled = true;
-                    runBtn.innerHTML = '<div class="loading-spinner mr-2"></div> Update in progress...';
-                } else {
-                    runBtn.disabled = false;
-                    runBtn.innerHTML = `
-                        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path>
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                        </svg>
-                        Run Update Now
-                    `;
-                }
-
-                // Update logs if we have results
-                if (status.last_run_result) {
-                    currentConfig.last_run = status.last_run;
-                    currentConfig.last_run_result = status.last_run_result;
-                }
-            } catch (error) {
-                console.error('Error loading status:', error);
-            }
-        }
-
-        // Load stacks for exclusion list
-        async function loadStacks() {
-            try {
-                const response = await fetch('/api/stacks');
-                if (!response.ok) {
-                    document.getElementById('stacks-list').innerHTML = '<p class="text-gray-500 text-sm">Failed to load stacks</p>';
-                    return;
-                }
-
-                const stacksData = await response.json();
-                const stacks = Array.isArray(stacksData) ? stacksData : (stacksData.stacks || []);
-                const container = document.getElementById('stacks-list');
-
-                if (stacks.length === 0) {
-                    container.innerHTML = '<p class="text-gray-500 text-sm">No stacks found</p>';
-                    return;
-                }
-
-                const excludedStacks = currentConfig.excluded_stacks || [];
-
-                container.innerHTML = stacks.map(stack => `
-                    <label class="flex items-center space-x-3 p-3 bg-gray-700 rounded cursor-pointer hover:bg-gray-600 transition-colors">
-                        <input type="checkbox"
-                               class="w-4 h-4 rounded border-gray-500 text-purple-600 focus:ring-purple-500"
-                               ${excludedStacks.includes(stack.name) ? 'checked' : ''}
-                               onchange="toggleExclusion('${stack.name}', this.checked)">
-                        <span class="flex-1">${stack.name}</span>
-                        <span class="text-xs px-2 py-1 rounded ${stack.status === 'running' ? 'bg-green-600' : stack.status === 'stopped' ? 'bg-red-600' : 'bg-gray-600'}">${stack.status || 'unknown'}</span>
-                    </label>
-                `).join('');
-            } catch (error) {
-                console.error('Error loading stacks:', error);
-                document.getElementById('stacks-list').innerHTML = '<p class="text-gray-500 text-sm">Failed to load stacks</p>';
-            }
-        }
-
-        // Toggle stack exclusion
-        async function toggleExclusion(stackName, excluded) {
-            let excludedStacks = [...(currentConfig.excluded_stacks || [])];
-
-            if (excluded && !excludedStacks.includes(stackName)) {
-                excludedStacks.push(stackName);
-            } else if (!excluded) {
-                excludedStacks = excludedStacks.filter(s => s !== stackName);
-            }
-
-            await saveConfig({ excluded_stacks: excludedStacks });
-        }
-
-        // Run update now
-        async function runNow() {
-            const runBtn = document.getElementById('run-now-btn');
-            runBtn.disabled = true;
-            runBtn.innerHTML = '<div class="loading-spinner mr-2"></div> Running update...';
-
-            showNotification('Running update check...', 'info');
-
-            try {
-                const response = await fetch('/api/auto-update/run-now', { method: 'POST' });
-                const result = await response.json();
-
-                if (result.error) {
-                    showNotification(`Error: ${result.error}`, 'error');
-                } else {
-                    const r = result.results;
-                    const message = `Updated: ${r.updated.length}, Skipped: ${r.skipped.length}, Failed: ${r.failed.length}`;
-                    showNotification(message, r.failed.length > 0 ? 'error' : 'success');
-
-                    // Update config with new results
-                    currentConfig.last_run = r.timestamp;
-                    currentConfig.last_run_result = r;
-
-                    // Show logs
-                    showLogs();
-                }
-            } catch (error) {
-                console.error('Error running update:', error);
-                showNotification('Failed to run update', 'error');
-            } finally {
-                runBtn.disabled = false;
-                runBtn.innerHTML = `
-                    <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path>
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                    </svg>
-                    Run Update Now
-                `;
-            }
-        }
-
-        // Toggle logs visibility
-        async function toggleLogs() {
-            const section = document.getElementById('settings-updates-logs');
-            logsVisible = !logsVisible;
-
-            if (logsVisible) {
-                section.classList.remove('hidden');
-                // Fetch fresh logs data
-                await fetchAndRenderLogs();
-            } else {
-                section.classList.add('hidden');
-            }
-        }
-
-        // Fetch logs from API and render
-        async function fetchAndRenderLogs() {
-            try {
-                const response = await fetch('/api/auto-update/logs');
-                if (response.ok) {
-                    const data = await response.json();
-                    currentConfig.last_run = data.last_run;
-                    currentConfig.last_run_result = data.last_run_result;
-                }
-            } catch (e) {
-                console.error('Failed to fetch logs:', e);
-            }
-            renderLogs();
-        }
-
-        // Show logs section
-        async function showLogs() {
-            logsVisible = true;
-            document.getElementById('settings-updates-logs').classList.remove('hidden');
-            await fetchAndRenderLogs();
-        }
-
-        // Render logs content
-        function renderLogs() {
-            const content = document.getElementById('logs-content');
-
-            if (!currentConfig.last_run_result) {
-                content.innerHTML = '<p class="text-gray-400">No updates have run yet</p>';
-                return;
-            }
-
-            const r = currentConfig.last_run_result;
-            const timestamp = r.timestamp ? new Date(r.timestamp).toLocaleString() : 'Unknown';
-
-            let html = `<p class="text-sm text-gray-400 mb-4">Last run: ${timestamp}</p>`;
-
-            if (r.updated && r.updated.length > 0) {
-                html += `
-                    <div class="mb-3">
-                        <span class="text-green-400 font-medium">Updated (${r.updated.length}):</span>
-                        <div class="mt-1 flex flex-wrap gap-2">
-                            ${r.updated.map(name => `<span class="px-2 py-1 bg-green-600/30 rounded text-sm">${name}</span>`).join('')}
-                        </div>
-                    </div>
-                `;
-            }
-
-            if (r.skipped && r.skipped.length > 0) {
-                html += `
-                    <div class="mb-3">
-                        <span class="text-gray-400 font-medium">Skipped (${r.skipped.length}):</span>
-                        <div class="mt-1 flex flex-wrap gap-2">
-                            ${r.skipped.map(name => `<span class="px-2 py-1 bg-gray-600/30 rounded text-sm">${name}</span>`).join('')}
-                        </div>
-                    </div>
-                `;
-            }
-
-            if (r.failed && r.failed.length > 0) {
-                html += `
-                    <div class="mb-3">
-                        <span class="text-red-400 font-medium">Failed (${r.failed.length}):</span>
-                        <div class="mt-1 space-y-1">
-                            ${r.failed.map(f => `
-                                <div class="px-2 py-1 bg-red-600/30 rounded text-sm">
-                                    <span class="font-medium">${f.name}:</span>
-                                    <span class="text-red-300">${f.error || 'Unknown error'}</span>
-                                </div>
-                            `).join('')}
-                        </div>
-                    </div>
-                `;
-            }
-
-            if (!r.updated?.length && !r.skipped?.length && !r.failed?.length) {
-                html += '<p class="text-gray-400">No stacks processed</p>';
-            }
-
-            content.innerHTML = html;
-        }
-
-        // Periodic status refresh
-        setInterval(loadStatus, 30000);
-        setInterval(loadBackupStatus, 30000);
-
-        // Initialize
-        document.addEventListener('DOMContentLoaded', () => {
-            const sectionSelect = document.getElementById('settings-section');
-            if (sectionSelect) {
-                sectionSelect.addEventListener('change', (e) => {
-                    setSettingsSection(e.target.value);
-                });
-                setSettingsSection(sectionSelect.value);
-            }
-            loadConfig();
-            loadBackupConfig();
-            loadPiHealthUpdateConfig();
-        });
-    </script>
+    <script type="module" src="/js/pages/settings.js"></script>
 </body>
 </html>
