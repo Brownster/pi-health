@@ -59,7 +59,7 @@
 - [x] Migrate `disks`.
 - [x] Migrate `network`.
 - [x] Migrate `tailscale`.
-- [ ] Migrate `tools`.
+- [x] Migrate `tools`.
 - [ ] Backfill already-migrated pages that still use page-local shell/state markup instead of shared primitives.
 - [ ] Validate plugin-specific edge cases.
 
