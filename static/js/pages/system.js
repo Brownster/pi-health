@@ -1,5 +1,7 @@
 import { ensureAuthenticated, logoutToLogin } from '/js/lib/auth.js';
 import { requestJson } from '/js/lib/http.js';
+import { formatBytes } from '/js/lib/format.js';
+import { showNotification } from '/js/lib/notify.js';
 
 const els = {
     cpuUsage: document.getElementById('cpu-usage'),
@@ -26,18 +28,9 @@ const els = {
     wifiInterface: document.getElementById('wifi-interface'),
     wifiSignal: document.getElementById('wifi-signal'),
     wifiBar: document.getElementById('wifi-bar'),
-    notificationArea: document.getElementById('notification-area'),
 };
 
 let networkSnapshot = { recv: null, sent: null, time: null };
-
-function formatBytes(bytes, decimals = 2) {
-    if (!Number.isFinite(bytes) || bytes <= 0) return '0 Bytes';
-    const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return `${parseFloat((bytes / Math.pow(k, i)).toFixed(decimals))} ${sizes[i]}`;
-}
 
 function nowTime() {
     const date = new Date();
@@ -48,20 +41,6 @@ function colorClass(percent) {
     if (percent < 70) return 'ph-positive';
     if (percent < 85) return 'ph-warn';
     return 'ph-danger';
-}
-
-function showNotification(message, type = 'info') {
-    if (!els.notificationArea) return;
-
-    const notification = document.createElement('div');
-    notification.className = 'rounded shadow-lg px-3 py-2 mb-2 text-white opacity-95';
-    if (type === 'success') notification.classList.add('bg-green-600');
-    else if (type === 'error') notification.classList.add('bg-red-600');
-    else notification.classList.add('bg-blue-600');
-
-    notification.textContent = message;
-    els.notificationArea.appendChild(notification);
-    window.setTimeout(() => notification.remove(), 3200);
 }
 
 function renderCoreBreakdown(cores = []) {

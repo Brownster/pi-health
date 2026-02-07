@@ -1,7 +1,10 @@
 import { ensureAuthenticated, logoutToLogin } from '/js/lib/auth.js';
 import { ensureDashboardShell } from '/js/lib/layout.js';
-import { clearClientSession } from '/js/lib/session.js';
 import { clearElement, createEmptyState, createErrorState, createLoadingState } from '/js/lib/states.js';
+import { requestApiResponse } from '/js/lib/http.js';
+import { escapeHtml, encodeDataAttr, formatBytes } from '/js/lib/format.js';
+import { showNotification } from '/js/lib/notify.js';
+import { setNodeContent } from '/js/lib/dom.js';
 
 ensureDashboardShell({
     notificationClass: 'fixed top-4 right-4 z-50 w-80 flex flex-col items-end',
@@ -13,68 +16,11 @@ let currentMount = {};
 let smartData = [];
 let currentSmartDevice = null;
 
-async function apiFetch(url, options = {}) {
-    const response = await fetch(url, options);
-    if (response.status === 401) {
-        clearClientSession();
-        window.location.href = '/login.html';
-        throw new Error('Authentication required');
-    }
-    return response;
-}
-
-function showNotification(message, type = 'info') {
-    const area = document.getElementById('notification-area');
-    const notification = document.createElement('div');
-    notification.className = 'p-3 mb-2 rounded shadow-lg transform transition-all duration-300 opacity-0';
-    if (type === 'success') notification.classList.add('bg-green-600');
-    else if (type === 'error') notification.classList.add('bg-red-600');
-    else notification.classList.add('bg-blue-600');
-    notification.textContent = message;
-    area.appendChild(notification);
-    setTimeout(() => notification.classList.replace('opacity-0', 'opacity-100'), 10);
-    setTimeout(() => {
-        notification.classList.replace('opacity-100', 'opacity-0');
-        setTimeout(() => notification.remove(), 300);
-    }, 3000);
-}
-
-function formatBytes(bytes) {
-    if (!bytes || bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
-}
-
-function escapeHtml(str) {
-    if (!str) return '';
-    return String(str)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-}
-
-function encodeDataAttr(value) {
-    return escapeHtml(String(value ?? ''));
-}
-
 function parseDataBool(value, defaultValue = false) {
     if (value === undefined || value === null || value === '') {
         return defaultValue;
     }
     return value === 'true';
-}
-
-function setNodeContent(containerId, node) {
-    const container = document.getElementById(containerId);
-    if (!container) {
-        return;
-    }
-    clearElement(container);
-    container.appendChild(node);
 }
 
 function renderHelperUnavailable() {
@@ -119,7 +65,7 @@ async function loadDisks() {
     }));
 
     try {
-        const response = await apiFetch('/api/disks');
+        const response = await requestApiResponse('/api/disks');
         const data = await response.json().catch(() => ({}));
 
         if (!response.ok) {
@@ -277,7 +223,7 @@ function bindDiskActions(diskList) {
 
 async function loadSuggestions() {
     try {
-        const response = await apiFetch('/api/disks/suggested-mounts');
+        const response = await requestApiResponse('/api/disks/suggested-mounts');
         const data = await response.json().catch(() => ({}));
         if (!response.ok) {
             throw new Error(data?.error || `Failed to load suggestions (${response.status})`);
@@ -368,7 +314,7 @@ async function submitMount() {
     }
 
     try {
-        const response = await apiFetch('/api/disks/mount', {
+        const response = await requestApiResponse('/api/disks/mount', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -397,7 +343,7 @@ async function unmountDisk(mountpoint) {
     }
 
     try {
-        const response = await apiFetch('/api/disks/unmount', {
+        const response = await requestApiResponse('/api/disks/unmount', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -426,7 +372,7 @@ async function loadSmartData() {
     smartList.innerHTML = '<div class="text-gray-400 text-sm">Loading SMART data...</div>';
 
     try {
-        const response = await apiFetch('/api/disks/smart');
+        const response = await requestApiResponse('/api/disks/smart');
         const data = await response.json().catch(() => ({}));
 
         if (data.error) {
@@ -563,7 +509,7 @@ async function openSmartModal(deviceName) {
     }
 
     try {
-        const response = await apiFetch(`/api/disks/${encodeURIComponent(deviceName)}/smart`);
+        const response = await requestApiResponse(`/api/disks/${encodeURIComponent(deviceName)}/smart`);
         const data = await response.json().catch(() => ({}));
 
         if (data.error) {
@@ -719,7 +665,7 @@ async function runSmartTest(testType) {
     }
 
     try {
-        const response = await apiFetch(`/api/disks/${encodeURIComponent(currentSmartDevice)}/smart-test`, {
+        const response = await requestApiResponse(`/api/disks/${encodeURIComponent(currentSmartDevice)}/smart-test`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ test_type: testType }),
@@ -736,14 +682,67 @@ async function runSmartTest(testType) {
     }
 }
 
-Object.assign(window, {
-    loadDisks,
-    loadSmartData,
-    closeMountModal,
-    submitMount,
-    closeSmartModal,
-    runSmartTest,
-});
+function bindDiskPageActions() {
+    const refreshButton = document.getElementById('disks-refresh-btn');
+    if (refreshButton) {
+        refreshButton.addEventListener('click', loadDisks);
+    }
+
+    const refreshSmartButton = document.getElementById('disks-smart-refresh-btn');
+    if (refreshSmartButton) {
+        refreshSmartButton.addEventListener('click', loadSmartData);
+    }
+
+    const closeMountTop = document.getElementById('disks-close-mount-top');
+    if (closeMountTop) {
+        closeMountTop.addEventListener('click', closeMountModal);
+    }
+
+    const closeMountBottom = document.getElementById('disks-close-mount-bottom');
+    if (closeMountBottom) {
+        closeMountBottom.addEventListener('click', closeMountModal);
+    }
+
+    const submitMountButton = document.getElementById('disks-submit-mount');
+    if (submitMountButton) {
+        submitMountButton.addEventListener('click', submitMount);
+    }
+
+    const smartModal = document.getElementById('smart-modal');
+    if (smartModal) {
+        smartModal.addEventListener('click', (event) => {
+            if (event.target === smartModal) {
+                closeSmartModal();
+            }
+        });
+    }
+
+    const smartModalPanel = document.querySelector('#smart-modal [data-modal-panel]');
+    if (smartModalPanel) {
+        smartModalPanel.addEventListener('click', (event) => {
+            event.stopPropagation();
+        });
+    }
+
+    const closeSmartTop = document.getElementById('disks-close-smart-top');
+    if (closeSmartTop) {
+        closeSmartTop.addEventListener('click', closeSmartModal);
+    }
+
+    const closeSmartBottom = document.getElementById('disks-close-smart-bottom');
+    if (closeSmartBottom) {
+        closeSmartBottom.addEventListener('click', closeSmartModal);
+    }
+
+    document.querySelectorAll('[data-smart-test]').forEach((button) => {
+        button.addEventListener('click', () => {
+            const testType = button.dataset.smartTest;
+            if (testType) {
+                runSmartTest(testType);
+            }
+        });
+    });
+}
 
 (async function initDisksPage() {
     const authenticated = await ensureAuthenticated();
@@ -752,5 +751,6 @@ Object.assign(window, {
     }
 
     window.logout = logoutToLogin;
+    bindDiskPageActions();
     await loadDisks();
 })();

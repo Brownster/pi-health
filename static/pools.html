@@ -34,7 +34,7 @@
             </div>
             <div id="pool-filter-wrap" class="hidden">
                 <label class="block text-xs text-gray-400 mb-1">Plugin</label>
-                <select id="pool-filter" onchange="setPoolFilter(this.value)"
+                <select id="pool-filter"
                         class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-white">
                     <option value="all">All</option>
                 </select>
@@ -47,11 +47,11 @@
     </main>
 
     <!-- Command Output Modal -->
-    <div id="output-modal" class="hidden fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4" onclick="if(event.target === this) closeOutputModal()">
-        <div class="bg-gray-900 w-full max-w-3xl rounded-lg shadow-xl border border-purple-900 flex flex-col max-h-[90vh]" onclick="event.stopPropagation()">
+    <div id="output-modal" class="hidden fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4" data-overlay-close="output-modal">
+        <div class="bg-gray-900 w-full max-w-3xl rounded-lg shadow-xl border border-purple-900 flex flex-col max-h-[90vh]" data-modal-panel>
             <div class="flex justify-between items-center p-4 border-b border-purple-800 flex-shrink-0">
                 <h3 id="output-modal-title" class="text-xl font-semibold">Command Output</h3>
-                <button onclick="closeOutputModal()" class="text-gray-400 hover:text-white text-2xl font-bold leading-none">&times;</button>
+                <button type="button" data-action="close-output-modal" class="text-gray-400 hover:text-white text-2xl font-bold leading-none">&times;</button>
             </div>
             <div class="p-4 overflow-y-auto flex-1 min-h-0 bg-gray-950">
                 <div id="snapraid-progress" class="hidden bg-gray-900 border border-purple-900/40 rounded mb-3 p-3 text-xs text-gray-300">
@@ -68,35 +68,35 @@
                 <div id="output-content" class="output-panel text-gray-300"></div>
             </div>
             <div class="p-4 border-t border-purple-800 flex justify-end flex-shrink-0">
-                <button onclick="closeOutputModal()" class="px-4 py-2 bg-gray-700 text-white rounded hover:bg-gray-600">Close</button>
+                <button type="button" data-action="close-output-modal" class="px-4 py-2 bg-gray-700 text-white rounded hover:bg-gray-600">Close</button>
             </div>
         </div>
     </div>
 
     <!-- Command Params Modal -->
-    <div id="command-param-modal" class="hidden fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4" onclick="if(event.target === this) closeCommandParamModal()">
-        <div class="bg-gray-900 w-full max-w-md rounded-lg shadow-xl border border-purple-900 flex flex-col" onclick="event.stopPropagation()">
+    <div id="command-param-modal" class="hidden fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4" data-overlay-close="command-param-modal">
+        <div class="bg-gray-900 w-full max-w-md rounded-lg shadow-xl border border-purple-900 flex flex-col" data-modal-panel>
             <div class="flex justify-between items-center p-4 border-b border-purple-800">
                 <h3 id="command-param-title" class="text-lg font-semibold">Select Pool</h3>
-                <button onclick="closeCommandParamModal()" class="text-gray-400 hover:text-white text-2xl font-bold leading-none">&times;</button>
+                <button type="button" data-action="close-command-param-modal" class="text-gray-400 hover:text-white text-2xl font-bold leading-none">&times;</button>
             </div>
             <div class="p-4">
                 <label class="block text-sm text-gray-300 mb-2">Pool</label>
                 <select id="command-pool-select" class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white text-sm"></select>
             </div>
             <div class="p-4 border-t border-purple-800 flex justify-end gap-2">
-                <button onclick="closeCommandParamModal()" class="px-4 py-2 bg-gray-700 text-white rounded hover:bg-gray-600">Cancel</button>
-                <button onclick="confirmCommandParams()" class="px-4 py-2 coraline-button text-white rounded">Run</button>
+                <button type="button" data-action="close-command-param-modal" class="px-4 py-2 bg-gray-700 text-white rounded hover:bg-gray-600">Cancel</button>
+                <button type="button" data-action="confirm-command-params" class="px-4 py-2 coraline-button text-white rounded">Run</button>
             </div>
         </div>
     </div>
 
     <!-- SnapRAID Sync Confirm Modal -->
-    <div id="snapraid-sync-modal" class="hidden fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4" onclick="if(event.target === this) closeSnapraidSyncModal()">
-        <div class="bg-gray-900 w-full max-w-lg rounded-lg shadow-xl border border-purple-900 flex flex-col" onclick="event.stopPropagation()">
+    <div id="snapraid-sync-modal" class="hidden fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4" data-overlay-close="snapraid-sync-modal">
+        <div class="bg-gray-900 w-full max-w-lg rounded-lg shadow-xl border border-purple-900 flex flex-col" data-modal-panel>
             <div class="flex justify-between items-center p-4 border-b border-purple-800">
                 <h3 class="text-lg font-semibold">Confirm SnapRAID Sync</h3>
-                <button onclick="closeSnapraidSyncModal()" class="text-gray-400 hover:text-white text-2xl font-bold leading-none">&times;</button>
+                <button type="button" data-action="close-snapraid-sync-modal" class="text-gray-400 hover:text-white text-2xl font-bold leading-none">&times;</button>
             </div>
             <div class="p-4 text-sm text-gray-300 space-y-3">
                 <p>Review the diff summary before syncing.</p>
@@ -104,27 +104,27 @@
                 <div id="snapraid-sync-warning" class="hidden text-yellow-300 text-xs"></div>
             </div>
             <div class="p-4 border-t border-purple-800 flex justify-end gap-2">
-                <button onclick="closeSnapraidSyncModal()" class="px-4 py-2 bg-gray-700 text-white rounded hover:bg-gray-600">Cancel</button>
-                <button id="snapraid-sync-confirm" onclick="confirmSnapraidSync()" class="px-4 py-2 coraline-button text-white rounded">Sync Now</button>
+                <button type="button" data-action="close-snapraid-sync-modal" class="px-4 py-2 bg-gray-700 text-white rounded hover:bg-gray-600">Cancel</button>
+                <button id="snapraid-sync-confirm" type="button" data-action="confirm-snapraid-sync" class="px-4 py-2 coraline-button text-white rounded">Sync Now</button>
             </div>
         </div>
     </div>
 
     <!-- Configure Modal -->
-    <div id="config-modal" class="hidden fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4" onclick="if(event.target === this) closeConfigModal()">
-        <div class="bg-gray-900 w-full max-w-2xl rounded-lg shadow-xl border border-purple-900 flex flex-col max-h-[90vh] overflow-hidden" onclick="event.stopPropagation()">
+    <div id="config-modal" class="hidden fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4" data-overlay-close="config-modal">
+        <div class="bg-gray-900 w-full max-w-2xl rounded-lg shadow-xl border border-purple-900 flex flex-col max-h-[90vh] overflow-hidden" data-modal-panel>
             <div class="flex justify-between items-center p-4 border-b border-purple-800 flex-shrink-0">
                 <h3 id="config-modal-title" class="text-xl font-semibold">Configure Plugin</h3>
-                <button onclick="closeConfigModal()" class="text-gray-400 hover:text-white text-2xl font-bold leading-none">&times;</button>
+                <button type="button" data-action="close-config-modal" class="text-gray-400 hover:text-white text-2xl font-bold leading-none">&times;</button>
             </div>
             <div class="p-4 overflow-y-auto flex-1 min-h-0" id="config-modal-form">
                 <!-- Form fields populated by JS -->
             </div>
             <div class="p-4 border-t border-purple-800 flex justify-between flex-shrink-0">
-                <button onclick="applyConfig()" class="coraline-button px-4 py-2 rounded text-white">Apply to System</button>
+                <button type="button" data-action="apply-config" class="coraline-button px-4 py-2 rounded text-white">Apply to System</button>
                 <div class="flex gap-2">
-                    <button onclick="closeConfigModal()" class="px-4 py-2 text-gray-400 hover:text-white">Cancel</button>
-                    <button onclick="saveConfig()" class="coraline-button px-4 py-2 rounded text-white">Save</button>
+                    <button type="button" data-action="close-config-modal" class="px-4 py-2 text-gray-400 hover:text-white">Cancel</button>
+                    <button type="button" data-action="save-config" class="coraline-button px-4 py-2 rounded text-white">Save</button>
                 </div>
             </div>
         </div>

@@ -1,66 +1,20 @@
 import { ensureAuthenticated, logoutToLogin } from '/js/lib/auth.js';
 import { ensureDashboardShell } from '/js/lib/layout.js';
-import { clearClientSession } from '/js/lib/session.js';
-import { clearElement, createEmptyState, createErrorState, createLoadingState } from '/js/lib/states.js';
+import { createEmptyState, createErrorState, createLoadingState } from '/js/lib/states.js';
+import { requestApiResponse } from '/js/lib/http.js';
+import { escapeHtml, encodeDataAttr } from '/js/lib/format.js';
+import { showNotification } from '/js/lib/notify.js';
+import { setNodeContent } from '/js/lib/dom.js';
 
 ensureDashboardShell({
     notificationClass: 'fixed top-4 right-4 z-50 w-80 flex flex-col items-end',
     includeFooter: true,
 });
 
-async function apiFetch(url, options = {}) {
-    const response = await fetch(url, options);
-    if (response.status === 401) {
-        clearClientSession();
-        window.location.href = '/login.html';
-        throw new Error('Authentication required');
-    }
-    return response;
-}
-
 let mountPlugins = [];
 let currentMountPlugin = null;
 let currentMountId = null;
 let mediaPaths = {};
-
-function setNodeContent(containerId, node) {
-    const container = document.getElementById(containerId);
-    if (!container) {
-        return;
-    }
-    clearElement(container);
-    container.appendChild(node);
-}
-
-function showNotification(message, type = 'info') {
-    const area = document.getElementById('notification-area');
-    const notification = document.createElement('div');
-    notification.className = 'p-3 mb-2 rounded shadow-lg transform transition-all duration-300 opacity-0';
-    if (type === 'success') notification.classList.add('bg-green-600');
-    else if (type === 'error') notification.classList.add('bg-red-600');
-    else notification.classList.add('bg-blue-600');
-    notification.textContent = message;
-    area.appendChild(notification);
-    setTimeout(() => notification.classList.replace('opacity-0', 'opacity-100'), 10);
-    setTimeout(() => {
-        notification.classList.replace('opacity-100', 'opacity-0');
-        setTimeout(() => notification.remove(), 300);
-    }, 3000);
-}
-
-function escapeHtml(str) {
-    if (!str) return '';
-    return String(str)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-}
-
-function encodeDataAttr(value) {
-    return escapeHtml(String(value ?? ''));
-}
 
 async function loadPage() {
     await Promise.all([
@@ -72,7 +26,7 @@ async function loadPage() {
 // ========== Media Paths ==========
 async function loadMediaPaths() {
     try {
-        const response = await apiFetch('/api/disks/media-paths');
+        const response = await requestApiResponse('/api/disks/media-paths');
         const data = await response.json();
         mediaPaths = data.paths || {};
 
@@ -94,7 +48,7 @@ async function saveMediaPaths() {
     };
 
     try {
-        const response = await apiFetch('/api/disks/media-paths', {
+        const response = await requestApiResponse('/api/disks/media-paths', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(paths)
@@ -111,7 +65,7 @@ async function saveMediaPaths() {
 // ========== Startup Service Diff ==========
 async function previewStartupService() {
     try {
-        const res = await apiFetch('/api/disks/startup-service/preview');
+        const res = await requestApiResponse('/api/disks/startup-service/preview');
         if (!res.ok) {
             const errData = await res.json().catch(() => ({}));
             const errMsg = errData.error || `Preview failed (${res.status})`;
@@ -190,7 +144,7 @@ function closeDiffModal() {
 
 async function applyStartupService() {
     try {
-        const res = await apiFetch('/api/disks/startup-service', { method: 'POST' });
+        const res = await requestApiResponse('/api/disks/startup-service', { method: 'POST' });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Failed to update service');
         showNotification('Startup service updated', 'success');
@@ -209,7 +163,7 @@ async function loadMountPlugins() {
     }));
 
     try {
-        const res = await apiFetch('/api/storage/plugins');
+        const res = await requestApiResponse('/api/storage/plugins');
         const data = await res.json();
 
         // Filter to only mount-category plugins that are enabled
@@ -246,7 +200,7 @@ async function renderMountPluginSections() {
         // Fetch mounts for this plugin
         let mounts = [];
         try {
-            const res = await apiFetch(`/api/storage/mounts/${plugin.id}`);
+            const res = await requestApiResponse(`/api/storage/mounts/${plugin.id}`);
             const data = await res.json();
             mounts = data.mounts || [];
         } catch (e) {
@@ -261,16 +215,16 @@ async function renderMountPluginSections() {
                         <p class="text-sm text-gray-400">${escapeHtml(plugin.description)}</p>
                     </div>
                     <div class="flex gap-2">
-                        <button onclick="detectMounts(this.dataset.pluginId)"
+                        <button type="button"
+                                class="js-detect-mounts py-2 px-4 rounded text-sm border border-purple-700 text-purple-300 hover:bg-purple-900"
                                 data-plugin-id="${encodeDataAttr(plugin.id)}"
-                                class="py-2 px-4 rounded text-sm border border-purple-700 text-purple-300 hover:bg-purple-900"
                                 ${!plugin.installed ? 'disabled' : ''}
                                 title="Detect existing mounts on this system">
                             Detect
                         </button>
-                        <button onclick="openAddMountModal(this.dataset.pluginId)"
+                        <button type="button"
+                                class="js-open-add-mount coraline-button py-2 px-4 rounded text-sm"
                                 data-plugin-id="${encodeDataAttr(plugin.id)}"
-                                class="coraline-button py-2 px-4 rounded text-sm"
                                 ${!plugin.installed ? 'disabled title="Install dependencies first"' : ''}>
                             + Add Mount
                         </button>
@@ -295,6 +249,47 @@ async function renderMountPluginSections() {
     }
 
     container.innerHTML = html;
+    bindMountPluginActions(container);
+}
+
+function bindMountPluginActions(container) {
+    if (!container) return;
+
+    container.querySelectorAll('.js-detect-mounts').forEach((button) => {
+        button.addEventListener('click', () => {
+            detectMounts(button.dataset.pluginId || '');
+        });
+    });
+
+    container.querySelectorAll('.js-open-add-mount').forEach((button) => {
+        button.addEventListener('click', () => {
+            openAddMountModal(button.dataset.pluginId || '');
+        });
+    });
+
+    container.querySelectorAll('.js-mount-remote').forEach((button) => {
+        button.addEventListener('click', () => {
+            mountRemote(button.dataset.pluginId || '', button.dataset.mountId || '');
+        });
+    });
+
+    container.querySelectorAll('.js-unmount-remote').forEach((button) => {
+        button.addEventListener('click', () => {
+            unmountRemote(button.dataset.pluginId || '', button.dataset.mountId || '');
+        });
+    });
+
+    container.querySelectorAll('.js-edit-mount').forEach((button) => {
+        button.addEventListener('click', () => {
+            editMount(button.dataset.pluginId || '', button.dataset.mountId || '');
+        });
+    });
+
+    container.querySelectorAll('.js-remove-mount').forEach((button) => {
+        button.addEventListener('click', () => {
+            removeMount(button.dataset.pluginId || '', button.dataset.mountId || '');
+        });
+    });
 }
 
 function renderMountCard(pluginId, mount) {
@@ -323,11 +318,11 @@ function renderMountCard(pluginId, mount) {
             <div class="flex items-center gap-3">
                 <span class="status-pill ${statusClass}">${statusText}</span>
                 ${mount.mounted ?
-                    `<button onclick="unmountRemote(this.dataset.pluginId, this.dataset.mountId)" data-plugin-id="${encodeDataAttr(pluginId)}" data-mount-id="${encodeDataAttr(mount.id)}" class="text-sm text-red-400 hover:text-red-300">Unmount</button>` :
-                    `<button onclick="mountRemote(this.dataset.pluginId, this.dataset.mountId)" data-plugin-id="${encodeDataAttr(pluginId)}" data-mount-id="${encodeDataAttr(mount.id)}" class="text-sm text-green-400 hover:text-green-300">Mount</button>`
+                    `<button type="button" class="js-unmount-remote text-sm text-red-400 hover:text-red-300" data-plugin-id="${encodeDataAttr(pluginId)}" data-mount-id="${encodeDataAttr(mount.id)}">Unmount</button>` :
+                    `<button type="button" class="js-mount-remote text-sm text-green-400 hover:text-green-300" data-plugin-id="${encodeDataAttr(pluginId)}" data-mount-id="${encodeDataAttr(mount.id)}">Mount</button>`
                 }
-                <button onclick="editMount(this.dataset.pluginId, this.dataset.mountId)" data-plugin-id="${encodeDataAttr(pluginId)}" data-mount-id="${encodeDataAttr(mount.id)}" class="text-sm text-gray-400 hover:text-white">Edit</button>
-                <button onclick="removeMount(this.dataset.pluginId, this.dataset.mountId)" data-plugin-id="${encodeDataAttr(pluginId)}" data-mount-id="${encodeDataAttr(mount.id)}" class="text-sm text-gray-400 hover:text-red-400">Remove</button>
+                <button type="button" class="js-edit-mount text-sm text-gray-400 hover:text-white" data-plugin-id="${encodeDataAttr(pluginId)}" data-mount-id="${encodeDataAttr(mount.id)}">Edit</button>
+                <button type="button" class="js-remove-mount text-sm text-gray-400 hover:text-red-400" data-plugin-id="${encodeDataAttr(pluginId)}" data-mount-id="${encodeDataAttr(mount.id)}">Remove</button>
             </div>
         </div>
     `;
@@ -336,7 +331,7 @@ function renderMountCard(pluginId, mount) {
 // ========== Mount Operations ==========
 async function mountRemote(pluginId, mountId) {
     try {
-        const res = await apiFetch(`/api/storage/mounts/${pluginId}/${mountId}/mount`, { method: 'POST' });
+        const res = await requestApiResponse(`/api/storage/mounts/${pluginId}/${mountId}/mount`, { method: 'POST' });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error);
         showNotification('Mounted successfully', 'success');
@@ -348,7 +343,7 @@ async function mountRemote(pluginId, mountId) {
 
 async function unmountRemote(pluginId, mountId) {
     try {
-        const res = await apiFetch(`/api/storage/mounts/${pluginId}/${mountId}/unmount`, { method: 'POST' });
+        const res = await requestApiResponse(`/api/storage/mounts/${pluginId}/${mountId}/unmount`, { method: 'POST' });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error);
         showNotification('Unmounted successfully', 'success');
@@ -361,7 +356,7 @@ async function unmountRemote(pluginId, mountId) {
 async function removeMount(pluginId, mountId) {
     if (!confirm('Remove this mount configuration?')) return;
     try {
-        const res = await apiFetch(`/api/storage/mounts/${pluginId}/${mountId}`, { method: 'DELETE' });
+        const res = await requestApiResponse(`/api/storage/mounts/${pluginId}/${mountId}`, { method: 'DELETE' });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error);
         showNotification('Mount removed', 'success');
@@ -374,7 +369,7 @@ async function removeMount(pluginId, mountId) {
 async function detectMounts(pluginId) {
     try {
         showNotification('Detecting existing mounts...', 'info');
-        const res = await apiFetch(`/api/storage/mounts/${pluginId}/detect`, { method: 'POST' });
+        const res = await requestApiResponse(`/api/storage/mounts/${pluginId}/detect`, { method: 'POST' });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error);
 
@@ -398,7 +393,7 @@ async function openAddMountModal(pluginId) {
 
     // Load schema for this plugin
     try {
-        const res = await apiFetch(`/api/storage/plugins/${pluginId}`);
+        const res = await requestApiResponse(`/api/storage/plugins/${pluginId}`);
         const data = await res.json();
         renderMountForm(data.schema, {});
     } catch (e) {
@@ -418,8 +413,8 @@ async function editMount(pluginId, mountId) {
     // Load plugin schema and mount data
     try {
         const [schemaRes, mountsRes] = await Promise.all([
-            apiFetch(`/api/storage/plugins/${pluginId}`),
-            apiFetch(`/api/storage/mounts/${pluginId}`)
+            requestApiResponse(`/api/storage/plugins/${pluginId}`),
+            requestApiResponse(`/api/storage/mounts/${pluginId}`)
         ]);
         const schemaData = await schemaRes.json();
         const mountsData = await mountsRes.json();
@@ -513,13 +508,13 @@ async function submitMountForm() {
     try {
         let res;
         if (currentMountId) {
-            res = await apiFetch(`/api/storage/mounts/${currentMountPlugin}/${currentMountId}`, {
+            res = await requestApiResponse(`/api/storage/mounts/${currentMountPlugin}/${currentMountId}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(formData)
             });
         } else {
-            res = await apiFetch(`/api/storage/mounts/${currentMountPlugin}`, {
+            res = await requestApiResponse(`/api/storage/mounts/${currentMountPlugin}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(formData)
@@ -537,20 +532,40 @@ async function submitMountForm() {
     }
 }
 
-Object.assign(window, {
-    saveMediaPaths,
-    previewStartupService,
-    closeDiffModal,
-    applyStartupService,
-    detectMounts,
-    openAddMountModal,
-    closeMountModal,
-    submitMountForm,
-    mountRemote,
-    unmountRemote,
-    editMount,
-    removeMount,
-});
+function bindMountPageActions() {
+    document.getElementById('save-media-paths')?.addEventListener('click', saveMediaPaths);
+    document.getElementById('preview-startup-service')?.addEventListener('click', previewStartupService);
+
+    document.addEventListener('click', (event) => {
+        const trigger = event.target.closest('[data-action]');
+        if (trigger) {
+            const { action } = trigger.dataset;
+            switch (action) {
+            case 'close-mount-modal':
+                closeMountModal();
+                break;
+            case 'submit-mount-form':
+                submitMountForm();
+                break;
+            case 'close-diff-modal':
+                closeDiffModal();
+                break;
+            case 'apply-startup-service':
+                applyStartupService();
+                break;
+            default:
+                break;
+            }
+        }
+
+        if (event.target instanceof HTMLElement && event.target.matches('[data-overlay-close]')) {
+            const modalId = event.target.dataset.overlayClose;
+            if (modalId) {
+                document.getElementById(modalId)?.classList.add('hidden');
+            }
+        }
+    });
+}
 
 (async function initMountsPage() {
     const authenticated = await ensureAuthenticated();
@@ -559,5 +574,6 @@ Object.assign(window, {
     }
 
     window.logout = logoutToLogin;
+    bindMountPageActions();
     await loadPage();
 })();

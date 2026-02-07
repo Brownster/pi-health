@@ -63,7 +63,7 @@
                         Leave blank for interactive login via browser. Get an auth key from
                         <a href="https://login.tailscale.com/admin/settings/keys" target="_blank" class="text-purple-400 hover:underline">Tailscale Admin Console</a>.
                     </p>
-                    <button onclick="setupTailscale()" class="coraline-button text-blue-100 py-2 px-6 rounded">
+                    <button id="tailscale-setup-btn" class="coraline-button text-blue-100 py-2 px-6 rounded">
                         Install & Connect
                     </button>
                 </div>
@@ -83,10 +83,10 @@
                         </div>
                     </div>
                     <div class="flex gap-2">
-                        <button onclick="refreshStatus()" class="px-4 py-2 text-sm border border-purple-700 text-purple-300 rounded hover:bg-purple-900">
+                        <button id="tailscale-refresh-btn" class="px-4 py-2 text-sm border border-purple-700 text-purple-300 rounded hover:bg-purple-900">
                             Refresh
                         </button>
-                        <button onclick="reauthenticate()" class="px-4 py-2 text-sm border border-yellow-700 text-yellow-300 rounded hover:bg-yellow-900/30">
+                        <button id="tailscale-reauth-btn" class="px-4 py-2 text-sm border border-yellow-700 text-yellow-300 rounded hover:bg-yellow-900/30">
                             Re-authenticate
                         </button>
                     </div>

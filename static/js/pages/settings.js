@@ -1,8 +1,8 @@
 import { ensureAuthenticated, logoutToLogin } from '/js/lib/auth.js';
 import { ensureDashboardShell } from '/js/lib/layout.js';
 import { clearElement } from '/js/lib/states.js';
-import { requestJson } from '/js/lib/http.js';
-import { clearClientSession } from '/js/lib/session.js';
+import { requestApiJson, requestApiResponse } from '/js/lib/http.js';
+import { showNotification } from '/js/lib/notify.js';
 
 ensureDashboardShell({
     notificationClass: 'fixed top-4 right-4 z-50 space-y-2',
@@ -14,56 +14,17 @@ let backupConfig = {};
 let logsVisible = false;
 let pihealthUpdateConfig = {};
 
-function showNotification(message, type = 'info') {
-    const notificationArea = document.getElementById('notification-area');
-    if (!notificationArea) {
-        return;
-    }
-
-    const notification = document.createElement('div');
-    notification.className = 'notification transform transition-all duration-500 opacity-0';
-
-    if (type === 'success') {
-        notification.classList.add('bg-green-600');
-    } else if (type === 'error') {
-        notification.classList.add('bg-red-600');
-    } else {
-        notification.classList.add('bg-blue-600');
-    }
-
-    notification.textContent = message;
-    notificationArea.appendChild(notification);
-
-    window.setTimeout(() => notification.classList.replace('opacity-0', 'opacity-100'), 10);
-    window.setTimeout(() => {
-        notification.classList.replace('opacity-100', 'opacity-0');
-        window.setTimeout(() => notification.remove(), 500);
-    }, 3000);
-}
-
 async function requestApi(url, options = {}) {
-    const { response, payload } = await requestJson(url, options);
+    const response = await requestApiResponse(url, options);
+    let payload = {};
 
-    if (response.status === 401) {
-        clearClientSession();
-        window.location.href = '/login.html';
-        throw new Error('Authentication required');
+    try {
+        payload = await response.json();
+    } catch (_err) {
+        payload = {};
     }
 
-    return { response, payload: payload || {} };
-}
-
-async function requestApiJson(url, options = {}) {
-    const { response, payload } = await requestApi(url, options);
-
-    if (!response.ok) {
-        const err = new Error(payload.error || payload.stderr || `Request failed (${response.status})`);
-        err.status = response.status;
-        err.data = payload;
-        throw err;
-    }
-
-    return payload;
+    return { response, payload };
 }
 
 function setButtonBusy(button, busy) {

@@ -35,7 +35,7 @@
                 <p class="text-gray-400 text-sm mt-1">View and manage storage devices</p>
             </div>
             <div class="flex space-x-2">
-                <button onclick="loadDisks()" class="coraline-button text-blue-100 font-bold py-2 px-4 rounded flex items-center">
+                <button id="disks-refresh-btn" class="coraline-button text-blue-100 font-bold py-2 px-4 rounded flex items-center">
                     <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
                     </svg>
@@ -57,7 +57,7 @@
                     <h3 class="text-lg font-semibold">SMART Health</h3>
                     <p class="text-gray-400 text-sm">Disk health monitoring via S.M.A.R.T.</p>
                 </div>
-                <button onclick="loadSmartData()" class="coraline-button text-blue-100 py-2 px-4 rounded text-sm flex items-center">
+                <button id="disks-smart-refresh-btn" class="coraline-button text-blue-100 py-2 px-4 rounded text-sm flex items-center">
                     <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
                     </svg>
@@ -79,7 +79,7 @@
         <div class="bg-gray-900 w-full max-w-lg rounded-lg shadow-xl border border-purple-900 flex flex-col">
             <div class="flex justify-between items-center p-4 border-b border-purple-800">
                 <h3 id="mount-title" class="text-xl font-semibold">Mount Partition</h3>
-                <button onclick="closeMountModal()" class="text-gray-400 hover:text-gray-200">Close</button>
+                <button id="disks-close-mount-top" class="text-gray-400 hover:text-gray-200">Close</button>
             </div>
             <div class="p-4 space-y-4">
                 <div>
@@ -104,17 +104,17 @@
                 </div>
             </div>
             <div class="p-4 border-t border-purple-800 flex justify-end space-x-2">
-                <button onclick="closeMountModal()" class="px-4 py-2 bg-gray-700 text-white rounded">Cancel</button>
-                <button onclick="submitMount()" class="coraline-button px-4 py-2 text-white rounded">Mount</button>
+                <button id="disks-close-mount-bottom" class="px-4 py-2 bg-gray-700 text-white rounded">Cancel</button>
+                <button id="disks-submit-mount" class="coraline-button px-4 py-2 text-white rounded">Mount</button>
             </div>
         </div>
     </div>
 
-    <div id="smart-modal" class="hidden fixed inset-0 bg-black bg-opacity-60 z-50 items-center justify-center p-4 overflow-hidden" onclick="if(event.target === this) closeSmartModal()">
-        <div class="bg-gray-900 w-full max-w-2xl rounded-lg shadow-xl border border-purple-900 flex flex-col max-h-[90vh]" onclick="event.stopPropagation()">
+    <div id="smart-modal" data-overlay-close class="hidden fixed inset-0 bg-black bg-opacity-60 z-50 items-center justify-center p-4 overflow-hidden">
+        <div data-modal-panel class="bg-gray-900 w-full max-w-2xl rounded-lg shadow-xl border border-purple-900 flex flex-col max-h-[90vh]">
             <div class="flex justify-between items-center p-4 border-b border-purple-800 flex-shrink-0">
                 <h3 id="smart-modal-title" class="text-xl font-semibold">SMART Details</h3>
-                <button onclick="closeSmartModal()" class="text-gray-400 hover:text-white text-2xl font-bold leading-none">&times;</button>
+                <button id="disks-close-smart-top" class="text-gray-400 hover:text-white text-2xl font-bold leading-none">&times;</button>
             </div>
             <div class="p-4 overflow-y-auto flex-1 min-h-0">
                 <div id="smart-modal-content">
@@ -122,10 +122,10 @@
             </div>
             <div class="p-4 border-t border-purple-800 flex justify-between items-center flex-shrink-0">
                 <div class="flex gap-2">
-                    <button onclick="runSmartTest('short')" class="coraline-button px-3 py-2 text-sm rounded text-white">Short Test</button>
-                    <button onclick="runSmartTest('long')" class="coraline-button px-3 py-2 text-sm rounded text-white">Long Test</button>
+                    <button data-smart-test="short" class="coraline-button px-3 py-2 text-sm rounded text-white">Short Test</button>
+                    <button data-smart-test="long" class="coraline-button px-3 py-2 text-sm rounded text-white">Long Test</button>
                 </div>
-                <button onclick="closeSmartModal()" class="px-4 py-2 bg-gray-700 text-white rounded hover:bg-gray-600">Close</button>
+                <button id="disks-close-smart-bottom" class="px-4 py-2 bg-gray-700 text-white rounded hover:bg-gray-600">Close</button>
             </div>
         </div>
     </div>

@@ -1,43 +1,14 @@
 import { ensureAuthenticated, logoutToLogin } from '/js/lib/auth.js';
-import { requestJson } from '/js/lib/http.js';
+import { requestApiJson } from '/js/lib/http.js';
+import { formatBytes as formatBaseBytes } from '/js/lib/format.js';
+import { showNotification as showBaseNotification } from '/js/lib/notify.js';
 
 window.logout = logoutToLogin;
 
-async function requestApiJson(url, options = {}) {
-    const { response, payload } = await requestJson(url, options);
-
-    if (!response.ok) {
-        throw new Error(payload?.error || `Request failed (${response.status})`);
-    }
-
-    return payload || {};
-}
-
 function showNotification(message, type = 'info') {
-    const area = document.getElementById('notification-area');
-    if (!area) {
-        return;
-    }
-
-    const notification = document.createElement('div');
-    notification.className = 'bg-opacity-90 p-3 mb-2 rounded shadow-lg transform transition-all duration-500 opacity-0 text-white';
-
-    if (type === 'success') {
-        notification.classList.add('bg-green-600');
-    } else if (type === 'error') {
-        notification.classList.add('bg-red-600');
-    } else {
-        notification.classList.add('bg-blue-600');
-    }
-
-    notification.textContent = message;
-    area.appendChild(notification);
-
-    window.setTimeout(() => notification.classList.replace('opacity-0', 'opacity-100'), 10);
-    window.setTimeout(() => {
-        notification.classList.replace('opacity-100', 'opacity-0');
-        window.setTimeout(() => notification.remove(), 300);
-    }, 3000);
+    showBaseNotification(message, type, {
+        baseClass: 'bg-opacity-90 p-3 mb-2 rounded shadow-lg transform transition-all duration-500 opacity-0 text-white',
+    });
 }
 
 function formatDateTime(date) {
@@ -50,12 +21,7 @@ function formatDateTime(date) {
 function formatBytes(bytes) {
     const value = Number(bytes);
     if (!Number.isFinite(value) || value < 0) return '—';
-    if (value === 0) return '0 B';
-
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.min(Math.floor(Math.log(value) / Math.log(k)), sizes.length - 1);
-    return `${parseFloat((value / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
+    return formatBaseBytes(value, 1);
 }
 
 function getStatColorClass(percent) {

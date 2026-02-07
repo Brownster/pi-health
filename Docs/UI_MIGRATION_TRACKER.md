@@ -61,6 +61,7 @@
 - [x] Migrate `tailscale`.
 - [x] Migrate `tools`.
 - [ ] Backfill already-migrated pages that still use page-local shell/state markup instead of shared primitives.
+  Pending backfill: `containers`, `system`.
 - [ ] Validate plugin-specific edge cases.
 
 ## Release readiness

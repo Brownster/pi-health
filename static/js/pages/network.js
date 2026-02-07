@@ -1,41 +1,14 @@
 import { ensureAuthenticated, logoutToLogin } from '/js/lib/auth.js';
 import { ensureDashboardShell } from '/js/lib/layout.js';
-import { clearClientSession } from '/js/lib/session.js';
 import { clearElement, createEmptyState, createErrorState, createLoadingState } from '/js/lib/states.js';
+import { requestApiResponse } from '/js/lib/http.js';
+import { escapeHtml } from '/js/lib/format.js';
+import { setNodeContent } from '/js/lib/dom.js';
 
 ensureDashboardShell({
     notificationClass: 'fixed top-4 right-4 z-50 w-80 flex flex-col items-end',
     includeFooter: true,
 });
-
-async function apiFetch(url, options = {}) {
-    const response = await fetch(url, options);
-    if (response.status === 401) {
-        clearClientSession();
-        window.location.href = '/login.html';
-        throw new Error('Authentication required');
-    }
-    return response;
-}
-
-function escapeHtml(text) {
-    if (!text) return '';
-    return String(text)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-}
-
-function setNodeContent(containerId, node) {
-    const container = document.getElementById(containerId);
-    if (!container) {
-        return;
-    }
-    clearElement(container);
-    container.appendChild(node);
-}
 
 function showLoadError(message) {
     const loadingState = document.getElementById('loading-state');
@@ -52,7 +25,7 @@ function showLoadError(message) {
 
 async function loadNetworkInfo() {
     try {
-        const response = await apiFetch('/api/network/info');
+        const response = await requestApiResponse('/api/network/info');
         const data = await response.json().catch(() => ({}));
 
         if (!response.ok) {
@@ -196,10 +169,6 @@ function refreshNetworkInfo() {
     loadNetworkInfo();
 }
 
-Object.assign(window, {
-    refreshNetworkInfo,
-});
-
 (async function initNetworkPage() {
     const authenticated = await ensureAuthenticated();
     if (!authenticated) {
@@ -207,5 +176,6 @@ Object.assign(window, {
     }
 
     window.logout = logoutToLogin;
+    document.getElementById('refresh-network-info')?.addEventListener('click', refreshNetworkInfo);
     await loadNetworkInfo();
 })();

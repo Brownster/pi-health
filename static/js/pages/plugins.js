@@ -1,7 +1,9 @@
 import { ensureAuthenticated, logoutToLogin } from '/js/lib/auth.js';
 import { ensureDashboardShell } from '/js/lib/layout.js';
-import { clearClientSession } from '/js/lib/session.js';
 import { clearElement, createEmptyState, createErrorState, createLoadingState } from '/js/lib/states.js';
+import { requestApiResponse } from '/js/lib/http.js';
+import { escapeHtml, encodeDataAttr } from '/js/lib/format.js';
+import { showNotification } from '/js/lib/notify.js';
 
 ensureDashboardShell({
     notificationClass: 'fixed top-4 right-4 z-50 w-80 flex flex-col items-end',
@@ -35,50 +37,10 @@ const CATEGORY_SECTIONS = [
     },
 ];
 
-async function apiFetch(url, options = {}) {
-    const response = await fetch(url, options);
-    if (response.status === 401) {
-        clearClientSession();
-        window.location.href = '/login.html';
-        throw new Error('Authentication required');
-    }
-    return response;
-}
-
 function statusClass(status) {
     if (status === 'healthy') return 'status-healthy';
     if (status === 'error') return 'status-error';
     return 'status-unconfigured';
-}
-
-function escapeHtml(str) {
-    if (!str) return '';
-    return String(str)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-}
-
-function encodeDataAttr(value) {
-    return escapeHtml(String(value ?? ''));
-}
-
-function showNotification(message, type = 'info') {
-    const area = document.getElementById('notification-area');
-    const notification = document.createElement('div');
-    notification.className = 'p-3 mb-2 rounded shadow-lg transform transition-all duration-300 opacity-0';
-    if (type === 'success') notification.classList.add('bg-green-600');
-    else if (type === 'error') notification.classList.add('bg-red-600');
-    else notification.classList.add('bg-blue-600');
-    notification.textContent = message;
-    area.appendChild(notification);
-    setTimeout(() => notification.classList.replace('opacity-0', 'opacity-100'), 10);
-    setTimeout(() => {
-        notification.classList.replace('opacity-100', 'opacity-0');
-        setTimeout(() => notification.remove(), 300);
-    }, 3000);
 }
 
 function setContainerNode(node) {
@@ -98,7 +60,7 @@ async function loadPlugins() {
     }));
 
     try {
-        const response = await apiFetch('/api/storage/plugins');
+        const response = await requestApiResponse('/api/storage/plugins');
         const payload = await response.json();
         if (!response.ok) {
             throw new Error(payload?.error || `Failed to load plugins (${response.status})`);
@@ -232,7 +194,7 @@ async function togglePlugin(pluginId, enabled) {
     }
 
     try {
-        const response = await apiFetch(`/api/storage/plugins/${encodeURIComponent(pluginId)}/toggle`, {
+        const response = await requestApiResponse(`/api/storage/plugins/${encodeURIComponent(pluginId)}/toggle`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ enabled }),
@@ -303,7 +265,7 @@ async function submitInstall() {
     const payload = Object.fromEntries(formData.entries());
 
     try {
-        const response = await apiFetch('/api/storage/plugins/install', {
+        const response = await requestApiResponse('/api/storage/plugins/install', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
@@ -332,7 +294,7 @@ async function removePlugin(pluginId) {
     }
 
     try {
-        const response = await apiFetch(`/api/storage/plugins/${encodeURIComponent(pluginId)}/remove`, {
+        const response = await requestApiResponse(`/api/storage/plugins/${encodeURIComponent(pluginId)}/remove`, {
             method: 'DELETE',
         });
         const data = await response.json().catch(() => ({}));
@@ -347,12 +309,34 @@ async function removePlugin(pluginId) {
     }
 }
 
-Object.assign(window, {
-    openInstallModal,
-    closeInstallModal,
-    toggleInstallType,
-    submitInstall,
-});
+function bindPluginPageActions() {
+    const openButton = document.getElementById('plugin-open-install');
+    if (openButton) {
+        openButton.addEventListener('click', openInstallModal);
+    }
+
+    const closeTopButton = document.getElementById('plugin-close-install-top');
+    if (closeTopButton) {
+        closeTopButton.addEventListener('click', closeInstallModal);
+    }
+
+    const closeBottomButton = document.getElementById('plugin-close-install-bottom');
+    if (closeBottomButton) {
+        closeBottomButton.addEventListener('click', closeInstallModal);
+    }
+
+    const installTypeSelect = document.getElementById('plugin-install-type');
+    if (installTypeSelect) {
+        installTypeSelect.addEventListener('change', (event) => {
+            toggleInstallType(event.target.value);
+        });
+    }
+
+    const submitButton = document.getElementById('plugin-submit-install');
+    if (submitButton) {
+        submitButton.addEventListener('click', submitInstall);
+    }
+}
 
 (async function initPluginsPage() {
     const authenticated = await ensureAuthenticated();
@@ -361,5 +345,6 @@ Object.assign(window, {
     }
 
     window.logout = logoutToLogin;
+    bindPluginPageActions();
     await loadPlugins();
 })();

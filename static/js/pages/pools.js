@@ -1,22 +1,15 @@
 import { ensureAuthenticated, logoutToLogin } from '/js/lib/auth.js';
 import { ensureDashboardShell } from '/js/lib/layout.js';
-import { clearClientSession } from '/js/lib/session.js';
-import { clearElement, createEmptyState, createLoadingState } from '/js/lib/states.js';
+import { createEmptyState, createLoadingState } from '/js/lib/states.js';
+import { requestApiResponse } from '/js/lib/http.js';
+import { escapeHtml, encodeDataAttr } from '/js/lib/format.js';
+import { showNotification } from '/js/lib/notify.js';
+import { setNodeContent } from '/js/lib/dom.js';
 
 ensureDashboardShell({
     notificationClass: 'fixed top-4 right-4 z-50 w-80 flex flex-col items-end',
     includeFooter: true,
 });
-
-async function apiFetch(url, options = {}) {
-    const response = await fetch(url, options);
-    if (response.status === 401) {
-        clearClientSession();
-        window.location.href = '/login.html';
-        throw new Error('Authentication required');
-    }
-    return response;
-}
 
 let poolPlugins = [];
 let pluginDetailsMap = {};
@@ -28,45 +21,6 @@ let snapraidLogTagsByPlugin = {};
 let snapraidProgressState = {};
 let snapraidSyncContext = null;
 
-function setNodeContent(containerId, node) {
-    const container = document.getElementById(containerId);
-    if (!container) {
-        return;
-    }
-    clearElement(container);
-    container.appendChild(node);
-}
-
-function showNotification(message, type = 'info') {
-    const area = document.getElementById('notification-area');
-    const notification = document.createElement('div');
-    notification.className = 'p-3 mb-2 rounded shadow-lg transform transition-all duration-300 opacity-0';
-    if (type === 'success') notification.classList.add('bg-green-600');
-    else if (type === 'error') notification.classList.add('bg-red-600');
-    else notification.classList.add('bg-blue-600');
-    notification.textContent = message;
-    area.appendChild(notification);
-    setTimeout(() => notification.classList.replace('opacity-0', 'opacity-100'), 10);
-    setTimeout(() => {
-        notification.classList.replace('opacity-100', 'opacity-0');
-        setTimeout(() => notification.remove(), 300);
-    }, 3000);
-}
-
-function escapeHtml(str) {
-    if (!str) return '';
-    return String(str)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-}
-
-function encodeDataAttr(value) {
-    return escapeHtml(String(value ?? ''));
-}
-
 async function loadPage() {
     setNodeContent('pool-plugins', createLoadingState({
         message: 'Loading storage plugins...',
@@ -74,7 +28,7 @@ async function loadPage() {
         messageClass: 'text-gray-400',
     }));
 
-    const res = await apiFetch('/api/storage/plugins');
+    const res = await requestApiResponse('/api/storage/plugins');
     const data = await res.json();
 
     // Filter to storage-category plugins that are enabled
@@ -110,7 +64,7 @@ async function renderPoolPluginSections() {
         // Fetch full plugin details
         let details = { status: { status: 'unknown' }, commands: [] };
         try {
-            const res = await apiFetch(`/api/storage/plugins/${plugin.id}`);
+            const res = await requestApiResponse(`/api/storage/plugins/${plugin.id}`);
             details = await res.json();
             pluginDetailsMap[plugin.id] = details;
         } catch (e) {
@@ -118,7 +72,7 @@ async function renderPoolPluginSections() {
         }
         if (plugin.id === 'snapraid') {
             try {
-                const res = await apiFetch(`/api/storage/plugins/${plugin.id}/recovery`);
+                const res = await requestApiResponse(`/api/storage/plugins/${plugin.id}/recovery`);
                 recoveryMap[plugin.id] = await res.json();
             } catch (e) {
                 recoveryMap[plugin.id] = null;
@@ -233,6 +187,10 @@ function bindPoolPluginActions() {
             }
         });
     });
+
+    container.querySelectorAll('.js-view-snapraid-log').forEach((button) => {
+        button.addEventListener('click', viewSnapraidLog);
+    });
 }
 
 function renderPoolFilterOptions() {
@@ -296,7 +254,7 @@ function renderPluginStatus(pluginId, status, recovery) {
         ` : '';
 
         const logLink = status?.details?.last_log_path ? `
-            <button onclick="viewSnapraidLog()" class="mt-3 text-xs text-purple-300 hover:text-purple-200">
+            <button type="button" class="js-view-snapraid-log mt-3 text-xs text-purple-300 hover:text-purple-200">
                 View last log
             </button>
         ` : '';
@@ -407,7 +365,7 @@ async function viewSnapraidLog() {
     progressPanel.classList.add('hidden');
 
     try {
-        const res = await apiFetch('/api/storage/plugins/snapraid/logs/latest');
+        const res = await requestApiResponse('/api/storage/plugins/snapraid/logs/latest');
         if (!res.ok) {
             content.textContent = 'No log available.';
             return;
@@ -442,7 +400,7 @@ async function executePluginCommand(pluginId, commandId, commandName, payload) {
             requestPayload.log_tags = true;
             requestPayload.stream_tags = true;
         }
-        const res = await apiFetch(`/api/storage/plugins/${pluginId}/commands/${commandId}`, {
+        const res = await requestApiResponse(`/api/storage/plugins/${pluginId}/commands/${commandId}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(requestPayload)
@@ -642,7 +600,7 @@ function buildSnapraidSyncWarning(pluginId, summary) {
 
 async function fetchSnapraidDiffSummary(pluginId) {
     try {
-        const res = await apiFetch(`/api/storage/plugins/${pluginId}/commands/diff`, {
+        const res = await requestApiResponse(`/api/storage/plugins/${pluginId}/commands/diff`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ log_tags: true })
@@ -737,7 +695,7 @@ async function openConfigModal(pluginId) {
     currentPlugin = pluginId;
 
     try {
-        const res = await apiFetch(`/api/storage/plugins/${pluginId}`);
+        const res = await requestApiResponse(`/api/storage/plugins/${pluginId}`);
         const data = await res.json();
         currentPluginSchema = data.schema;
         renderConfigForm(data.schema, data.config || {});
@@ -771,14 +729,18 @@ function renderConfigForm(schema, values) {
                     <label class="block text-sm text-gray-300 mb-1">${escapeHtml(description)}</label>
                     <div id="array-${key}" class="space-y-2">
                         ${items.map((item, i) => `
-                            <div class="flex gap-2">
+                            <div class="flex gap-2 js-array-item-row">
                                 <input type="text" name="${key}[]" value="${escapeHtml(String(item))}"
                                        class="flex-1 bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm">
-                                <button type="button" onclick="removeArrayItem('${key}', ${i})" class="px-2 text-red-400 hover:text-red-300">&times;</button>
+                                <button type="button"
+                                        class="js-remove-array-item px-2 text-red-400 hover:text-red-300"
+                                        data-array-key="${encodeDataAttr(key)}">&times;</button>
                             </div>
                         `).join('')}
                     </div>
-                    <button type="button" onclick="addArrayItem('${key}')" class="mt-2 text-sm text-purple-400 hover:text-purple-300">+ Add</button>
+                    <button type="button"
+                            class="js-add-array-item mt-2 text-sm text-purple-400 hover:text-purple-300"
+                            data-array-key="${encodeDataAttr(key)}">+ Add</button>
                 </div>
             `;
         } else if (prop.type === 'boolean') {
@@ -838,7 +800,7 @@ function renderMergerFSConfigForm(schema, values) {
                 <div class="text-sm text-gray-400">
                     Configure MergerFS pools. Branches and mount points should be under /mnt/.
                 </div>
-                <button type="button" onclick="addMergerFSPool()" class="text-sm text-purple-400 hover:text-purple-300">+ Add Pool</button>
+                <button type="button" class="js-add-mergerfs-pool text-sm text-purple-400 hover:text-purple-300">+ Add Pool</button>
             </div>
             <div id="mergerfs-pools" class="space-y-4">
                 ${poolCards || '<p class="text-gray-500">No pools configured</p>'}
@@ -867,7 +829,7 @@ function renderMergerFSPoolCard(pool, idx) {
         <div class="flex gap-2 mergerfs-branch-row">
             <input type="text" name="branches[]" value="${escapeHtml(String(branch))}"
                    class="flex-1 bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm">
-            <button type="button" onclick="removeMergerFSBranch(this)" class="px-2 text-red-400 hover:text-red-300">&times;</button>
+            <button type="button" class="js-remove-mergerfs-branch px-2 text-red-400 hover:text-red-300">&times;</button>
         </div>
     `).join('');
 
@@ -882,7 +844,7 @@ function renderMergerFSPoolCard(pool, idx) {
         <div class="bg-gray-900 border border-purple-900/40 rounded p-4 mergerfs-pool">
             <div class="flex items-center justify-between mb-3">
                 <h4 class="text-sm font-semibold text-gray-200">Pool ${idx + 1}</h4>
-                <button type="button" onclick="removeMergerFSPool(this)" class="text-xs text-red-300 hover:text-red-200">Remove</button>
+                <button type="button" class="js-remove-mergerfs-pool text-xs text-red-300 hover:text-red-200">Remove</button>
             </div>
             <input type="hidden" name="pool_id" value="${escapeHtml(String(poolId))}">
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
@@ -926,11 +888,11 @@ function renderMergerFSPoolCard(pool, idx) {
                         <div class="flex gap-2 mergerfs-branch-row">
                             <input type="text" name="branches[]" value=""
                                    class="flex-1 bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm">
-                            <button type="button" onclick="removeMergerFSBranch(this)" class="px-2 text-red-400 hover:text-red-300">&times;</button>
+                            <button type="button" class="js-remove-mergerfs-branch px-2 text-red-400 hover:text-red-300">&times;</button>
                         </div>
                     `}
                 </div>
-                <button type="button" onclick="addMergerFSBranch(this)" class="mt-2 text-sm text-purple-400 hover:text-purple-300">+ Add Branch</button>
+                <button type="button" class="js-add-mergerfs-branch mt-2 text-sm text-purple-400 hover:text-purple-300">+ Add Branch</button>
             </div>
             <div class="flex items-center gap-3">
                 <input type="checkbox" name="enabled" ${enabled ? 'checked' : ''} class="w-4 h-4 rounded">
@@ -975,7 +937,7 @@ function addMergerFSBranch(button) {
     row.innerHTML = `
         <input type="text" name="branches[]" value=""
                class="flex-1 bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm">
-        <button type="button" onclick="removeMergerFSBranch(this)" class="px-2 text-red-400 hover:text-red-300">&times;</button>
+        <button type="button" class="js-remove-mergerfs-branch px-2 text-red-400 hover:text-red-300">&times;</button>
     `;
     container.appendChild(row);
 }
@@ -987,22 +949,22 @@ function removeMergerFSBranch(button) {
 
 function addArrayItem(key) {
     const container = document.getElementById(`array-${key}`);
-    const idx = container.children.length;
+    if (!container) return;
     const div = document.createElement('div');
-    div.className = 'flex gap-2';
+    div.className = 'flex gap-2 js-array-item-row';
     div.innerHTML = `
         <input type="text" name="${key}[]" value=""
                class="flex-1 bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm">
-        <button type="button" onclick="removeArrayItem('${key}', ${idx})" class="px-2 text-red-400 hover:text-red-300">&times;</button>
+        <button type="button"
+                class="js-remove-array-item px-2 text-red-400 hover:text-red-300"
+                data-array-key="${encodeDataAttr(key)}">&times;</button>
     `;
     container.appendChild(div);
 }
 
-function removeArrayItem(key, idx) {
-    const container = document.getElementById(`array-${key}`);
-    if (container.children[idx]) {
-        container.children[idx].remove();
-    }
+function removeArrayItem(button) {
+    const row = button?.closest('.js-array-item-row');
+    if (row) row.remove();
 }
 
 function closeConfigModal() {
@@ -1075,7 +1037,7 @@ async function saveConfig() {
     const formData = getFormData();
 
     try {
-        const res = await apiFetch(`/api/storage/plugins/${currentPlugin}/config`, {
+        const res = await requestApiResponse(`/api/storage/plugins/${currentPlugin}/config`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(formData)
@@ -1092,7 +1054,7 @@ async function saveConfig() {
 
 async function applyConfig() {
     try {
-        const res = await apiFetch(`/api/storage/plugins/${currentPlugin}/apply`, {
+        const res = await requestApiResponse(`/api/storage/plugins/${currentPlugin}/apply`, {
             method: 'POST'
         });
         const data = await res.json();
@@ -1104,27 +1066,107 @@ async function applyConfig() {
     }
 }
 
-Object.assign(window, {
-    setPoolFilter,
-    runPluginCommand,
-    runSnapraidRecovery,
-    viewSnapraidLog,
-    closeOutputModal,
-    closeCommandParamModal,
-    confirmCommandParams,
-    closeSnapraidSyncModal,
-    confirmSnapraidSync,
-    openConfigModal,
-    closeConfigModal,
-    saveConfig,
-    applyConfig,
-    addMergerFSPool,
-    removeMergerFSPool,
-    addMergerFSBranch,
-    removeMergerFSBranch,
-    addArrayItem,
-    removeArrayItem,
-});
+function bindPoolFilterActions() {
+    const select = document.getElementById('pool-filter');
+    if (!select) return;
+
+    select.addEventListener('change', () => {
+        setPoolFilter(select.value);
+    });
+}
+
+function bindPoolModalActions() {
+    document.addEventListener('click', (event) => {
+        const actionTrigger = event.target.closest('[data-action]');
+        if (actionTrigger) {
+            const { action } = actionTrigger.dataset;
+            switch (action) {
+            case 'close-output-modal':
+                closeOutputModal();
+                break;
+            case 'close-command-param-modal':
+                closeCommandParamModal();
+                break;
+            case 'confirm-command-params':
+                confirmCommandParams();
+                break;
+            case 'close-snapraid-sync-modal':
+                closeSnapraidSyncModal();
+                break;
+            case 'confirm-snapraid-sync':
+                confirmSnapraidSync();
+                break;
+            case 'close-config-modal':
+                closeConfigModal();
+                break;
+            case 'save-config':
+                saveConfig();
+                break;
+            case 'apply-config':
+                applyConfig();
+                break;
+            default:
+                break;
+            }
+        }
+
+        if (event.target instanceof HTMLElement && event.target.matches('[data-overlay-close]')) {
+            const modalId = event.target.dataset.overlayClose;
+            if (modalId) {
+                document.getElementById(modalId)?.classList.add('hidden');
+            }
+
+            if (modalId === 'command-param-modal') {
+                pendingCommand = null;
+            } else if (modalId === 'snapraid-sync-modal') {
+                snapraidSyncContext = null;
+            } else if (modalId === 'config-modal') {
+                currentPlugin = null;
+                currentPluginSchema = null;
+            }
+        }
+    });
+}
+
+function bindPoolConfigFormActions() {
+    document.addEventListener('click', (event) => {
+        const addArrayButton = event.target.closest('.js-add-array-item');
+        if (addArrayButton) {
+            const key = addArrayButton.dataset.arrayKey || '';
+            if (key) addArrayItem(key);
+            return;
+        }
+
+        const removeArrayButton = event.target.closest('.js-remove-array-item');
+        if (removeArrayButton) {
+            removeArrayItem(removeArrayButton);
+            return;
+        }
+
+        const addPoolButton = event.target.closest('.js-add-mergerfs-pool');
+        if (addPoolButton) {
+            addMergerFSPool();
+            return;
+        }
+
+        const removePoolButton = event.target.closest('.js-remove-mergerfs-pool');
+        if (removePoolButton) {
+            removeMergerFSPool(removePoolButton);
+            return;
+        }
+
+        const addBranchButton = event.target.closest('.js-add-mergerfs-branch');
+        if (addBranchButton) {
+            addMergerFSBranch(addBranchButton);
+            return;
+        }
+
+        const removeBranchButton = event.target.closest('.js-remove-mergerfs-branch');
+        if (removeBranchButton) {
+            removeMergerFSBranch(removeBranchButton);
+        }
+    });
+}
 
 (async function initPoolsPage() {
     const authenticated = await ensureAuthenticated();
@@ -1133,5 +1175,8 @@ Object.assign(window, {
     }
 
     window.logout = logoutToLogin;
+    bindPoolFilterActions();
+    bindPoolModalActions();
+    bindPoolConfigFormActions();
     await loadPage();
 })();

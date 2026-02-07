@@ -1,7 +1,10 @@
 import { ensureAuthenticated, logoutToLogin } from '/js/lib/auth.js';
 import { ensureDashboardShell } from '/js/lib/layout.js';
-import { clearClientSession } from '/js/lib/session.js';
-import { clearElement, createErrorState, createLoadingState } from '/js/lib/states.js';
+import { createErrorState, createLoadingState } from '/js/lib/states.js';
+import { requestApiResponse } from '/js/lib/http.js';
+import { formatBytes } from '/js/lib/format.js';
+import { showNotification as showBaseNotification } from '/js/lib/notify.js';
+import { setNodeContent } from '/js/lib/dom.js';
 
 ensureDashboardShell({
     notificationClass: 'fixed top-4 right-4 z-50 w-80 flex flex-col items-end',
@@ -9,43 +12,6 @@ ensureDashboardShell({
 });
 
 let currentStatus = null;
-
-async function apiFetch(url, options = {}) {
-    const response = await fetch(url, options);
-    if (response.status === 401) {
-        clearClientSession();
-        window.location.href = '/login.html';
-        throw new Error('Authentication required');
-    }
-    return response;
-}
-
-function escapeHtml(text) {
-    if (!text) return '';
-    return String(text)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-}
-
-function formatBytes(bytes) {
-    if (!bytes || bytes <= 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
-}
-
-function setNodeContent(containerId, node) {
-    const container = document.getElementById(containerId);
-    if (!container) {
-        return;
-    }
-    clearElement(container);
-    container.appendChild(node);
-}
 
 function setLoadingState(isLoading, message = '') {
     const loadingState = document.getElementById('loading-state');
@@ -135,17 +101,22 @@ function showStatusSection(data) {
     if (healthSection && healthList) {
         if (health.length > 0) {
             healthSection.classList.remove('hidden');
-            healthList.innerHTML = health.map((item) => `<li>${escapeHtml(item)}</li>`).join('');
+            healthList.textContent = '';
+            health.forEach((item) => {
+                const li = document.createElement('li');
+                li.textContent = item;
+                healthList.appendChild(li);
+            });
         } else {
             healthSection.classList.add('hidden');
-            healthList.innerHTML = '';
+            healthList.textContent = '';
         }
     }
 }
 
 async function loadStatus() {
     try {
-        const response = await apiFetch('/api/tailscale/status');
+        const response = await requestApiResponse('/api/tailscale/status');
         const data = await response.json().catch(() => ({}));
 
         if (!response.ok) {
@@ -168,30 +139,16 @@ async function loadStatus() {
 }
 
 function showNotification(message, type = 'info') {
-    const area = document.getElementById('notification-area');
-    if (!area) {
-        return;
-    }
-
-    const colors = {
-        success: 'bg-green-800 border-green-600',
-        error: 'bg-red-800 border-red-600',
-        info: 'bg-blue-800 border-blue-600',
-    };
-
-    const notification = document.createElement('div');
-    notification.className = `${colors[type] || colors.info} border rounded-lg p-4 shadow-lg transition-opacity duration-500`;
-
-    const messageEl = document.createElement('p');
-    messageEl.className = 'text-white text-sm';
-    messageEl.textContent = message;
-    notification.appendChild(messageEl);
-
-    area.appendChild(notification);
-    setTimeout(() => {
-        notification.classList.add('opacity-0');
-        setTimeout(() => notification.remove(), 500);
-    }, 5000);
+    showBaseNotification(message, type, {
+        duration: 5000,
+        baseClass: 'border rounded-lg p-4 shadow-lg transition-opacity duration-500 opacity-0 text-white',
+        colorMap: {
+            success: 'bg-green-800 border-green-600',
+            error: 'bg-red-800 border-red-600',
+            info: 'bg-blue-800 border-blue-600',
+            warning: 'bg-yellow-800 border-yellow-600',
+        },
+    });
 }
 
 async function setupTailscale() {
@@ -200,7 +157,7 @@ async function setupTailscale() {
     showNotification('Installing and configuring Tailscale...', 'info');
 
     try {
-        const response = await apiFetch('/api/setup/tailscale', {
+        const response = await requestApiResponse('/api/setup/tailscale', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ auth_key: authKey }),
@@ -224,7 +181,7 @@ async function reauthenticate() {
     }
 
     try {
-        const response = await apiFetch('/api/tailscale/logout', { method: 'POST' });
+        const response = await requestApiResponse('/api/tailscale/logout', { method: 'POST' });
         const data = await response.json().catch(() => ({}));
 
         if (!response.ok) {
@@ -247,11 +204,22 @@ function refreshStatus() {
     loadStatus();
 }
 
-Object.assign(window, {
-    setupTailscale,
-    reauthenticate,
-    refreshStatus,
-});
+function bindTailscaleActions() {
+    const setupButton = document.getElementById('tailscale-setup-btn');
+    if (setupButton) {
+        setupButton.addEventListener('click', setupTailscale);
+    }
+
+    const refreshButton = document.getElementById('tailscale-refresh-btn');
+    if (refreshButton) {
+        refreshButton.addEventListener('click', refreshStatus);
+    }
+
+    const reauthButton = document.getElementById('tailscale-reauth-btn');
+    if (reauthButton) {
+        reauthButton.addEventListener('click', reauthenticate);
+    }
+}
 
 (async function initTailscalePage() {
     const authenticated = await ensureAuthenticated();
@@ -260,5 +228,6 @@ Object.assign(window, {
     }
 
     window.logout = logoutToLogin;
+    bindTailscaleActions();
     await loadStatus();
 })();

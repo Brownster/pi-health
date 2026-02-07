@@ -1,33 +1,17 @@
 import { ensureAuthenticated, logoutToLogin } from '/js/lib/auth.js';
 import { ensureDashboardShell } from '/js/lib/layout.js';
-import { clearClientSession } from '/js/lib/session.js';
-import { clearElement, createEmptyState, createErrorState, createLoadingState } from '/js/lib/states.js';
+import { createEmptyState, createErrorState, createLoadingState } from '/js/lib/states.js';
+import { requestApiResponse } from '/js/lib/http.js';
+import { escapeHtml, encodeDataAttr } from '/js/lib/format.js';
+import { showNotification } from '/js/lib/notify.js';
+import { setNodeContent } from '/js/lib/dom.js';
 
 ensureDashboardShell({
     notificationClass: 'fixed top-4 right-4 z-50 w-80 flex flex-col items-end',
     includeFooter: true,
 });
 
-async function apiFetch(url, options = {}) {
-    const response = await fetch(url, options);
-    if (response.status === 401) {
-        clearClientSession();
-        window.location.href = '/login.html';
-        throw new Error('Authentication required');
-    }
-    return response;
-}
-
 let sharePlugins = [];
-
-function setNodeContent(containerId, node) {
-    const container = document.getElementById(containerId);
-    if (!container) {
-        return;
-    }
-    clearElement(container);
-    container.appendChild(node);
-}
 
 function showSharesLoading() {
     const loadingState = document.getElementById('loading-state');
@@ -54,43 +38,11 @@ function statusClass(status) {
     return 'status-unconfigured';
 }
 
-function escapeHtml(str) {
-    if (!str) return '';
-    return String(str)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-}
-
-function encodeDataAttr(value) {
-    return escapeHtml(String(value ?? ''));
-}
-
-function showNotification(message, type = 'info') {
-    const area = document.getElementById('notification-area');
-    const colors = {
-        success: 'bg-green-600',
-        error: 'bg-red-600',
-        info: 'bg-blue-600'
-    };
-    const notification = document.createElement('div');
-    notification.className = `${colors[type] || colors.info} p-3 mb-2 rounded shadow-lg transform transition-all duration-300 opacity-0`;
-    notification.textContent = message;
-    area.appendChild(notification);
-    setTimeout(() => notification.classList.replace('opacity-0', 'opacity-100'), 10);
-    setTimeout(() => {
-        notification.classList.replace('opacity-100', 'opacity-0');
-        setTimeout(() => notification.remove(), 300);
-    }, 3000);
-}
-
 async function loadSharePlugins() {
     showSharesLoading();
 
     try {
-        const res = await apiFetch('/api/storage/plugins');
+        const res = await requestApiResponse('/api/storage/plugins');
         const data = await res.json();
         sharePlugins = (data.plugins || []).filter(p => p.category === 'share' && p.enabled);
 
@@ -126,7 +78,7 @@ async function renderSharePlugins() {
         // Fetch detailed share info
         let shareData = { shares: [], service_running: false, status: 'unknown' };
         try {
-            const res = await apiFetch(`/api/storage/shares/${plugin.id}`);
+            const res = await requestApiResponse(`/api/storage/shares/${plugin.id}`);
             shareData = await res.json();
         } catch (e) {
             console.error(`Failed to load shares for ${plugin.id}:`, e);
@@ -148,23 +100,23 @@ async function renderSharePlugins() {
                         <p class="text-sm text-gray-400">${escapeHtml(plugin.description)}</p>
                     </div>
                     <div class="flex gap-2">
-                        <button onclick="runPluginCommand(this.dataset.pluginId, this.dataset.commandId)"
+                        <button type="button"
+                                class="js-run-plugin-command px-3 py-1 text-sm border border-purple-700 text-purple-300 rounded hover:bg-purple-900"
                                 data-plugin-id="${encodeDataAttr(plugin.id)}"
                                 data-command-id="apply"
-                                class="px-3 py-1 text-sm border border-purple-700 text-purple-300 rounded hover:bg-purple-900"
                                 title="Generate configuration file">
                             Apply Config
                         </button>
-                        <button onclick="runPluginCommand(this.dataset.pluginId, this.dataset.commandId)"
+                        <button type="button"
+                                class="js-run-plugin-command px-3 py-1 text-sm border border-yellow-700 text-yellow-300 rounded hover:bg-yellow-900/30"
                                 data-plugin-id="${encodeDataAttr(plugin.id)}"
                                 data-command-id="restart"
-                                class="px-3 py-1 text-sm border border-yellow-700 text-yellow-300 rounded hover:bg-yellow-900/30"
                                 title="Restart Samba service">
                             Restart Service
                         </button>
-                        <button onclick="openAddShareModal(this.dataset.pluginId)"
+                        <button type="button"
+                                class="js-open-add-share coraline-button px-4 py-1 rounded text-sm"
                                 data-plugin-id="${encodeDataAttr(plugin.id)}"
-                                class="coraline-button px-4 py-1 rounded text-sm"
                                 ${!plugin.installed ? 'disabled title="Install Samba first"' : ''}>
                             + Add Share
                         </button>
@@ -189,6 +141,7 @@ async function renderSharePlugins() {
     }
 
     container.innerHTML = html;
+    bindSharePluginActions(container);
 }
 
 function renderShareCard(pluginId, share) {
@@ -226,28 +179,61 @@ function renderShareCard(pluginId, share) {
                 </div>
                 <div class="flex items-center gap-3 ml-4">
                     <label class="toggle-switch" title="${isEnabled ? 'Disable share' : 'Enable share'}">
-                        <input type="checkbox" ${isEnabled ? 'checked' : ''}
+                        <input type="checkbox" class="js-toggle-share" ${isEnabled ? 'checked' : ''}
                                data-plugin-id="${encodeDataAttr(pluginId)}"
-                               data-share-name="${encodeDataAttr(share.name)}"
-                               onchange="toggleShare(this.dataset.pluginId, this.dataset.shareName, this.checked)">
+                               data-share-name="${encodeDataAttr(share.name)}">
                         <span class="toggle-slider"></span>
                     </label>
                     <button data-plugin-id="${encodeDataAttr(pluginId)}"
+                            type="button"
                             data-share="${encodeDataAttr(encodeURIComponent(JSON.stringify(share)))}"
-                            onclick="openEditShareModalFromButton(this)"
-                            class="text-sm text-gray-400 hover:text-white px-2 py-1">
+                            class="js-open-edit-share text-sm text-gray-400 hover:text-white px-2 py-1">
                         Edit
                     </button>
-                    <button onclick="deleteShare(this.dataset.pluginId, this.dataset.shareName)"
+                    <button type="button"
+                            class="js-delete-share text-sm text-red-400 hover:text-red-300 px-2 py-1"
                             data-plugin-id="${encodeDataAttr(pluginId)}"
-                            data-share-name="${encodeDataAttr(share.name)}"
-                            class="text-sm text-red-400 hover:text-red-300 px-2 py-1">
+                            data-share-name="${encodeDataAttr(share.name)}">
                         Delete
                     </button>
                 </div>
             </div>
         </div>
     `;
+}
+
+function bindSharePluginActions(container) {
+    if (!container) return;
+
+    container.querySelectorAll('.js-run-plugin-command').forEach((button) => {
+        button.addEventListener('click', () => {
+            runPluginCommand(button.dataset.pluginId || '', button.dataset.commandId || '');
+        });
+    });
+
+    container.querySelectorAll('.js-open-add-share').forEach((button) => {
+        button.addEventListener('click', () => {
+            openAddShareModal(button.dataset.pluginId || '');
+        });
+    });
+
+    container.querySelectorAll('.js-toggle-share').forEach((checkbox) => {
+        checkbox.addEventListener('change', () => {
+            toggleShare(checkbox.dataset.pluginId || '', checkbox.dataset.shareName || '', checkbox.checked);
+        });
+    });
+
+    container.querySelectorAll('.js-open-edit-share').forEach((button) => {
+        button.addEventListener('click', () => {
+            openEditShareModalFromButton(button);
+        });
+    });
+
+    container.querySelectorAll('.js-delete-share').forEach((button) => {
+        button.addEventListener('click', () => {
+            deleteShare(button.dataset.pluginId || '', button.dataset.shareName || '');
+        });
+    });
 }
 
 function openAddShareModal(pluginId) {
@@ -329,13 +315,13 @@ async function saveShare(event) {
     try {
         let res;
         if (isEdit) {
-            res = await apiFetch(`/api/storage/shares/${pluginId}/${encodeURIComponent(originalName)}`, {
+            res = await requestApiResponse(`/api/storage/shares/${pluginId}/${encodeURIComponent(originalName)}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(share)
             });
         } else {
-            res = await apiFetch(`/api/storage/shares/${pluginId}`, {
+            res = await requestApiResponse(`/api/storage/shares/${pluginId}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(share)
@@ -357,7 +343,7 @@ async function saveShare(event) {
 
 async function toggleShare(pluginId, shareName, enabled) {
     try {
-        const res = await apiFetch(`/api/storage/shares/${pluginId}/${encodeURIComponent(shareName)}/toggle`, {
+        const res = await requestApiResponse(`/api/storage/shares/${pluginId}/${encodeURIComponent(shareName)}/toggle`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ enabled })
@@ -382,7 +368,7 @@ async function deleteShare(pluginId, shareName) {
     }
 
     try {
-        const res = await apiFetch(`/api/storage/shares/${pluginId}/${encodeURIComponent(shareName)}`, {
+        const res = await requestApiResponse(`/api/storage/shares/${pluginId}/${encodeURIComponent(shareName)}`, {
             method: 'DELETE'
         });
 
@@ -409,7 +395,7 @@ async function runPluginCommand(pluginId, commandId) {
     document.getElementById('output-modal').classList.remove('hidden');
 
     try {
-        const res = await apiFetch(`/api/storage/plugins/${pluginId}/commands/${commandId}`, {
+        const res = await requestApiResponse(`/api/storage/plugins/${pluginId}/commands/${commandId}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }
         });
@@ -453,18 +439,28 @@ function closeOutputModal() {
     document.getElementById('output-modal').classList.add('hidden');
 }
 
-// Load on page load
+function bindSharePageActions() {
+    document.getElementById('share-form')?.addEventListener('submit', saveShare);
 
-Object.assign(window, {
-    closeShareModal,
-    saveShare,
-    closeOutputModal,
-    runPluginCommand,
-    openAddShareModal,
-    openEditShareModalFromButton,
-    toggleShare,
-    deleteShare,
-});
+    document.addEventListener('click', (event) => {
+        const trigger = event.target.closest('[data-action]');
+        if (trigger) {
+            const { action } = trigger.dataset;
+            if (action === 'close-share-modal') {
+                closeShareModal();
+            } else if (action === 'close-output-modal') {
+                closeOutputModal();
+            }
+        }
+
+        if (event.target instanceof HTMLElement && event.target.matches('[data-overlay-close]')) {
+            const modalId = event.target.dataset.overlayClose;
+            if (modalId) {
+                document.getElementById(modalId)?.classList.add('hidden');
+            }
+        }
+    });
+}
 
 (async function initSharesPage() {
     const authenticated = await ensureAuthenticated();
@@ -473,5 +469,6 @@ Object.assign(window, {
     }
 
     window.logout = logoutToLogin;
+    bindSharePageActions();
     await loadSharePlugins();
 })();
