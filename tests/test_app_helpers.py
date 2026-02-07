@@ -26,6 +26,7 @@ from app import (
     calculate_container_memory_stats,
     calculate_container_network_stats,
     exec_in_container,
+    system_action,
 )
 
 
@@ -214,6 +215,22 @@ class TestHelpers:
         assert exit_code == 0
         assert "ok" in output
         assert "err" in output
+
+    def test_system_action_shutdown(self):
+        with patch("app.subprocess.Popen") as mock_popen:
+            result = system_action("shutdown")
+        mock_popen.assert_called_once_with(["sudo", "shutdown", "-h", "now"])
+        assert result["status"] == "Shutdown initiated"
+
+    def test_system_action_reboot(self):
+        with patch("app.subprocess.Popen") as mock_popen:
+            result = system_action("reboot")
+        mock_popen.assert_called_once_with(["sudo", "reboot"])
+        assert result["status"] == "Reboot initiated"
+
+    def test_system_action_invalid(self):
+        result = system_action("invalid")
+        assert result["error"] == "Invalid system action"
 
 
 class TestNetworkDiagnostics:
