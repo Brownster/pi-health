@@ -1,0 +1,69 @@
+.coraline-button {
+    background: linear-gradient(to bottom, #5f4b8b, #372b53);
+    border: 1px solid #8a6cbd;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.25);
+    transition: all 0.3s ease;
+}
+
+.coraline-button:hover:not(:disabled) {
+    background: linear-gradient(to bottom, #6f58a3, #413162);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 10px rgba(0, 0, 0, 0.3);
+}
+
+.coraline-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.status-pill {
+    display: inline-block;
+    padding: 0.25rem 0.75rem;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 500;
+}
+
+.status-up {
+    background-color: rgba(52, 211, 153, 0.2);
+    color: #34d399;
+    border: 1px solid #34d399;
+}
+
+.status-down {
+    background-color: rgba(248, 113, 113, 0.2);
+    color: #f87171;
+    border: 1px solid #f87171;
+}
+
+.status-unknown {
+    background-color: rgba(156, 163, 175, 0.2);
+    color: #9ca3af;
+    border: 1px solid #9ca3af;
+}
+
+.info-card {
+    background-color: rgba(17, 24, 39, 0.5);
+    border: 1px solid rgba(107, 33, 168, 0.3);
+    border-radius: 0.5rem;
+    padding: 1rem;
+}
+
+.info-label {
+    color: #9ca3af;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.info-value {
+    color: #e5e7eb;
+    font-size: 1rem;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+}
+
+.interface-card {
+    background-color: rgba(17, 24, 39, 0.7);
+    border: 1px solid rgba(107, 33, 168, 0.4);
+    border-radius: 0.5rem;
+}

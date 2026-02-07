@@ -57,7 +57,7 @@
 - [x] Migrate `shares`.
 - [x] Migrate `plugins`.
 - [x] Migrate `disks`.
-- [ ] Migrate `network`.
+- [x] Migrate `network`.
 - [ ] Migrate `tailscale`.
 - [ ] Migrate `tools`.
 - [ ] Backfill already-migrated pages that still use page-local shell/state markup instead of shared primitives.
