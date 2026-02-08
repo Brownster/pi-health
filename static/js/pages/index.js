@@ -3,8 +3,8 @@ import { ensureDashboardShell } from '/js/lib/layout.js';
 import { requestJson } from '/js/lib/http.js';
 
 ensureDashboardShell({
-    navClass: 'bg-slate-900/90 shadow-md',
-    notificationClass: 'fixed top-4 right-4 z-50 space-y-2',
+    notificationClass: 'fixed top-4 right-4 z-50 w-72 flex flex-col items-end',
+    includeFooter: true,
 });
 
 const serviceGrid = document.getElementById('service-grid');

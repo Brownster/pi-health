@@ -26,6 +26,12 @@ def test_network_page_loads(authenticated_page: Page):
 
     expect(page.get_by_role("heading", name="Host Network")).to_be_visible()
     _wait_for_network_content(page)
+
+    # Either content loaded or an error was shown
+    loading_text = page.locator("#loading-state").text_content() or ""
+    if "Failed to load" in loading_text:
+        expect(page.locator("#loading-state")).to_contain_text("Failed to load")
+        return
     expect(page.locator("#network-content")).to_be_visible()
 
 

@@ -16,8 +16,12 @@ def test_system_metrics_page_renders(authenticated_page: Page):
 
     stats_resp = page.request.get(f"{BASE_URL}/api/stats")
     if not stats_resp.ok:
+        # First-load failure hides the metrics grid and shows an error state
         page.wait_for_function(
-            "() => document.getElementById('cpu-usage')?.textContent.includes('Error')",
+            """() => {
+                const state = document.getElementById('system-state');
+                return state && !state.classList.contains('hidden');
+            }""",
             timeout=10000
         )
         expect(page.locator("#notification-area")).to_contain_text(
