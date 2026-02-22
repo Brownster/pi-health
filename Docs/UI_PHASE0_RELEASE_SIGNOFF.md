@@ -9,6 +9,8 @@ GO for standalone Phase 0 release.
 
 Phase 0 objectives are met with automated evidence on desktop/phone/tablet and ticket-level QA reviews. Remaining follow-ups are non-blocking and documented below.
 
+Downstream decision gate outcome (2026-02-22): GO for Phase 1 foundation, recorded in `Docs/UI_PHASE1_DECISION_GATE.md`.
+
 ## Validation Evidence
 
 ### Automated test evidence (executed 2026-02-22)

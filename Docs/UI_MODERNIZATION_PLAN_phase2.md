@@ -1,10 +1,11 @@
 # UI Modernization Plan - Phase 2 (Reconciled)
 
 Date: 2026-02-22  
-Status: Phase 0 complete, decision gate ready  
+Status: Phase 0 complete, Phase 1 decision gate approved  
 Owner: Pi-Health maintainers
 
 Phase 0 signoff artifact: `Docs/UI_PHASE0_RELEASE_SIGNOFF.md`
+Phase 1 decision gate artifact: `Docs/UI_PHASE1_DECISION_GATE.md`
 
 ## 1. Project Overview
 
@@ -64,6 +65,8 @@ After Phase 0 completion, run a formal decision checkpoint:
 2. If major constraints remain, proceed with Phases 1+ (React/shadcn path).
 
 This gate is mandatory to avoid conflating urgent bug-fix scope with multi-month rewrite scope.
+
+Outcome (2026-02-22): GO. Proceed with Phase 1 foundation while keeping the standalone Phase 0 hotfix release path intact.
 
 ## 5. Technical Decisions
 
@@ -177,6 +180,8 @@ Execution ticket set: `Docs/UI_PHASE0_HOTFIX_TICKETS.md`
 ### Phase 1: Foundation (Conditional, 1-2 weeks)
 
 Precondition: Decision gate approves React migration.
+
+Execution ticket set: `Docs/UI_PHASE1_FOUNDATION_TICKETS.md`
 
 1. Scaffold `frontend/` app.
 2. Implement shell primitives and auth guard.
