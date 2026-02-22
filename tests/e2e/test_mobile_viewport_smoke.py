@@ -87,6 +87,7 @@ def _install_container_api_mocks(page: Page) -> None:
 
 
 def _wait_for_container_list(page: Page) -> None:
+    # Structural readiness check: wait for at least one rendered container row.
     page.wait_for_function(
         """() => {
             return !!document.querySelector('#container-list tr[data-container-id]');
