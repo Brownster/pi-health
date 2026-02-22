@@ -1,6 +1,6 @@
 /**
  * Shared Navigation Component
- * Provides consistent dropdown navigation across all pages.
+ * Provides consistent touch-first navigation across all pages.
  */
 
 // Navigation configuration
@@ -42,6 +42,108 @@ const NAV_CONFIG = {
     ]
 };
 
+let navListenersBound = false;
+
+function normalizeCurrentPage(currentPage) {
+    if (currentPage === '/index.html') {
+        return '/';
+    }
+    return currentPage;
+}
+
+function isItemActive(item, currentPage) {
+    if (item.href) {
+        return item.href === currentPage;
+    }
+    return item.children?.some((child) => child.href === currentPage) || false;
+}
+
+function renderDesktopLinks(currentPage) {
+    return NAV_CONFIG.items.map((item, index) => {
+        if (item.children) {
+            const isActive = isItemActive(item, currentPage);
+            const dropdownId = `nav-dropdown-${index}`;
+            const childrenHtml = item.children.map((child) => `
+                <a href="${child.href}" class="nav-dropdown-link ${child.href === currentPage ? 'nav-dropdown-link-active' : ''}">
+                    ${child.label}
+                </a>
+            `).join('');
+
+            return `
+                <div class="nav-dropdown relative" data-nav-dropdown>
+                    <button type="button"
+                            class="nav-link ${isActive ? 'nav-active' : ''} flex items-center gap-1"
+                            data-nav-dropdown-toggle
+                            aria-expanded="false"
+                            aria-controls="${dropdownId}">
+                        ${item.label}
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                        </svg>
+                    </button>
+                    <div id="${dropdownId}"
+                         class="nav-dropdown-menu absolute hidden bg-gray-800 border border-purple-700 rounded-lg shadow-xl py-1 min-w-[170px] z-50"
+                         data-nav-dropdown-menu>
+                        ${childrenHtml}
+                    </div>
+                </div>
+            `;
+        }
+
+        const isActive = isItemActive(item, currentPage);
+        return `
+            <a href="${item.href}" class="nav-link ${isActive ? 'nav-active' : ''}">
+                ${item.label}
+            </a>
+        `;
+    }).join('');
+}
+
+function renderMobileLinks(currentPage) {
+    return NAV_CONFIG.items.map((item, index) => {
+        if (item.children) {
+            const isActive = isItemActive(item, currentPage);
+            const sectionId = `nav-mobile-section-${index}`;
+            const sectionOpenClass = isActive ? '' : 'hidden';
+            const expanded = isActive ? 'true' : 'false';
+            const childrenHtml = item.children.map((child) => `
+                <button type="button"
+                        class="nav-mobile-sublink ${child.href === currentPage ? 'nav-active' : ''}"
+                        data-nav-mobile-target="${child.href}">
+                    ${child.label}
+                </button>
+            `).join('');
+
+            return `
+                <div class="nav-mobile-section">
+                    <button type="button"
+                            class="nav-mobile-link nav-mobile-section-toggle ${isActive ? 'nav-active' : ''}"
+                            data-nav-mobile-section-toggle
+                            aria-expanded="${expanded}"
+                            aria-controls="${sectionId}">
+                        <span>${item.label}</span>
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                        </svg>
+                    </button>
+                    <div id="${sectionId}" class="nav-mobile-submenu ${sectionOpenClass}" data-nav-mobile-submenu>
+                        ${childrenHtml}
+                    </div>
+                </div>
+            `;
+        }
+
+        const isActive = isItemActive(item, currentPage);
+        return `
+            <button type="button"
+                    class="nav-mobile-link ${isActive ? 'nav-active' : ''}"
+                    data-nav-mobile-target="${item.href}">
+                <span>${item.label}</span>
+            </button>
+        `;
+    }).join('');
+}
+
 /**
  * Render the navigation bar
  * @param {string} currentPage - Current page path (e.g., '/disks.html')
@@ -50,118 +152,258 @@ function renderNav(currentPage) {
     const nav = document.getElementById('main-nav');
     if (!nav) return;
 
-    // Normalize currentPage - handle both '/' and '/index.html'
-    if (currentPage === '/index.html') {
-        currentPage = '/';
-    }
-
-    const linksHtml = NAV_CONFIG.items.map(item => {
-        if (item.children) {
-            // Dropdown menu
-            const isActive = item.children.some(c => c.href === currentPage);
-            return `
-                <div class="nav-dropdown relative">
-                    <button class="nav-link ${isActive ? 'nav-active' : ''} flex items-center gap-1"
-                            onclick="toggleDropdown(this)">
-                        ${item.label}
-                        <svg class="w-4 h-4 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
-                        </svg>
-                    </button>
-                    <div class="nav-dropdown-menu absolute hidden bg-gray-800 border border-purple-700 rounded-lg shadow-xl py-1 min-w-[160px] z-50">
-                        ${item.children.map(child => `
-                            <a href="${child.href}"
-                               class="block px-4 py-2 text-sm ${child.href === currentPage ? 'text-white bg-purple-800' : 'text-blue-200 hover:bg-purple-700 hover:text-white'}">
-                                ${child.label}
-                            </a>
-                        `).join('')}
-                    </div>
-                </div>
-            `;
-        } else {
-            // Simple link
-            const isActive = item.href === currentPage;
-            return `
-                <a href="${item.href}" class="nav-link ${isActive ? 'nav-active' : ''}">
-                    ${item.label}
-                </a>
-            `;
-        }
-    }).join('');
+    const normalizedCurrentPage = normalizeCurrentPage(currentPage);
+    const desktopLinksHtml = renderDesktopLinks(normalizedCurrentPage);
+    const mobileLinksHtml = renderMobileLinks(normalizedCurrentPage);
 
     nav.innerHTML = `
-        <div class="container mx-auto px-4">
-            <div class="flex items-center justify-between h-12">
+        <div class="container mx-auto px-4 nav-shell">
+            <div class="hidden lg:flex items-center justify-between h-12">
                 <div class="flex space-x-1 nav-links">
-                    ${linksHtml}
+                    ${desktopLinksHtml}
                 </div>
                 <div class="flex items-center space-x-3">
-                    <span id="logged-in-user" class="text-blue-200 text-sm"></span>
-                    <button onclick="logout()" class="px-3 py-2 rounded-md text-red-300 hover:bg-red-800 hover:text-white font-medium text-sm">Logout</button>
+                    <span id="logged-in-user" class="logged-in-user text-blue-200 text-sm" data-nav-username></span>
+                    <button type="button" onclick="logout()" class="px-3 py-2 rounded-md text-red-300 hover:bg-red-800 hover:text-white font-medium text-sm">Logout</button>
+                </div>
+            </div>
+
+            <div class="lg:hidden nav-mobile-header">
+                <button type="button"
+                        class="nav-menu-toggle"
+                        data-nav-mobile-menu-toggle
+                        aria-expanded="false"
+                        aria-controls="nav-mobile-panel">
+                    <span>Menu</span>
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8h16M4 16h16"/>
+                    </svg>
+                </button>
+                <div class="nav-user-actions">
+                    <span class="logged-in-user text-blue-200 text-sm" data-nav-username></span>
+                    <button type="button" onclick="logout()" class="nav-logout-btn">Logout</button>
+                </div>
+            </div>
+
+            <div id="nav-mobile-panel" class="nav-mobile-panel hidden lg:hidden" data-nav-mobile-panel>
+                <div class="nav-mobile-links">
+                    ${mobileLinksHtml}
                 </div>
             </div>
         </div>
     `;
 
-    // Set username if available
-    const username = sessionStorage.getItem('username');
-    if (username) {
-        const userEl = document.getElementById('logged-in-user');
-        if (userEl) userEl.textContent = username;
-    }
-
-    // Setup hover behavior for dropdowns
-    setupDropdownHover();
-}
-
-/**
- * Toggle dropdown menu (for click behavior)
- */
-function toggleDropdown(button) {
-    const dropdown = button.closest('.nav-dropdown');
-    const menu = dropdown.querySelector('.nav-dropdown-menu');
-
-    // Close other dropdowns
-    document.querySelectorAll('.nav-dropdown-menu').forEach(m => {
-        if (m !== menu) m.classList.add('hidden');
+    const username = sessionStorage.getItem('username') || '';
+    document.querySelectorAll('[data-nav-username]').forEach((node) => {
+        node.textContent = username;
     });
 
-    menu.classList.toggle('hidden');
+    setupNavigationInteractions();
 }
 
-/**
- * Setup hover behavior for dropdown menus
- */
-function setupDropdownHover() {
-    document.querySelectorAll('.nav-dropdown').forEach(dropdown => {
-        const menu = dropdown.querySelector('.nav-dropdown-menu');
-        let hideTimeout = null;
+function closeDesktopDropdowns(exceptButton = null) {
+    document.querySelectorAll('[data-nav-dropdown]').forEach((dropdown) => {
+        const toggle = dropdown.querySelector('[data-nav-dropdown-toggle]');
+        const menu = dropdown.querySelector('[data-nav-dropdown-menu]');
 
-        dropdown.addEventListener('mouseenter', () => {
-            // Cancel any pending hide
-            if (hideTimeout) {
-                clearTimeout(hideTimeout);
-                hideTimeout = null;
+        if (!toggle || !menu) {
+            return;
+        }
+        if (exceptButton && toggle === exceptButton) {
+            return;
+        }
+
+        toggle.setAttribute('aria-expanded', 'false');
+        menu.classList.add('hidden');
+    });
+}
+
+function openDesktopDropdown(button) {
+    const dropdown = button.closest('[data-nav-dropdown]');
+    if (!dropdown) {
+        return;
+    }
+
+    const menu = dropdown.querySelector('[data-nav-dropdown-menu]');
+    if (!menu) {
+        return;
+    }
+
+    closeDesktopDropdowns(button);
+    button.setAttribute('aria-expanded', 'true');
+    menu.classList.remove('hidden');
+}
+
+function toggleDesktopDropdown(button) {
+    const dropdown = button.closest('[data-nav-dropdown]');
+    if (!dropdown) {
+        return;
+    }
+
+    const menu = dropdown.querySelector('[data-nav-dropdown-menu]');
+    if (!menu) {
+        return;
+    }
+
+    const currentlyExpanded = button.getAttribute('aria-expanded') === 'true';
+    closeDesktopDropdowns(button);
+
+    if (currentlyExpanded) {
+        button.setAttribute('aria-expanded', 'false');
+        menu.classList.add('hidden');
+        return;
+    }
+
+    openDesktopDropdown(button);
+}
+
+function setMobileSectionState(button, shouldOpen) {
+    const sectionId = button.getAttribute('aria-controls');
+    if (!sectionId) {
+        return;
+    }
+
+    const section = document.getElementById(sectionId);
+    if (!section) {
+        return;
+    }
+
+    button.setAttribute('aria-expanded', shouldOpen ? 'true' : 'false');
+    section.classList.toggle('hidden', !shouldOpen);
+}
+
+function closeMobileSections(exceptButton = null) {
+    document.querySelectorAll('[data-nav-mobile-section-toggle]').forEach((button) => {
+        if (exceptButton && button === exceptButton) {
+            return;
+        }
+        setMobileSectionState(button, false);
+    });
+}
+
+function closeMobileMenu() {
+    const panel = document.querySelector('[data-nav-mobile-panel]');
+    const toggle = document.querySelector('[data-nav-mobile-menu-toggle]');
+
+    if (panel) {
+        panel.classList.add('hidden');
+    }
+    if (toggle) {
+        toggle.setAttribute('aria-expanded', 'false');
+    }
+}
+
+function toggleMobileMenu(button) {
+    const panel = document.querySelector('[data-nav-mobile-panel]');
+    if (!panel) {
+        return;
+    }
+
+    const shouldOpen = panel.classList.contains('hidden');
+    panel.classList.toggle('hidden', !shouldOpen);
+    button.setAttribute('aria-expanded', shouldOpen ? 'true' : 'false');
+}
+
+function setupNavigationInteractions() {
+    const nav = document.getElementById('main-nav');
+    if (!nav || navListenersBound) {
+        return;
+    }
+
+    navListenersBound = true;
+
+    nav.addEventListener('click', (event) => {
+        const desktopToggle = event.target.closest('[data-nav-dropdown-toggle]');
+        if (desktopToggle) {
+            event.preventDefault();
+            toggleDesktopDropdown(desktopToggle);
+            return;
+        }
+
+        const mobileMenuToggle = event.target.closest('[data-nav-mobile-menu-toggle]');
+        if (mobileMenuToggle) {
+            event.preventDefault();
+            toggleMobileMenu(mobileMenuToggle);
+            return;
+        }
+
+        const mobileSectionToggle = event.target.closest('[data-nav-mobile-section-toggle]');
+        if (mobileSectionToggle) {
+            event.preventDefault();
+            const isOpen = mobileSectionToggle.getAttribute('aria-expanded') === 'true';
+            closeMobileSections(mobileSectionToggle);
+            setMobileSectionState(mobileSectionToggle, !isOpen);
+            return;
+        }
+
+        const mobileLink = event.target.closest('[data-nav-mobile-target]');
+        if (mobileLink) {
+            const targetHref = mobileLink.getAttribute('data-nav-mobile-target');
+            closeMobileSections();
+            closeMobileMenu();
+            if (targetHref) {
+                window.location.href = targetHref;
             }
-            menu.classList.remove('hidden');
+            return;
+        }
+    });
+
+    nav.querySelectorAll('[data-nav-dropdown]').forEach((dropdown) => {
+        dropdown.addEventListener('mouseenter', () => {
+            if (!window.matchMedia('(hover: hover)').matches || window.innerWidth < 1024) {
+                return;
+            }
+            const toggle = dropdown.querySelector('[data-nav-dropdown-toggle]');
+            if (toggle) {
+                openDesktopDropdown(toggle);
+            }
         });
 
         dropdown.addEventListener('mouseleave', () => {
-            // Small delay before hiding to allow moving to submenu
-            hideTimeout = setTimeout(() => {
+            if (!window.matchMedia('(hover: hover)').matches || window.innerWidth < 1024) {
+                return;
+            }
+            const toggle = dropdown.querySelector('[data-nav-dropdown-toggle]');
+            const menu = dropdown.querySelector('[data-nav-dropdown-menu]');
+            if (toggle && menu) {
+                toggle.setAttribute('aria-expanded', 'false');
                 menu.classList.add('hidden');
-            }, 150);
+            }
         });
     });
 
-    // Close dropdowns when clicking outside
-    document.addEventListener('click', (e) => {
-        if (!e.target.closest('.nav-dropdown')) {
-            document.querySelectorAll('.nav-dropdown-menu').forEach(m => {
-                m.classList.add('hidden');
-            });
+    document.addEventListener('click', (event) => {
+        if (!event.target.closest('[data-nav-dropdown]')) {
+            closeDesktopDropdowns();
+        }
+        if (!event.target.closest('#main-nav')) {
+            closeMobileSections();
+            closeMobileMenu();
         }
     });
+
+    document.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape') {
+            return;
+        }
+        closeDesktopDropdowns();
+        closeMobileSections();
+        closeMobileMenu();
+    });
+
+    window.addEventListener('resize', () => {
+        if (window.innerWidth >= 1024) {
+            closeMobileSections();
+            closeMobileMenu();
+        }
+    });
+}
+
+/**
+ * Backwards-compatible dropdown toggle for any older inline handlers.
+ */
+function toggleDropdown(button) {
+    toggleDesktopDropdown(button);
 }
 
 /**
@@ -173,6 +415,10 @@ function injectNavStyles() {
     const style = document.createElement('style');
     style.id = 'nav-styles';
     style.textContent = `
+        .nav-shell {
+            padding-top: 0.125rem;
+            padding-bottom: 0.125rem;
+        }
         .nav-link {
             padding: 0.5rem 0.75rem;
             border-radius: 0.375rem;
@@ -182,6 +428,9 @@ function injectNavStyles() {
             cursor: pointer;
             background: transparent;
             border: none;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
         }
         .nav-link:hover {
             background-color: var(--theme-nav-active-bg, rgba(107, 33, 168, 0.8));
@@ -194,22 +443,134 @@ function injectNavStyles() {
         }
         .nav-dropdown-menu {
             left: 0;
-            top: 100%;
-            padding-top: 0.25rem;
+            top: calc(100% + 0.25rem);
+            background-color: var(--theme-nav-dropdown-bg, #1f2937);
+            border-color: var(--theme-nav-dropdown-border, #6b21a8);
         }
-        .nav-dropdown-menu::before {
-            content: '';
-            position: absolute;
-            top: -8px;
-            left: 0;
-            right: 0;
-            height: 8px;
+        .nav-dropdown-link {
+            display: block;
+            padding: 0.5rem 0.9rem;
+            font-size: 0.875rem;
+            color: var(--theme-nav-link-color, #bfdbfe);
+            text-decoration: none;
         }
-        .nav-dropdown button svg {
+        .nav-dropdown-link:hover {
+            background-color: var(--theme-nav-active-bg, rgba(107, 33, 168, 0.8));
+            color: var(--theme-nav-link-hover, white);
+        }
+        .nav-dropdown-link-active {
+            color: var(--theme-nav-active-color, white) !important;
+            background-color: var(--theme-nav-active-bg, #1e40af) !important;
+        }
+        [data-nav-dropdown-toggle] svg,
+        [data-nav-mobile-section-toggle] svg {
             transition: transform 0.2s ease;
         }
-        .nav-dropdown:hover button svg {
+        [data-nav-dropdown-toggle][aria-expanded='true'] svg,
+        [data-nav-mobile-section-toggle][aria-expanded='true'] svg {
             transform: rotate(180deg);
+        }
+        .nav-mobile-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.65rem;
+            min-height: 3rem;
+            padding-top: 0.25rem;
+            padding-bottom: 0.25rem;
+        }
+        .nav-menu-toggle {
+            border: 1px solid var(--theme-nav-active-border, #60a5fa);
+            border-radius: 0.5rem;
+            color: var(--theme-nav-link-color, #bfdbfe);
+            background: rgba(17, 24, 39, 0.35);
+            min-height: 2.75rem;
+            padding: 0.45rem 0.65rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            font-weight: 600;
+            font-size: 0.875rem;
+            line-height: 1;
+        }
+        .nav-user-actions {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            min-width: 0;
+        }
+        .nav-user-actions [data-nav-username] {
+            max-width: 8.25rem;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .nav-logout-btn {
+            border: none;
+            border-radius: 0.375rem;
+            color: #fca5a5;
+            background: transparent;
+            padding: 0.4rem 0.6rem;
+            font-weight: 600;
+            font-size: 0.8125rem;
+            line-height: 1.2;
+        }
+        .nav-logout-btn:hover {
+            background: #991b1b;
+            color: #fff;
+        }
+        .nav-mobile-panel {
+            border-top: 1px solid rgba(148, 163, 184, 0.3);
+            margin-top: 0.25rem;
+            padding-top: 0.5rem;
+            padding-bottom: 0.65rem;
+        }
+        .nav-mobile-links {
+            display: grid;
+            gap: 0.25rem;
+        }
+        .nav-mobile-link {
+            width: 100%;
+            min-height: 2.75rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border: none;
+            border-radius: 0.5rem;
+            background: transparent;
+            color: var(--theme-nav-link-color, #bfdbfe);
+            text-decoration: none;
+            padding: 0.55rem 0.7rem;
+            font-weight: 500;
+            font-size: 0.95rem;
+        }
+        .nav-mobile-link:hover {
+            background-color: var(--theme-nav-active-bg, rgba(107, 33, 168, 0.8));
+            color: var(--theme-nav-link-hover, white);
+        }
+        .nav-mobile-submenu {
+            display: grid;
+            gap: 0.2rem;
+            padding-left: 0.45rem;
+            padding-bottom: 0.35rem;
+        }
+        .nav-mobile-sublink {
+            display: block;
+            width: 100%;
+            min-height: 2.75rem;
+            text-decoration: none;
+            border-radius: 0.4rem;
+            border: none;
+            background: transparent;
+            text-align: left;
+            color: var(--theme-nav-link-color, #bfdbfe);
+            padding: 0.45rem 0.7rem;
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+        .nav-mobile-sublink:hover {
+            background-color: var(--theme-nav-active-bg, rgba(107, 33, 168, 0.8));
+            color: var(--theme-nav-link-hover, white);
         }
     `;
     document.head.appendChild(style);

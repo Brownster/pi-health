@@ -5,19 +5,23 @@
     transition: all 0.3s ease;
 }
 
-.coraline-button:hover {
-    background: linear-gradient(to bottom, var(--coraline-600), var(--coraline-900));
-    transform: translateY(-2px);
-    box-shadow: 0 6px 10px rgba(0, 0, 0, 0.3);
+@media (hover: hover) and (pointer: fine) {
+    .coraline-button:hover {
+        background: linear-gradient(to bottom, var(--coraline-600), var(--coraline-900));
+        transform: translateY(-2px);
+        box-shadow: 0 6px 10px rgba(0, 0, 0, 0.3);
+    }
 }
 
 .disk-card {
     transition: all 0.2s ease;
 }
 
-.disk-card:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.3);
+@media (hover: hover) and (pointer: fine) {
+    .disk-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 16px rgba(0, 0, 0, 0.3);
+    }
 }
 
 .progress-bar {
@@ -93,10 +97,28 @@
     border: 1px solid var(--status-neutral);
 }
 
-.smart-attr-row:hover {
-    background-color: rgba(139, 92, 246, 0.1);
+@media (hover: hover) and (pointer: fine) {
+    .smart-attr-row:hover {
+        background-color: rgba(139, 92, 246, 0.1);
+    }
 }
 
 .smart-attr-critical {
     background-color: rgba(248, 113, 113, 0.1);
+}
+
+.disk-action-btn {
+    min-height: 2.75rem;
+}
+
+.disk-smart-table-wrap {
+    -webkit-overflow-scrolling: touch;
+}
+
+.disk-smart-table-wrap table {
+    border-collapse: collapse;
+}
+
+.smart-attr-row td {
+    vertical-align: top;
 }

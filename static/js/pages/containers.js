@@ -12,7 +12,7 @@ ensureDashboardShell({
 
 function showNotification(message, type = 'info') {
     showBaseNotification(message, type, {
-        baseClass: 'bg-opacity-90 p-3 mb-2 rounded shadow-lg transform transition-all duration-500 opacity-0 text-white',
+        baseClass: 'bg-opacity-90 p-3 rounded shadow-lg transform transition-all duration-500 opacity-0 text-white',
     });
 }
 
@@ -174,8 +174,10 @@ function appendTableState(stateNode) {
     clearContainerList();
 
     const row = document.createElement('tr');
+    row.className = 'containers-state-row';
     const cell = document.createElement('td');
     cell.colSpan = 8;
+    cell.dataset.stateCell = 'true';
     cell.className = 'px-4 py-4';
     cell.appendChild(stateNode);
     row.appendChild(cell);
@@ -262,33 +264,41 @@ function buildUnavailableRow(container) {
 
     const nameCell = document.createElement('td');
     nameCell.className = 'px-6 py-4 whitespace-nowrap text-sm font-medium';
+    nameCell.dataset.label = 'Container';
     nameCell.textContent = container.name || 'Docker unavailable';
     row.appendChild(nameCell);
 
     const imageCell = document.createElement('td');
     imageCell.className = 'px-6 py-4 whitespace-nowrap text-sm';
+    imageCell.dataset.label = 'Image';
     imageCell.textContent = container.image || 'N/A';
     row.appendChild(imageCell);
 
     const statusCell = document.createElement('td');
     statusCell.className = 'px-6 py-4 whitespace-nowrap';
+    statusCell.dataset.label = 'Status';
     statusCell.appendChild(createStatusBadge(container.status || 'unavailable'));
     row.appendChild(statusCell);
 
     for (let i = 0; i < 3; i += 1) {
         const cell = document.createElement('td');
         cell.className = 'px-4 py-4 whitespace-nowrap text-sm text-gray-500';
+        if (i === 0) cell.dataset.label = 'CPU';
+        if (i === 1) cell.dataset.label = 'Memory';
+        if (i === 2) cell.dataset.label = 'Network';
         cell.textContent = '—';
         row.appendChild(cell);
     }
 
     const webCell = document.createElement('td');
     webCell.className = 'px-6 py-4 whitespace-nowrap text-sm';
+    webCell.dataset.label = 'Web UI';
     webCell.textContent = 'N/A';
     row.appendChild(webCell);
 
     const actionsCell = document.createElement('td');
     actionsCell.className = 'px-4 py-4 whitespace-nowrap text-sm text-gray-500';
+    actionsCell.dataset.label = 'Actions';
     actionsCell.textContent = '—';
     row.appendChild(actionsCell);
 
@@ -307,11 +317,13 @@ function buildContainerRow(container, showStatsLoading = false) {
     const nameCell = document.createElement('td');
     nameCell.className = 'px-6 py-4 whitespace-nowrap text-sm font-medium';
     nameCell.dataset.cell = 'name';
+    nameCell.dataset.label = 'Container';
     renderContainerNameCell(nameCell, container);
     row.appendChild(nameCell);
 
     const imageCell = document.createElement('td');
     imageCell.className = 'px-6 py-4 whitespace-nowrap text-sm text-gray-400 max-w-xs truncate';
+    imageCell.dataset.label = 'Image';
     imageCell.title = container.image || '';
     imageCell.textContent = container.image || '—';
     row.appendChild(imageCell);
@@ -319,29 +331,34 @@ function buildContainerRow(container, showStatsLoading = false) {
     const statusCell = document.createElement('td');
     statusCell.className = 'px-6 py-4 whitespace-nowrap';
     statusCell.dataset.cell = 'status';
+    statusCell.dataset.label = 'Status';
     statusCell.appendChild(createStatusBadge(container.status));
     row.appendChild(statusCell);
 
     const cpuCell = document.createElement('td');
     cpuCell.className = 'px-4 py-4 whitespace-nowrap text-sm';
     cpuCell.dataset.stat = 'cpu';
+    cpuCell.dataset.label = 'CPU';
     cpuCell.innerHTML = formatCpuCell(container.cpu_percent, loading);
     row.appendChild(cpuCell);
 
     const memoryCell = document.createElement('td');
     memoryCell.className = 'px-4 py-4 whitespace-nowrap text-sm';
     memoryCell.dataset.stat = 'memory';
+    memoryCell.dataset.label = 'Memory';
     memoryCell.innerHTML = formatMemoryCell(container.memory_percent, container.memory_used, container.memory_limit, loading);
     row.appendChild(memoryCell);
 
     const networkCell = document.createElement('td');
     networkCell.className = 'px-4 py-4 whitespace-nowrap text-sm';
     networkCell.dataset.stat = 'network';
+    networkCell.dataset.label = 'Network';
     networkCell.innerHTML = formatNetworkCell(container.net_rx, container.net_tx, container.id, loading);
     row.appendChild(networkCell);
 
     const webCell = document.createElement('td');
     webCell.className = 'px-4 py-4 whitespace-nowrap text-sm';
+    webCell.dataset.label = 'Web UI';
     const webPort = getWebUIPort(container);
     if (webPort) {
         const link = document.createElement('a');
@@ -358,9 +375,10 @@ function buildContainerRow(container, showStatsLoading = false) {
 
     const actionsCell = document.createElement('td');
     actionsCell.className = 'px-4 py-4 whitespace-nowrap text-sm';
+    actionsCell.dataset.label = 'Actions';
 
     const actionWrap = document.createElement('div');
-    actionWrap.className = 'flex items-center gap-1';
+    actionWrap.className = 'flex items-center gap-1 container-actions-wrap';
 
     actionWrap.appendChild(buildActionButton({
         label: 'Start',

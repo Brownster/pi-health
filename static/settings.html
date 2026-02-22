@@ -23,12 +23,12 @@
 
     <div id="notification-area" class="fixed top-4 right-4 z-50 space-y-2"></div>
 
-    <main class="container mx-auto px-4 py-8">
-        <div class="flex flex-col gap-4 mb-8">
-            <h2 class="text-3xl font-bold">Settings</h2>
+    <main class="container mx-auto p-4 sm:p-6">
+        <div class="flex flex-col gap-4 mb-6">
+            <h2 class="text-2xl sm:text-3xl font-bold">Settings</h2>
             <div class="flex flex-wrap items-center gap-4">
                 <label class="text-sm text-gray-300" for="settings-section">Section</label>
-                <select id="settings-section" class="bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm">
+                <select id="settings-section" class="bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm w-full sm:w-auto">
                     <option value="plugins">Plugins</option>
                     <option value="backups">Backups</option>
                     <option value="updates">Updates</option>
@@ -36,8 +36,8 @@
             </div>
         </div>
 
-        <section id="settings-plugins" class="bg-gray-800 rounded-lg p-6 mb-6 border border-purple-800/30 hidden">
-            <div class="flex justify-between items-center mb-6">
+        <section id="settings-plugins" class="bg-gray-800 rounded-lg p-4 sm:p-6 mb-6 border border-purple-800/30 hidden">
+            <div class="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center mb-6">
                 <div>
                     <h3 class="text-xl font-semibold flex items-center">
                         <svg class="w-6 h-6 mr-2 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -69,8 +69,8 @@
             </div>
         </section>
 
-        <section id="settings-backups" class="bg-gray-800 rounded-lg p-6 mb-6 border border-purple-800/30 hidden">
-            <div class="flex justify-between items-center mb-6">
+        <section id="settings-backups" class="bg-gray-800 rounded-lg p-4 sm:p-6 mb-6 border border-purple-800/30 hidden">
+            <div class="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center mb-6">
                 <div>
                     <h3 class="text-xl font-semibold flex items-center">
                         <svg class="w-6 h-6 mr-2 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -80,8 +80,8 @@
                     </h3>
                     <p class="text-gray-400 text-sm mt-1">Archive docker config + stacks to a USB backup drive.</p>
                 </div>
-                <div class="flex items-center">
-                    <span id="backup-status-badge" class="px-3 py-1 rounded-full text-sm mr-4 bg-gray-600">Disabled</span>
+                <div class="flex items-center gap-3 self-start sm:self-auto">
+                    <span id="backup-status-badge" class="px-3 py-1 rounded-full text-sm bg-gray-600">Disabled</span>
                     <label class="toggle-switch">
                         <input type="checkbox" id="backup-enabled">
                         <span class="toggle-slider"></span>
@@ -168,8 +168,8 @@
             </div>
         </section>
 
-        <section id="settings-updates" class="bg-gray-800 rounded-lg p-6 mb-6 border border-purple-800/30 hidden">
-            <div class="flex justify-between items-center mb-6">
+        <section id="settings-updates" class="bg-gray-800 rounded-lg p-4 sm:p-6 mb-6 border border-purple-800/30 hidden">
+            <div class="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center mb-6">
                 <div>
                     <h3 class="text-xl font-semibold flex items-center">
                         <svg class="w-6 h-6 mr-2 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -179,8 +179,8 @@
                     </h3>
                     <p class="text-gray-400 text-sm mt-1">Automatically pull images and update stacks on a schedule</p>
                 </div>
-                <div class="flex items-center">
-                    <span id="status-badge" class="px-3 py-1 rounded-full text-sm mr-4 bg-gray-600">Disabled</span>
+                <div class="flex items-center gap-3 self-start sm:self-auto">
+                    <span id="status-badge" class="px-3 py-1 rounded-full text-sm bg-gray-600">Disabled</span>
                     <label class="toggle-switch">
                         <input type="checkbox" id="auto-update-enabled">
                         <span class="toggle-slider"></span>
@@ -228,8 +228,8 @@
             </div>
         </section>
 
-        <section id="settings-pihealth-update" class="bg-gray-800 rounded-lg p-6 mb-6 border border-purple-800/30 hidden">
-            <div class="flex justify-between items-center mb-6">
+        <section id="settings-pihealth-update" class="bg-gray-800 rounded-lg p-4 sm:p-6 mb-6 border border-purple-800/30 hidden">
+            <div class="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center mb-6">
                 <div>
                     <h3 class="text-xl font-semibold flex items-center">
                         <svg class="w-6 h-6 mr-2 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -268,7 +268,7 @@
             </div>
         </section>
 
-        <section id="settings-updates-logs" class="bg-gray-800 rounded-lg p-6 border border-purple-800/30 hidden">
+        <section id="settings-updates-logs" class="bg-gray-800 rounded-lg p-4 sm:p-6 border border-purple-800/30 hidden">
             <div class="flex justify-between items-center mb-4">
                 <h3 class="text-lg font-semibold">Last Update Run</h3>
                 <button id="close-logs-btn" class="text-gray-400 hover:text-white" type="button">

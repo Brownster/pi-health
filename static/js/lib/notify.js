@@ -5,11 +5,19 @@ const DEFAULT_COLORS = {
     info: 'bg-blue-600',
 };
 
+function prepareNotificationArea(area) {
+    if (!area) {
+        return;
+    }
+    // This class activates responsive notification positioning from layout.js.
+    area.classList.add('ph-notification-area');
+}
+
 export function showNotification(message, type = 'info', options = {}) {
     const {
         areaId = 'notification-area',
         duration = 3000,
-        baseClass = 'p-3 mb-2 rounded shadow-lg transform transition-all duration-300 opacity-0 text-white',
+        baseClass = 'p-3 rounded shadow-lg transform transition-all duration-300 opacity-0 text-white',
         animate = true,
         colorMap = DEFAULT_COLORS,
     } = options;
@@ -18,9 +26,11 @@ export function showNotification(message, type = 'info', options = {}) {
     if (!area) {
         return;
     }
+    prepareNotificationArea(area);
 
     const notification = document.createElement('div');
     notification.className = baseClass;
+    notification.classList.add('ph-notification-item');
     notification.classList.add(colorMap[type] || colorMap.info || DEFAULT_COLORS.info);
     notification.textContent = message;
     area.appendChild(notification);

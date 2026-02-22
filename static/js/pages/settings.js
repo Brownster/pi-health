@@ -69,12 +69,12 @@ function setStatusBadge(element, enabled) {
 
     if (enabled) {
         element.textContent = 'Enabled';
-        element.className = 'px-3 py-1 rounded-full text-sm mr-4 bg-green-600';
+        element.className = 'px-3 py-1 rounded-full text-sm bg-green-600';
         return;
     }
 
     element.textContent = 'Disabled';
-    element.className = 'px-3 py-1 rounded-full text-sm mr-4 bg-gray-600';
+    element.className = 'px-3 py-1 rounded-full text-sm bg-gray-600';
 }
 
 function formatDateTime(value) {

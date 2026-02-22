@@ -2,6 +2,7 @@ const DEFAULT_BODY_CLASS = 'bg-gray-900 text-blue-100 font-sans min-h-screen';
 const DEFAULT_NAV_CLASS = 'bg-purple-900 shadow-md';
 const DEFAULT_NOTIFICATION_CLASS = 'fixed top-4 right-4 z-50 w-72 flex flex-col items-end';
 const DEFAULT_FOOTER_CLASS = 'text-center text-xs text-gray-500 py-6';
+const NOTIFICATION_STYLE_ID = 'ph-notification-area-styles';
 
 function applyClassList(element, classNames) {
     if (!element || !classNames) {
@@ -59,6 +60,60 @@ function ensureNav(beforeNode, navClass) {
     return nav;
 }
 
+function injectNotificationStyles() {
+    if (document.getElementById(NOTIFICATION_STYLE_ID)) {
+        return;
+    }
+
+    const style = document.createElement('style');
+    style.id = NOTIFICATION_STYLE_ID;
+    style.textContent = `
+        #notification-area.ph-notification-area {
+            position: fixed !important;
+            top: auto !important;
+            left: max(0.5rem, env(safe-area-inset-left, 0px)) !important;
+            right: max(0.5rem, env(safe-area-inset-right, 0px)) !important;
+            bottom: max(0.75rem, env(safe-area-inset-bottom, 0px)) !important;
+            width: auto !important;
+            max-width: none !important;
+            display: flex !important;
+            flex-direction: column !important;
+            align-items: stretch !important;
+            gap: 0.5rem !important;
+            pointer-events: none;
+        }
+        #notification-area.ph-notification-area > * {
+            width: 100%;
+            max-width: 100%;
+            margin: 0 !important;
+            pointer-events: auto;
+        }
+        @media (min-width: 768px) {
+            #notification-area.ph-notification-area {
+                top: 1rem !important;
+                right: 1rem !important;
+                bottom: auto !important;
+                left: auto !important;
+                width: min(22rem, calc(100vw - 2rem)) !important;
+                align-items: flex-end !important;
+            }
+            #notification-area.ph-notification-area > * {
+                width: auto;
+                max-width: 100%;
+            }
+        }
+    `;
+    document.head.appendChild(style);
+}
+
+function prepareNotificationArea(notificationArea) {
+    if (!notificationArea) {
+        return;
+    }
+    injectNotificationStyles();
+    notificationArea.classList.add('ph-notification-area');
+}
+
 function ensureNotification(afterNode, notificationClass) {
     let notificationArea = document.getElementById('notification-area');
     if (!notificationArea) {
@@ -72,6 +127,7 @@ function ensureNotification(afterNode, notificationClass) {
     }
 
     applyClassList(notificationArea, notificationClass || DEFAULT_NOTIFICATION_CLASS);
+    prepareNotificationArea(notificationArea);
     notificationArea.dataset.shellNotifications = 'dashboard';
     return notificationArea;
 }

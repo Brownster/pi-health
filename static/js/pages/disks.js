@@ -113,12 +113,12 @@ function renderDisks() {
         return `
             <div class="disk-card bg-gray-800 rounded-lg border border-purple-900/40 overflow-hidden">
                 <div class="p-4 bg-gray-800/50 border-b border-gray-700">
-                    <div class="flex justify-between items-start">
-                        <div>
-                            <h4 class="font-semibold text-lg">${escapeHtml(disk.path)}</h4>
-                            <p class="text-sm text-gray-400">${escapeHtml(disk.model || 'Unknown device')} ${disk.serial ? `(${escapeHtml(disk.serial)})` : ''}</p>
+                    <div class="flex flex-col gap-2 sm:flex-row sm:justify-between sm:items-start">
+                        <div class="min-w-0">
+                            <h4 class="font-semibold text-lg break-all">${escapeHtml(disk.path)}</h4>
+                            <p class="text-sm text-gray-400 break-words">${escapeHtml(disk.model || 'Unknown device')} ${disk.serial ? `(${escapeHtml(disk.serial)})` : ''}</p>
                         </div>
-                        <div class="text-right">
+                        <div class="text-left sm:text-right shrink-0">
                             <span class="text-lg font-medium">${escapeHtml(disk.size)}</span>
                             <p class="text-xs text-gray-500">${escapeHtml(disk.transport || 'unknown')} ${disk.hotplug ? '(removable)' : ''}</p>
                         </div>
@@ -161,7 +161,7 @@ function renderPartition(part) {
     if (mounted) {
         actions = `
             <button type="button"
-                    class="px-3 py-1 text-sm rounded bg-red-700 hover:bg-red-600 text-white js-unmount"
+                    class="disk-action-btn px-3 py-2 text-sm rounded bg-red-700 hover:bg-red-600 text-white js-unmount"
                     data-mountpoint="${encodeDataAttr(part.mountpoint || '')}">
                 Unmount
             </button>
@@ -169,7 +169,7 @@ function renderPartition(part) {
     } else if (part.uuid) {
         actions = `
             <button type="button"
-                    class="coraline-button px-3 py-1 text-sm rounded text-white js-open-mount"
+                    class="coraline-button disk-action-btn px-3 py-2 text-sm rounded text-white js-open-mount"
                     data-device="${encodeDataAttr(part.path || '')}"
                     data-uuid="${encodeDataAttr(part.uuid || '')}"
                     data-fstype="${encodeDataAttr(part.fstype || 'ext4')}">
@@ -180,18 +180,18 @@ function renderPartition(part) {
 
     return `
         <div class="p-4">
-            <div class="flex justify-between items-start">
-                <div class="flex-1">
-                    <div class="flex items-center space-x-2">
-                        <span class="font-medium">${escapeHtml(part.path || part.name)}</span>
+            <div class="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-start">
+                <div class="flex-1 min-w-0">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <span class="font-medium break-all">${escapeHtml(part.path || part.name)}</span>
                         <span class="text-xs px-2 py-0.5 rounded ${part.fstype ? 'bg-blue-900 text-blue-300' : 'bg-gray-700 text-gray-400'}">${escapeHtml(part.fstype || 'unknown')}</span>
                         <span class="text-xs ${statusClass}">${statusText}</span>
                     </div>
-                    ${part.mountpoint ? `<p class="text-sm text-gray-400 mt-1">Mounted at: ${escapeHtml(part.mountpoint)}</p>` : ''}
-                    ${part.uuid ? `<p class="text-xs text-gray-500 mt-1">UUID: ${escapeHtml(part.uuid)}</p>` : ''}
+                    ${part.mountpoint ? `<p class="text-sm text-gray-400 mt-1 break-all">Mounted at: ${escapeHtml(part.mountpoint)}</p>` : ''}
+                    ${part.uuid ? `<p class="text-xs text-gray-500 mt-1 break-all">UUID: ${escapeHtml(part.uuid)}</p>` : ''}
                     ${usageBar}
                 </div>
-                <div class="ml-4 flex items-center space-x-2">
+                <div class="flex w-full sm:w-auto flex-wrap items-center gap-2 sm:justify-end">
                     <span class="text-sm text-gray-400">${escapeHtml(part.size)}</span>
                     ${actions}
                 </div>
@@ -245,13 +245,13 @@ async function loadSuggestions() {
 
         section.classList.remove('hidden');
         list.innerHTML = suggestions.map((s) => `
-            <div class="bg-gray-800 rounded-lg p-4 border border-purple-900/40 flex justify-between items-center">
-                <div>
-                    <p class="font-medium">${escapeHtml(s.device)} <span class="text-gray-400">(${escapeHtml(s.size)})</span></p>
-                    <p class="text-sm text-gray-400">${escapeHtml(s.reason)}</p>
+            <div class="bg-gray-800 rounded-lg p-4 border border-purple-900/40 flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center">
+                <div class="min-w-0">
+                    <p class="font-medium break-all">${escapeHtml(s.device)} <span class="text-gray-400">(${escapeHtml(s.size)})</span></p>
+                    <p class="text-sm text-gray-400 break-words">${escapeHtml(s.reason)}</p>
                 </div>
                 <button type="button"
-                        class="coraline-button px-3 py-1 text-sm rounded text-white js-open-suggested-mount"
+                        class="coraline-button disk-action-btn px-3 py-2 text-sm rounded text-white js-open-suggested-mount self-start sm:self-auto"
                         data-device="${encodeDataAttr(s.device)}"
                         data-uuid="${encodeDataAttr(s.uuid)}"
                         data-fstype="${encodeDataAttr(s.fstype)}"
@@ -436,17 +436,17 @@ function renderSmartCards() {
         return `
             <div class="bg-gray-900 rounded-lg p-4 border border-gray-700 hover:border-purple-600 cursor-pointer transition-colors js-smart-card"
                  data-device-name="${encodeDataAttr(deviceName)}">
-                <div class="flex justify-between items-start mb-3">
-                    <div class="flex items-center">
-                        <span class="text-2xl mr-2">${driveIcon}</span>
-                        <div>
-                            <h4 class="font-semibold">${escapeHtml(device)}</h4>
-                            <p class="text-xs text-gray-400">${escapeHtml(data.model || 'Unknown')}</p>
+                <div class="flex flex-col gap-2 sm:flex-row sm:justify-between sm:items-start mb-3">
+                    <div class="flex items-start min-w-0">
+                        <span class="text-2xl mr-2 shrink-0">${driveIcon}</span>
+                        <div class="min-w-0">
+                            <h4 class="font-semibold break-all">${escapeHtml(device)}</h4>
+                            <p class="text-xs text-gray-400 break-words">${escapeHtml(data.model || 'Unknown')}</p>
                         </div>
                     </div>
-                    <span class="smart-badge ${statusClass}">${escapeHtml(status.toUpperCase())}</span>
+                    <span class="smart-badge ${statusClass} self-start">${escapeHtml(status.toUpperCase())}</span>
                 </div>
-                <div class="grid grid-cols-2 gap-2 text-sm">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
                     <div>
                         <span class="text-gray-400">Temp:</span>
                         <span class="${data.temperature_c > 55 ? 'text-yellow-400' : 'text-gray-200'}">${data.temperature_c != null ? `${data.temperature_c}°C` : 'N/A'}</span>
@@ -548,14 +548,14 @@ function renderSmartDetails(data) {
 
     let html = `
         <div class="mb-6">
-            <div class="flex items-center justify-between mb-4">
-                <div>
-                    <h4 class="font-semibold text-lg">${escapeHtml(data.model || 'Unknown Model')}</h4>
-                    <p class="text-sm text-gray-400">Serial: ${escapeHtml(data.serial || 'Unknown')}</p>
+            <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-4">
+                <div class="min-w-0">
+                    <h4 class="font-semibold text-lg break-words">${escapeHtml(data.model || 'Unknown Model')}</h4>
+                    <p class="text-sm text-gray-400 break-all">Serial: ${escapeHtml(data.serial || 'Unknown')}</p>
                 </div>
-                <span class="smart-badge ${statusClass}">${escapeHtml(status.toUpperCase())}</span>
+                <span class="smart-badge ${statusClass} self-start">${escapeHtml(status.toUpperCase())}</span>
             </div>
-            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
                 <div class="bg-gray-800 p-3 rounded">
                     <span class="text-gray-400 block">Type</span>
                     <span class="font-medium">${escapeHtml((data.drive_type || 'unknown').toUpperCase())}</span>
@@ -588,8 +588,8 @@ function renderSmartDetails(data) {
         html += `
             <div>
                 <h5 class="font-semibold mb-2">SMART Attributes</h5>
-                <div class="overflow-x-auto">
-                    <table class="w-full text-sm">
+                <div class="overflow-x-auto disk-smart-table-wrap">
+                    <table class="w-full text-sm min-w-[34rem]">
                         <thead>
                             <tr class="text-gray-400 border-b border-gray-700">
                                 ${data.drive_type === 'nvme' ? `
@@ -613,7 +613,7 @@ function renderSmartDetails(data) {
             if (data.drive_type === 'nvme') {
                 html += `
                     <tr class="border-b border-gray-800 smart-attr-row ${critical}">
-                        <td class="py-2 px-2">${escapeHtml(attr.name)}</td>
+                        <td class="py-2 px-2 break-words">${escapeHtml(attr.name)}</td>
                         <td class="py-2 px-2 text-right font-mono">${attr.value != null ? Number(attr.value).toLocaleString() : 'N/A'}</td>
                     </tr>
                 `;
@@ -621,7 +621,7 @@ function renderSmartDetails(data) {
                 html += `
                     <tr class="border-b border-gray-800 smart-attr-row ${critical}">
                         <td class="py-2 px-1 text-gray-500">${attr.id || ''}</td>
-                        <td class="py-2 px-2">${escapeHtml(attr.name)}</td>
+                        <td class="py-2 px-2 break-words">${escapeHtml(attr.name)}</td>
                         <td class="py-2 px-2 text-right font-mono">${attr.value != null ? attr.value : ''}</td>
                         <td class="py-2 px-2 text-right font-mono text-gray-500">${attr.worst != null ? attr.worst : ''}</td>
                         <td class="py-2 px-2 text-right font-mono text-gray-500">${attr.thresh != null ? attr.thresh : ''}</td>

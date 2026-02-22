@@ -54,13 +54,64 @@ async function apiDelete(url) {
  * Toast notification container - created once on first use
  */
 let toastContainer = null;
+const TOAST_STYLE_ID = 'ph-toast-container-styles';
+
+function ensureToastStyles() {
+    if (document.getElementById(TOAST_STYLE_ID)) {
+        return;
+    }
+
+    const style = document.createElement('style');
+    style.id = TOAST_STYLE_ID;
+    style.textContent = `
+        #toast-container.ph-toast-container {
+            position: fixed;
+            top: auto;
+            left: max(0.5rem, env(safe-area-inset-left, 0px));
+            right: max(0.5rem, env(safe-area-inset-right, 0px));
+            bottom: max(0.75rem, env(safe-area-inset-bottom, 0px));
+            width: auto;
+            max-width: none;
+            display: flex;
+            flex-direction: column;
+            align-items: stretch;
+            gap: 0.5rem;
+            z-index: 50;
+            pointer-events: none;
+        }
+        #toast-container.ph-toast-container > * {
+            width: 100%;
+            max-width: 100%;
+            margin: 0;
+            pointer-events: auto;
+        }
+        @media (min-width: 768px) {
+            #toast-container.ph-toast-container {
+                top: 1rem;
+                right: 1rem;
+                bottom: auto;
+                left: auto;
+                width: min(22rem, calc(100vw - 2rem));
+                align-items: flex-end;
+            }
+            #toast-container.ph-toast-container > * {
+                width: auto;
+                max-width: 100%;
+            }
+        }
+    `;
+    document.head.appendChild(style);
+}
 
 function getToastContainer() {
+    ensureToastStyles();
+
     if (!toastContainer) {
         toastContainer = document.createElement('div');
         toastContainer.id = 'toast-container';
-        toastContainer.className = 'fixed top-4 right-4 z-50 flex flex-col gap-2';
-        toastContainer.style.cssText = 'max-width: 400px;';
+        toastContainer.className = 'ph-toast-container';
+        toastContainer.setAttribute('aria-live', 'polite');
+        toastContainer.setAttribute('aria-atomic', 'false');
         document.body.appendChild(toastContainer);
     }
     return toastContainer;
@@ -90,11 +141,11 @@ function showToast(message, type = 'info', duration = 4000) {
     };
 
     const toast = document.createElement('div');
-    toast.className = `${colors[type] || colors.info} border-l-4 text-white px-4 py-3 rounded shadow-lg flex items-center gap-3 transform transition-all duration-300 translate-x-full opacity-0`;
+    toast.className = `${colors[type] || colors.info} ph-toast-item border-l-4 text-white px-4 py-3 rounded shadow-lg flex items-center gap-3 transform transition-all duration-300 translate-x-full opacity-0`;
     toast.innerHTML = `
         <span class="flex-shrink-0">${icons[type] || icons.info}</span>
         <span class="flex-grow text-sm">${message}</span>
-        <button onclick="this.parentElement.remove()" class="flex-shrink-0 ml-2 hover:opacity-75">
+        <button type="button" aria-label="Dismiss notification" onclick="this.parentElement.remove()" class="flex-shrink-0 ml-2 hover:opacity-75">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
             </svg>
