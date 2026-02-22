@@ -376,7 +376,178 @@ class TestStaticPages:
         assert 'vpn-password' in body
         assert 'vpn-network-name' in body
 
+class TestV2Routes:
+    """Test /v2 static serving and SPA fallback behavior."""
 
+    def test_v2_root_serves_index_when_present(self, client, monkeypatch, tmp_path):
+        monkeypatch.setenv("PIHEALTH_UI_MODE", "hybrid")
+        static_dir = tmp_path / "static"
+        v2_dir = static_dir / "v2"
+        v2_dir.mkdir(parents=True)
+        (v2_dir / "index.html").write_text(
+            "<html><body>v2-shell</body></html>",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(app, "static_folder", str(static_dir))
+
+        response = client.get('/v2')
+        assert response.status_code == 200
+        assert "v2-shell" in response.data.decode("utf-8")
+
+    def test_v2_missing_index_returns_404(self, client, monkeypatch, tmp_path):
+        monkeypatch.setenv("PIHEALTH_UI_MODE", "hybrid")
+        static_dir = tmp_path / "static"
+        static_dir.mkdir(parents=True)
+        monkeypatch.setattr(app, "static_folder", str(static_dir))
+
+        response = client.get('/v2')
+        assert response.status_code == 404
+        data = json.loads(response.data)
+        assert "missing" in data["error"]
+
+    def test_v2_assets_served_directly(self, client, monkeypatch, tmp_path):
+        monkeypatch.setenv("PIHEALTH_UI_MODE", "hybrid")
+        static_dir = tmp_path / "static"
+        assets_dir = static_dir / "v2" / "assets"
+        assets_dir.mkdir(parents=True)
+        (assets_dir / "app.js").write_text(
+            "console.log('v2-asset');",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(app, "static_folder", str(static_dir))
+
+        response = client.get('/v2/assets/app.js')
+        assert response.status_code == 200
+        assert "v2-asset" in response.data.decode("utf-8")
+
+    def test_v2_missing_asset_returns_404_without_spa_fallback(
+        self,
+        client,
+        monkeypatch,
+        tmp_path,
+    ):
+        monkeypatch.setenv("PIHEALTH_UI_MODE", "hybrid")
+        static_dir = tmp_path / "static"
+        v2_dir = static_dir / "v2"
+        v2_dir.mkdir(parents=True)
+        (v2_dir / "index.html").write_text(
+            "<html><body>v2-shell</body></html>",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(app, "static_folder", str(static_dir))
+
+        response = client.get('/v2/assets/missing.js')
+        assert response.status_code == 404
+        data = json.loads(response.data)
+        assert "asset not found" in data["error"]
+
+    def test_v2_spa_route_falls_back_to_index(self, client, monkeypatch, tmp_path):
+        monkeypatch.setenv("PIHEALTH_UI_MODE", "hybrid")
+        static_dir = tmp_path / "static"
+        v2_dir = static_dir / "v2"
+        v2_dir.mkdir(parents=True)
+        (v2_dir / "index.html").write_text(
+            "<html><body>v2-fallback</body></html>",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(app, "static_folder", str(static_dir))
+
+        response = client.get('/v2/containers')
+        assert response.status_code == 200
+        assert "v2-fallback" in response.data.decode("utf-8")
+
+
+class TestUiRuntimeModes:
+    """Test deterministic legacy/hybrid/v2 mode behavior."""
+
+    def _build_mode_test_static(self, tmp_path):
+        static_dir = tmp_path / "static"
+        v2_dir = static_dir / "v2"
+        v2_dir.mkdir(parents=True)
+
+        (static_dir / "index.html").write_text("<html><body>legacy-index</body></html>", encoding="utf-8")
+        (static_dir / "containers.html").write_text(
+            "<html><body>legacy-containers</body></html>",
+            encoding="utf-8",
+        )
+        (static_dir / "system.html").write_text("<html><body>legacy-system</body></html>", encoding="utf-8")
+        (static_dir / "login.html").write_text("<html><body>legacy-login</body></html>", encoding="utf-8")
+        (v2_dir / "index.html").write_text("<html><body>v2-shell</body></html>", encoding="utf-8")
+
+        return static_dir
+
+    def test_legacy_mode_disables_v2_routes(self, client, monkeypatch, tmp_path):
+        monkeypatch.setenv("PIHEALTH_UI_MODE", "legacy")
+        static_dir = self._build_mode_test_static(tmp_path)
+        monkeypatch.setattr(app, "static_folder", str(static_dir))
+
+        v2_response = client.get('/v2')
+        assert v2_response.status_code == 404
+        v2_data = json.loads(v2_response.data)
+        assert "disabled" in v2_data["error"]
+
+        legacy_response = client.get('/containers.html')
+        assert legacy_response.status_code == 200
+        assert "legacy-containers" in legacy_response.data.decode("utf-8")
+
+    def test_invalid_mode_defaults_to_legacy(self, client, monkeypatch, tmp_path):
+        monkeypatch.setenv("PIHEALTH_UI_MODE", "invalid-mode")
+        static_dir = self._build_mode_test_static(tmp_path)
+        monkeypatch.setattr(app, "static_folder", str(static_dir))
+
+        response = client.get('/v2')
+        assert response.status_code == 404
+        data = json.loads(response.data)
+        assert data["mode"] == "legacy"
+
+    def test_hybrid_mode_redirects_only_selected_pages(self, client, monkeypatch, tmp_path):
+        monkeypatch.setenv("PIHEALTH_UI_MODE", "hybrid")
+        monkeypatch.setenv("PIHEALTH_UI_V2_PAGES", "containers,unknown")
+        static_dir = self._build_mode_test_static(tmp_path)
+        monkeypatch.setattr(app, "static_folder", str(static_dir))
+
+        redirected = client.get('/containers.html', follow_redirects=False)
+        assert redirected.status_code == 302
+        assert redirected.headers["Location"] == "/v2/containers"
+
+        legacy = client.get('/system.html')
+        assert legacy.status_code == 200
+        assert "legacy-system" in legacy.data.decode("utf-8")
+
+    def test_v2_mode_prefers_v2_routes_for_legacy_pages(self, client, monkeypatch, tmp_path):
+        monkeypatch.setenv("PIHEALTH_UI_MODE", "v2")
+        static_dir = self._build_mode_test_static(tmp_path)
+        monkeypatch.setattr(app, "static_folder", str(static_dir))
+
+        index_response = client.get('/', follow_redirects=False)
+        assert index_response.status_code == 302
+        assert index_response.headers["Location"] == "/v2"
+
+        containers_response = client.get('/containers.html', follow_redirects=False)
+        assert containers_response.status_code == 302
+        assert containers_response.headers["Location"] == "/v2/containers"
+
+        login_response = client.get('/login.html')
+        assert login_response.status_code == 200
+        assert "legacy-login" in login_response.data.decode("utf-8")
+
+    def test_hybrid_selected_pages_support_home_alias(self, client, monkeypatch, tmp_path):
+        monkeypatch.setenv("PIHEALTH_UI_MODE", "hybrid")
+        monkeypatch.setenv("PIHEALTH_UI_V2_PAGES", " home , system ")
+        static_dir = self._build_mode_test_static(tmp_path)
+        monkeypatch.setattr(app, "static_folder", str(static_dir))
+
+        index_response = client.get('/', follow_redirects=False)
+        assert index_response.status_code == 302
+        assert index_response.headers["Location"] == "/v2"
+
+        system_response = client.get('/system.html', follow_redirects=False)
+        assert system_response.status_code == 302
+        assert system_response.headers["Location"] == "/v2/system"
+
+        containers_response = client.get('/containers.html')
+        assert containers_response.status_code == 200
+        assert "legacy-containers" in containers_response.data.decode("utf-8")
 
 
 if __name__ == '__main__':

@@ -6,8 +6,10 @@ __pycache__/
 node_modules/
 dist/
 .vite/
+*.tsbuildinfo
 .DS_Store
 config/plugins.json
 config/copyparty.json
 config/pihealth_update.json
+static/v2/
 *.tar.zst

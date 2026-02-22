@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Pi-Health v2 application shell" />
+    <title>Pi-Health v2</title>
+    <script>
+      (function () {
+        var storageKey = "pihealth-v2-theme";
+        var fallbackMode = "dark";
+        var root = document.documentElement;
+
+        function resolveSystemMode() {
+          return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        }
+
+        try {
+          var storedMode = window.localStorage.getItem(storageKey);
+          var mode =
+            storedMode === "light" || storedMode === "dark" || storedMode === "system"
+              ? storedMode
+              : fallbackMode;
+          var resolvedMode = mode === "system" ? resolveSystemMode() : mode;
+          root.classList.remove("light", "dark");
+          root.classList.add(resolvedMode);
+          root.dataset.theme = mode;
+        } catch (_error) {
+          root.classList.remove("light", "dark");
+          root.classList.add(fallbackMode);
+          root.dataset.theme = fallbackMode;
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

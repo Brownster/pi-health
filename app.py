@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, send_from_directory, request, session
+from flask import Flask, jsonify, redirect, send_from_directory, request, session
 import psutil
 import os
 import docker
@@ -21,6 +21,7 @@ from backup_scheduler import backup_scheduler, init_backup_scheduler
 from disk_manager import disk_manager
 from setup_manager import setup_manager
 from helper_client import helper_call, HelperError
+from werkzeug.utils import safe_join
 
 # Initialize Flask
 app = Flask(__name__, static_folder='static')
@@ -936,100 +937,253 @@ def system_action(action):
         return {"error": str(e)}
 
 
+UI_MODE_LEGACY = 'legacy'
+UI_MODE_HYBRID = 'hybrid'
+UI_MODE_V2 = 'v2'
+VALID_UI_MODES = {UI_MODE_LEGACY, UI_MODE_HYBRID, UI_MODE_V2}
+V2_PAGE_KEYS = {
+    'index',
+    'system',
+    'containers',
+    'apps',
+    'stacks',
+    'tools',
+    'settings',
+    'storage',
+    'pools',
+    'mounts',
+    'shares',
+    'plugins',
+    'disks',
+    'network',
+    'tailscale',
+}
+V2_PAGE_ALIASES = {
+    'home': 'index',
+}
+
+
+def normalize_ui_mode(mode_value):
+    """Normalize UI mode env values to supported values with legacy fallback."""
+    normalized = (mode_value or '').strip().lower()
+    if normalized in VALID_UI_MODES:
+        return normalized
+    return UI_MODE_LEGACY
+
+
+def get_ui_mode():
+    """Read current UI mode from environment."""
+    return normalize_ui_mode(os.getenv('PIHEALTH_UI_MODE', UI_MODE_LEGACY))
+
+
+def parse_v2_pages(raw_pages):
+    """Parse and normalize comma-separated v2 page keys."""
+    if not raw_pages:
+        return set()
+
+    parsed_pages = set()
+    for token in raw_pages.split(','):
+        normalized = token.strip().lower()
+        if not normalized:
+            continue
+
+        if normalized == '*':
+            return set(V2_PAGE_KEYS)
+
+        normalized = V2_PAGE_ALIASES.get(normalized, normalized)
+        if normalized in V2_PAGE_KEYS:
+            parsed_pages.add(normalized)
+
+    return parsed_pages
+
+
+def get_v2_enabled_pages():
+    """Return selected v2 page keys for hybrid mode."""
+    return parse_v2_pages(os.getenv('PIHEALTH_UI_V2_PAGES', ''))
+
+
+def get_v2_target_for_page(page_key):
+    """Map a legacy page key to its v2 route target."""
+    if page_key == 'index':
+        return '/v2'
+    return f'/v2/{page_key}'
+
+
 @app.route('/')
 def serve_frontend():
     """Serve the main landing page."""
-    return send_from_directory(app.static_folder, 'index.html')
+    return serve_ui_page('index', 'index.html')
 
 
 @app.route('/system.html')
 def serve_system():
     """Serve the system health page."""
-    return send_from_directory(app.static_folder, 'system.html')
+    return serve_ui_page('system', 'system.html')
 
 
 @app.route('/containers.html')
 def serve_containers():
     """Serve the containers management page."""
-    return send_from_directory(app.static_folder, 'containers.html')
+    return serve_ui_page('containers', 'containers.html')
 
 
 
 @app.route('/apps.html')
 def serve_apps():
     """Serve the app catalog page."""
-    return send_from_directory(app.static_folder, 'apps.html')
+    return serve_ui_page('apps', 'apps.html')
 
 
 @app.route('/stacks.html')
 def serve_stacks():
     """Serve the stacks management page."""
-    return send_from_directory(app.static_folder, 'stacks.html')
+    return serve_ui_page('stacks', 'stacks.html')
 
 
 @app.route('/tools.html')
 def serve_tools():
     """Serve the tools page."""
-    return send_from_directory(app.static_folder, 'tools.html')
+    return serve_ui_page('tools', 'tools.html')
 
 
 @app.route('/settings.html')
 def serve_settings():
     """Serve the settings page."""
-    return send_from_directory(app.static_folder, 'settings.html')
+    return serve_ui_page('settings', 'settings.html')
 
 @app.route('/storage.html')
 def serve_storage():
     """Serve the storage plugins page (redirects to pools)."""
-    return send_from_directory(app.static_folder, 'storage.html')
+    return serve_ui_page('storage', 'storage.html')
 
 
 @app.route('/pools.html')
 def serve_pools():
     """Serve the storage pools page."""
-    return send_from_directory(app.static_folder, 'pools.html')
+    return serve_ui_page('pools', 'pools.html')
 
 
 @app.route('/mounts.html')
 def serve_mounts():
     """Serve the mounts page."""
-    return send_from_directory(app.static_folder, 'mounts.html')
+    return serve_ui_page('mounts', 'mounts.html')
 
 
 @app.route('/shares.html')
 def serve_shares():
     """Serve the network shares page."""
-    return send_from_directory(app.static_folder, 'shares.html')
+    return serve_ui_page('shares', 'shares.html')
 
 
 @app.route('/plugins.html')
 def serve_plugins():
     """Serve the plugins page."""
-    return send_from_directory(app.static_folder, 'plugins.html')
+    return serve_ui_page('plugins', 'plugins.html')
 
 
 @app.route('/disks.html')
 def serve_disks():
     """Serve the disk management page."""
-    return send_from_directory(app.static_folder, 'disks.html')
+    return serve_ui_page('disks', 'disks.html')
 
 
 @app.route('/network.html')
 def serve_network():
     """Serve the host network page."""
-    return send_from_directory(app.static_folder, 'network.html')
+    return serve_ui_page('network', 'network.html')
 
 
 @app.route('/tailscale.html')
 def serve_tailscale():
     """Serve the Tailscale page."""
-    return send_from_directory(app.static_folder, 'tailscale.html')
+    return serve_ui_page('tailscale', 'tailscale.html')
 
 
 @app.route('/login.html')
 def serve_login():
     """Serve the login page."""
     return send_from_directory(app.static_folder, 'login.html')
+
+
+def get_v2_static_dir():
+    """Return the absolute static directory used for v2 build artifacts."""
+    return os.path.join(app.static_folder, 'v2')
+
+
+def v2_index_exists():
+    """Return True when the published v2 index artifact exists."""
+    return os.path.isfile(os.path.join(get_v2_static_dir(), 'index.html'))
+
+
+def should_redirect_legacy_page_to_v2(page_key):
+    """Return whether a legacy UI route should redirect to v2."""
+    mode = get_ui_mode()
+    if mode == UI_MODE_LEGACY:
+        return False
+
+    if not v2_index_exists():
+        return False
+
+    if mode == UI_MODE_V2:
+        return True
+
+    return page_key in get_v2_enabled_pages()
+
+
+def serve_ui_page(page_key, filename):
+    """Serve legacy page or redirect to v2 based on runtime mode and page selection."""
+    if should_redirect_legacy_page_to_v2(page_key):
+        return redirect(get_v2_target_for_page(page_key))
+    return send_from_directory(app.static_folder, filename)
+
+
+@app.route('/v2')
+@app.route('/v2/')
+def serve_v2_index():
+    """Serve the v2 SPA entrypoint."""
+    if get_ui_mode() == UI_MODE_LEGACY:
+        return jsonify({
+            "error": "v2 UI is disabled in legacy mode",
+            "mode": UI_MODE_LEGACY,
+        }), 404
+
+    if not v2_index_exists():
+        return jsonify({
+            "error": "v2 build artifacts are missing",
+            "hint": "run `npm --prefix frontend run build:publish`",
+        }), 404
+    return send_from_directory(get_v2_static_dir(), 'index.html')
+
+
+@app.route('/v2/<path:path>')
+def serve_v2_path(path):
+    """Serve v2 assets directly and fallback route-like paths to SPA index."""
+    if get_ui_mode() == UI_MODE_LEGACY:
+        return jsonify({
+            "error": "v2 UI is disabled in legacy mode",
+            "mode": UI_MODE_LEGACY,
+        }), 404
+
+    v2_static_dir = get_v2_static_dir()
+    resolved_path = safe_join(v2_static_dir, path)
+    if resolved_path and os.path.isfile(resolved_path):
+        return send_from_directory(v2_static_dir, path)
+
+    first_segment = path.split('/', 1)[0]
+    has_extension = os.path.splitext(path)[1] != ''
+    is_asset_request = first_segment == 'assets' or has_extension
+
+    # Missing assets must return 404 instead of falling back to index.html.
+    if is_asset_request:
+        return jsonify({"error": f"v2 asset not found: {path}"}), 404
+
+    if not v2_index_exists():
+        return jsonify({
+            "error": "v2 build artifacts are missing",
+            "hint": "run `npm --prefix frontend run build:publish`",
+        }), 404
+
+    return send_from_directory(v2_static_dir, 'index.html')
 
 
 @app.route('/api/login', methods=['POST'])
