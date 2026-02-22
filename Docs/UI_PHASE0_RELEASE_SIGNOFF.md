@@ -21,7 +21,8 @@ Phase 0 objectives are met with automated evidence on desktop/phone/tablet and t
 2. PH0-002 review: pass.
 3. PH0-003 review: pass after required table-shell clipping fix.
 4. PH0-004 review: pass.
-5. PH0-006 review: pass (plus non-blocking cleanup applied).
+5. PH0-005 review: pass.
+6. PH0-006 review: pass (plus non-blocking cleanup applied).
 
 ## Phase 0 Exit Criteria
 
