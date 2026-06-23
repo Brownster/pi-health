@@ -1,6 +1,6 @@
 import type { ComponentType } from "react";
 
-import { ContainersPlaceholderPage } from "@/pages/containers-placeholder";
+import { ContainersPage } from "@/pages/containers-page";
 import { DashboardHomePage } from "@/pages/dashboard-home";
 
 export interface AppRoute {
@@ -23,7 +23,7 @@ export const appRoutes: AppRoute[] = [
     label: "Containers",
     requiresAuth: true,
     showInNav: true,
-    component: ContainersPlaceholderPage,
+    component: ContainersPage,
   },
 ];
 
