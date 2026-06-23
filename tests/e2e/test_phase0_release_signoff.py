@@ -4,7 +4,7 @@ import re
 from urllib.parse import urlparse
 
 import pytest
-from playwright.sync_api import Page, expect
+from playwright.sync_api import Error as PlaywrightError, Page, expect
 
 pytestmark = pytest.mark.e2e
 
@@ -149,7 +149,13 @@ def test_login_logout_and_session_guard(
     _login(page, creds["username"], creds["password"])
     page.evaluate("() => sessionStorage.removeItem('loggedIn')")
     page.context.clear_cookies()
-    page.goto(f"{BASE_URL}/system.html")
+    try:
+        # The auth guard redirects to login mid-navigation, which can interrupt the
+        # goto before it resolves. That redirect is exactly the behavior under test, so
+        # tolerate the interruption and assert the final URL below.
+        page.goto(f"{BASE_URL}/system.html", wait_until="commit")
+    except PlaywrightError:
+        pass
     expect(page).to_have_url(f"{BASE_URL}/login.html")
 
 
