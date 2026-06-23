@@ -22,7 +22,7 @@ Deliver `/v2/containers` at functional parity for desktop/phone/tablet, then ena
 | 4 | PH2-004 Stats Polling + Network Rate Parity | PH2-001 | Yes | Complete (2026-06-23) |
 | 5 | PH2-005 Accessibility + Mobile Interaction Hardening | PH2-002..PH2-004 | No | Complete (2026-06-23) |
 | 6 | PH2-006 Playwright v2 Containers Parity Suite | PH2-002..PH2-005 | Yes | Complete (2026-06-23) |
-| 7 | PH2-007 Hybrid Rollout Validation (`containers` route) | PH2-006 | Yes | Pending |
+| 7 | PH2-007 Hybrid Rollout Validation (`containers` route) | PH2-006 | Yes | Complete (2026-06-23) |
 | 8 | PH2-008 Phase 2 Release Signoff | PH2-007 | Yes | Pending |
 
 ## PH2-001 - v2 Containers Read Path + Responsive Layout (P0)
@@ -300,6 +300,28 @@ Estimate: 0.5 day
 ### Acceptance Criteria
 1. `hybrid` with `PIHEALTH_UI_V2_PAGES=containers` redirects only containers route.
 2. Rollback to `legacy` restores legacy containers page without rebuild.
+
+### Status
+Complete (2026-06-23)
+
+### Evidence
+1. Added `tests/e2e/test_v2_hybrid_rollout.py` for rollout/rollback validation:
+   - `hybrid` with `PIHEALTH_UI_V2_PAGES=containers` returns a 302 from
+     `/containers.html` to `/v2/containers` while `/system.html` and `/` remain legacy.
+   - `v2` mode returns 302 redirects from legacy routes to their v2 targets.
+   - rollback is verified by starting a separate `legacy` instance without rebuilding assets:
+     `/containers.html` serves the legacy page again and `/v2/containers` returns the
+     legacy-mode disabled response.
+   - `/api/containers?stats=false` and `/api/containers/stats?ids=` payloads are identical
+     across `legacy`, `hybrid`, and `v2`, confirming no backend API behavior changes.
+2. Shared fixture support extended in `tests/e2e/conftest.py`:
+   - `_v2_spawn` accepts explicit `PIHEALTH_UI_V2_PAGES` overrides.
+   - `v2_server_factory` starts multiple isolated app instances in one test, enabling direct
+     rollout -> rollback assertions.
+3. Validation:
+   - `pytest tests/e2e/test_v2_hybrid_rollout.py -q` -> `5 passed`
+   - `pytest tests/e2e/test_v2_foundation.py tests/e2e/test_v2_containers_parity.py tests/e2e/test_v2_hybrid_rollout.py -q`
+     -> `44 passed, 6 skipped`
 
 ## PH2-008 - Phase 2 Release Signoff (P0)
 Owner: Pi-Health maintainers  

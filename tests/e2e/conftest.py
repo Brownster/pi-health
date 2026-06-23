@@ -192,7 +192,7 @@ def _v2_wait_for_server_ready(base_url: str, timeout_seconds: float = 30.0) -> N
     raise RuntimeError(f"Timed out waiting for app at {base_url}")
 
 
-def _v2_spawn(mode: str):
+def _v2_spawn(mode: str, v2_pages: str | None = None):
     """Spawn app.py in the given UI mode. Returns (process, base_url)."""
     if not V2_APP_PATH.exists():
         pytest.skip(f"App entrypoint not found at {V2_APP_PATH}")
@@ -213,6 +213,11 @@ def _v2_spawn(mode: str):
     )
     env.pop("PIHEALTH_UI_V2_PAGES", None)
     env.update(V2_MODE_CONFIG.get(mode, {}))
+    if v2_pages is not None:
+        if v2_pages:
+            env["PIHEALTH_UI_V2_PAGES"] = v2_pages
+        else:
+            env.pop("PIHEALTH_UI_V2_PAGES", None)
 
     process = subprocess.Popen(
         [sys.executable, str(V2_APP_PATH)],
@@ -258,6 +263,24 @@ def v2_mode_server():
         yield {"base_url": base_url, "mode": "v2"}
     finally:
         _v2_teardown(process)
+
+
+@pytest.fixture(scope="function")
+def v2_server_factory():
+    """Start one or more app.py instances with explicit v2 rollout settings."""
+    processes = []
+
+    def _start(mode: str, v2_pages: str | None = None):
+        process, base_url = _v2_spawn(mode, v2_pages=v2_pages)
+        processes.append(process)
+        _v2_wait_for_server_ready(base_url)
+        return {"base_url": base_url, "mode": mode, "v2_pages": v2_pages}
+
+    try:
+        yield _start
+    finally:
+        for process in reversed(processes):
+            _v2_teardown(process)
 
 
 @pytest.fixture(scope="function")
