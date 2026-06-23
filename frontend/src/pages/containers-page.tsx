@@ -251,16 +251,32 @@ function NetworkCell({ rate, rx, tx }: { rate?: NetworkRate; rx: number | null; 
   if (hasRate) {
     return (
       <div className="space-y-1 text-xs">
-        <p className="text-sky-300">↓ {formatRatePerSecond(rate?.rxRate ?? null)}</p>
-        <p className="text-emerald-300">↑ {formatRatePerSecond(rate?.txRate ?? null)}</p>
+        <p className="text-sky-300">
+          <span aria-hidden="true">↓ </span>
+          <span className="sr-only">Download rate </span>
+          {formatRatePerSecond(rate?.rxRate ?? null)}
+        </p>
+        <p className="text-emerald-300">
+          <span aria-hidden="true">↑ </span>
+          <span className="sr-only">Upload rate </span>
+          {formatRatePerSecond(rate?.txRate ?? null)}
+        </p>
       </div>
     );
   }
 
   return (
     <div className="space-y-1 text-xs">
-      <p className="text-sky-300">↓ {formatBytes(rx)}</p>
-      <p className="text-emerald-300">↑ {formatBytes(tx)}</p>
+      <p className="text-sky-300">
+        <span aria-hidden="true">↓ </span>
+        <span className="sr-only">Received </span>
+        {formatBytes(rx)}
+      </p>
+      <p className="text-emerald-300">
+        <span aria-hidden="true">↑ </span>
+        <span className="sr-only">Sent </span>
+        {formatBytes(tx)}
+      </p>
     </div>
   );
 }
@@ -434,7 +450,12 @@ function DesktopContainerTable({
                     <div className="flex min-w-0 items-center gap-2">
                       <span className="truncate font-medium">{container.name}</span>
                       {container.update_available ? (
-                        <span className="text-amber-300" title="Update available">
+                        <span
+                          aria-label="Update available"
+                          className="text-amber-300"
+                          role="img"
+                          title="Update available"
+                        >
                           ↻
                         </span>
                       ) : null}
@@ -472,7 +493,8 @@ function DesktopContainerTable({
                   <td className="px-4 py-3">
                     {webPort ? (
                       <a
-                        className="text-sm text-primary underline-offset-2 hover:underline"
+                        aria-label={`Open ${container.name} web UI in a new tab`}
+                        className="inline-flex min-h-11 items-center text-sm text-primary underline-offset-2 hover:underline"
                         href={`http://${window.location.hostname}:${webPort}`}
                         rel="noopener noreferrer"
                         target="_blank"
@@ -608,6 +630,9 @@ function MobileContainerCards({
   );
 }
 
+const FOCUSABLE_SELECTOR =
+  'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])';
+
 function ModalOverlay({
   onClose,
   children,
@@ -615,6 +640,48 @@ function ModalOverlay({
   onClose: () => void;
   children: ReactNode;
 }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    const node = containerRef.current;
+    const focusables = node
+      ? Array.from(node.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR))
+      : [];
+    (focusables[0] ?? node)?.focus();
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (event.key !== "Tab" || !node) {
+        return;
+      }
+      const items = Array.from(node.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
+      if (!items.length) {
+        return;
+      }
+      const first = items[0];
+      const last = items[items.length - 1];
+      const active = document.activeElement;
+      if (event.shiftKey && active === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown, true);
+      previouslyFocused?.focus?.();
+    };
+  }, [onClose]);
+
   return (
     <div
       className="fixed inset-0 z-[70] flex items-center justify-center bg-black/75 p-3 sm:p-4"
@@ -623,6 +690,8 @@ function ModalOverlay({
           onClose();
         }
       }}
+      ref={containerRef}
+      tabIndex={-1}
     >
       {children}
     </div>
@@ -1001,25 +1070,6 @@ export function ContainersPage() {
   }, [refreshNow]);
 
   useEffect(() => {
-    if (!logsModal.open && !containerNetworkModal.open) {
-      return undefined;
-    }
-
-    const onEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") {
-        return;
-      }
-      closeLogsModal();
-      closeContainerNetworkModal();
-    };
-
-    window.addEventListener("keydown", onEscape);
-    return () => {
-      window.removeEventListener("keydown", onEscape);
-    };
-  }, [logsModal.open, containerNetworkModal.open, closeLogsModal, closeContainerNetworkModal]);
-
-  useEffect(() => {
     if (!actionNotice || actionNotice.tone === "error") {
       return undefined;
     }
@@ -1174,7 +1224,11 @@ export function ContainersPage() {
       ) : null}
 
       {actionNotice ? (
-        <Card className={getNoticeToneClass(actionNotice.tone)}>
+        <Card
+          aria-live={actionNotice.tone === "error" ? "assertive" : "polite"}
+          className={getNoticeToneClass(actionNotice.tone)}
+          role="status"
+        >
           <CardContent className="flex items-center gap-2 p-4 text-sm">
             {actionNotice.tone === "error" ? (
               <TriangleAlert aria-hidden="true" className="h-4 w-4" />
@@ -1213,7 +1267,7 @@ export function ContainersPage() {
       ) : null}
 
       {isLoading ? (
-        <Card>
+        <Card aria-live="polite" role="status">
           <CardContent className="flex min-h-[14rem] items-center justify-center gap-2 p-6 text-sm text-muted-foreground">
             <Activity aria-hidden="true" className="h-4 w-4 animate-pulse text-primary" />
             Loading containers...

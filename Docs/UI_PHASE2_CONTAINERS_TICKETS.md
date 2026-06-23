@@ -20,7 +20,7 @@ Deliver `/v2/containers` at functional parity for desktop/phone/tablet, then ena
 | 2 | PH2-002 Containers Lifecycle Actions (start/stop/restart/check/update) | PH2-001 | Yes | Complete (2026-02-22) |
 | 3 | PH2-003 Containers Logs + Diagnostics Modals | PH2-002 | Yes | Complete (2026-02-22) |
 | 4 | PH2-004 Stats Polling + Network Rate Parity | PH2-001 | Yes | Complete (2026-06-23) |
-| 5 | PH2-005 Accessibility + Mobile Interaction Hardening | PH2-002..PH2-004 | No | Pending |
+| 5 | PH2-005 Accessibility + Mobile Interaction Hardening | PH2-002..PH2-004 | No | Complete (2026-06-23) |
 | 6 | PH2-006 Playwright v2 Containers Parity Suite | PH2-002..PH2-005 | Yes | Pending |
 | 7 | PH2-007 Hybrid Rollout Validation (`containers` route) | PH2-006 | Yes | Pending |
 | 8 | PH2-008 Phase 2 Release Signoff | PH2-007 | Yes | Pending |
@@ -215,6 +215,35 @@ Estimate: 0.5 day
 ### Acceptance Criteria
 1. Critical controls are keyboard reachable and screen-reader labeled.
 2. No hover-only affordances remain on v2 containers.
+
+### Status
+Complete (2026-06-23)
+
+### Evidence
+1. Touch targets: the shared `Button` primitive already enforces `min-h-11` (44px) across all
+   sizes, so every lifecycle/diagnostic/filter/refresh control meets the 44px minimum. The
+   desktop "Open" web-UI link was given `min-h-11 inline-flex` for parity.
+2. Dialog focus management consolidated into `ModalOverlay` (`frontend/src/pages/containers-page.tsx`):
+   - moves focus into the dialog on open (first focusable element),
+   - traps Tab/Shift+Tab within the dialog,
+   - closes on Escape (per-dialog; the prior global keydown effect was removed),
+   - restores focus to the triggering control on close.
+   Logs and container-network dialogs already carry `role="dialog"`, `aria-modal="true"`, and
+   `aria-labelledby`.
+3. Screen-reader announcements:
+   - action notice card is `role="status"` with `aria-live` (`assertive` for errors, otherwise
+     `polite`); loading card is `role="status"` `aria-live="polite"`.
+   - the update-available glyph is `role="img"` with `aria-label="Update available"`.
+   - network cells mark the arrow glyphs `aria-hidden` and add sr-only
+     download/upload/received/sent labels.
+4. No hover-only affordances: all controls are always-visible buttons/links; hover styles are
+   purely decorative enhancements (verified on desktop table and mobile cards).
+5. Validation:
+   - `npm --prefix frontend run check` -> pass
+   - `npm --prefix frontend run build:publish` -> pass
+   - `node scripts/check_frontend_bundle_budget.mjs` -> pass (initial JS gzip 73.86 kB / 200 kB)
+   - `pytest tests/e2e/test_v2_foundation.py -q` -> `30 passed, 6 skipped` (incl. dialog
+     open/close workflow with the new focus management)
 
 ## PH2-006 - Playwright v2 Containers Parity Suite (P0)
 Owner: Pi-Health maintainers  
