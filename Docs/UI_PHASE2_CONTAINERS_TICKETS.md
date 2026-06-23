@@ -21,7 +21,7 @@ Deliver `/v2/containers` at functional parity for desktop/phone/tablet, then ena
 | 3 | PH2-003 Containers Logs + Diagnostics Modals | PH2-002 | Yes | Complete (2026-02-22) |
 | 4 | PH2-004 Stats Polling + Network Rate Parity | PH2-001 | Yes | Complete (2026-06-23) |
 | 5 | PH2-005 Accessibility + Mobile Interaction Hardening | PH2-002..PH2-004 | No | Complete (2026-06-23) |
-| 6 | PH2-006 Playwright v2 Containers Parity Suite | PH2-002..PH2-005 | Yes | Pending |
+| 6 | PH2-006 Playwright v2 Containers Parity Suite | PH2-002..PH2-005 | Yes | Complete (2026-06-23) |
 | 7 | PH2-007 Hybrid Rollout Validation (`containers` route) | PH2-006 | Yes | Pending |
 | 8 | PH2-008 Phase 2 Release Signoff | PH2-007 | Yes | Pending |
 
@@ -261,6 +261,32 @@ Estimate: 0.75 day
 ### Acceptance Criteria
 1. CI executes parity suite with stable pass/fail behavior.
 2. Tests cover core lifecycle and diagnostics flows on mobile/tablet.
+
+### Status
+Complete (2026-06-23)
+
+### Evidence
+1. Shared v2 e2e scaffolding lifted into `tests/e2e/conftest.py` as fixtures (server
+   lifecycle, login, deterministic `/api/**` mocks) so the foundation and parity suites
+   reuse one source of truth:
+   - `mode_server` (legacy/hybrid/v2) + `v2_mode_server` (v2-pinned),
+   - `v2_login`, `install_v2_containers_api_mocks`, `v2_mock_container_id`.
+   `tests/e2e/test_v2_foundation.py` refactored onto these fixtures (no behavior change;
+   still `30 passed, 6 skipped`).
+2. New parity suite `tests/e2e/test_v2_containers_parity.py`, pinned to v2 mode so the
+   matrix is the three viewport profiles (desktop/phone/tablet):
+   - `test_v2_containers_overflow_through_workflows`: overflow assertions on load and after
+     opening the logs modal, container network modal, and host network panel.
+   - `test_v2_containers_lifecycle_action_feedback`: restart action reachable on every
+     viewport with success feedback surfaced; overflow re-checked after the action.
+   - `test_v2_containers_dialog_focus_trap_and_restore`: focus moves into the dialog on
+     open, Tab/Shift+Tab stay trapped, Escape closes and restores focus to the trigger
+     (covers the PH2-005 hardening that the foundation suite did not assert).
+3. Determinism: all action/logs/network flows use mocked endpoints; no docker dependency.
+4. Validation:
+   - `pytest tests/e2e/test_v2_foundation.py tests/e2e/test_v2_containers_parity.py -q`
+     -> `39 passed, 6 skipped`
+   - `ruff check --select E9,F63,F7,F82 tests/e2e/` -> pass (and full default ruleset clean)
 
 ## PH2-007 - Hybrid Rollout Validation (`containers`) (P0)
 Owner: Pi-Health maintainers  

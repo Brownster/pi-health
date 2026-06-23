@@ -1,7 +1,16 @@
 import pytest
 import docker
+import json
+import re
+import socket
+import subprocess
+import sys
 import time
 import os
+from pathlib import Path
+from urllib import error as urlerror
+from urllib import request as urlrequest
+from urllib.parse import urlparse
 from playwright.sync_api import Page, expect
 
 # Default credentials from appropriate environment variables or defaults
@@ -145,3 +154,230 @@ def test_container(docker_client):
         container.remove(force=True)
     except Exception:
         pass
+
+
+# ---------------------------------------------------------------------------
+# Shared v2 (React) UI e2e scaffolding
+#
+# Reusable across the v2 foundation suite and the containers parity suite:
+# per-mode app server lifecycle, login helper, and deterministic /api mocks.
+# ---------------------------------------------------------------------------
+
+V2_REPO_ROOT = Path(__file__).resolve().parents[2]
+V2_APP_PATH = V2_REPO_ROOT / "app.py"
+V2_INDEX_PATH = V2_REPO_ROOT / "static" / "v2" / "index.html"
+
+V2_MODE_CONFIG = {
+    "legacy": {},
+    "hybrid": {"PIHEALTH_UI_V2_PAGES": "index,containers"},
+    "v2": {},
+}
+V2_MOCK_CONTAINER_ID = "v2-mock-container-1"
+
+
+def _v2_find_open_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+def _v2_wait_for_server_ready(base_url: str, timeout_seconds: float = 30.0) -> None:
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        try:
+            with urlrequest.urlopen(f"{base_url}/api/theme", timeout=1):
+                return
+        except (urlerror.URLError, TimeoutError, ConnectionError):
+            time.sleep(0.25)
+    raise RuntimeError(f"Timed out waiting for app at {base_url}")
+
+
+def _v2_spawn(mode: str):
+    """Spawn app.py in the given UI mode. Returns (process, base_url)."""
+    if not V2_APP_PATH.exists():
+        pytest.skip(f"App entrypoint not found at {V2_APP_PATH}")
+    if not V2_INDEX_PATH.exists():
+        pytest.skip("v2 assets missing. Run `npm --prefix frontend run build:publish` first.")
+
+    port = _v2_find_open_port()
+    base_url = f"http://127.0.0.1:{port}"
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "PORT": str(port),
+            "PIHEALTH_USER": USERNAME,
+            "PIHEALTH_PASSWORD": PASSWORD,
+            "PIHEALTH_UI_MODE": mode,
+        }
+    )
+    env.pop("PIHEALTH_UI_V2_PAGES", None)
+    env.update(V2_MODE_CONFIG.get(mode, {}))
+
+    process = subprocess.Popen(
+        [sys.executable, str(V2_APP_PATH)],
+        cwd=str(V2_REPO_ROOT),
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.STDOUT,
+    )
+    return process, base_url
+
+
+def _v2_teardown(process) -> None:
+    process.terminate()
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=5)
+
+
+@pytest.fixture(params=["legacy", "hybrid", "v2"], ids=lambda mode: f"mode_{mode}")
+def ui_mode(request):
+    return request.param
+
+
+@pytest.fixture(scope="function")
+def mode_server(ui_mode):
+    """App server parametrized across legacy/hybrid/v2 UI modes."""
+    process, base_url = _v2_spawn(ui_mode)
+    try:
+        _v2_wait_for_server_ready(base_url)
+        yield {"base_url": base_url, "mode": ui_mode}
+    finally:
+        _v2_teardown(process)
+
+
+@pytest.fixture(scope="function")
+def v2_mode_server():
+    """App server pinned to v2 UI mode (for v2-only parity coverage)."""
+    process, base_url = _v2_spawn("v2")
+    try:
+        _v2_wait_for_server_ready(base_url)
+        yield {"base_url": base_url, "mode": "v2"}
+    finally:
+        _v2_teardown(process)
+
+
+@pytest.fixture(scope="function")
+def v2_mock_container_id():
+    return V2_MOCK_CONTAINER_ID
+
+
+@pytest.fixture(scope="function")
+def v2_login():
+    """Returns a callable(page, base_url) that logs in and waits for the v2/home URL."""
+
+    def _login(page: Page, base_url: str) -> None:
+        page.goto(f"{base_url}/login.html")
+        if "login.html" not in page.url:
+            return
+        page.fill("#username", USERNAME)
+        page.fill("#password", PASSWORD)
+        page.click("#login-button")
+        page.wait_for_url(re.compile(rf"{re.escape(base_url)}/(v2/?|$)"), timeout=10000)
+
+    return _login
+
+
+@pytest.fixture(scope="function")
+def install_v2_containers_api_mocks():
+    """Returns a callable(page) that installs deterministic /api/** mocks for v2 containers."""
+
+    def _json_fulfill(route, payload, status: int = 200) -> None:
+        route.fulfill(
+            status=status,
+            content_type="application/json",
+            body=json.dumps(payload),
+        )
+
+    def _install(page: Page) -> None:
+        container_payload = [
+            {
+                "id": V2_MOCK_CONTAINER_ID,
+                "name": "v2-mock-service",
+                "image": "linuxserver/mock:latest",
+                "status": "running",
+                "cpu_percent": 7.5,
+                "memory_percent": 22.1,
+                "memory_used": 380000000,
+                "memory_limit": 2048000000,
+                "net_rx": 1234000,
+                "net_tx": 2345000,
+                "ports": [{"container_port": 8080, "host_port": 18080, "protocol": "tcp"}],
+                "update_available": False,
+            }
+        ]
+
+        def _handler(route):
+            parsed = urlparse(route.request.url)
+            path = parsed.path
+            method = route.request.method
+
+            if path == "/api/containers" and method == "GET":
+                _json_fulfill(route, container_payload)
+                return
+
+            if path == "/api/containers/stats" and method == "GET":
+                _json_fulfill(
+                    route,
+                    {
+                        V2_MOCK_CONTAINER_ID: {
+                            "cpu_percent": 7.5,
+                            "memory_percent": 22.1,
+                            "memory_used": 380000000,
+                            "memory_limit": 2048000000,
+                            "net_rx": 1234000,
+                            "net_tx": 2345000,
+                        }
+                    },
+                )
+                return
+
+            if path == f"/api/containers/{V2_MOCK_CONTAINER_ID}/logs" and method == "GET":
+                _json_fulfill(
+                    route,
+                    {"container": "v2-mock-service", "logs": "line 1\nline 2\nline 3"},
+                )
+                return
+
+            if path == f"/api/containers/{V2_MOCK_CONTAINER_ID}/network-test" and method == "POST":
+                _json_fulfill(
+                    route,
+                    {
+                        "container_id": V2_MOCK_CONTAINER_ID,
+                        "container_name": "v2-mock-service",
+                        "ping_success": True,
+                        "local_ip": "172.18.0.2",
+                        "public_ip": "203.0.113.10",
+                        "probe_method": "ping",
+                        "ping_output": "64 bytes from 8.8.8.8: icmp_seq=1 ttl=57 time=10ms",
+                    },
+                )
+                return
+
+            if path == "/api/network-test" and method == "POST":
+                _json_fulfill(
+                    route,
+                    {
+                        "ping_success": True,
+                        "local_ip": "192.168.1.50",
+                        "public_ip": "203.0.113.20",
+                        "probe_method": "ping",
+                        "ping_output": "64 bytes from 8.8.8.8: icmp_seq=1 ttl=57 time=8ms",
+                    },
+                )
+                return
+
+            if path.startswith(f"/api/containers/{V2_MOCK_CONTAINER_ID}/") and method == "POST":
+                action = path.rsplit("/", 1)[-1]
+                if action in {"start", "stop", "restart", "check_update", "update"}:
+                    _json_fulfill(route, {"status": f"{action} accepted", "update_available": False})
+                    return
+
+            route.continue_()
+
+        page.route("**/api/**", _handler)
+
+    return _install
