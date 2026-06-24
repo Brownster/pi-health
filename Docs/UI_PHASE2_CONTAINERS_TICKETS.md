@@ -23,7 +23,7 @@ Deliver `/v2/containers` at functional parity for desktop/phone/tablet, then ena
 | 5 | PH2-005 Accessibility + Mobile Interaction Hardening | PH2-002..PH2-004 | No | Complete (2026-06-23) |
 | 6 | PH2-006 Playwright v2 Containers Parity Suite | PH2-002..PH2-005 | Yes | Complete (2026-06-23) |
 | 7 | PH2-007 Hybrid Rollout Validation (`containers` route) | PH2-006 | Yes | Complete (2026-06-23) |
-| 8 | PH2-008 Phase 2 Release Signoff | PH2-007 | Yes | Pending |
+| 8 | PH2-008 Phase 2 Release Signoff | PH2-007 | Yes | Complete (2026-06-23) |
 
 ## PH2-001 - v2 Containers Read Path + Responsive Layout (P0)
 Owner: Pi-Health maintainers  
@@ -339,3 +339,24 @@ Estimate: 0.5 day
 ### Acceptance Criteria
 1. Phase 2 exit criteria are documented with evidence.
 2. Rollback procedure is tested and recorded.
+
+### Status
+Complete (2026-06-23)
+
+### Evidence
+1. Added `Docs/UI_PHASE2_RELEASE_SIGNOFF.md` with:
+   - GO decision for Phase 2 containers pilot,
+   - automated validation evidence,
+   - Phase 2 exit criteria mapping,
+   - rollback procedure and automated rollback test references,
+   - deferred non-blocking follow-ups.
+2. Validation completed:
+   - `npm --prefix frontend run build:publish` -> pass
+   - `node scripts/check_frontend_bundle_budget.mjs` -> pass
+   - `pytest tests/ -v -m "not e2e"` -> `540 passed, 1 skipped, 123 deselected`
+   - `pytest tests/e2e/test_v2_foundation.py tests/e2e/test_v2_containers_parity.py tests/e2e/test_v2_hybrid_rollout.py -q`
+     -> `44 passed, 6 skipped`
+   - `.tox/all/bin/ruff check --select E9,F63,F7,F82 .` -> pass
+   - `tox -e all` -> pass (`95 passed, 28 skipped` in full e2e; lint and unit
+     steps passed)
+3. `core.hooksPath` restored to `scripts/hooks`; the hook runs `tox -e all`.
