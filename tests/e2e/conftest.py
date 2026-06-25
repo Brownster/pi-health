@@ -451,6 +451,30 @@ def install_v2_stacks_api_mocks():
                 _json_fulfill(route, {"logs": "stack log line 1\nstack log line 2", "returncode": 0})
                 return
 
+            if path == "/api/stacks/media/compose" and method == "GET":
+                _json_fulfill(
+                    route,
+                    {"content": "services:\n  web:\n    image: nginx:latest\n", "filename": "docker-compose.yml"},
+                )
+                return
+            if path == "/api/stacks/media/compose" and method == "POST":
+                _json_fulfill(route, {"status": "saved"})
+                return
+
+            if path == "/api/stacks/media/env" and method == "GET":
+                _json_fulfill(route, {"content": "PUID=1000\nPGID=1000\n", "exists": True})
+                return
+            if path == "/api/stacks/media/env" and method == "POST":
+                _json_fulfill(route, {"status": "saved"})
+                return
+
+            if path == "/api/stacks/media/backups" and method == "GET":
+                _json_fulfill(route, {"backups": ["docker-compose.yml.20260101-000000.bak"]})
+                return
+            if path == "/api/stacks/media/restore" and method == "POST":
+                _json_fulfill(route, {"status": "restored", "backup": "docker-compose.yml.20260101-000000.bak"})
+                return
+
             # Non-streaming lifecycle fallback.
             if path.startswith("/api/stacks/media/") and method == "POST":
                 action = path.rsplit("/", 1)[-1]

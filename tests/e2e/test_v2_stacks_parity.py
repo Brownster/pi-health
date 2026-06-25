@@ -67,3 +67,53 @@ def test_v2_stacks_lifecycle_streaming_console(
     expect(page.locator("#v2-stack-console")).to_contain_text("Completed", timeout=15000)
     page.click("#v2-stack-console-close")
     expect(page.locator("#v2-stack-console")).to_have_count(0)
+
+
+def test_v2_stacks_compose_env_editor(
+    page: Page,
+    v2_mode_server,
+    v2_login,
+    install_v2_stacks_api_mocks,
+):
+    base_url = v2_mode_server["base_url"]
+    _open_v2_stacks(page, base_url, v2_login, install_v2_stacks_api_mocks)
+
+    page.locator("button[data-stack-action='edit']:visible").first.click()
+    editor = page.locator("#v2-stack-editor-modal")
+    expect(editor).to_be_visible()
+
+    # Compose tab loads file content.
+    textarea = page.locator("#v2-stack-editor-textarea")
+    expect(textarea).to_have_value("services:\n  web:\n    image: nginx:latest\n")
+    textarea.fill("services:\n  web:\n    image: nginx:1.27\n")
+    page.click("#v2-stack-editor-save")
+    expect(page.locator("#v2-stack-editor-status")).to_have_text("Saved", timeout=10000)
+
+    # Env tab loads the .env content.
+    page.click("button[data-editor-tab='env']")
+    expect(textarea).to_have_value("PUID=1000\nPGID=1000\n")
+
+    page.click("#v2-stack-editor-close")
+    expect(page.locator("#v2-stack-editor-modal")).to_have_count(0)
+
+
+def test_v2_stacks_backups_restore_with_confirm(
+    page: Page,
+    v2_mode_server,
+    v2_login,
+    install_v2_stacks_api_mocks,
+):
+    base_url = v2_mode_server["base_url"]
+    _open_v2_stacks(page, base_url, v2_login, install_v2_stacks_api_mocks)
+
+    page.locator("button[data-stack-action='backups']:visible").first.click()
+    expect(page.locator("#v2-stack-backups-modal")).to_be_visible()
+
+    backup = "docker-compose.yml.20260101-000000.bak"
+    # Restore requires an explicit confirm step (no destructive one-click).
+    page.click(f"button[data-restore='{backup}']")
+    page.click(f"button[data-confirm-restore='{backup}']")
+    expect(page.locator("#v2-stack-backups-modal")).to_contain_text("Restored", timeout=10000)
+
+    page.click("#v2-stack-backups-close")
+    expect(page.locator("#v2-stack-backups-modal")).to_have_count(0)

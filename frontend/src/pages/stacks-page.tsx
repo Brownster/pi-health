@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Activity,
+  Archive,
   Download,
   FileText,
   Layers,
   Loader2,
+  Pencil,
   Play,
   RefreshCw,
   RotateCw,
@@ -18,11 +20,17 @@ import { ModalOverlay } from "@/components/ui/modal-overlay";
 import {
   type StackAction,
   type StackSummary,
+  fetchStackBackups,
+  fetchStackCompose,
+  fetchStackEnv,
   fetchStackLogs,
   fetchStacks,
   getStackServicesPercent,
   getStackStreamUrl,
+  restoreStackBackup,
   runStackAction,
+  saveStackCompose,
+  saveStackEnv,
 } from "@/lib/stacks";
 import { formatClockTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -87,6 +95,33 @@ interface LogsModalState {
   error: string | null;
 }
 
+type EditorTab = "compose" | "env";
+type SaveStatus = "idle" | "saving" | "saved" | "error";
+
+interface EditorModalState {
+  open: boolean;
+  stackName: string;
+  tab: EditorTab;
+  status: AsyncStatus;
+  loadError: string | null;
+  compose: string;
+  composeFilename: string | null;
+  env: string;
+  saveStatus: SaveStatus;
+  saveError: string | null;
+}
+
+interface BackupsModalState {
+  open: boolean;
+  stackName: string;
+  status: AsyncStatus;
+  backups: string[];
+  error: string | null;
+  confirming: string | null;
+  restoring: string | null;
+  notice: string | null;
+}
+
 function getStatusTone(status: string): string {
   switch (status) {
     case "running":
@@ -123,11 +158,15 @@ function StackCard({
   pendingAction,
   onAction,
   onLogs,
+  onEdit,
+  onBackups,
 }: {
   stack: StackSummary;
   pendingAction?: StackAction;
   onAction: (stack: StackSummary, action: StackAction) => void;
   onLogs: (stack: StackSummary) => void;
+  onEdit: (stack: StackSummary) => void;
+  onBackups: (stack: StackSummary) => void;
 }) {
   const percent = getStackServicesPercent(stack);
   const barWidth = percent === null ? 0 : Math.max(0, Math.min(percent, 100));
@@ -206,6 +245,32 @@ function StackCard({
             <FileText aria-hidden="true" className="h-3.5 w-3.5" />
             Logs
           </Button>
+          <Button
+            aria-label={`Edit ${stack.name}`}
+            className="gap-1.5 text-xs sm:text-sm"
+            data-stack-action="edit"
+            data-stack={stack.name}
+            disabled={rowBusy}
+            onClick={() => onEdit(stack)}
+            size="sm"
+            variant="outline"
+          >
+            <Pencil aria-hidden="true" className="h-3.5 w-3.5" />
+            Edit
+          </Button>
+          <Button
+            aria-label={`Backups ${stack.name}`}
+            className="gap-1.5 text-xs sm:text-sm"
+            data-stack-action="backups"
+            data-stack={stack.name}
+            disabled={rowBusy}
+            onClick={() => onBackups(stack)}
+            size="sm"
+            variant="outline"
+          >
+            <Archive aria-hidden="true" className="h-3.5 w-3.5" />
+            Backups
+          </Button>
         </div>
       </CardContent>
     </Card>
@@ -235,6 +300,28 @@ export function StacksPage() {
     stackName: "",
     logs: "",
     error: null,
+  });
+  const [editorModal, setEditorModal] = useState<EditorModalState>({
+    open: false,
+    stackName: "",
+    tab: "compose",
+    status: "idle",
+    loadError: null,
+    compose: "",
+    composeFilename: null,
+    env: "",
+    saveStatus: "idle",
+    saveError: null,
+  });
+  const [backupsModal, setBackupsModal] = useState<BackupsModalState>({
+    open: false,
+    stackName: "",
+    status: "idle",
+    backups: [],
+    error: null,
+    confirming: null,
+    restoring: null,
+    notice: null,
   });
 
   const isMountedRef = useRef(true);
@@ -466,6 +553,140 @@ export function StacksPage() {
     setLogsModal((current) => ({ ...current, open: false }));
   }, []);
 
+  const onEdit = useCallback(async (stack: StackSummary) => {
+    setEditorModal({
+      open: true,
+      stackName: stack.name,
+      tab: "compose",
+      status: "loading",
+      loadError: null,
+      compose: "",
+      composeFilename: null,
+      env: "",
+      saveStatus: "idle",
+      saveError: null,
+    });
+
+    try {
+      const [compose, env] = await Promise.all([
+        fetchStackCompose(stack.name),
+        fetchStackEnv(stack.name),
+      ]);
+      if (!isMountedRef.current) {
+        return;
+      }
+      setEditorModal((current) =>
+        current.stackName === stack.name && current.open
+          ? {
+              ...current,
+              status: "ready",
+              compose: compose.content,
+              composeFilename: compose.filename,
+              env: env.content,
+            }
+          : current,
+      );
+    } catch (caughtError) {
+      if (!isMountedRef.current) {
+        return;
+      }
+      setEditorModal((current) =>
+        current.stackName === stack.name && current.open
+          ? { ...current, status: "error", loadError: getErrorMessage(caughtError) }
+          : current,
+      );
+    }
+  }, []);
+
+  const closeEditor = useCallback(() => {
+    setEditorModal((current) => ({ ...current, open: false }));
+  }, []);
+
+  const saveEditor = useCallback(async () => {
+    const name = editorModal.stackName;
+    const tab = editorModal.tab;
+    const content = tab === "compose" ? editorModal.compose : editorModal.env;
+    setEditorModal((current) => ({ ...current, saveStatus: "saving", saveError: null }));
+
+    try {
+      if (tab === "compose") {
+        await saveStackCompose(name, content);
+      } else {
+        await saveStackEnv(name, content);
+      }
+      if (!isMountedRef.current) {
+        return;
+      }
+      setEditorModal((current) => ({ ...current, saveStatus: "saved", saveError: null }));
+      setActionNotice({ tone: "success", message: `Saved ${tab} for ${name}` });
+    } catch (caughtError) {
+      if (!isMountedRef.current) {
+        return;
+      }
+      setEditorModal((current) => ({ ...current, saveStatus: "error", saveError: getErrorMessage(caughtError) }));
+    }
+  }, [editorModal]);
+
+  const onBackups = useCallback(async (stack: StackSummary) => {
+    setBackupsModal({
+      open: true,
+      stackName: stack.name,
+      status: "loading",
+      backups: [],
+      error: null,
+      confirming: null,
+      restoring: null,
+      notice: null,
+    });
+
+    try {
+      const backups = await fetchStackBackups(stack.name);
+      if (!isMountedRef.current) {
+        return;
+      }
+      setBackupsModal((current) =>
+        current.stackName === stack.name && current.open
+          ? { ...current, status: "ready", backups }
+          : current,
+      );
+    } catch (caughtError) {
+      if (!isMountedRef.current) {
+        return;
+      }
+      setBackupsModal((current) =>
+        current.stackName === stack.name && current.open
+          ? { ...current, status: "error", error: getErrorMessage(caughtError) }
+          : current,
+      );
+    }
+  }, []);
+
+  const closeBackups = useCallback(() => {
+    setBackupsModal((current) => ({ ...current, open: false }));
+  }, []);
+
+  const restoreBackup = useCallback(
+    async (stackName: string, backup: string) => {
+      setBackupsModal((current) => ({ ...current, confirming: null, restoring: backup, notice: null }));
+      try {
+        await restoreStackBackup(stackName, backup);
+        if (!isMountedRef.current) {
+          return;
+        }
+        setBackupsModal((current) => ({ ...current, restoring: null, notice: `Restored ${backup}` }));
+        setActionNotice({ tone: "success", message: `Restored ${stackName} from ${backup}` });
+        void loadStacks("action");
+      } catch (caughtError) {
+        if (!isMountedRef.current) {
+          return;
+        }
+        setBackupsModal((current) => ({ ...current, restoring: null, error: getErrorMessage(caughtError) }));
+        setActionNotice({ tone: "error", message: `Restore failed for ${stackName}: ${getErrorMessage(caughtError)}` });
+      }
+    },
+    [loadStacks],
+  );
+
   useEffect(() => {
     isMountedRef.current = true;
     void loadStacks("initial");
@@ -590,6 +811,8 @@ export function StacksPage() {
             <StackCard
               key={stack.name}
               onAction={onAction}
+              onBackups={onBackups}
+              onEdit={onEdit}
               onLogs={onLogs}
               pendingAction={pendingActions[stack.name]}
               stack={stack}
@@ -675,6 +898,187 @@ export function StacksPage() {
                       : logsModal.logs || "No logs available."}
                 </pre>
               </div>
+            </CardContent>
+          </Card>
+        </ModalOverlay>
+      ) : null}
+
+      {editorModal.open ? (
+        <ModalOverlay onClose={closeEditor}>
+          <Card
+            aria-labelledby="v2-stack-editor-title"
+            aria-modal="true"
+            className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden"
+            id="v2-stack-editor-modal"
+            role="dialog"
+          >
+            <CardHeader className="flex flex-row items-start justify-between gap-3 border-b border-border/70 p-4 sm:p-5">
+              <div className="space-y-1">
+                <CardTitle className="text-base sm:text-lg" id="v2-stack-editor-title">
+                  Edit {editorModal.stackName}
+                </CardTitle>
+                <CardDescription>
+                  {editorModal.tab === "compose"
+                    ? editorModal.composeFilename || "docker-compose.yml"
+                    : ".env"}
+                </CardDescription>
+              </div>
+              <Button id="v2-stack-editor-close" onClick={closeEditor} variant="outline">
+                Close
+              </Button>
+            </CardHeader>
+            <CardContent className="space-y-3 overflow-auto p-4">
+              <div aria-label="Editor file" className="flex flex-wrap gap-2" role="group">
+                {(["compose", "env"] as EditorTab[]).map((tab) => (
+                  <Button
+                    aria-pressed={editorModal.tab === tab}
+                    data-editor-tab={tab}
+                    key={tab}
+                    onClick={() =>
+                      setEditorModal((current) => ({ ...current, tab, saveStatus: "idle", saveError: null }))
+                    }
+                    size="sm"
+                    variant={editorModal.tab === tab ? "default" : "outline"}
+                  >
+                    {tab === "compose" ? "Compose" : "Env"}
+                  </Button>
+                ))}
+              </div>
+
+              {editorModal.status === "loading" ? (
+                <p className="text-sm text-muted-foreground">Loading...</p>
+              ) : editorModal.status === "error" ? (
+                <p className="text-sm text-rose-300">{editorModal.loadError || "Failed to load files"}</p>
+              ) : (
+                <>
+                  <textarea
+                    aria-label={editorModal.tab === "compose" ? "Compose file content" : "Env file content"
+                    }
+                    className="h-[40vh] w-full resize-y rounded-lg border border-border/70 bg-muted/25 p-3 font-mono text-xs sm:text-sm"
+                    id="v2-stack-editor-textarea"
+                    onChange={(event) =>
+                      setEditorModal((current) => ({
+                        ...current,
+                        saveStatus: "idle",
+                        saveError: null,
+                        ...(current.tab === "compose"
+                          ? { compose: event.target.value }
+                          : { env: event.target.value }),
+                      }))
+                    }
+                    spellCheck={false}
+                    value={editorModal.tab === "compose" ? editorModal.compose : editorModal.env}
+                  />
+                  <div className="flex flex-wrap items-center gap-3">
+                    <Button
+                      disabled={editorModal.saveStatus === "saving"}
+                      id="v2-stack-editor-save"
+                      onClick={() => void saveEditor()}
+                    >
+                      {editorModal.saveStatus === "saving" ? "Saving..." : "Save"}
+                    </Button>
+                    <span
+                      aria-live="polite"
+                      className={cn(
+                        "text-sm",
+                        editorModal.saveStatus === "error" ? "text-rose-300" : "text-emerald-300",
+                      )}
+                      id="v2-stack-editor-status"
+                      role="status"
+                    >
+                      {editorModal.saveStatus === "saved"
+                        ? "Saved"
+                        : editorModal.saveStatus === "error"
+                          ? editorModal.saveError || "Save failed"
+                          : ""}
+                    </span>
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </ModalOverlay>
+      ) : null}
+
+      {backupsModal.open ? (
+        <ModalOverlay onClose={closeBackups}>
+          <Card
+            aria-labelledby="v2-stack-backups-title"
+            aria-modal="true"
+            className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden"
+            id="v2-stack-backups-modal"
+            role="dialog"
+          >
+            <CardHeader className="flex flex-row items-start justify-between gap-3 border-b border-border/70 p-4 sm:p-5">
+              <div className="space-y-1">
+                <CardTitle className="text-base sm:text-lg" id="v2-stack-backups-title">
+                  Backups: {backupsModal.stackName}
+                </CardTitle>
+                <CardDescription>Restore the compose file from a previous backup.</CardDescription>
+              </div>
+              <Button id="v2-stack-backups-close" onClick={closeBackups} variant="outline">
+                Close
+              </Button>
+            </CardHeader>
+            <CardContent className="space-y-3 overflow-auto p-4">
+              {backupsModal.notice ? (
+                <p aria-live="polite" className="text-sm text-emerald-300" role="status">
+                  {backupsModal.notice}
+                </p>
+              ) : null}
+              {backupsModal.error ? (
+                <p aria-live="assertive" className="text-sm text-rose-300" role="status">
+                  {backupsModal.error}
+                </p>
+              ) : null}
+
+              {backupsModal.status === "loading" ? (
+                <p className="text-sm text-muted-foreground">Loading backups...</p>
+              ) : !backupsModal.backups.length ? (
+                <p className="text-sm text-muted-foreground">No backups available.</p>
+              ) : (
+                <ul className="space-y-2">
+                  {backupsModal.backups.map((backup) => (
+                    <li
+                      className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/70 bg-muted/25 p-3"
+                      key={backup}
+                    >
+                      <span className="break-all font-mono text-xs sm:text-sm">{backup}</span>
+                      {backupsModal.confirming === backup ? (
+                        <span className="flex items-center gap-2">
+                          <Button
+                            className="border-rose-500/40 text-rose-300 hover:bg-rose-500/15"
+                            data-confirm-restore={backup}
+                            disabled={backupsModal.restoring === backup}
+                            onClick={() => void restoreBackup(backupsModal.stackName, backup)}
+                            size="sm"
+                            variant="outline"
+                          >
+                            {backupsModal.restoring === backup ? "Restoring..." : "Confirm"}
+                          </Button>
+                          <Button
+                            onClick={() => setBackupsModal((current) => ({ ...current, confirming: null }))}
+                            size="sm"
+                            variant="outline"
+                          >
+                            Cancel
+                          </Button>
+                        </span>
+                      ) : (
+                        <Button
+                          data-restore={backup}
+                          disabled={Boolean(backupsModal.restoring)}
+                          onClick={() => setBackupsModal((current) => ({ ...current, confirming: backup, notice: null, error: null }))}
+                          size="sm"
+                          variant="outline"
+                        >
+                          Restore
+                        </Button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </CardContent>
           </Card>
         </ModalOverlay>

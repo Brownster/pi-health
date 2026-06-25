@@ -29,7 +29,7 @@ Migrate the core management pages to `/v2` with the same rollback model proven b
 | 1 | PH3-001 Phase 3 Architecture + Shared Utilities | PH2-008 | Yes | Complete (2026-06-25) |
 | 2 | PH3-002 v2 Stacks Read Path + Responsive Layout | PH3-001 | Yes | Complete (2026-06-25) |
 | 3a | PH3-003a Stacks Lifecycle + Logs + Streaming Console | PH3-002 | Yes | Complete (2026-06-25) |
-| 3b | PH3-003b Stacks Compose/Env Editor + Backups/Restore | PH3-003a | Yes | Pending |
+| 3b | PH3-003b Stacks Compose/Env Editor + Backups/Restore | PH3-003a | Yes | Complete (2026-06-25) |
 | 4 | PH3-004 v2 Disks Read Path + SMART Views | PH3-001 | Yes | Draft |
 | 5 | PH3-005 Disks Mount/Unmount + SMART Actions | PH3-004 | Yes | Draft |
 | 6 | PH3-006 v2 Storage Plugins + Pools | PH3-001 | Yes | Draft |
@@ -158,9 +158,21 @@ Estimate: 2.0 days
 > 5. Validation: `npm run check` / `build:publish` / bundle budget (JS 76.74 kB gz / 200 kB) pass;
 >    `pytest tests/e2e/test_v2_stacks_parity.py -q` -> `5 passed`.
 >
-> ### PH3-003b Status: Pending
-> Compose/env editors (`GET|POST /api/stacks/<name>/compose|env`) and backups list/restore
-> (`/backups*`, `/restore`) remain.
+> ### PH3-003b Status: Complete (2026-06-25)
+> Evidence:
+> 1. `frontend/src/lib/stacks.ts`: `fetchStackCompose`/`saveStackCompose`,
+>    `fetchStackEnv`/`saveStackEnv`, `fetchStackBackups`, `restoreStackBackup`.
+> 2. `frontend/src/pages/stacks-page.tsx`: per-stack **Edit** modal with Compose/Env tabs
+>    (textarea editors, Save with server validation-error surfacing via a `role=status`
+>    region) and a **Backups** modal listing backups with a two-step (Restore -> Confirm)
+>    keyboard-safe restore; both reuse the shared `ModalOverlay`. Successful restore refreshes
+>    the stack list.
+> 3. e2e: `install_v2_stacks_api_mocks` extended (compose/env GET+POST, backups GET, restore
+>    POST); `test_v2_stacks_parity.py` adds editor (load/edit/save/tab-switch) and
+>    backups-restore-with-confirm coverage.
+> 4. Validation: `npm run check` / `build:publish` / bundle budget (JS 78.30 kB gz / 200 kB) pass;
+>    `pytest tests/e2e/test_v2_stacks_parity.py -q` -> `7 passed`; full v2 e2e set
+>    `56 passed, 6 skipped`.
 
 ### Files
 - `frontend/src/pages/stacks-page.tsx`
