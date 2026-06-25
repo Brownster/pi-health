@@ -32,6 +32,33 @@ def authenticated_client(client):
     return client
 
 
+def _mock_container(name, cid, status='running', network_mode='',
+                    labels=None, health=None, exit_code=None):
+    """Build a Mock that looks enough like a docker-py Container for the helpers."""
+    container = Mock()
+    container.name = name
+    container.id = cid
+    container.status = status
+    container.image.tags = ['img:latest']
+    container.ports = {}
+    state = {}
+    if health is not None:
+        state['Health'] = {
+            'Status': health,
+            'FailingStreak': 0,
+            'Log': [{'Output': 'ok', 'ExitCode': 0}],
+        }
+    if exit_code is not None:
+        state['ExitCode'] = exit_code
+    container.attrs = {
+        'HostConfig': {'NetworkMode': network_mode},
+        'Config': {'Labels': labels or {}, 'ExposedPorts': {}},
+        'State': state,
+        'NetworkSettings': {'Ports': {}},
+    }
+    return container
+
+
 class TestListContainers:
     """Test container listing functionality."""
 
@@ -512,6 +539,205 @@ class TestContainerStats:
         result = calculate_container_network_stats({'networks': {}})
         assert result['rx'] == 0
         assert result['tx'] == 0
+
+
+class TestNetworkTopology:
+    """Tests for VPN-style shared-network detection and orphan flagging."""
+
+    def test_standalone_container(self):
+        from app import analyze_network_topology
+        c = _mock_container('jellyfin', 'J', network_mode='bridge')
+        info, groups = analyze_network_topology([c])
+        assert info['J']['role'] == 'standalone'
+        assert info['J']['status'] == 'ok'
+        assert groups == {}
+
+    def test_member_and_provider(self):
+        from app import analyze_network_topology
+        vpn = _mock_container('vpn', 'VPNID', network_mode='bridge')
+        sonarr = _mock_container('sonarr', 'S', network_mode='container:VPNID')
+        info, groups = analyze_network_topology([vpn, sonarr])
+        assert info['VPNID']['role'] == 'provider'
+        assert info['S']['role'] == 'member'
+        assert info['S']['provider'] == 'vpn'
+        assert info['S']['status'] == 'ok'
+        assert 'sonarr' in groups['vpn']['members']
+
+    def test_orphan_detection(self):
+        """A member pinned to a namespace id that no longer exists is orphaned."""
+        from app import analyze_network_topology
+        vpn = _mock_container('vpn', 'VPNID', network_mode='bridge')
+        # transmission was left pinned to a dead vpn id; depends_on names the service
+        trans = _mock_container(
+            'transmission', 'T', status='created',
+            network_mode='container:DEADID',
+            labels={'com.docker.compose.depends_on': 'vpn:service_started:true'},
+        )
+        info, groups = analyze_network_topology([vpn, trans])
+        assert info['T']['status'] == 'orphaned'
+        assert info['T']['provider'] == 'vpn'
+        assert 'transmission' in groups['vpn']['orphaned']
+
+
+class TestNetworkGroups:
+    """Tests for list_network_groups and the leak probe."""
+
+    @patch('app.docker_client')
+    @patch('app.docker_available', True)
+    def test_groups_flag_orphans(self, mock_docker):
+        from app import list_network_groups
+        vpn = _mock_container('vpn', 'VPNID', network_mode='bridge', health='healthy')
+        sonarr = _mock_container('sonarr', 'S', network_mode='container:VPNID')
+        trans = _mock_container(
+            'transmission', 'T', status='created',
+            network_mode='container:DEADID',
+            labels={'com.docker.compose.depends_on': 'vpn:service_started:true'},
+        )
+        mock_docker.containers.list.return_value = [vpn, sonarr, trans]
+        result = list_network_groups(probe=False)
+        assert result['docker_available'] is True
+        group = next(g for g in result['groups'] if g['provider'] == 'vpn')
+        assert group['status'] == 'degraded'
+        assert 'transmission' in group['orphaned_members']
+        assert any(o['name'] == 'transmission' for o in result['orphans'])
+
+    @patch('app.get_container_public_ip', return_value='9.9.9.9')
+    @patch('app.get_host_public_ip', return_value='9.9.9.9')
+    @patch('app.docker_client')
+    @patch('app.docker_available', True)
+    def test_vpn_leak_detected(self, mock_docker, mock_host_ip, mock_cip):
+        from app import list_network_groups
+        vpn = _mock_container('vpn', 'VPNID', network_mode='bridge', health='healthy')
+        sonarr = _mock_container('sonarr', 'S', network_mode='container:VPNID')
+        mock_docker.containers.list.return_value = [vpn, sonarr]
+        result = list_network_groups(probe=True)
+        group = next(g for g in result['groups'] if g['provider'] == 'vpn')
+        assert group['vpn_leak'] is True
+        assert group['provider_public_ip'] == '9.9.9.9'
+
+    @patch('app.docker_available', False)
+    def test_groups_docker_unavailable(self):
+        from app import list_network_groups
+        result = list_network_groups()
+        assert result['docker_available'] is False
+        assert result['groups'] == []
+
+
+class TestRecreateNetworkGroup:
+    """Tests for the one-click VPN-group recreate remedy."""
+
+    @patch('app.docker_client')
+    @patch('app.docker_available', True)
+    def test_requires_compose_management(self, mock_docker):
+        from app import recreate_network_group
+        vpn = _mock_container('vpn', 'VPNID')  # no compose labels
+        mock_docker.containers.get.return_value = vpn
+        result = recreate_network_group('vpn')
+        assert 'error' in result
+
+    @patch('app.subprocess.run')
+    @patch('app.docker_client')
+    @patch('app.docker_available', True)
+    def test_recreate_builds_compose_command(self, mock_docker, mock_run):
+        from app import recreate_network_group
+        compose_labels = {
+            'com.docker.compose.project.config_files': '/opt/stacks/media/docker-compose.yml',
+            'com.docker.compose.project.working_dir': '/opt/stacks/media',
+            'com.docker.compose.service': 'vpn',
+        }
+        vpn = _mock_container('vpn', 'VPNID', network_mode='bridge', labels=compose_labels)
+        sonarr = _mock_container(
+            'sonarr', 'S', network_mode='container:VPNID',
+            labels={'com.docker.compose.service': 'sonarr'},
+        )
+        mock_docker.containers.get.return_value = vpn
+        mock_docker.containers.list.return_value = [vpn, sonarr]
+        mock_run.return_value = Mock(returncode=0, stdout='done', stderr='')
+
+        result = recreate_network_group('vpn')
+        assert result['status'] == 'recreated'
+        assert result['services'][0] == 'vpn'  # provider recreated first
+        assert 'sonarr' in result['services']
+        cmd = mock_run.call_args[0][0]
+        assert '--project-directory' in cmd
+        assert '/opt/stacks/media' in cmd
+        assert cmd[-2:] == ['vpn', 'sonarr'] or set(cmd[-2:]) == {'vpn', 'sonarr'}
+
+
+class TestContainerHealth:
+    """Tests for healthcheck status/output surfacing."""
+
+    def test_health_none_when_absent(self):
+        from app import get_container_health
+        assert get_container_health(_mock_container('a', 'A')) is None
+
+    def test_health_status(self):
+        from app import get_container_health
+        assert get_container_health(_mock_container('a', 'A', health='unhealthy')) == 'unhealthy'
+
+    def test_health_detail_includes_output(self):
+        from app import get_container_health_detail
+        detail = get_container_health_detail(_mock_container('a', 'A', health='unhealthy'))
+        assert detail['status'] == 'unhealthy'
+        assert detail['last_output'] == 'ok'
+
+
+class TestListContainersEnrichment:
+    """list_containers now carries health, exit_code and network topology."""
+
+    @patch('app.docker_client')
+    @patch('app.docker_available', True)
+    def test_enriched_fields(self, mock_docker):
+        from app import list_containers
+        vpn = _mock_container('vpn', 'VPNID', network_mode='bridge', health='healthy')
+        sonarr = _mock_container('sonarr', 'S', network_mode='container:VPNID')
+        mock_docker.containers.list.return_value = [vpn, sonarr]
+        result = list_containers(include_stats=False)
+        by_name = {c['name']: c for c in result}
+        assert by_name['vpn']['health'] == 'healthy'
+        assert by_name['vpn']['network']['role'] == 'provider'
+        assert by_name['sonarr']['network']['provider'] == 'vpn'
+        assert by_name['sonarr']['network']['status'] == 'ok'
+        assert 'exit_code' in by_name['sonarr']
+
+
+class TestNetworkGroupsAPI:
+    """Tests for the network-group and health API routes."""
+
+    def test_network_groups_requires_auth(self, client):
+        assert client.get('/api/network-groups').status_code == 401
+
+    def test_network_groups_format(self, authenticated_client, monkeypatch):
+        monkeypatch.setattr(
+            'app.list_network_groups',
+            lambda probe=False: {'docker_available': True, 'groups': [], 'orphans': []},
+        )
+        response = authenticated_client.get('/api/network-groups')
+        assert response.status_code == 200
+        assert 'groups' in json.loads(response.data)
+
+    def test_recreate_requires_auth(self, client):
+        assert client.post('/api/network-groups/vpn/recreate').status_code == 401
+
+    def test_recreate_docker_unavailable(self, authenticated_client, monkeypatch):
+        monkeypatch.setattr('app.docker_available', False)
+        response = authenticated_client.post('/api/network-groups/vpn/recreate')
+        assert response.status_code == 503
+
+    def test_recreate_delegates(self, authenticated_client, monkeypatch):
+        monkeypatch.setattr('app.docker_available', True)
+        monkeypatch.setattr(
+            'app.recreate_network_group',
+            lambda provider: {'status': 'recreated', 'provider': provider},
+        )
+        response = authenticated_client.post('/api/network-groups/vpn/recreate')
+        assert response.status_code == 200
+        assert json.loads(response.data)['provider'] == 'vpn'
+
+    def test_health_route_docker_unavailable(self, authenticated_client, monkeypatch):
+        monkeypatch.setattr('app.docker_available', False)
+        response = authenticated_client.get('/api/containers/x/health')
+        assert response.status_code == 503
 
 
 if __name__ == '__main__':

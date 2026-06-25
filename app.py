@@ -548,6 +548,7 @@ def list_containers(include_stats=True):
     try:
         containers = docker_client.containers.list(all=True)
         containers_by_name = {container.name: container for container in containers}
+        net_topology, _net_groups = analyze_network_topology(containers)
         port_cache = {}
         container_list = []
         for container in containers:
@@ -572,6 +573,13 @@ def list_containers(include_stats=True):
                 "image": container.image.tags[0] if container.image.tags else "unknown",
                 "update_available": container_updates.get(container.id[:12], False),
                 "ports": ports,
+                "health": get_container_health(container),
+                "exit_code": (container.attrs.get('State') or {}).get('ExitCode')
+                if container.status in ('exited', 'dead') else None,
+                "network": net_topology.get(
+                    container.id,
+                    {"mode": "", "role": "standalone", "provider": None, "status": "ok"},
+                ),
                 "cpu_percent": None,
                 "memory_percent": None,
                 "memory_used": None,
@@ -897,6 +905,269 @@ def run_container_network_test(container_id):
         "public_ip": public_ip,
         "probe_method": probe_method,
     }
+
+def get_container_health(container):
+    """Return the container's healthcheck status, or None if it defines no healthcheck.
+
+    Values: 'healthy', 'unhealthy', 'starting'."""
+    try:
+        health = (container.attrs.get('State') or {}).get('Health') or {}
+    except Exception:
+        return None
+    return health.get('Status')
+
+
+def get_container_health_detail(container):
+    """Return health status plus the most recent healthcheck output.
+
+    Surfacing the output is what distinguishes a genuinely failing service from a
+    broken check (e.g. gluetun reporting 'unhealthy' only because `curl` is missing)."""
+    state = container.attrs.get('State') or {}
+    health = state.get('Health') or {}
+    last_output = None
+    log = health.get('Log') or []
+    if log:
+        out = (log[-1].get('Output') or '').strip()
+        last_output = out[-500:] if out else None
+    return {
+        'status': health.get('Status'),
+        'failing_streak': health.get('FailingStreak'),
+        'last_output': last_output,
+    }
+
+
+def _network_target(host_config):
+    """Describe a container's shared-network target.
+
+    Returns ('container', <id>) when it joins another container's namespace,
+    ('service', <name>) for the compose service form, or (None, None) for
+    standalone/bridge/host networking."""
+    mode = (host_config or {}).get('NetworkMode') or ''
+    if mode.startswith('container:'):
+        return 'container', mode.split(':', 1)[1]
+    if mode.startswith('service:'):
+        return 'service', mode.split(':', 1)[1]
+    return None, None
+
+
+def _compose_label(container, key):
+    return ((container.attrs.get('Config') or {}).get('Labels') or {}).get(key)
+
+
+def _compose_dependency_name(container):
+    """Best-effort name of the service a container shares its network with, taken
+    from the compose depends_on label. Used to name the provider when the live
+    namespace target is already gone (the orphaned case)."""
+    dep = _compose_label(container, 'com.docker.compose.depends_on') or ''
+    first = dep.split(',')[0].strip()
+    if first:
+        name = first.split(':', 1)[0].strip()
+        if name:
+            return name
+    return None
+
+
+def analyze_network_topology(containers):
+    """Map containers that ride on another container's network namespace
+    (e.g. download clients behind a gluetun VPN) and flag *orphans* — members
+    pinned to a namespace whose container no longer exists.
+
+    Returns (info_by_id, groups_by_provider_name) where info entries carry
+    {mode, role, provider, status, [members]} and groups carry member/orphan sets."""
+    by_id = {c.id: c for c in containers}
+    by_name = {c.name: c for c in containers}
+
+    def _running(c):
+        return getattr(c, 'status', None) == 'running'
+
+    info = {}
+    groups = {}
+
+    for c in containers:
+        host_config = c.attrs.get('HostConfig') or {}
+        kind, value = _network_target(host_config)
+        entry = {
+            'mode': host_config.get('NetworkMode') or '',
+            'role': 'standalone',
+            'provider': None,
+            'status': 'ok',
+        }
+
+        if kind in ('container', 'service'):
+            entry['role'] = 'member'
+            orphaned = False
+            provider_name = None
+
+            if kind == 'container':
+                target = by_id.get(value)
+                if target is None:
+                    # Pinned to a namespace that no longer exists -> ORPHANED.
+                    orphaned = True
+                    provider_name = _compose_dependency_name(c)
+                else:
+                    provider_name = target.name
+            else:  # service:<name>
+                provider_name = value
+                if by_name.get(value) is None:
+                    orphaned = True
+
+            entry['provider'] = provider_name
+            if orphaned:
+                entry['status'] = 'orphaned'
+            else:
+                tgt = by_name.get(provider_name) if provider_name else None
+                entry['status'] = 'ok' if (tgt is not None and _running(tgt)) else 'provider_stopped'
+
+            if provider_name:
+                grp = groups.setdefault(provider_name, {'members': set(), 'orphaned': set()})
+                grp['members'].add(c.name)
+                if orphaned:
+                    grp['orphaned'].add(c.name)
+
+        info[c.id] = entry
+
+    # Mark the provider containers themselves.
+    for provider_name, grp in groups.items():
+        provider = by_name.get(provider_name)
+        if provider is not None:
+            pinfo = info.get(provider.id)
+            if pinfo is not None:
+                pinfo['role'] = 'provider'
+                pinfo['provider'] = provider_name
+                pinfo['members'] = sorted(grp['members'])
+
+    return info, groups
+
+
+def get_host_public_ip():
+    """Return the host's public IP, or None if it can't be determined."""
+    try:
+        with urlrequest.urlopen("https://api.ipify.org", timeout=10) as response:
+            return response.read().decode("utf-8").strip()
+    except Exception:
+        return None
+
+
+def list_network_groups(probe=False):
+    """Return VPN-style network groups: a provider container plus the containers
+    sharing its namespace, with health and orphan status. When probe=True, also
+    compare the provider's public IP against the host's to detect a VPN leak."""
+    if not docker_available:
+        return {"docker_available": False, "groups": [], "orphans": []}
+
+    try:
+        containers = docker_client.containers.list(all=True)
+    except Exception as exc:
+        return {"docker_available": True, "error": str(exc), "groups": [], "orphans": []}
+
+    info, groups = analyze_network_topology(containers)
+    by_id = {c.id: c for c in containers}
+    by_name = {c.name: c for c in containers}
+    host_ip = get_host_public_ip() if probe else None
+
+    group_list = []
+    for provider_name, grp in groups.items():
+        provider = by_name.get(provider_name)
+        orphaned = sorted(grp['orphaned'])
+        group = {
+            'provider': provider_name,
+            'provider_id': provider.id[:12] if provider else None,
+            'provider_status': provider.status if provider else 'missing',
+            'provider_health': get_container_health(provider) if provider else None,
+            'members': sorted(grp['members']),
+            'member_count': len(grp['members']),
+            'orphaned_members': orphaned,
+            'status': 'ok',
+        }
+        if orphaned or provider is None or provider.status != 'running':
+            group['status'] = 'degraded'
+        elif group['provider_health'] == 'unhealthy':
+            group['status'] = 'provider_unhealthy'
+
+        if probe and provider is not None and provider.status == 'running':
+            provider_ip = get_container_public_ip(provider)
+            group['provider_public_ip'] = provider_ip
+            group['host_public_ip'] = host_ip
+            group['vpn_leak'] = bool(provider_ip and host_ip and provider_ip == host_ip)
+
+        group_list.append(group)
+
+    orphans = [
+        {
+            'name': by_id[cid].name,
+            'id': by_id[cid].id[:12],
+            'status': by_id[cid].status,
+            'provider': entry.get('provider'),
+        }
+        for cid, entry in info.items()
+        if entry.get('status') == 'orphaned' and cid in by_id
+    ]
+
+    group_list.sort(key=lambda g: g['provider'] or '')
+    orphans.sort(key=lambda o: o['name'])
+    return {"docker_available": True, "groups": group_list, "orphans": orphans}
+
+
+def recreate_network_group(provider_name):
+    """Recreate a provider and every container sharing its namespace together,
+    via `docker compose up -d`, so they all re-bind to the same live namespace.
+
+    This is the one-click remedy for the orphaned-namespace failure: doing the
+    services individually (or `docker start`) re-pins them to the dead namespace."""
+    if not docker_available:
+        return {"error": "Docker is not available"}
+
+    try:
+        provider = docker_client.containers.get(provider_name)
+    except Exception as exc:
+        return {"error": f"Provider container '{provider_name}' not found: {exc}"}
+
+    config_files = _compose_label(provider, 'com.docker.compose.project.config_files')
+    working_dir = _compose_label(provider, 'com.docker.compose.project.working_dir')
+    if not config_files or not working_dir:
+        return {"error": "Provider is not managed by docker compose; cannot safely recreate the group."}
+
+    try:
+        containers = docker_client.containers.list(all=True)
+    except Exception as exc:
+        return {"error": str(exc)}
+    by_name = {c.name: c for c in containers}
+    _, groups = analyze_network_topology(containers)
+    member_names = sorted(groups.get(provider_name, {}).get('members', set()))
+
+    # Resolve container names to compose service names (they can differ), provider first.
+    ordered_services = []
+    seen = set()
+    for name in [provider_name] + member_names:
+        container = by_name.get(name)
+        service = _compose_label(container, 'com.docker.compose.service') if container else None
+        service = service or name
+        if service not in seen:
+            seen.add(service)
+            ordered_services.append(service)
+
+    cmd = ["docker", "compose"]
+    for path in config_files.split(','):
+        path = path.strip()
+        if path:
+            cmd += ["-f", path]
+    cmd += ["--project-directory", working_dir, "up", "-d"] + ordered_services
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+    except Exception as exc:
+        return {"error": str(exc)}
+
+    ok = result.returncode == 0
+    return {
+        "status": "recreated" if ok else "error",
+        "provider": provider_name,
+        "services": ordered_services,
+        "returncode": result.returncode,
+        "stdout": (result.stdout or "")[-2000:],
+        "stderr": (result.stderr or "")[-2000:],
+    }
+
 
 def control_container(container_id, action):
     """Start, stop, or restart a container by ID."""
@@ -1351,6 +1622,38 @@ def api_container_network_test(container_id):
     if not docker_available:
         return jsonify({"error": "Docker is not available"}), 503
     return jsonify(run_container_network_test(container_id))
+
+
+@app.route('/api/containers/<container_id>/health', methods=['GET'])
+@login_required
+def api_container_health(container_id):
+    """API endpoint to fetch a container's healthcheck status and latest output."""
+    if not docker_available:
+        return jsonify({"error": "Docker is not available"}), 503
+    try:
+        container = docker_client.containers.get(container_id)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 404
+    return jsonify(get_container_health_detail(container))
+
+
+@app.route('/api/network-groups', methods=['GET'])
+@login_required
+def api_network_groups():
+    """API endpoint listing shared-network (VPN) groups, their members, and orphans.
+
+    Pass ?probe=true to also compare provider vs host public IP (VPN leak check)."""
+    probe = request.args.get('probe', 'false').lower() == 'true'
+    return jsonify(list_network_groups(probe=probe))
+
+
+@app.route('/api/network-groups/<provider>/recreate', methods=['POST'])
+@login_required
+def api_recreate_network_group(provider):
+    """API endpoint to recreate a provider and its namespace-sharing members together."""
+    if not docker_available:
+        return jsonify({"error": "Docker is not available"}), 503
+    return jsonify(recreate_network_group(provider))
 
 
 @app.route('/api/pihealth/update/config', methods=['GET'])
