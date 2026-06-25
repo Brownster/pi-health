@@ -298,6 +298,8 @@ export async function fetchContainerStats(
   }, {});
 }
 
+const STOPPED_STATUSES = new Set(["stopped", "exited"]);
+
 export function filterContainers(
   containers: ContainerSummary[],
   filter: ContainerFilter,
@@ -305,7 +307,16 @@ export function filterContainers(
   if (filter === "all") {
     return containers;
   }
+  if (filter === "stopped") {
+    // Docker reports stopped containers as "exited"; treat both as stopped to
+    // match isActionDisabled and the legacy lifecycle-state handling.
+    return containers.filter((container) => STOPPED_STATUSES.has(container.status));
+  }
   return containers.filter((container) => container.status === filter);
+}
+
+function isValidWebPort(port: number | null | undefined): port is number {
+  return typeof port === "number" && Number.isInteger(port) && port > 0 && port <= 65535;
 }
 
 export function getContainerWebPort(container: ContainerSummary): number | null {
@@ -313,24 +324,21 @@ export function getContainerWebPort(container: ContainerSummary): number | null 
     return null;
   }
 
-  const tcpWithHost = container.ports.find(
-    (port) => port.protocol !== "udp" && port.host_port,
-  );
-  if (tcpWithHost?.host_port) {
-    return tcpWithHost.host_port;
-  }
+  const tcpPorts = container.ports.filter((port) => port.protocol !== "udp");
+  // Precedence mirrors the legacy page: tcp host port, any host port, tcp
+  // container port, any container port. Each candidate must be a valid port
+  // (1-65535) so we never produce an http://host:0 (or out-of-range) link.
+  const orderedCandidates = [
+    tcpPorts.find((port) => isValidWebPort(port.host_port))?.host_port,
+    container.ports.find((port) => isValidWebPort(port.host_port))?.host_port,
+    tcpPorts.find((port) => isValidWebPort(port.container_port))?.container_port,
+    container.ports.find((port) => isValidWebPort(port.container_port))?.container_port,
+  ];
 
-  const anyHostPort = container.ports.find((port) => port.host_port);
-  if (anyHostPort?.host_port) {
-    return anyHostPort.host_port;
+  for (const candidate of orderedCandidates) {
+    if (isValidWebPort(candidate)) {
+      return candidate;
+    }
   }
-
-  const tcpContainerPort = container.ports.find(
-    (port) => port.protocol !== "udp" && port.container_port,
-  );
-  if (tcpContainerPort?.container_port) {
-    return tcpContainerPort.container_port;
-  }
-
-  return container.ports[0]?.container_port ?? null;
+  return null;
 }

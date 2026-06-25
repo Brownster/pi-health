@@ -597,6 +597,7 @@ function MobileContainerCards({
               <div className="grid gap-2 sm:flex sm:items-center sm:justify-between">
                 {webPort ? (
                   <a
+                    aria-label={`Open ${container.name} web UI in a new tab`}
                     className="inline-flex min-h-11 items-center rounded-md border border-border px-3 text-sm text-primary underline-offset-2 hover:bg-muted hover:underline"
                     href={`http://${window.location.hostname}:${webPort}`}
                     rel="noopener noreferrer"
@@ -643,12 +644,22 @@ function ModalOverlay({
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const previouslyFocused = document.activeElement as HTMLElement | null;
     const node = containerRef.current;
+    // Capture the control to restore focus to on close. Only treat focus that is
+    // currently *outside* the dialog as the trigger, which guards against React 18
+    // StrictMode's mount->unmount->mount double-invoke (where the re-mount would
+    // otherwise capture an element inside the modal as the "trigger").
+    const active = document.activeElement as HTMLElement | null;
+    const triggerEl = node && active && !node.contains(active) ? active : null;
+
     const focusables = node
       ? Array.from(node.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR))
       : [];
     (focusables[0] ?? node)?.focus();
+
+    // Lock body scroll while the dialog is open (prevents scroll-behind on mobile).
+    const previousBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -678,7 +689,8 @@ function ModalOverlay({
     document.addEventListener("keydown", onKeyDown, true);
     return () => {
       document.removeEventListener("keydown", onKeyDown, true);
-      previouslyFocused?.focus?.();
+      document.body.style.overflow = previousBodyOverflow;
+      triggerEl?.focus?.();
     };
   }, [onClose]);
 
