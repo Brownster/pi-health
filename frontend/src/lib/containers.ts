@@ -1,3 +1,5 @@
+import { requestApi, toNullableNumber, toNullableString } from "@/lib/api";
+
 export type ContainerFilter = "all" | "running" | "stopped";
 export type ContainerAction = "start" | "stop" | "restart" | "check_update" | "update";
 
@@ -65,32 +67,6 @@ export interface ContainerStatsSummary {
   memory_limit: number | null;
   net_rx: number | null;
   net_tx: number | null;
-}
-
-async function requestApi<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
-    ...init,
-    credentials: "same-origin",
-    headers: {
-      Accept: "application/json",
-      ...(init?.headers ?? {}),
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error(`Request failed (${response.status}) for ${path}`);
-  }
-
-  return (await response.json()) as T;
-}
-
-function toNullableNumber(value: unknown): number | null {
-  const numeric = Number(value);
-  return Number.isFinite(numeric) ? numeric : null;
-}
-
-function toNullableString(value: unknown): string | null {
-  return typeof value === "string" && value.trim().length > 0 ? value : null;
 }
 
 function normalizePortBinding(

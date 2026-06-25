@@ -1,3 +1,5 @@
+import { requestApi, toNullableNumber, toNullableString } from "@/lib/api";
+
 export interface StackSummary {
   name: string;
   status: string;
@@ -10,32 +12,6 @@ export interface StackSummary {
 interface FetchStacksOptions {
   includeStatus?: boolean;
   signal?: AbortSignal;
-}
-
-async function requestApi<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
-    ...init,
-    credentials: "same-origin",
-    headers: {
-      Accept: "application/json",
-      ...(init?.headers ?? {}),
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error(`Request failed (${response.status}) for ${path}`);
-  }
-
-  return (await response.json()) as T;
-}
-
-function toNullableNumber(value: unknown): number | null {
-  const numeric = Number(value);
-  return Number.isFinite(numeric) ? numeric : null;
-}
-
-function toNullableString(value: unknown): string | null {
-  return typeof value === "string" && value.trim().length > 0 ? value : null;
 }
 
 function normalizeStack(stack: Partial<StackSummary> | undefined): StackSummary {
