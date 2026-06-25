@@ -405,3 +405,61 @@ def install_v2_containers_api_mocks():
         page.route("**/api/**", _handler)
 
     return _install
+
+
+@pytest.fixture(scope="function")
+def install_v2_stacks_api_mocks():
+    """Returns a callable(page) installing deterministic /api/stacks* mocks for v2 stacks."""
+
+    def _json_fulfill(route, payload, status: int = 200) -> None:
+        route.fulfill(status=status, content_type="application/json", body=json.dumps(payload))
+
+    def _install(page: Page) -> None:
+        stacks_payload = {
+            "stacks": [
+                {
+                    "name": "media",
+                    "path": "/opt/stacks/media",
+                    "compose_file": "docker-compose.yml",
+                    "status": "running",
+                    "running_count": 2,
+                    "container_count": 2,
+                }
+            ]
+        }
+        sse_body = (
+            'data: {"line": "Pulling service web"}\n\n'
+            'data: {"line": "Container media-web-1 Started"}\n\n'
+            'data: {"done": true, "returncode": 0}\n\n'
+        )
+
+        def _handler(route):
+            parsed = urlparse(route.request.url)
+            path = parsed.path
+            method = route.request.method
+
+            if path == "/api/stacks" and method == "GET":
+                _json_fulfill(route, stacks_payload)
+                return
+
+            # Streaming lifecycle output (EventSource / SSE).
+            if path.startswith("/api/stacks/media/") and path.endswith("/stream") and method == "GET":
+                route.fulfill(status=200, content_type="text/event-stream", body=sse_body)
+                return
+
+            if path == "/api/stacks/media/logs" and method == "GET":
+                _json_fulfill(route, {"logs": "stack log line 1\nstack log line 2", "returncode": 0})
+                return
+
+            # Non-streaming lifecycle fallback.
+            if path.startswith("/api/stacks/media/") and method == "POST":
+                action = path.rsplit("/", 1)[-1]
+                if action in {"up", "down", "restart", "pull"}:
+                    _json_fulfill(route, {"success": True, "stdout": "done", "stderr": "", "returncode": 0})
+                    return
+
+            route.continue_()
+
+        page.route("**/api/**", _handler)
+
+    return _install

@@ -28,7 +28,8 @@ Migrate the core management pages to `/v2` with the same rollback model proven b
 |---|---|---|---|---|
 | 1 | PH3-001 Phase 3 Architecture + Shared Utilities | PH2-008 | Yes | Complete (2026-06-25) |
 | 2 | PH3-002 v2 Stacks Read Path + Responsive Layout | PH3-001 | Yes | Complete (2026-06-25) |
-| 3 | PH3-003 Stacks Lifecycle, Logs, Editor, and Backups | PH3-002 | Yes | Draft |
+| 3a | PH3-003a Stacks Lifecycle + Logs + Streaming Console | PH3-002 | Yes | Complete (2026-06-25) |
+| 3b | PH3-003b Stacks Compose/Env Editor + Backups/Restore | PH3-003a | Yes | Pending |
 | 4 | PH3-004 v2 Disks Read Path + SMART Views | PH3-001 | Yes | Draft |
 | 5 | PH3-005 Disks Mount/Unmount + SMART Actions | PH3-004 | Yes | Draft |
 | 6 | PH3-006 v2 Storage Plugins + Pools | PH3-001 | Yes | Draft |
@@ -131,6 +132,32 @@ this matches the planned nasOS stacks screen; revisit if a denser desktop table 
 ## PH3-003 - Stacks Lifecycle, Logs, Editor, and Backups (P0)
 Owner: Pi-Health maintainers  
 Estimate: 2.0 days
+
+> Split per review-question Q3 into **PH3-003a** (lifecycle + logs + streaming console) and
+> **PH3-003b** (compose/env editor + backups/restore), to isolate the higher-risk editor work.
+>
+> ### PH3-003a Status: Complete (2026-06-25)
+> Evidence:
+> 1. `frontend/src/components/ui/modal-overlay.tsx` (new): the Phase 2 `ModalOverlay`
+>    (focus trap + scroll lock + StrictMode-safe focus restore) extracted for reuse;
+>    `containers-page.tsx` now imports it instead of a local copy.
+> 2. `frontend/src/lib/stacks.ts`: `runStackAction` (POST), `fetchStackLogs`, and
+>    `getStackStreamUrl` for the SSE endpoints.
+> 3. `frontend/src/pages/stacks-page.tsx`: per-stack `up/down/restart/pull` controls with
+>    in-flight locking; a **streaming action console** that consumes
+>    `GET /api/stacks/<name>/<action>/stream` via `EventSource` (line/done/error events),
+>    falls back to the `POST` action when the stream errors before completion, and closes
+>    the connection on done/close/unmount; a logs modal wired to `/api/stacks/<name>/logs`;
+>    `role=status` action notices.
+> 4. `tests/e2e/conftest.py`: `install_v2_stacks_api_mocks` fixture (list, action POST,
+>    SSE stream body, logs). `tests/e2e/test_v2_stacks_parity.py` (new): list render +
+>    overflow matrix, logs modal, and the streaming-console happy path.
+> 5. Validation: `npm run check` / `build:publish` / bundle budget (JS 76.74 kB gz / 200 kB) pass;
+>    `pytest tests/e2e/test_v2_stacks_parity.py -q` -> `5 passed`.
+>
+> ### PH3-003b Status: Pending
+> Compose/env editors (`GET|POST /api/stacks/<name>/compose|env`) and backups list/restore
+> (`/backups*`, `/restore`) remain.
 
 ### Files
 - `frontend/src/pages/stacks-page.tsx`

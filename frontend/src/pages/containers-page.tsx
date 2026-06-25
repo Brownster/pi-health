@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Activity, FileText, Loader2, RefreshCw, Server, TriangleAlert, Wifi } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { ModalOverlay } from "@/components/ui/modal-overlay";
 import {
   type ContainerAction,
   type ContainerActionResult,
@@ -627,85 +628,6 @@ function MobileContainerCards({
           </Card>
         );
       })}
-    </div>
-  );
-}
-
-const FOCUSABLE_SELECTOR =
-  'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])';
-
-function ModalOverlay({
-  onClose,
-  children,
-}: {
-  onClose: () => void;
-  children: ReactNode;
-}) {
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const node = containerRef.current;
-    // Capture the control to restore focus to on close. Only treat focus that is
-    // currently *outside* the dialog as the trigger, which guards against React 18
-    // StrictMode's mount->unmount->mount double-invoke (where the re-mount would
-    // otherwise capture an element inside the modal as the "trigger").
-    const active = document.activeElement as HTMLElement | null;
-    const triggerEl = node && active && !node.contains(active) ? active : null;
-
-    const focusables = node
-      ? Array.from(node.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR))
-      : [];
-    (focusables[0] ?? node)?.focus();
-
-    // Lock body scroll while the dialog is open (prevents scroll-behind on mobile).
-    const previousBodyOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onClose();
-        return;
-      }
-      if (event.key !== "Tab" || !node) {
-        return;
-      }
-      const items = Array.from(node.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
-      if (!items.length) {
-        return;
-      }
-      const first = items[0];
-      const last = items[items.length - 1];
-      const active = document.activeElement;
-      if (event.shiftKey && active === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && active === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-
-    document.addEventListener("keydown", onKeyDown, true);
-    return () => {
-      document.removeEventListener("keydown", onKeyDown, true);
-      document.body.style.overflow = previousBodyOverflow;
-      triggerEl?.focus?.();
-    };
-  }, [onClose]);
-
-  return (
-    <div
-      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/75 p-3 sm:p-4"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) {
-          onClose();
-        }
-      }}
-      ref={containerRef}
-      tabIndex={-1}
-    >
-      {children}
     </div>
   );
 }
