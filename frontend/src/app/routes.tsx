@@ -10,10 +10,10 @@ import { StacksPage } from "@/pages/stacks-page";
 // (showInNav: false) until implemented so the shell nav stays uncluttered.
 const PHASE3_PLACEHOLDERS: Array<{ path: string; label: string; legacyHref: string }> = [
   { path: "/disks", label: "Disks", legacyHref: "/disks.html" },
-  { path: "/pools", label: "Pools", legacyHref: "/disks.html" },
-  { path: "/mounts", label: "Mounts", legacyHref: "/disks.html" },
-  { path: "/shares", label: "Shares", legacyHref: "/disks.html" },
-  { path: "/plugins", label: "Plugins", legacyHref: "/disks.html" },
+  { path: "/pools", label: "Pools", legacyHref: "/pools.html" },
+  { path: "/mounts", label: "Mounts", legacyHref: "/mounts.html" },
+  { path: "/shares", label: "Shares", legacyHref: "/shares.html" },
+  { path: "/plugins", label: "Plugins", legacyHref: "/plugins.html" },
   { path: "/settings", label: "Settings", legacyHref: "/settings.html" },
 ];
 

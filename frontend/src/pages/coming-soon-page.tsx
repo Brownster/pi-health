@@ -1,7 +1,7 @@
 import type { ComponentType } from "react";
 import { Clock } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 interface ComingSoonOptions {
@@ -39,9 +39,13 @@ export function createComingSoonPage({
               source until this page is migrated.
             </p>
             <div className="flex flex-wrap gap-2">
-              <Button onClick={() => window.location.assign(legacyHref)} variant="outline">
+              <a
+                className={buttonVariants({ variant: "outline" })}
+                data-legacy-href={legacyHref}
+                href={legacyHref}
+              >
                 Open Legacy {title}
-              </Button>
+              </a>
             </div>
           </CardContent>
         </Card>

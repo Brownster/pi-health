@@ -130,6 +130,7 @@ function StackCard({
   onLogs: (stack: StackSummary) => void;
 }) {
   const percent = getStackServicesPercent(stack);
+  const barWidth = percent === null ? 0 : Math.max(0, Math.min(percent, 100));
   const running = stack.running_count ?? "—";
   const total = stack.container_count ?? "—";
   const rowBusy = Boolean(pendingAction);
@@ -161,7 +162,7 @@ function StackCard({
           <div className="h-1.5 rounded-full bg-muted">
             <div
               className="h-1.5 rounded-full bg-emerald-500 transition-[width] duration-300"
-              style={{ width: `${percent ?? 0}%` }}
+              style={{ width: `${barWidth}%` }}
             />
           </div>
         </div>

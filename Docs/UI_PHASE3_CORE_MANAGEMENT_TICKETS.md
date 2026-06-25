@@ -123,7 +123,10 @@ Complete (2026-06-25)
    refresh + "last updated".
 3. Route + auto-wired shell nav entry (`/stacks`, requiresAuth) in `frontend/src/app/routes.tsx`.
 4. Validation: `npm run check` / `build:publish` / bundle budget pass; foundation e2e
-   `30 passed, 6 skipped`. Parity e2e (`test_v2_stacks_parity.py`) is seeded in PH3-003/PH3-010.
+   `30 passed, 6 skipped`.
+5. Read-path e2e coverage now lives in `tests/e2e/test_v2_stacks_parity.py::test_v2_stacks_list_renders`
+   (added with PH3-003a): renders `/v2/stacks`, asserts the stack card + "2 / 2 services up",
+   and checks no horizontal overflow across desktop/phone/tablet, backed by an `/api/stacks` mock.
 
 Deviation from task spec: the read path uses a responsive **card grid at all breakpoints**
 rather than a desktop table + mobile cards. Stacks have few columns (name/status/services-up) and
