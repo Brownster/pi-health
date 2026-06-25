@@ -2,6 +2,7 @@ import type { ComponentType } from "react";
 
 import { ContainersPage } from "@/pages/containers-page";
 import { DashboardHomePage } from "@/pages/dashboard-home";
+import { StacksPage } from "@/pages/stacks-page";
 
 export interface AppRoute {
   path: string;
@@ -24,6 +25,13 @@ export const appRoutes: AppRoute[] = [
     requiresAuth: true,
     showInNav: true,
     component: ContainersPage,
+  },
+  {
+    path: "/stacks",
+    label: "Stacks",
+    requiresAuth: true,
+    showInNav: true,
+    component: StacksPage,
   },
 ];
 
