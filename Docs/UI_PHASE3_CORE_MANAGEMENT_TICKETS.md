@@ -30,7 +30,7 @@ Migrate the core management pages to `/v2` with the same rollback model proven b
 | 2 | PH3-002 v2 Stacks Read Path + Responsive Layout | PH3-001 | Yes | Complete (2026-06-25) |
 | 3a | PH3-003a Stacks Lifecycle + Logs + Streaming Console | PH3-002 | Yes | Complete (2026-06-25) |
 | 3b | PH3-003b Stacks Compose/Env Editor + Backups/Restore | PH3-003a | Yes | Complete (2026-06-25) |
-| 4 | PH3-004 v2 Disks Read Path + SMART Views | PH3-001 | Yes | Draft |
+| 4 | PH3-004 v2 Disks Read Path + SMART Views | PH3-001 | Yes | Complete (2026-06-25) |
 | 5 | PH3-005 Disks Mount/Unmount + SMART Actions | PH3-004 | Yes | Draft |
 | 6 | PH3-006 v2 Storage Plugins + Pools | PH3-001 | Yes | Draft |
 | 7 | PH3-007 v2 Mounts Management | PH3-006 | Yes | Draft |
@@ -214,6 +214,27 @@ Estimate: 1.0 day
 2. SMART health data is readable on phone and tablet.
 3. No horizontal overflow at 390x844 and 768x1024.
 4. Legacy `/disks.html` remains available unless selected for v2 rollout.
+
+### Status
+Complete (2026-06-25)
+
+### Evidence
+1. `frontend/src/lib/disks.ts`: typed `fetchDiskInventory`, `fetchHelperStatus`,
+   `fetchSmartSummary` (keyed by device path), `fetchDiskSmart`; null-safe normalizers using
+   shared `lib/api.ts`.
+2. `frontend/src/pages/disks-page.tsx`: responsive disk-card grid (device/model, size, bus,
+   partitions with fs/mount/size), a SMART health badge per disk merged from the SMART summary,
+   a helper-unavailable warning banner, loading/empty/error states, manual refresh + "last
+   updated", and a SMART detail modal (`/api/disks/<device>/smart`) reusing `ModalOverlay`.
+3. `/disks` promoted from placeholder to a real protected route in `routes.tsx` (in nav);
+   removed from the placeholder route test.
+4. e2e: `install_v2_disks_api_mocks` fixture (inventory, helper-status, SMART summary + device);
+   `tests/e2e/test_v2_disks_parity.py` (inventory + overflow matrix, SMART modal).
+5. Validation: `npm run check` / `build:publish` / bundle budget (JS 80.50 kB gz / 200 kB) pass;
+   `pytest test_v2_disks_parity.py test_v2_phase3_routes.py -q` -> `10 passed`; full v2 set
+   `59 passed, 6 skipped`.
+
+Deferred to PH3-005: mount/unmount, suggested mounts, and SMART self-test actions.
 
 ## PH3-005 - Disks Mount/Unmount + SMART Actions (P0)
 Owner: Pi-Health maintainers  

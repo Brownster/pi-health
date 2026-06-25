@@ -487,3 +487,81 @@ def install_v2_stacks_api_mocks():
         page.route("**/api/**", _handler)
 
     return _install
+
+
+@pytest.fixture(scope="function")
+def install_v2_disks_api_mocks():
+    """Returns a callable(page) installing deterministic /api/disks* mocks for v2 disks."""
+
+    def _json_fulfill(route, payload, status: int = 200) -> None:
+        route.fulfill(status=status, content_type="application/json", body=json.dumps(payload))
+
+    def _install(page: Page) -> None:
+        inventory = {
+            "helper_available": True,
+            "disks": [
+                {
+                    "name": "sda",
+                    "path": "/dev/sda",
+                    "type": "disk",
+                    "size": "7.3T",
+                    "model": "WDC WD80EDAZ-11CEWB0",
+                    "serial": "WD-RD1ENASE",
+                    "transport": "usb",
+                    "mountpoint": "",
+                    "fstype": "",
+                    "partitions": [
+                        {
+                            "name": "sda1",
+                            "path": "/dev/sda1",
+                            "size": "7.3T",
+                            "fstype": "ext4",
+                            "mountpoint": "/mnt/storage",
+                            "uuid": "abcd-1234",
+                        }
+                    ],
+                }
+            ],
+        }
+        smart_device = {
+            "device": "/dev/sda",
+            "model": "WDC WD80EDAZ-11CEWB0",
+            "serial": "WD-RD1ENASE",
+            "drive_type": "hdd",
+            "smart_available": True,
+            "smart_enabled": True,
+            "health_status": "healthy",
+            "temperature_c": 38,
+            "power_on_hours": 1234,
+            "reallocated_sectors": 0,
+            "pending_sectors": 0,
+            "uncorrectable_errors": 0,
+            "percentage_used": None,
+            "available_spare": None,
+            "media_errors": None,
+            "error_message": None,
+        }
+
+        def _handler(route):
+            parsed = urlparse(route.request.url)
+            path = parsed.path
+            method = route.request.method
+
+            if path == "/api/disks" and method == "GET":
+                _json_fulfill(route, inventory)
+                return
+            if path == "/api/disks/helper-status" and method == "GET":
+                _json_fulfill(route, {"available": True, "socket_path": "/run/pihealth.sock"})
+                return
+            if path == "/api/disks/smart" and method == "GET":
+                _json_fulfill(route, {"disks": [{"device": "/dev/sda", "data": smart_device}]})
+                return
+            if path == "/api/disks/sda/smart" and method == "GET":
+                _json_fulfill(route, smart_device)
+                return
+
+            route.continue_()
+
+        page.route("**/api/**", _handler)
+
+    return _install

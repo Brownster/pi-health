@@ -3,13 +3,13 @@ import type { ComponentType } from "react";
 import { createComingSoonPage } from "@/pages/coming-soon-page";
 import { ContainersPage } from "@/pages/containers-page";
 import { DashboardHomePage } from "@/pages/dashboard-home";
+import { DisksPage } from "@/pages/disks-page";
 import { StacksPage } from "@/pages/stacks-page";
 
 // Phase 3 (PH3-001) placeholder routes: reachable v2 shell routes behind the auth
 // guard, each replaced by a real page as its ticket lands. Kept out of the nav
 // (showInNav: false) until implemented so the shell nav stays uncluttered.
 const PHASE3_PLACEHOLDERS: Array<{ path: string; label: string; legacyHref: string }> = [
-  { path: "/disks", label: "Disks", legacyHref: "/disks.html" },
   { path: "/pools", label: "Pools", legacyHref: "/pools.html" },
   { path: "/mounts", label: "Mounts", legacyHref: "/mounts.html" },
   { path: "/shares", label: "Shares", legacyHref: "/shares.html" },
@@ -45,6 +45,13 @@ export const appRoutes: AppRoute[] = [
     requiresAuth: true,
     showInNav: true,
     component: StacksPage,
+  },
+  {
+    path: "/disks",
+    label: "Disks",
+    requiresAuth: true,
+    showInNav: true,
+    component: DisksPage,
   },
   ...PHASE3_PLACEHOLDERS.map<AppRoute>(({ path, label, legacyHref }) => ({
     path,
