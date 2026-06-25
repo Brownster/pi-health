@@ -315,7 +315,7 @@ def install_v2_containers_api_mocks():
             body=json.dumps(payload),
         )
 
-    def _install(page: Page) -> None:
+    def _install(page: Page, extra_containers=None) -> None:
         container_payload = [
             {
                 "id": V2_MOCK_CONTAINER_ID,
@@ -330,7 +330,8 @@ def install_v2_containers_api_mocks():
                 "net_tx": 2345000,
                 "ports": [{"container_port": 8080, "host_port": 18080, "protocol": "tcp"}],
                 "update_available": False,
-            }
+            },
+            *(extra_containers or []),
         ]
 
         def _handler(route):

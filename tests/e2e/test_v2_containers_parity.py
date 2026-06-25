@@ -102,6 +102,47 @@ def test_v2_containers_lifecycle_action_feedback(
     assert_no_horizontal_overflow(page, f"v2 lifecycle feedback ({viewport_profile_name})")
 
 
+def test_v2_containers_stopped_filter_includes_exited(
+    profiled_page: Page,
+    viewport_profile_name: str,
+    v2_mode_server,
+    v2_login,
+    install_v2_containers_api_mocks,
+):
+    page = profiled_page
+    base_url = v2_mode_server["base_url"]
+
+    # Docker reports stopped containers as "exited"; the Stopped filter must include them.
+    exited_container = {
+        "id": "v2-mock-exited-1",
+        "name": "v2-mock-exited",
+        "image": "linuxserver/mock-exited:latest",
+        "status": "exited",
+        "cpu_percent": None,
+        "memory_percent": None,
+        "memory_used": None,
+        "memory_limit": None,
+        "net_rx": None,
+        "net_tx": None,
+        "ports": [],
+        "update_available": False,
+    }
+
+    v2_login(page, base_url)
+    install_v2_containers_api_mocks(page, extra_containers=[exited_container])
+    page.goto(f"{base_url}/v2/containers")
+    expect(page.get_by_role("heading", name="Docker Containers")).to_be_visible()
+
+    # Under "All" both containers are present.
+    expect(page.get_by_text("v2-mock-exited")).not_to_have_count(0)
+    expect(page.get_by_text("v2-mock-service")).not_to_have_count(0)
+
+    # Under "Stopped" the exited container stays, the running one is filtered out.
+    page.get_by_role("button", name="Stopped").click()
+    expect(page.get_by_text("v2-mock-exited")).not_to_have_count(0)
+    expect(page.get_by_text("v2-mock-service")).to_have_count(0)
+
+
 def test_v2_containers_dialog_focus_trap_and_restore(
     profiled_page: Page,
     viewport_profile_name: str,
