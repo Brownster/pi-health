@@ -162,27 +162,22 @@ export function DisksPage() {
       setIsRefreshing(true);
     }
 
-    // Helper status and SMART summary are best-effort; the inventory is the primary payload.
-    const [helper, summary] = await Promise.all([
-      fetchHelperStatus().catch(() => null),
-      fetchSmartSummary().catch(() => ({})),
-    ]);
-
+    // The inventory is the only thing on the critical path. SMART summary and the
+    // helper-status probe can be slow (sleeping disks / USB enclosures), so they must
+    // never gate the disk list — fetch them independently and merge once available.
     try {
       const inventory = await fetchDiskInventory();
       if (!isMountedRef.current) {
         return;
       }
       setDisks(inventory.disks);
-      setHelperAvailable(helper ? helper.available : inventory.helper_available);
-      setSmart(summary);
+      setHelperAvailable(inventory.helper_available);
       setError(null);
       setLastUpdated(formatClockTime(new Date()));
     } catch (caughtError) {
       if (!isMountedRef.current) {
         return;
       }
-      setHelperAvailable(helper ? helper.available : false);
       setError(getErrorMessage(caughtError));
     } finally {
       if (isMountedRef.current) {
@@ -193,6 +188,22 @@ export function DisksPage() {
         }
       }
     }
+
+    // Best-effort refinements, off the critical path.
+    void fetchHelperStatus()
+      .then((helper) => {
+        if (isMountedRef.current) {
+          setHelperAvailable(helper.available);
+        }
+      })
+      .catch(() => {});
+    void fetchSmartSummary()
+      .then((summary) => {
+        if (isMountedRef.current) {
+          setSmart(summary);
+        }
+      })
+      .catch(() => {});
   }, []);
 
   const onSmart = useCallback(async (disk: DiskInfo) => {
@@ -287,7 +298,7 @@ export function DisksPage() {
         </Card>
       ) : null}
 
-      {!isLoading && !error && !disks.length ? (
+      {!isLoading && !error && !disks.length && helperAvailable !== false ? (
         <Card>
           <CardContent className="flex min-h-[10rem] items-center justify-center p-6 text-sm text-muted-foreground">
             No disks found.

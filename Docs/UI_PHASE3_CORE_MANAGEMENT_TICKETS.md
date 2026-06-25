@@ -236,6 +236,12 @@ Complete (2026-06-25)
 
 Deferred to PH3-005: mount/unmount, suggested mounts, and SMART self-test actions.
 
+Deviation from task spec ("responsive table/card layout"): the disks view uses a responsive
+**card grid at all breakpoints** rather than a desktop table + mobile cards. Each disk's
+partitions are naturally nested under its card (variable count, fs/mount/size/uuid per row),
+which reads better than a flat table; this matches the card approach taken for stacks. Revisit
+if a denser desktop table is preferred.
+
 ## PH3-005 - Disks Mount/Unmount + SMART Actions (P0)
 Owner: Pi-Health maintainers  
 Estimate: 1.5 days

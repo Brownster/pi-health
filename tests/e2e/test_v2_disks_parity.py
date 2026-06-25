@@ -5,6 +5,9 @@ SMART summary + per-device SMART) keep the page reproducible without the
 privileged helper or a real disk.
 """
 
+import json
+from urllib.parse import urlparse
+
 import pytest
 from playwright.sync_api import Page, expect
 
@@ -53,3 +56,29 @@ def test_v2_disks_smart_modal(
     expect(page.locator("#v2-disk-smart-content")).to_contain_text("1234")
     page.click("#v2-disk-smart-close")
     expect(page.locator("#v2-disk-smart-modal")).to_have_count(0)
+
+
+def test_v2_disks_helper_unavailable_state(page: Page, v2_mode_server, v2_login):
+    base_url = v2_mode_server["base_url"]
+    v2_login(page, base_url)
+
+    def _handler(route):
+        path = urlparse(route.request.url).path
+        if path == "/api/disks":
+            body = {"disks": [], "helper_available": False}
+        elif path == "/api/disks/helper-status":
+            body = {"available": False, "socket_path": "/run/pihealth.sock"}
+        elif path == "/api/disks/smart":
+            body = {"disks": []}
+        else:
+            route.continue_()
+            return
+        route.fulfill(status=200, content_type="application/json", body=json.dumps(body))
+
+    page.route("**/api/**", _handler)
+    page.goto(f"{base_url}/v2/disks")
+    expect(page.get_by_role("heading", name="Disks")).to_be_visible()
+
+    # Helper-unavailable surfaces as a warning, NOT a misleading "No disks found." empty state.
+    expect(page.get_by_text("Privileged helper unavailable")).to_be_visible()
+    expect(page.get_by_text("No disks found.")).to_have_count(0)
