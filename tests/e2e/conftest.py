@@ -13,6 +13,11 @@ from urllib import request as urlrequest
 from urllib.parse import urlparse
 from playwright.sync_api import Page, expect
 
+# The full e2e run spawns a fresh app server per v2 test (viewport x mode matrix), so under
+# heavy parallel load login/navigation can exceed Playwright's default 5s assertion timeout
+# even though the same checks pass in isolation. Bump the default to absorb that load flake.
+expect.set_options(timeout=10_000)
+
 # Default credentials from appropriate environment variables or defaults
 USERNAME = os.getenv('PIHEALTH_USER', 'admin')
 PASSWORD = os.getenv('PIHEALTH_PASSWORD', 'pihealth')
@@ -720,6 +725,54 @@ def install_v2_mounts_api_mocks():
                 return
             if path == "/api/storage/mounts/rclone/gdrive" and method == "DELETE":
                 _json_fulfill(route, {"status": "removed"})
+                return
+
+            route.continue_()
+
+        page.route("**/api/**", _handler)
+
+    return _install
+
+
+@pytest.fixture(scope="function")
+def install_v2_shares_api_mocks():
+    """Returns a callable(page) installing deterministic shares mocks (samba plugin + shares)."""
+
+    def _json_fulfill(route, payload, status: int = 200) -> None:
+        route.fulfill(status=status, content_type="application/json", body=json.dumps(payload))
+
+    def _install(page: Page) -> None:
+        plugins = [
+            {"id": "samba", "name": "Samba", "description": "SMB shares", "version": "1.0",
+             "installed": True, "enabled": True, "configured": True, "status": "active",
+             "status_message": "", "category": "shares", "type": "builtin"},
+            {"id": "mergerfs", "name": "MergerFS", "description": "pool", "version": "1.0",
+             "installed": True, "enabled": True, "configured": True, "status": "active",
+             "status_message": "", "category": "storage", "type": "builtin"},
+        ]
+        shares_payload = {
+            "shares": [{"name": "media", "path": "/mnt/storage/media", "enabled": True}],
+            "service_running": True,
+            "status": "ok",
+            "message": "Samba running",
+        }
+
+        def _handler(route):
+            parsed = urlparse(route.request.url)
+            path = parsed.path
+            method = route.request.method
+
+            if path == "/api/storage/plugins" and method == "GET":
+                _json_fulfill(route, {"plugins": plugins})
+                return
+            if path == "/api/storage/shares/samba" and method == "GET":
+                _json_fulfill(route, shares_payload)
+                return
+            if path == "/api/storage/shares/samba/media/toggle" and method == "POST":
+                _json_fulfill(route, {"status": "ok"})
+                return
+            if path == "/api/storage/shares/samba/media" and method == "DELETE":
+                _json_fulfill(route, {"status": "deleted"})
                 return
 
             route.continue_()

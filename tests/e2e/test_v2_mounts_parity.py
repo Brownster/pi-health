@@ -10,7 +10,8 @@ def _open_v2_mounts(page, base_url, v2_login, install_v2_mounts_api_mocks):
     v2_login(page, base_url)
     install_v2_mounts_api_mocks(page)
     page.goto(f"{base_url}/v2/mounts")
-    expect(page.get_by_role("heading", name="Mounts")).to_be_visible()
+    # exact=True: "Rclone mounts" group headings also contain "Mounts".
+    expect(page.get_by_role("heading", name="Mounts", exact=True)).to_be_visible()
 
 
 def test_v2_mounts_media_paths_and_list(

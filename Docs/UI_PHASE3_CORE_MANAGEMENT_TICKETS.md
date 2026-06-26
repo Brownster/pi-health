@@ -35,7 +35,7 @@ Migrate the core management pages to `/v2` with the same rollback model proven b
 | 6a | PH3-006a v2 Storage Plugins + Pools (mgmt + details + commands) | PH3-001 | Yes | Complete (2026-06-26) |
 | 6b | PH3-006b Storage plugin schema config editor + install wizard | PH3-006a | No | Pending |
 | 7 | PH3-007 v2 Mounts Management (media paths + mounts) | PH3-006 | Yes | Complete (2026-06-26) |
-| 8 | PH3-008 v2 Shares Management | PH3-006 | Yes | Draft |
+| 8 | PH3-008 v2 Shares Management (list + toggle/delete) | PH3-006 | Yes | Complete (2026-06-26) |
 | 9 | PH3-009 v2 Settings + Backup/Update Workflows | PH3-001 | Yes | Draft |
 | 10 | PH3-010 Phase 3 Parity and Rollout Suite | PH3-002..PH3-009 | Yes | Draft |
 | 11 | PH3-011 Phase 3 Release Signoff | PH3-010 | Yes | Draft |
@@ -409,6 +409,22 @@ Estimate: 1.0 day
 2. Create/edit/toggle/delete flows call existing endpoints.
 3. Delete confirmation is keyboard safe.
 4. E2E mocks cover share CRUD and one plugin command path.
+
+### Status
+Complete (2026-06-26)
+
+### Evidence
+1. `frontend/src/lib/shares.ts`: `fetchShares` (per plugin), `toggleShare`, `deleteShare`.
+2. `frontend/src/pages/shares-page.tsx`: share-capable plugins (category contains "share")
+   each shown with service running/stopped status and their shares (name/path/enabled), with
+   enable/disable toggle and keyboard-safe delete-with-confirm; `role=status` notices.
+3. `/shares` promoted to a real protected nav route (removed from placeholder set + test).
+4. e2e: `install_v2_shares_api_mocks` (samba shares + mergerfs filtered out);
+   `tests/e2e/test_v2_shares_parity.py` covers list + share-plugin filtering + toggle + delete.
+5. Validation: `npm run check` / `build:publish` / bundle budget (JS 87.25 kB gz / 200 kB) pass;
+   `pytest test_v2_shares_parity.py -q` -> `6 passed`.
+
+Deferred to PH3-008b: the create/edit share form (overlaps the PH3-006b schema config editor).
 
 ## PH3-009 - v2 Settings + Backup/Update Workflows (P0)
 Owner: Pi-Health maintainers  
