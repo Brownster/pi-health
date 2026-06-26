@@ -32,7 +32,8 @@ Migrate the core management pages to `/v2` with the same rollback model proven b
 | 3b | PH3-003b Stacks Compose/Env Editor + Backups/Restore | PH3-003a | Yes | Complete (2026-06-25) |
 | 4 | PH3-004 v2 Disks Read Path + SMART Views | PH3-001 | Yes | Complete (2026-06-25) |
 | 5 | PH3-005 Disks Mount/Unmount + SMART Actions | PH3-004 | Yes | Complete (2026-06-26) |
-| 6 | PH3-006 v2 Storage Plugins + Pools | PH3-001 | Yes | Draft |
+| 6a | PH3-006a v2 Storage Plugins + Pools (mgmt + details + commands) | PH3-001 | Yes | Complete (2026-06-26) |
+| 6b | PH3-006b Storage plugin schema config editor + install wizard | PH3-006a | No | Pending |
 | 7 | PH3-007 v2 Mounts Management | PH3-006 | Yes | Draft |
 | 8 | PH3-008 v2 Shares Management | PH3-006 | Yes | Draft |
 | 9 | PH3-009 v2 Settings + Backup/Update Workflows | PH3-001 | Yes | Draft |
@@ -305,6 +306,36 @@ Estimate: 1.5 days
 2. Enable/disable/install/remove/config flows use existing API contracts.
 3. Plugin command output is usable on phone and tablet.
 4. E2E mocks cover at least one local storage plugin and one disabled/unavailable state.
+
+> Split (per Q2 + scope): **PH3-006a** delivers the tabbed surface + plugin management +
+> details/commands; the heavier, least-specified parts (**schema-driven config form editor**
+> and the **install-new-plugin wizard**) are tracked as **PH3-006b**.
+
+### PH3-006a Status: Complete (2026-06-26)
+Evidence:
+1. `frontend/src/lib/storage-plugins.ts`: `fetchPlugins`, `fetchPluginDetail`, `togglePlugin`,
+   `removePlugin`, `fetchPluginRecovery` (404 = unsupported), `fetchPluginLatestLog`, and
+   `streamPluginCommand` — the command endpoint is **SSE-over-POST**, so it is consumed with a
+   `fetch` + `ReadableStream` reader (EventSource is GET-only). `isPoolPlugin` heuristic
+   (category contains "pool" or id in {mergerfs, snapraid}; documented, revisit if the API adds a
+   capability flag).
+2. `frontend/src/pages/storage-page.tsx`: one tabbed surface (Plugins / Pools) used by both
+   `/v2/plugins` and `/v2/pools` (initial tab from the path via `useLocation`). Plugin cards with
+   enabled/installed/status badges; enable/disable toggle; remove with inline keyboard-safe
+   confirm; details modal showing status, recovery (when supported), latest log, and per-command
+   run buttons with **live streamed output**; `role=status` notices; single-flight `pendingId`.
+3. `routes.tsx`: `/plugins` and `/pools` promoted to real protected nav routes (removed from the
+   placeholder set + test).
+4. e2e: `install_v2_storage_api_mocks` (list/toggle/detail/recovery-404/log/SSE-command);
+   `tests/e2e/test_v2_storage_parity.py` covers list + pools-tab filter + pools-route default +
+   toggle + details/streamed-command across viewports.
+5. Validation: `npm run check` / `build:publish` / bundle budget (JS 84.58 kB gz / 200 kB) pass;
+   `pytest test_v2_storage_parity.py test_v2_phase3_routes.py -q` -> `10 passed`; full v2 set
+   `67 passed, 6 skipped`.
+
+### PH3-006b Status: Pending
+Schema-driven config form editor (`/config`, `/validate`, `/apply`) and the install-new-plugin
+wizard (`/install`) remain.
 
 ## PH3-007 - v2 Mounts Management (P0)
 Owner: Pi-Health maintainers  

@@ -15,10 +15,8 @@ pytestmark = pytest.mark.e2e
 # (route path, expected legacy fallback href). Pages promoted to real v2 routes
 # (e.g. disks) are covered by their own parity suite, not here.
 PHASE3_PLACEHOLDER_ROUTES = [
-    ("pools", "/pools.html"),
     ("mounts", "/mounts.html"),
     ("shares", "/shares.html"),
-    ("plugins", "/plugins.html"),
     ("settings", "/settings.html"),
 ]
 

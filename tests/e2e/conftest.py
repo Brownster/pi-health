@@ -592,3 +592,69 @@ def install_v2_disks_api_mocks():
         page.route("**/api/**", _handler)
 
     return _install
+
+
+@pytest.fixture(scope="function")
+def install_v2_storage_api_mocks():
+    """Returns a callable(page) installing deterministic /api/storage/plugins* mocks."""
+
+    def _json_fulfill(route, payload, status: int = 200) -> None:
+        route.fulfill(status=status, content_type="application/json", body=json.dumps(payload))
+
+    def _install(page: Page) -> None:
+        plugins = [
+            {
+                "id": "mergerfs", "name": "MergerFS", "description": "Union filesystem pooling",
+                "version": "1.0", "installed": True, "enabled": False, "configured": False,
+                "status": "disabled", "status_message": "Disabled", "category": "storage", "type": "builtin",
+            },
+            {
+                "id": "samba", "name": "Samba", "description": "SMB shares",
+                "version": "1.0", "installed": True, "enabled": True, "configured": True,
+                "status": "active", "status_message": "Running", "category": "shares", "type": "builtin",
+            },
+        ]
+        mergerfs_detail = {
+            "id": "mergerfs", "name": "MergerFS", "description": "Union filesystem pooling",
+            "version": "1.0", "installed": True,
+            "status": {"status": "ok", "message": "Pool active"},
+            "commands": [{"id": "status", "label": "Pool Status", "params": []}],
+            "schema": {}, "config": {}, "install_instructions": "",
+        }
+        command_sse = (
+            'data: {"type": "output", "line": "checking pool mergerfs"}\n\n'
+            'data: {"type": "complete", "success": true, "message": "pool healthy"}\n\n'
+        )
+
+        def _handler(route):
+            parsed = urlparse(route.request.url)
+            path = parsed.path
+            method = route.request.method
+
+            if path == "/api/storage/plugins" and method == "GET":
+                _json_fulfill(route, {"plugins": plugins})
+                return
+            if path == "/api/storage/plugins/mergerfs" and method == "GET":
+                _json_fulfill(route, mergerfs_detail)
+                return
+            if path.startswith("/api/storage/plugins/") and path.endswith("/toggle") and method == "POST":
+                _json_fulfill(route, {"status": "ok", "enabled": True})
+                return
+            if path.startswith("/api/storage/plugins/") and path.endswith("/remove") and method == "DELETE":
+                _json_fulfill(route, {"status": "removed"})
+                return
+            if path == "/api/storage/plugins/mergerfs/recovery" and method == "GET":
+                _json_fulfill(route, {"error": "Recovery not supported"}, status=404)
+                return
+            if path == "/api/storage/plugins/mergerfs/logs/latest" and method == "GET":
+                route.fulfill(status=200, content_type="text/plain", body="mergerfs pool log line")
+                return
+            if path == "/api/storage/plugins/mergerfs/commands/status" and method == "POST":
+                route.fulfill(status=200, content_type="text/event-stream", body=command_sse)
+                return
+
+            route.continue_()
+
+        page.route("**/api/**", _handler)
+
+    return _install
