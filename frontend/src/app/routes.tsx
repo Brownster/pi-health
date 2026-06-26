@@ -4,6 +4,7 @@ import { createComingSoonPage } from "@/pages/coming-soon-page";
 import { ContainersPage } from "@/pages/containers-page";
 import { DashboardHomePage } from "@/pages/dashboard-home";
 import { DisksPage } from "@/pages/disks-page";
+import { MountsPage } from "@/pages/mounts-page";
 import { StacksPage } from "@/pages/stacks-page";
 import { StoragePage } from "@/pages/storage-page";
 
@@ -11,7 +12,6 @@ import { StoragePage } from "@/pages/storage-page";
 // guard, each replaced by a real page as its ticket lands. Kept out of the nav
 // (showInNav: false) until implemented so the shell nav stays uncluttered.
 const PHASE3_PLACEHOLDERS: Array<{ path: string; label: string; legacyHref: string }> = [
-  { path: "/mounts", label: "Mounts", legacyHref: "/mounts.html" },
   { path: "/shares", label: "Shares", legacyHref: "/shares.html" },
   { path: "/settings", label: "Settings", legacyHref: "/settings.html" },
 ];
@@ -65,6 +65,13 @@ export const appRoutes: AppRoute[] = [
     requiresAuth: true,
     showInNav: true,
     component: StoragePage,
+  },
+  {
+    path: "/mounts",
+    label: "Mounts",
+    requiresAuth: true,
+    showInNav: true,
+    component: MountsPage,
   },
   ...PHASE3_PLACEHOLDERS.map<AppRoute>(({ path, label, legacyHref }) => ({
     path,

@@ -663,3 +663,67 @@ def install_v2_storage_api_mocks():
         page.route("**/api/**", _handler)
 
     return _install
+
+
+@pytest.fixture(scope="function")
+def install_v2_mounts_api_mocks():
+    """Returns a callable(page) installing deterministic mounts mocks (media paths + mount plugin)."""
+
+    def _json_fulfill(route, payload, status: int = 200) -> None:
+        route.fulfill(status=status, content_type="application/json", body=json.dumps(payload))
+
+    def _install(page: Page) -> None:
+        paths = {
+            "downloads": "/mnt/downloads",
+            "storage": "/mnt/storage",
+            "backup": "/mnt/backup",
+            "config": "/home/pi/docker",
+        }
+        plugins = [
+            {"id": "rclone", "name": "Rclone", "description": "Remote mounts", "version": "1.0",
+             "installed": True, "enabled": True, "configured": True, "status": "active",
+             "status_message": "", "category": "mounts", "type": "builtin"},
+            {"id": "samba", "name": "Samba", "description": "SMB", "version": "1.0",
+             "installed": True, "enabled": True, "configured": True, "status": "active",
+             "status_message": "", "category": "shares", "type": "builtin"},
+        ]
+
+        def _handler(route):
+            parsed = urlparse(route.request.url)
+            path = parsed.path
+            method = route.request.method
+
+            if path == "/api/disks/media-paths" and method == "GET":
+                _json_fulfill(route, {"paths": paths})
+                return
+            if path == "/api/disks/media-paths" and method == "POST":
+                _json_fulfill(route, {"status": "updated", "paths": paths})
+                return
+            if path == "/api/storage/plugins" and method == "GET":
+                _json_fulfill(route, {"plugins": plugins})
+                return
+            if path == "/api/storage/mounts/rclone" and method == "GET":
+                _json_fulfill(
+                    route,
+                    {"mounts": [{"id": "gdrive", "name": "gdrive", "mountpoint": "/mnt/remote/gdrive",
+                                 "mounted": False, "type": "rclone"}]},
+                )
+                return
+            if path == "/api/storage/mounts/samba" and method == "GET":
+                _json_fulfill(route, {"error": "Not a remote mount plugin"}, status=400)
+                return
+            if path == "/api/storage/mounts/rclone/gdrive/mount" and method == "POST":
+                _json_fulfill(route, {"status": "mounted"})
+                return
+            if path == "/api/storage/mounts/rclone/gdrive/unmount" and method == "POST":
+                _json_fulfill(route, {"status": "unmounted"})
+                return
+            if path == "/api/storage/mounts/rclone/gdrive" and method == "DELETE":
+                _json_fulfill(route, {"status": "removed"})
+                return
+
+            route.continue_()
+
+        page.route("**/api/**", _handler)
+
+    return _install

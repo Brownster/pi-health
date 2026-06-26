@@ -34,7 +34,7 @@ Migrate the core management pages to `/v2` with the same rollback model proven b
 | 5 | PH3-005 Disks Mount/Unmount + SMART Actions | PH3-004 | Yes | Complete (2026-06-26) |
 | 6a | PH3-006a v2 Storage Plugins + Pools (mgmt + details + commands) | PH3-001 | Yes | Complete (2026-06-26) |
 | 6b | PH3-006b Storage plugin schema config editor + install wizard | PH3-006a | No | Pending |
-| 7 | PH3-007 v2 Mounts Management | PH3-006 | Yes | Draft |
+| 7 | PH3-007 v2 Mounts Management (media paths + mounts) | PH3-006 | Yes | Complete (2026-06-26) |
 | 8 | PH3-008 v2 Shares Management | PH3-006 | Yes | Draft |
 | 9 | PH3-009 v2 Settings + Backup/Update Workflows | PH3-001 | Yes | Draft |
 | 10 | PH3-010 Phase 3 Parity and Rollout Suite | PH3-002..PH3-009 | Yes | Draft |
@@ -367,6 +367,25 @@ Estimate: 1.5 days
 2. Mount actions are reachable on phone and tablet.
 3. Secret/password fields are not echoed after save unless the API already returns them.
 4. E2E mocks cover media paths, startup preview, mount/unmount, and add/edit modal flows.
+
+### Status
+Complete (2026-06-26)
+
+### Evidence
+1. `frontend/src/lib/mounts.ts`: media-paths fetch/save, per-plugin mount discovery
+   (`fetchPluginMounts` returns null for non-mount plugins), and mount/unmount/delete actions.
+2. `frontend/src/pages/mounts-page.tsx`: a **Media paths editor** (downloads/storage/backup/config
+   inputs with absolute-path validation, Save, startup-warning surfacing) and **configured mounts**
+   grouped by mount plugin, each with mount/unmount toggle and delete-with-confirm; `role=status`
+   notices. `/mounts` promoted to a real protected nav route.
+3. e2e: `install_v2_mounts_api_mocks` (media paths, plugins, rclone mounts, samba=400 non-mount);
+   `tests/e2e/test_v2_mounts_parity.py` covers media-paths render+save, plugin-mount filtering,
+   and mount + delete-with-confirm.
+4. Validation: `npm run check` / `build:publish` / bundle budget (JS 86.15 kB gz / 200 kB) pass;
+   `pytest test_v2_mounts_parity.py -q` -> pass.
+
+Deferred to PH3-007b: the add/edit mount modal (with secret credential fields — overlaps the
+PH3-006b schema config editor) and the startup-service preview/apply flow.
 
 ## PH3-008 - v2 Shares Management (P0)
 Owner: Pi-Health maintainers  
