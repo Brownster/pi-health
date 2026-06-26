@@ -36,7 +36,7 @@ Migrate the core management pages to `/v2` with the same rollback model proven b
 | 6b | PH3-006b Storage plugin schema config editor + install wizard | PH3-006a | No | Pending |
 | 7 | PH3-007 v2 Mounts Management (media paths + mounts) | PH3-006 | Yes | Complete (2026-06-26) |
 | 8 | PH3-008 v2 Shares Management (list + toggle/delete) | PH3-006 | Yes | Complete (2026-06-26) |
-| 9 | PH3-009 v2 Settings + Backup/Update Workflows | PH3-001 | Yes | Draft |
+| 9 | PH3-009 v2 Settings + Backup/Update Workflows | PH3-001 | Yes | Complete (2026-06-26) |
 | 10 | PH3-010 Phase 3 Parity and Rollout Suite | PH3-002..PH3-009 | Yes | Draft |
 | 11 | PH3-011 Phase 3 Release Signoff | PH3-010 | Yes | Draft |
 
@@ -448,6 +448,24 @@ Estimate: 1.5 days
 2. Save/restore/run-now actions show clear success/error feedback.
 3. Restore actions require confirmation.
 4. E2E mocks cover backup config save, backup restore confirmation, auto-update config save, and Pi-Health update trigger.
+
+### Status
+Complete (2026-06-26)
+
+### Evidence
+1. `frontend/src/lib/settings.ts`: Pi-Health self-update (config get/save + trigger), backups
+   (config get/save, status, list, run, restore), and auto-update (config get/save, run-now).
+2. `frontend/src/pages/settings-page.tsx`: three sections — Pi-Health self-update (repo/service
+   fields, Save, Update-now with confirm), Backups (enabled/schedule/dest fields + status line,
+   Save, Run-now, backup list with restore-with-confirm), and Container auto-update
+   (enabled/notify/schedule, Save, Run-now); `role=status` notices, single-flight `pendingKey`.
+3. `/settings` promoted to a real protected nav route; all Phase 3 placeholder routes are now
+   real, so `routes.tsx` drops the placeholder scaffold and the phase3-routes test keeps only the
+   shared auth-guard assertion.
+4. e2e: `install_v2_settings_api_mocks`; `tests/e2e/test_v2_settings_parity.py` covers render +
+   Pi-Health update trigger (confirm) + backup save + backup restore (confirm) + auto-update save.
+5. Validation: `npm run check` / `build:publish` / bundle budget (JS 88.77 kB gz / 200 kB) pass;
+   `pytest test_v2_settings_parity.py -q` -> `7 passed`; full v2 set `86 passed, 6 skipped`.
 
 ## PH3-010 - Phase 3 Parity and Rollout Suite (P0)
 Owner: Pi-Health maintainers  

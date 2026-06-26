@@ -1,20 +1,13 @@
 import type { ComponentType } from "react";
 
-import { createComingSoonPage } from "@/pages/coming-soon-page";
 import { ContainersPage } from "@/pages/containers-page";
 import { DashboardHomePage } from "@/pages/dashboard-home";
 import { DisksPage } from "@/pages/disks-page";
 import { MountsPage } from "@/pages/mounts-page";
+import { SettingsPage } from "@/pages/settings-page";
 import { SharesPage } from "@/pages/shares-page";
 import { StacksPage } from "@/pages/stacks-page";
 import { StoragePage } from "@/pages/storage-page";
-
-// Phase 3 (PH3-001) placeholder routes: reachable v2 shell routes behind the auth
-// guard, each replaced by a real page as its ticket lands. Kept out of the nav
-// (showInNav: false) until implemented so the shell nav stays uncluttered.
-const PHASE3_PLACEHOLDERS: Array<{ path: string; label: string; legacyHref: string }> = [
-  { path: "/settings", label: "Settings", legacyHref: "/settings.html" },
-];
 
 export interface AppRoute {
   path: string;
@@ -80,13 +73,13 @@ export const appRoutes: AppRoute[] = [
     showInNav: true,
     component: SharesPage,
   },
-  ...PHASE3_PLACEHOLDERS.map<AppRoute>(({ path, label, legacyHref }) => ({
-    path,
-    label,
+  {
+    path: "/settings",
+    label: "Settings",
     requiresAuth: true,
-    showInNav: false,
-    component: createComingSoonPage({ title: label, legacyHref }),
-  })),
+    showInNav: true,
+    component: SettingsPage,
+  },
 ];
 
 export const navRoutes = appRoutes.filter((route) => route.showInNav);

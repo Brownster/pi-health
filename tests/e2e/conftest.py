@@ -780,3 +780,61 @@ def install_v2_shares_api_mocks():
         page.route("**/api/**", _handler)
 
     return _install
+
+
+@pytest.fixture(scope="function")
+def install_v2_settings_api_mocks():
+    """Returns a callable(page) installing deterministic settings mocks."""
+
+    def _json_fulfill(route, payload, status: int = 200) -> None:
+        route.fulfill(status=status, content_type="application/json", body=json.dumps(payload))
+
+    def _install(page: Page) -> None:
+        def _handler(route):
+            parsed = urlparse(route.request.url)
+            path = parsed.path
+            method = route.request.method
+
+            if path == "/api/pihealth/update/config" and method == "GET":
+                _json_fulfill(route, {"repo_path": "/opt/pi-health", "service_name": "pi-health"})
+                return
+            if path == "/api/pihealth/update/config" and method == "POST":
+                _json_fulfill(route, {"status": "saved", "config": {}})
+                return
+            if path == "/api/pihealth/update" and method == "POST":
+                _json_fulfill(route, {"status": "updating"})
+                return
+            if path == "/api/backups/config" and method == "GET":
+                _json_fulfill(route, {"enabled": True, "schedule_preset": "daily", "retention_count": 5, "dest_dir": "/mnt/backup/ph"})
+                return
+            if path == "/api/backups/config" and method == "POST":
+                _json_fulfill(route, {"status": "ok"})
+                return
+            if path == "/api/backups/status" and method == "GET":
+                _json_fulfill(route, {"enabled": True, "next_run": "2026-06-27 04:00", "backup_running": False,
+                                      "last_run": "2026-06-26 04:00", "last_run_result": "success"})
+                return
+            if path == "/api/backups/run" and method == "POST":
+                _json_fulfill(route, {"status": "ok"})
+                return
+            if path == "/api/backups/list" and method == "GET":
+                _json_fulfill(route, {"backups": ["ph-backup-20260626.tar.gz"]})
+                return
+            if path == "/api/backups/restore" and method == "POST":
+                _json_fulfill(route, {"status": "ok"})
+                return
+            if path == "/api/auto-update/config" and method == "GET":
+                _json_fulfill(route, {"enabled": True, "schedule_preset": "daily_4am", "notify_on_update": False})
+                return
+            if path == "/api/auto-update/config" and method == "POST":
+                _json_fulfill(route, {"status": "updated", "config": {}})
+                return
+            if path == "/api/auto-update/run-now" and method == "POST":
+                _json_fulfill(route, {"status": "ok"})
+                return
+
+            route.continue_()
+
+        page.route("**/api/**", _handler)
+
+    return _install
