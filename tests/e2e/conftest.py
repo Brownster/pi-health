@@ -559,6 +559,33 @@ def install_v2_disks_api_mocks():
             if path == "/api/disks/sda/smart" and method == "GET":
                 _json_fulfill(route, smart_device)
                 return
+            if path == "/api/disks/suggested-mounts" and method == "GET":
+                _json_fulfill(
+                    route,
+                    {
+                        "suggestions": [
+                            {
+                                "device": "/dev/sdb1",
+                                "uuid": "sdb-uuid-1",
+                                "size": "500G",
+                                "fstype": "ext4",
+                                "label": "",
+                                "suggested_mount": "/mnt/backup",
+                                "reason": "Small USB device - suitable for backups",
+                            }
+                        ]
+                    },
+                )
+                return
+            if path == "/api/disks/mount" and method == "POST":
+                _json_fulfill(route, {"status": "mounted", "mountpoint": "/mnt/backup", "fstab_added": True})
+                return
+            if path == "/api/disks/unmount" and method == "POST":
+                _json_fulfill(route, {"status": "unmounted", "mountpoint": "/mnt/storage", "fstab_removed": False})
+                return
+            if path == "/api/disks/sda/smart-test" and method == "POST":
+                _json_fulfill(route, {"status": "started", "test_type": "short", "message": "SMART short self-test started"})
+                return
 
             route.continue_()
 

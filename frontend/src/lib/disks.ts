@@ -160,3 +160,102 @@ export async function fetchDiskSmart(deviceName: string, signal?: AbortSignal): 
   }
   return normalizeSmart(payload, deviceName);
 }
+
+export interface SuggestedMount {
+  device: string;
+  uuid: string;
+  size: string | null;
+  fstype: string | null;
+  label: string | null;
+  suggested_mount: string;
+  reason: string;
+}
+
+export async function fetchSuggestedMounts(signal?: AbortSignal): Promise<SuggestedMount[]> {
+  const payload = await requestApi<{ suggestions?: Record<string, unknown>[]; error?: string }>(
+    "/api/disks/suggested-mounts",
+    { method: "GET", signal },
+  );
+  if (payload.error || !Array.isArray(payload.suggestions)) {
+    return [];
+  }
+  return payload.suggestions
+    .map((raw) => ({
+      device: String(raw.device ?? ""),
+      uuid: String(raw.uuid ?? ""),
+      size: toNullableString(raw.size),
+      fstype: toNullableString(raw.fstype),
+      label: toNullableString(raw.label),
+      suggested_mount: String(raw.suggested_mount ?? ""),
+      reason: String(raw.reason ?? ""),
+    }))
+    .filter((item) => item.uuid && item.suggested_mount);
+}
+
+export interface MountRequest {
+  uuid: string;
+  mountpoint: string;
+  fstype?: string | null;
+  options?: string;
+  add_to_fstab?: boolean;
+}
+
+export async function mountDisk(request: MountRequest, signal?: AbortSignal): Promise<void> {
+  const payload = await requestApi<{ status?: string; error?: string }>("/api/disks/mount", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      uuid: request.uuid,
+      mountpoint: request.mountpoint,
+      fstype: request.fstype || "ext4",
+      options: request.options ?? "defaults,nofail",
+      add_to_fstab: request.add_to_fstab ?? true,
+    }),
+    signal,
+  });
+  if (payload.error) {
+    throw new Error(payload.error);
+  }
+}
+
+export async function unmountDisk(
+  mountpoint: string,
+  removeFromFstab = false,
+  signal?: AbortSignal,
+): Promise<{ warning: string | null }> {
+  const payload = await requestApi<{ status?: string; warning?: string; error?: string }>(
+    "/api/disks/unmount",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mountpoint, remove_from_fstab: removeFromFstab }),
+      signal,
+    },
+  );
+  if (payload.error) {
+    throw new Error(payload.error);
+  }
+  return { warning: toNullableString(payload.warning) };
+}
+
+export type SmartTestType = "short" | "long" | "conveyance";
+
+export async function runSmartTest(
+  deviceName: string,
+  testType: SmartTestType,
+  signal?: AbortSignal,
+): Promise<string> {
+  const payload = await requestApi<{ status?: string; message?: string; error?: string }>(
+    `/api/disks/${encodeURIComponent(deviceName)}/smart-test`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ test_type: testType }),
+      signal,
+    },
+  );
+  if (payload.error) {
+    throw new Error(payload.error);
+  }
+  return payload.message || `${testType} self-test started`;
+}

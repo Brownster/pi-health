@@ -82,3 +82,48 @@ def test_v2_disks_helper_unavailable_state(page: Page, v2_mode_server, v2_login)
     # Helper-unavailable surfaces as a warning, NOT a misleading "No disks found." empty state.
     expect(page.get_by_text("Privileged helper unavailable")).to_be_visible()
     expect(page.get_by_text("No disks found.")).to_have_count(0)
+
+
+def test_v2_disks_suggested_mount_with_confirm(
+    page: Page,
+    v2_mode_server,
+    v2_login,
+    install_v2_disks_api_mocks,
+):
+    base_url = v2_mode_server["base_url"]
+    _open_v2_disks(page, base_url, v2_login, install_v2_disks_api_mocks)
+
+    expect(page.locator("#v2-disk-suggestions")).to_be_visible()
+    page.click("button[data-mount='sdb-uuid-1']")
+    page.click("button[data-confirm-mount='sdb-uuid-1']")
+    expect(page.get_by_text("Mounted /dev/sdb1 at /mnt/backup")).to_be_visible(timeout=10000)
+
+
+def test_v2_disks_unmount_with_confirm(
+    page: Page,
+    v2_mode_server,
+    v2_login,
+    install_v2_disks_api_mocks,
+):
+    base_url = v2_mode_server["base_url"]
+    _open_v2_disks(page, base_url, v2_login, install_v2_disks_api_mocks)
+
+    page.click("button[data-unmount='/mnt/storage']")
+    page.click("button[data-confirm-unmount='/mnt/storage']")
+    expect(page.get_by_text("Unmounted /mnt/storage")).to_be_visible(timeout=10000)
+
+
+def test_v2_disks_smart_self_test_with_confirm(
+    page: Page,
+    v2_mode_server,
+    v2_login,
+    install_v2_disks_api_mocks,
+):
+    base_url = v2_mode_server["base_url"]
+    _open_v2_disks(page, base_url, v2_login, install_v2_disks_api_mocks)
+
+    page.locator("button[data-disk-action='smart'][data-disk='sda']:visible").first.click()
+    expect(page.locator("#v2-disk-smart-modal")).to_be_visible()
+    page.click("button[data-smarttest='short']")
+    page.click("button[data-confirm-smarttest='short']")
+    expect(page.get_by_text("SMART short self-test started")).to_be_visible(timeout=10000)

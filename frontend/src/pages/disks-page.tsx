@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Activity, HardDrive, RefreshCw, ShieldCheck, TriangleAlert } from "lucide-react";
+import { Activity, HardDrive, Loader2, RefreshCw, ShieldCheck, TriangleAlert } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -7,10 +7,16 @@ import { ModalOverlay } from "@/components/ui/modal-overlay";
 import {
   type DiskInfo,
   type SmartHealth,
+  type SmartTestType,
+  type SuggestedMount,
   fetchDiskInventory,
   fetchDiskSmart,
   fetchHelperStatus,
   fetchSmartSummary,
+  fetchSuggestedMounts,
+  mountDisk,
+  runSmartTest,
+  unmountDisk,
 } from "@/lib/disks";
 import { formatClockTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -23,6 +29,21 @@ interface SmartModalState {
   device: string;
   result: SmartHealth | null;
   error: string | null;
+}
+
+interface ActionNotice {
+  message: string;
+  tone: "info" | "success" | "error";
+}
+
+function getNoticeToneClass(tone: ActionNotice["tone"]): string {
+  if (tone === "success") {
+    return "border-emerald-500/40 text-emerald-300";
+  }
+  if (tone === "error") {
+    return "border-rose-500/40 text-rose-300";
+  }
+  return "border-sky-500/40 text-sky-300";
 }
 
 function getHealthTone(status: string): string {
@@ -54,14 +75,91 @@ function SmartDetailRow({ label, value }: { label: string; value: string | numbe
   );
 }
 
+function ConfirmButton({
+  actionKey,
+  label,
+  confirmLabel = "Confirm",
+  pendingLabel = "Working...",
+  className,
+  confirmKey,
+  setConfirmKey,
+  pendingKey,
+  disabled,
+  onConfirm,
+  requestData,
+  confirmData,
+}: {
+  actionKey: string;
+  label: string;
+  confirmLabel?: string;
+  pendingLabel?: string;
+  className?: string;
+  confirmKey: string | null;
+  setConfirmKey: (key: string | null) => void;
+  pendingKey: string | null;
+  disabled?: boolean;
+  onConfirm: () => void;
+  requestData?: Record<string, string>;
+  confirmData?: Record<string, string>;
+}) {
+  if (pendingKey === actionKey) {
+    return (
+      <Button className={cn("gap-1.5 text-xs sm:text-sm", className)} disabled size="sm" variant="outline">
+        <Loader2 aria-hidden="true" className="h-3.5 w-3.5 animate-spin" />
+        {pendingLabel}
+      </Button>
+    );
+  }
+  if (confirmKey === actionKey) {
+    return (
+      <span className="flex items-center gap-1.5">
+        <Button
+          className={cn("text-xs sm:text-sm", className)}
+          onClick={onConfirm}
+          size="sm"
+          variant="outline"
+          {...confirmData}
+        >
+          {confirmLabel}
+        </Button>
+        <Button onClick={() => setConfirmKey(null)} size="sm" variant="outline">
+          Cancel
+        </Button>
+      </span>
+    );
+  }
+  return (
+    <Button
+      className={cn("text-xs sm:text-sm", className)}
+      disabled={disabled || Boolean(pendingKey)}
+      onClick={() => setConfirmKey(actionKey)}
+      size="sm"
+      variant="outline"
+      {...requestData}
+    >
+      {label}
+    </Button>
+  );
+}
+
 function DiskCard({
   disk,
   smart,
+  helperAvailable,
+  pendingKey,
+  confirmKey,
+  setConfirmKey,
   onSmart,
+  onUnmount,
 }: {
   disk: DiskInfo;
   smart?: SmartHealth;
+  helperAvailable: boolean | null;
+  pendingKey: string | null;
+  confirmKey: string | null;
+  setConfirmKey: (key: string | null) => void;
   onSmart: (disk: DiskInfo) => void;
+  onUnmount: (mountpoint: string) => void;
 }) {
   return (
     <Card>
@@ -113,6 +211,21 @@ function DiskCard({
                     <span className="text-muted-foreground">unmounted</span>
                   )}
                   {part.size ? <span className="font-mono text-muted-foreground">{part.size}</span> : null}
+                  {part.mountpoint && helperAvailable !== false ? (
+                    <ConfirmButton
+                      actionKey={`unmount:${part.mountpoint}`}
+                      className="border-rose-500/40 text-rose-300 hover:bg-rose-500/15"
+                      confirmData={{ "data-confirm-unmount": part.mountpoint }}
+                      confirmKey={confirmKey}
+                      confirmLabel="Confirm unmount"
+                      label="Unmount"
+                      onConfirm={() => onUnmount(part.mountpoint as string)}
+                      pendingKey={pendingKey}
+                      pendingLabel="Unmounting..."
+                      requestData={{ "data-unmount": part.mountpoint }}
+                      setConfirmKey={setConfirmKey}
+                    />
+                  ) : null}
                 </span>
               </div>
             ))}
@@ -153,6 +266,10 @@ export function DisksPage() {
     result: null,
     error: null,
   });
+  const [suggestions, setSuggestions] = useState<SuggestedMount[]>([]);
+  const [actionNotice, setActionNotice] = useState<ActionNotice | null>(null);
+  const [pendingKey, setPendingKey] = useState<string | null>(null);
+  const [confirmKey, setConfirmKey] = useState<string | null>(null);
   const isMountedRef = useRef(true);
 
   const loadAll = useCallback(async (reason: "initial" | "manual") => {
@@ -204,7 +321,69 @@ export function DisksPage() {
         }
       })
       .catch(() => {});
+    void fetchSuggestedMounts()
+      .then((items) => {
+        if (isMountedRef.current) {
+          setSuggestions(items);
+        }
+      })
+      .catch(() => {});
   }, []);
+
+  const runDiskAction = useCallback(
+    async (key: string, action: () => Promise<string>) => {
+      if (pendingKey) {
+        return;
+      }
+      setPendingKey(key);
+      setConfirmKey(null);
+      try {
+        const message = await action();
+        if (!isMountedRef.current) {
+          return;
+        }
+        setActionNotice({ tone: "success", message });
+        await loadAll("manual");
+      } catch (caughtError) {
+        if (isMountedRef.current) {
+          setActionNotice({ tone: "error", message: getErrorMessage(caughtError) });
+        }
+      } finally {
+        if (isMountedRef.current) {
+          setPendingKey(null);
+        }
+      }
+    },
+    [loadAll, pendingKey],
+  );
+
+  const onMount = useCallback(
+    (suggestion: SuggestedMount) =>
+      runDiskAction(`mount:${suggestion.uuid}`, async () => {
+        await mountDisk({
+          uuid: suggestion.uuid,
+          mountpoint: suggestion.suggested_mount,
+          fstype: suggestion.fstype,
+        });
+        return `Mounted ${suggestion.device} at ${suggestion.suggested_mount}`;
+      }),
+    [runDiskAction],
+  );
+
+  const onUnmount = useCallback(
+    (mountpoint: string) =>
+      runDiskAction(`unmount:${mountpoint}`, async () => {
+        const { warning } = await unmountDisk(mountpoint);
+        return warning || `Unmounted ${mountpoint}`;
+      }),
+    [runDiskAction],
+  );
+
+  const onSmartTest = useCallback(
+    (deviceName: string, testType: SmartTestType) =>
+      runDiskAction(`test:${deviceName}:${testType}`, () => runSmartTest(deviceName, testType)),
+    [runDiskAction],
+  );
 
   const onSmart = useCallback(async (disk: DiskInfo) => {
     setSmartModal({ open: true, status: "loading", device: disk.path, result: null, error: null });
@@ -274,6 +453,60 @@ export function DisksPage() {
         </Card>
       ) : null}
 
+      {actionNotice ? (
+        <Card
+          aria-live={actionNotice.tone === "error" ? "assertive" : "polite"}
+          className={getNoticeToneClass(actionNotice.tone)}
+          role="status"
+        >
+          <CardContent className="flex items-center gap-2 p-4 text-sm">
+            {actionNotice.tone === "error" ? (
+              <TriangleAlert aria-hidden="true" className="h-4 w-4" />
+            ) : (
+              <Activity aria-hidden="true" className="h-4 w-4" />
+            )}
+            {actionNotice.message}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {suggestions.length && helperAvailable !== false ? (
+        <Card id="v2-disk-suggestions">
+          <CardHeader>
+            <CardTitle className="text-base sm:text-lg">Suggested mounts</CardTitle>
+            <CardDescription>Unmounted partitions detected with a recommended mount point.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {suggestions.map((suggestion) => (
+              <div
+                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/70 bg-muted/20 p-3 text-xs"
+                key={suggestion.uuid}
+              >
+                <div className="min-w-0">
+                  <p className="break-all font-mono text-sm">{suggestion.device}</p>
+                  <p className="text-muted-foreground">
+                    {suggestion.reason} → <span className="font-mono text-emerald-300">{suggestion.suggested_mount}</span>
+                  </p>
+                </div>
+                <ConfirmButton
+                  actionKey={`mount:${suggestion.uuid}`}
+                  className="border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/15"
+                  confirmData={{ "data-confirm-mount": suggestion.uuid }}
+                  confirmKey={confirmKey}
+                  confirmLabel={`Mount at ${suggestion.suggested_mount}`}
+                  label="Mount"
+                  onConfirm={() => onMount(suggestion)}
+                  pendingKey={pendingKey}
+                  pendingLabel="Mounting..."
+                  requestData={{ "data-mount": suggestion.uuid }}
+                  setConfirmKey={setConfirmKey}
+                />
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      ) : null}
+
       {error && !disks.length ? (
         <Card className="border-rose-500/40">
           <CardContent className="flex flex-col items-start gap-3 p-4 sm:p-6">
@@ -309,7 +542,17 @@ export function DisksPage() {
       {!isLoading && disks.length ? (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {disks.map((disk) => (
-            <DiskCard disk={disk} key={disk.path} onSmart={onSmart} smart={smart[disk.path]} />
+            <DiskCard
+              confirmKey={confirmKey}
+              disk={disk}
+              helperAvailable={helperAvailable}
+              key={disk.path}
+              onSmart={onSmart}
+              onUnmount={onUnmount}
+              pendingKey={pendingKey}
+              setConfirmKey={setConfirmKey}
+              smart={smart[disk.path]}
+            />
           ))}
         </div>
       ) : null}
@@ -378,6 +621,29 @@ export function DisksPage() {
                     />
                     <SmartDetailRow label="Media errors" value={smartModal.result.media_errors} />
                   </div>
+                  {helperAvailable !== false ? (
+                    <div className="flex flex-wrap items-center gap-2" id="v2-disk-smart-test">
+                      <span className="text-xs uppercase tracking-wide text-muted-foreground">Self-test</span>
+                      {(["short", "long"] as SmartTestType[]).map((testType) => {
+                        const deviceName = smartModal.device.replace(/^\/dev\//, "");
+                        return (
+                          <ConfirmButton
+                            actionKey={`test:${deviceName}:${testType}`}
+                            confirmData={{ "data-confirm-smarttest": testType }}
+                            confirmKey={confirmKey}
+                            confirmLabel={`Run ${testType} test`}
+                            key={testType}
+                            label={testType === "short" ? "Short" : "Long"}
+                            onConfirm={() => onSmartTest(deviceName, testType)}
+                            pendingKey={pendingKey}
+                            pendingLabel="Starting..."
+                            requestData={{ "data-smarttest": testType }}
+                            setConfirmKey={setConfirmKey}
+                          />
+                        );
+                      })}
+                    </div>
+                  ) : null}
                 </>
               ) : (
                 <p className="text-sm text-muted-foreground">No SMART data available.</p>

@@ -31,7 +31,7 @@ Migrate the core management pages to `/v2` with the same rollback model proven b
 | 3a | PH3-003a Stacks Lifecycle + Logs + Streaming Console | PH3-002 | Yes | Complete (2026-06-25) |
 | 3b | PH3-003b Stacks Compose/Env Editor + Backups/Restore | PH3-003a | Yes | Complete (2026-06-25) |
 | 4 | PH3-004 v2 Disks Read Path + SMART Views | PH3-001 | Yes | Complete (2026-06-25) |
-| 5 | PH3-005 Disks Mount/Unmount + SMART Actions | PH3-004 | Yes | Draft |
+| 5 | PH3-005 Disks Mount/Unmount + SMART Actions | PH3-004 | Yes | Complete (2026-06-26) |
 | 6 | PH3-006 v2 Storage Plugins + Pools | PH3-001 | Yes | Draft |
 | 7 | PH3-007 v2 Mounts Management | PH3-006 | Yes | Draft |
 | 8 | PH3-008 v2 Shares Management | PH3-006 | Yes | Draft |
@@ -263,6 +263,24 @@ Estimate: 1.5 days
 2. Confirmation dialogs trap focus and restore focus to the trigger.
 3. Success/error feedback is announced through live regions.
 4. E2E mocks cover mount, unmount, SMART test, and helper-unavailable states.
+
+### Status
+Complete (2026-06-26)
+
+### Evidence
+1. `frontend/src/lib/disks.ts`: `fetchSuggestedMounts`, `mountDisk`, `unmountDisk`, `runSmartTest`.
+2. `frontend/src/pages/disks-page.tsx`:
+   - "Suggested mounts" card listing detected unmounted partitions with a Mount action.
+   - per-mounted-partition Unmount action.
+   - SMART self-test (Short/Long) controls inside the SMART modal.
+   - a reusable `ConfirmButton` (inline two-step request -> confirm, keyboard-safe, no hover
+     dependency) for all system-changing actions; `role=status`/`aria-live` action notices;
+     all actions gated off when the helper is unavailable; single-flight `pendingKey` lock.
+3. e2e: disks mock extended (suggested-mounts, mount, unmount, smart-test);
+   `tests/e2e/test_v2_disks_parity.py` covers suggested-mount, unmount, and SMART self-test
+   (each through the confirm step), plus the existing helper-unavailable state.
+4. Validation: `npm run check` / `build:publish` / bundle budget (JS 81.71 kB gz / 200 kB) pass;
+   `pytest test_v2_disks_parity.py -q` -> `8 passed`.
 
 ## PH3-006 - v2 Storage Plugins + Pools (P0)
 Owner: Pi-Health maintainers  
