@@ -333,6 +333,14 @@ Evidence:
    `pytest test_v2_storage_parity.py test_v2_phase3_routes.py -q` -> `10 passed`; full v2 set
    `67 passed, 6 skipped`.
 
+### PH3-006a Review fixes (2026-06-26)
+1. Commands with required params are disabled (with a hint) rather than run with empty params —
+   parameterized commands need the PH3-006b config form.
+2. Active tab now syncs to the route via an effect on `location.pathname`, so shell-nav between
+   `/v2/plugins` and `/v2/pools` selects the right tab (covered by a new nav e2e).
+3. Remove is only offered for non-builtin (`type !== "builtin"`) plugins, matching the backend
+   which rejects removing builtins; e2e asserts builtins have no Remove and a github plugin does.
+
 ### PH3-006b Status: Pending
 Schema-driven config form editor (`/config`, `/validate`, `/apply`) and the install-new-plugin
 wizard (`/install`) remain.

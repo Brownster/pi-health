@@ -613,6 +613,11 @@ def install_v2_storage_api_mocks():
                 "version": "1.0", "installed": True, "enabled": True, "configured": True,
                 "status": "active", "status_message": "Running", "category": "shares", "type": "builtin",
             },
+            {
+                "id": "customfs", "name": "CustomFS", "description": "Third-party storage plugin",
+                "version": "0.1", "installed": True, "enabled": False, "configured": False,
+                "status": "disabled", "status_message": "Disabled", "category": "storage", "type": "github",
+            },
         ]
         mergerfs_detail = {
             "id": "mergerfs", "name": "MergerFS", "description": "Union filesystem pooling",

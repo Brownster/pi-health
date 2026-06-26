@@ -53,6 +53,42 @@ def test_v2_storage_pools_route_defaults_to_pools_tab(
     expect(page.get_by_text("Samba")).to_have_count(0)
 
 
+def test_v2_storage_tab_syncs_with_shell_nav(
+    page: Page,
+    v2_mode_server,
+    v2_login,
+    install_v2_storage_api_mocks,
+):
+    base_url = v2_mode_server["base_url"]
+    _open_v2_storage(page, base_url, "plugins", v2_login, install_v2_storage_api_mocks)
+    expect(page.locator("button[data-storage-tab='plugins'][aria-pressed='true']")).to_be_visible()
+
+    # Client-side nav via the shell nav link must switch the active tab.
+    page.get_by_role("link", name="Pools").click()
+    expect(page).to_have_url(f"{base_url}/v2/pools")
+    expect(page.locator("button[data-storage-tab='pools'][aria-pressed='true']")).to_be_visible()
+    expect(page.get_by_text("Samba")).to_have_count(0)
+
+
+def test_v2_storage_remove_only_for_non_builtin(
+    page: Page,
+    v2_mode_server,
+    v2_login,
+    install_v2_storage_api_mocks,
+):
+    base_url = v2_mode_server["base_url"]
+    _open_v2_storage(page, base_url, "plugins", v2_login, install_v2_storage_api_mocks)
+
+    # Builtin plugins cannot be removed (backend rejects it) -> no Remove control.
+    expect(page.locator("button[data-plugin-action='remove'][data-plugin='mergerfs']")).to_have_count(0)
+    expect(page.locator("button[data-plugin-action='remove'][data-plugin='samba']")).to_have_count(0)
+
+    # A third-party (github) plugin can be removed, via confirm.
+    page.click("button[data-plugin-action='remove'][data-plugin='customfs']")
+    page.click("button[data-confirm-remove='customfs']")
+    expect(page.get_by_text("Removed CustomFS")).to_be_visible(timeout=10000)
+
+
 def test_v2_storage_toggle_plugin(
     page: Page,
     v2_mode_server,

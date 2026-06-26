@@ -154,35 +154,37 @@ function PluginCard({
           >
             Details
           </Button>
-          {confirmingRemove ? (
-            <span className="flex items-center gap-1.5">
+          {plugin.type !== "builtin" ? (
+            confirmingRemove ? (
+              <span className="flex items-center gap-1.5">
+                <Button
+                  className="border-rose-500/40 text-rose-300 hover:bg-rose-500/15 text-xs sm:text-sm"
+                  data-confirm-remove={plugin.id}
+                  onClick={() => onRemoveConfirm(plugin)}
+                  size="sm"
+                  variant="outline"
+                >
+                  Confirm remove
+                </Button>
+                <Button onClick={onRemoveCancel} size="sm" variant="outline">
+                  Cancel
+                </Button>
+              </span>
+            ) : (
               <Button
-                className="border-rose-500/40 text-rose-300 hover:bg-rose-500/15 text-xs sm:text-sm"
-                data-confirm-remove={plugin.id}
-                onClick={() => onRemoveConfirm(plugin)}
+                aria-label={`Remove ${plugin.name}`}
+                className="text-xs sm:text-sm"
+                data-plugin={plugin.id}
+                data-plugin-action="remove"
+                disabled={pending}
+                onClick={() => onRemoveRequest(plugin.id)}
                 size="sm"
                 variant="outline"
               >
-                Confirm remove
+                Remove
               </Button>
-              <Button onClick={onRemoveCancel} size="sm" variant="outline">
-                Cancel
-              </Button>
-            </span>
-          ) : (
-            <Button
-              aria-label={`Remove ${plugin.name}`}
-              className="text-xs sm:text-sm"
-              data-plugin={plugin.id}
-              data-plugin-action="remove"
-              disabled={pending}
-              onClick={() => onRemoveRequest(plugin.id)}
-              size="sm"
-              variant="outline"
-            >
-              Remove
-            </Button>
-          )}
+            )
+          ) : null}
         </div>
       </CardContent>
     </Card>
@@ -381,6 +383,12 @@ export function StoragePage() {
     };
   }, [loadPlugins]);
 
+  // Both /v2/plugins and /v2/pools render this component, so keep the active tab in
+  // sync with the route when navigating between them inside the v2 shell.
+  useEffect(() => {
+    setTab(location.pathname.includes("/pools") ? "pools" : "plugins");
+  }, [location.pathname]);
+
   useEffect(() => {
     if (!actionNotice || actionNotice.tone === "error") {
       return undefined;
@@ -540,20 +548,31 @@ export function StoragePage() {
                     <div className="space-y-2">
                       <p className="text-xs uppercase tracking-wide text-muted-foreground">Commands</p>
                       <div className="flex flex-wrap gap-2">
-                        {detailModal.detail.commands.map((command) => (
-                          <Button
-                            className="gap-1.5 text-xs sm:text-sm"
-                            data-plugin-command={command.id}
-                            disabled={detailModal.command.running}
-                            key={command.id}
-                            onClick={() => void runCommand(detailModal.detail!.id, command)}
-                            size="sm"
-                            variant="outline"
-                          >
-                            <Terminal aria-hidden="true" className="h-3.5 w-3.5" />
-                            {command.label}
-                          </Button>
-                        ))}
+                        {detailModal.detail.commands.map((command) => {
+                          // Commands with required params need the schema-driven config form
+                          // (PH3-006b); disable rather than run them with empty params.
+                          const needsParams = command.params.length > 0;
+                          return (
+                            <Button
+                              className="gap-1.5 text-xs sm:text-sm"
+                              data-plugin-command={command.id}
+                              disabled={detailModal.command.running || needsParams}
+                              key={command.id}
+                              onClick={() => void runCommand(detailModal.detail!.id, command)}
+                              size="sm"
+                              title={
+                                needsParams
+                                  ? "Requires parameters — available in the upcoming plugin config editor"
+                                  : undefined
+                              }
+                              variant="outline"
+                            >
+                              <Terminal aria-hidden="true" className="h-3.5 w-3.5" />
+                              {command.label}
+                              {needsParams ? " (needs params)" : ""}
+                            </Button>
+                          );
+                        })}
                       </div>
                     </div>
                   ) : null}
