@@ -30,6 +30,8 @@ def test_system_metrics_page_renders(authenticated_page: Page):
         )
         return
 
+    stats = stats_resp.json()
+
     page.wait_for_function(
         """() => {
             const el = document.getElementById('cpu-usage');
@@ -41,3 +43,5 @@ def test_system_metrics_page_renders(authenticated_page: Page):
     expect(page.locator("#cpu-usage")).not_to_contain_text("Error")
     expect(page.locator("#memory-usage")).not_to_contain_text("Loading")
     expect(page.locator("#network-recv")).not_to_contain_text("Loading")
+    if stats.get("disk_usage_2") is None:
+        expect(page.locator("#disk-usage-2")).to_have_text("Unavailable")

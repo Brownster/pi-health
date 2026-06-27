@@ -125,6 +125,20 @@ function applyValue(el, value, percent) {
     el.classList.add(colorClass(percent), 'fade-in');
 }
 
+function renderDiskUsage(usage, valueEl, barEl) {
+    if (!usage) {
+        valueEl.textContent = 'Unavailable';
+        valueEl.classList.remove('ph-positive', 'ph-warn', 'ph-danger');
+        valueEl.classList.add('ph-muted');
+        barEl.style.width = '0%';
+        return;
+    }
+
+    const percent = Number(usage.percent.toFixed(1));
+    applyValue(valueEl, `${percent}% (${formatBytes(usage.used)} / ${formatBytes(usage.total)})`, percent);
+    barEl.style.width = `${percent}%`;
+}
+
 function updatePiMetrics(data) {
     if (data.is_raspberry_pi) {
         els.piSection.classList.remove('hidden');
@@ -224,13 +238,8 @@ async function fetchSystemMetrics() {
             els.tempBar.style.width = '0%';
         }
 
-        const disk1 = Number(data.disk_usage.percent.toFixed(1));
-        applyValue(els.diskUsage, `${disk1}% (${formatBytes(data.disk_usage.used)} / ${formatBytes(data.disk_usage.total)})`, disk1);
-        els.diskBar1.style.width = `${disk1}%`;
-
-        const disk2 = Number(data.disk_usage_2.percent.toFixed(1));
-        applyValue(els.diskUsage2, `${disk2}% (${formatBytes(data.disk_usage_2.used)} / ${formatBytes(data.disk_usage_2.total)})`, disk2);
-        els.diskBar2.style.width = `${disk2}%`;
+        renderDiskUsage(data.disk_usage, els.diskUsage, els.diskBar1);
+        renderDiskUsage(data.disk_usage_2, els.diskUsage2, els.diskBar2);
 
         els.networkRecv.textContent = `Received: ${formatBytes(data.network_usage.bytes_recv)}`;
         els.networkSent.textContent = `Sent: ${formatBytes(data.network_usage.bytes_sent)}`;

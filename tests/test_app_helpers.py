@@ -177,9 +177,8 @@ class TestSystemStats:
         assert round(calculate_cpu_usage(cpu_line), 2) == 20.0
 
     def test_get_system_stats(self):
-        import io
         with patch.dict(os.environ, {"DISK_PATH": "/mnt/data", "DISK_PATH_2": "/mnt/backup"}):
-            with patch("builtins.open", return_value=io.StringIO("cpu 10 0 10 80 0 0 0 0\n")):
+            with patch("app.get_cpu_usage_delta", return_value=(20.0, [])):
                 with patch("app.psutil.virtual_memory") as mock_mem:
                     with patch("app.psutil.disk_usage") as mock_disk:
                         with patch("app.psutil.net_io_counters") as mock_net:
