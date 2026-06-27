@@ -37,7 +37,7 @@ Migrate the core management pages to `/v2` with the same rollback model proven b
 | 7 | PH3-007 v2 Mounts Management (media paths + mounts) | PH3-006 | Yes | Complete (2026-06-26) |
 | 8 | PH3-008 v2 Shares Management (list + toggle/delete) | PH3-006 | Yes | Complete (2026-06-26) |
 | 9 | PH3-009 v2 Settings + Backup/Update Workflows | PH3-001 | Yes | Complete (2026-06-26) |
-| 10 | PH3-010 Phase 3 Parity and Rollout Suite | PH3-002..PH3-009 | Yes | Draft |
+| 10 | PH3-010 Phase 3 Parity and Rollout Suite | PH3-002..PH3-009 | Yes | Complete (2026-06-27) |
 | 11 | PH3-011 Phase 3 Release Signoff | PH3-010 | Yes | Draft |
 
 ## PH3-001 - Phase 3 Architecture + Shared Utilities (P0)
@@ -502,6 +502,23 @@ Estimate: 1.0 day
 2. `legacy` rollback restores every legacy page without rebuild.
 3. Critical workflows pass on phone and tablet.
 4. `tox -e all` passes with Phase 3 tests included.
+
+### Status
+Complete (2026-06-27)
+
+### Evidence
+1. `tests/e2e/test_v2_phase3_rollout.py` (new), built on the `v2_server_factory(mode, v2_pages)`
+   fixture, covers all 7 Phase 3 route keys (stacks/disks/plugins/pools/mounts/shares/settings):
+   - v2 mode redirects every `/<key>.html` -> `/v2/<key>`;
+   - legacy mode serves legacy and returns 404 for `/v2/<key>`;
+   - hybrid redirects only the routes named in `PIHEALTH_UI_V2_PAGES` (unselected stay legacy =
+     instant per-route rollback, no rebuild);
+   - every Phase 3 page renders under the v2 shell (nasOS headings);
+   - the `/api/stacks?status=true` contract is identical across legacy and v2 modes.
+2. Per-page phone/tablet critical-workflow + overflow coverage continues to live in the per-page
+   `test_v2_*_parity.py` suites (AC3).
+3. Validation: `npm run check` / `build:publish` / bundle budget (JS 92.60 kB gz / 200 kB) pass;
+   `pytest test_v2_phase3_rollout.py -q` -> `5 passed`; full v2 set `96 passed, 6 skipped`.
 
 ## PH3-011 - Phase 3 Release Signoff (P0)
 Owner: Pi-Health maintainers  
