@@ -38,7 +38,7 @@ Migrate the core management pages to `/v2` with the same rollback model proven b
 | 8 | PH3-008 v2 Shares Management (list + toggle/delete) | PH3-006 | Yes | Complete (2026-06-26) |
 | 9 | PH3-009 v2 Settings + Backup/Update Workflows | PH3-001 | Yes | Complete (2026-06-26) |
 | 10 | PH3-010 Phase 3 Parity and Rollout Suite | PH3-002..PH3-009 | Yes | Complete (2026-06-27) |
-| 11 | PH3-011 Phase 3 Release Signoff | PH3-010 | Yes | Draft |
+| 11 | PH3-011 Phase 3 Release Signoff | PH3-010 | Yes | Complete (2026-06-27) |
 
 ## PH3-001 - Phase 3 Architecture + Shared Utilities (P0)
 Owner: Pi-Health maintainers  
