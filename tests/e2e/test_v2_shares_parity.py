@@ -10,7 +10,7 @@ def _open_v2_shares(page, base_url, v2_login, install_v2_shares_api_mocks):
     v2_login(page, base_url)
     install_v2_shares_api_mocks(page)
     page.goto(f"{base_url}/v2/shares")
-    expect(page.get_by_role("heading", name="Shares")).to_be_visible()
+    expect(page.get_by_role("heading", name="network_shares")).to_be_visible()
 
 
 def test_v2_shares_list(

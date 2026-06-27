@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Activity, HardDrive, Loader2, RefreshCw, ShieldCheck, TriangleAlert } from "lucide-react";
+import { Activity, Loader2, RefreshCw, ShieldCheck, TriangleAlert } from "lucide-react";
 
+import { StatusBadge, type BadgeProps } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ModalOverlay } from "@/components/ui/modal-overlay";
+import { PageHeader } from "@/components/ui/page-header";
 import {
   type DiskInfo,
   type SmartHealth,
@@ -38,24 +40,24 @@ interface ActionNotice {
 
 function getNoticeToneClass(tone: ActionNotice["tone"]): string {
   if (tone === "success") {
-    return "border-emerald-500/40 text-emerald-300";
+    return "border-success/30 text-success";
   }
   if (tone === "error") {
-    return "border-rose-500/40 text-rose-300";
+    return "border-danger/30 text-danger";
   }
-  return "border-sky-500/40 text-sky-300";
+  return "border-info/30 text-info";
 }
 
-function getHealthTone(status: string): string {
+function getHealthTone(status: string): BadgeProps["tone"] {
   switch (status) {
     case "healthy":
-      return "bg-emerald-500/15 text-emerald-300 border-emerald-500/40";
+      return "success";
     case "warning":
-      return "bg-amber-500/15 text-amber-300 border-amber-500/40";
+      return "warning";
     case "failing":
-      return "bg-rose-500/15 text-rose-300 border-rose-500/40";
+      return "danger";
     default:
-      return "bg-slate-500/15 text-slate-300 border-slate-500/40";
+      return "neutral";
   }
 }
 
@@ -162,7 +164,7 @@ function DiskCard({
   onUnmount: (mountpoint: string) => void;
 }) {
   return (
-    <Card>
+    <Card className="transition-colors duration-200 hover:border-primary/25">
       <CardContent className="space-y-3 p-4">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
@@ -170,43 +172,40 @@ function DiskCard({
             <p className="truncate text-xs text-muted-foreground">{disk.model || "Unknown model"}</p>
           </div>
           {smart ? (
-            <span
-              className={cn(
-                "shrink-0 rounded-full border px-2 py-1 text-xs font-medium capitalize",
-                getHealthTone(smart.health_status),
-              )}
-            >
-              {smart.health_status}
-            </span>
+            <StatusBadge
+              className="shrink-0"
+              label={smart.health_status}
+              tone={getHealthTone(smart.health_status)}
+            />
           ) : null}
         </div>
 
         <div className="grid grid-cols-2 gap-2 text-xs">
-          <div className="rounded-lg border border-border/70 bg-muted/30 p-2">
-            <p className="uppercase tracking-wide text-muted-foreground">Size</p>
+          <div className="rounded-md border border-border bg-muted/20 p-2">
+            <p className="font-mono text-[10px] uppercase tracking-[0.1em] text-dim">Size</p>
             <p className="font-mono">{disk.size || "—"}</p>
           </div>
-          <div className="rounded-lg border border-border/70 bg-muted/30 p-2">
-            <p className="uppercase tracking-wide text-muted-foreground">Bus</p>
+          <div className="rounded-md border border-border bg-muted/20 p-2">
+            <p className="font-mono text-[10px] uppercase tracking-[0.1em] text-dim">Bus</p>
             <p className="font-mono">{[disk.transport, disk.type].filter(Boolean).join(" · ") || "—"}</p>
           </div>
         </div>
 
         {disk.partitions.length ? (
           <div className="space-y-1.5">
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">Partitions</p>
+            <p className="font-mono text-[10px] uppercase tracking-[0.1em] text-dim">Partitions</p>
             {disk.partitions.map((part) => (
               <div
-                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/70 bg-muted/20 p-2 text-xs"
+                className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/20 p-2 text-xs"
                 key={part.path}
               >
                 <span className="break-all font-mono">{part.path}</span>
                 <span className="flex flex-wrap items-center gap-2">
                   {part.fstype ? (
-                    <span className="rounded bg-sky-500/10 px-1.5 py-0.5 font-mono text-sky-300">{part.fstype}</span>
+                    <span className="rounded bg-info/10 px-1.5 py-0.5 font-mono text-info">{part.fstype}</span>
                   ) : null}
                   {part.mountpoint ? (
-                    <span className="font-mono text-emerald-300">{part.mountpoint}</span>
+                    <span className="font-mono text-success">{part.mountpoint}</span>
                   ) : (
                     <span className="text-muted-foreground">unmounted</span>
                   )}
@@ -214,7 +213,7 @@ function DiskCard({
                   {part.mountpoint && helperAvailable !== false ? (
                     <ConfirmButton
                       actionKey={`unmount:${part.mountpoint}`}
-                      className="border-rose-500/40 text-rose-300 hover:bg-rose-500/15"
+                      className="border-danger/30 bg-danger/10 text-danger hover:bg-danger/15"
                       confirmData={{ "data-confirm-unmount": part.mountpoint }}
                       confirmKey={confirmKey}
                       confirmLabel="Confirm unmount"
@@ -415,38 +414,31 @@ export function DisksPage() {
 
   return (
     <section className="space-y-4 sm:space-y-6">
-      <Card>
-        <CardHeader className="space-y-3">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-            <div className="min-w-0 space-y-1">
-              <CardTitle className="flex items-center gap-2 text-lg sm:text-xl">
-                <HardDrive aria-hidden="true" className="h-5 w-5 text-primary" />
-                Disks
-              </CardTitle>
-              <CardDescription>Block devices, partitions, and SMART health.</CardDescription>
-            </div>
-            <span className="inline-flex min-h-11 items-center rounded-md border border-border bg-muted/70 px-3 text-xs text-muted-foreground">
-              Last updated: {lastUpdated}
-            </span>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            <Button
-              className="gap-2"
-              disabled={isRefreshing}
-              onClick={() => void loadAll("manual")}
-              variant="outline"
-            >
-              <RefreshCw aria-hidden="true" className={cn("h-4 w-4", isRefreshing ? "animate-spin" : "")} />
-              {isRefreshing ? "Refreshing" : "Refresh"}
-            </Button>
-          </div>
-        </CardHeader>
-      </Card>
+      <PageHeader
+        actions={
+          <Button
+            className="gap-2"
+            disabled={isRefreshing}
+            onClick={() => void loadAll("manual")}
+            variant="secondary"
+          >
+            <RefreshCw aria-hidden="true" className={cn("h-4 w-4", isRefreshing ? "animate-spin" : "")} />
+            {isRefreshing ? "refreshing" : "refresh"}
+          </Button>
+        }
+        description={`${disks.length} devices · synced ${lastUpdated}`}
+        status={
+          <StatusBadge
+            label={helperAvailable === false ? "limited" : "helper ready"}
+            tone={helperAvailable === false ? "warning" : "success"}
+          />
+        }
+        title="disk_management"
+      />
 
       {helperAvailable === false ? (
-        <Card aria-live="polite" className="border-amber-500/40" role="status">
-          <CardContent className="flex items-center gap-2 p-4 text-sm text-amber-300">
+        <Card aria-live="polite" className="border-warning/30" role="status">
+          <CardContent className="flex items-center gap-2 p-4 text-sm text-warning">
             <TriangleAlert aria-hidden="true" className="h-4 w-4" />
             Privileged helper unavailable — disk and SMART operations are limited.
           </CardContent>
@@ -479,18 +471,18 @@ export function DisksPage() {
           <CardContent className="space-y-2">
             {suggestions.map((suggestion) => (
               <div
-                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/70 bg-muted/20 p-3 text-xs"
+                className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/20 p-3 text-xs"
                 key={suggestion.uuid}
               >
                 <div className="min-w-0">
                   <p className="break-all font-mono text-sm">{suggestion.device}</p>
                   <p className="text-muted-foreground">
-                    {suggestion.reason} → <span className="font-mono text-emerald-300">{suggestion.suggested_mount}</span>
+                    {suggestion.reason} → <span className="font-mono text-success">{suggestion.suggested_mount}</span>
                   </p>
                 </div>
                 <ConfirmButton
                   actionKey={`mount:${suggestion.uuid}`}
-                  className="border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/15"
+                  className="border-success/30 bg-success/10 text-success hover:bg-success/15"
                   confirmData={{ "data-confirm-mount": suggestion.uuid }}
                   confirmKey={confirmKey}
                   confirmLabel={`Mount at ${suggestion.suggested_mount}`}
@@ -508,9 +500,9 @@ export function DisksPage() {
       ) : null}
 
       {error && !disks.length ? (
-        <Card className="border-rose-500/40">
+        <Card className="border-danger/30">
           <CardContent className="flex flex-col items-start gap-3 p-4 sm:p-6">
-            <div className="flex items-center gap-2 text-rose-300">
+            <div className="flex items-center gap-2 text-danger">
               <TriangleAlert aria-hidden="true" className="h-4 w-4" />
               <p className="text-sm font-medium">Unable to load disks</p>
             </div>
@@ -581,24 +573,20 @@ export function DisksPage() {
               {smartModal.status === "loading" ? (
                 <p className="text-sm text-muted-foreground">Loading SMART data...</p>
               ) : smartModal.status === "error" ? (
-                <p className="text-sm text-rose-300">{smartModal.error || "Failed to load SMART data"}</p>
+                <p className="text-sm text-danger">{smartModal.error || "Failed to load SMART data"}</p>
               ) : smartModal.result ? (
                 <>
                   <div className="flex flex-wrap items-center gap-2">
-                    <span
-                      className={cn(
-                        "rounded-full border px-2 py-1 text-xs font-medium capitalize",
-                        getHealthTone(smartModal.result.health_status),
-                      )}
-                    >
-                      {smartModal.result.health_status}
-                    </span>
+                    <StatusBadge
+                      label={smartModal.result.health_status}
+                      tone={getHealthTone(smartModal.result.health_status)}
+                    />
                     {smartModal.result.drive_type ? (
                       <span className="rounded bg-muted/50 px-2 py-1 text-xs uppercase">{smartModal.result.drive_type}</span>
                     ) : null}
                   </div>
                   {smartModal.result.error_message ? (
-                    <p className="text-sm text-amber-300">{smartModal.result.error_message}</p>
+                    <p className="text-sm text-warning">{smartModal.result.error_message}</p>
                   ) : null}
                   <div className="rounded-lg border border-border/70 bg-muted/25 p-3">
                     <SmartDetailRow label="Model" value={smartModal.result.model} />

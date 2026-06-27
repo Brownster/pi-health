@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Activity, FolderTree, Loader2, RefreshCw, TriangleAlert } from "lucide-react";
+import { Activity, Loader2, RefreshCw, TriangleAlert } from "lucide-react";
 
+import { StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageHeader } from "@/components/ui/page-header";
 import {
   type MediaPathKey,
   type MediaPaths,
@@ -151,38 +153,32 @@ export function MountsPage() {
 
   return (
     <section className="space-y-4 sm:space-y-6">
-      <Card>
-        <CardHeader className="space-y-3">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-            <div className="min-w-0 space-y-1">
-              <CardTitle className="flex items-center gap-2 text-lg sm:text-xl">
-                <FolderTree aria-hidden="true" className="h-5 w-5 text-primary" />
-                Mounts
-              </CardTitle>
-              <CardDescription>Media paths and remote/local mounts.</CardDescription>
-            </div>
-            <span className="inline-flex min-h-11 items-center rounded-md border border-border bg-muted/70 px-3 text-xs text-muted-foreground">
-              Last updated: {lastUpdated}
-            </span>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              className="gap-2"
-              disabled={isRefreshing}
-              onClick={() => void loadAll("manual")}
-              variant="outline"
-            >
-              <RefreshCw aria-hidden="true" className={cn("h-4 w-4", isRefreshing ? "animate-spin" : "")} />
-              {isRefreshing ? "Refreshing" : "Refresh"}
-            </Button>
-          </div>
-        </CardHeader>
-      </Card>
+      <PageHeader
+        actions={
+          <Button
+            className="gap-2"
+            disabled={isRefreshing}
+            onClick={() => void loadAll("manual")}
+            variant="secondary"
+          >
+            <RefreshCw aria-hidden="true" className={cn("h-4 w-4", isRefreshing ? "animate-spin" : "")} />
+            {isRefreshing ? "refreshing" : "refresh"}
+          </Button>
+        }
+        description={`${pluginMounts.reduce((total, group) => total + group.mounts.length, 0)} mounts · synced ${lastUpdated}`}
+        status={
+          <StatusBadge
+            label={`${pluginMounts.reduce((total, group) => total + group.mounts.filter((mount) => mount.mounted).length, 0)} mounted`}
+            tone="success"
+          />
+        }
+        title="mount_management"
+      />
 
       {actionNotice ? (
         <Card
           aria-live={actionNotice.tone === "error" ? "assertive" : "polite"}
-          className={actionNotice.tone === "error" ? "border-rose-500/40 text-rose-300" : "border-emerald-500/40 text-emerald-300"}
+          className={actionNotice.tone === "error" ? "border-danger/30 text-danger" : "border-success/30 text-success"}
           role="status"
         >
           <CardContent className="flex items-center gap-2 p-4 text-sm">
@@ -215,7 +211,7 @@ export function MountsPage() {
                 <label className="block space-y-1" key={key}>
                   <span className="text-xs uppercase tracking-wide text-muted-foreground">{key}</span>
                   <input
-                    className="w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-xs sm:text-sm"
+                    className="w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:text-sm"
                     data-media-path={key}
                     onChange={(event) =>
                       setMediaPaths((current) => ({ ...current, [key]: event.target.value }))
@@ -226,12 +222,12 @@ export function MountsPage() {
                 </label>
               ))}
               {!pathsValid ? (
-                <p className="text-xs text-rose-300">Paths must be absolute (start with /).</p>
+                <p className="text-xs text-danger">Paths must be absolute (start with /).</p>
               ) : null}
               {pathsNotice ? (
                 <p
                   aria-live="polite"
-                  className={cn("text-sm", pathsNotice.tone === "error" ? "text-rose-300" : "text-emerald-300")}
+                  className={cn("text-sm", pathsNotice.tone === "error" ? "text-danger" : "text-success")}
                   id="v2-media-paths-notice"
                   role="status"
                 >
@@ -249,8 +245,8 @@ export function MountsPage() {
           </Card>
 
           {error ? (
-            <Card aria-live="polite" className="border-amber-500/40" role="status">
-              <CardContent className="flex items-center gap-2 p-4 text-sm text-amber-300">
+            <Card aria-live="polite" className="border-warning/30" role="status">
+              <CardContent className="flex items-center gap-2 p-4 text-sm text-warning">
                 <TriangleAlert aria-hidden="true" className="h-4 w-4" />
                 {error}
               </CardContent>
@@ -259,7 +255,7 @@ export function MountsPage() {
 
           {pluginMounts.length ? (
             pluginMounts.map((group) => (
-              <Card key={group.pluginId}>
+              <Card className="transition-colors duration-200 hover:border-primary/25" key={group.pluginId}>
                 <CardHeader>
                   <CardTitle className="text-base sm:text-lg">{group.pluginName} mounts</CardTitle>
                 </CardHeader>
@@ -269,7 +265,7 @@ export function MountsPage() {
                     const deleteKey = `delete:${group.pluginId}:${mount.id}`;
                     return (
                       <div
-                        className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/70 bg-muted/20 p-3 text-xs"
+                        className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/20 p-3 text-xs"
                         key={mount.id}
                       >
                         <div className="min-w-0">
@@ -280,22 +276,16 @@ export function MountsPage() {
                           </p>
                         </div>
                         <div className="flex flex-wrap items-center gap-2">
-                          <span
-                            className={cn(
-                              "rounded-full border px-2 py-0.5 font-mono",
-                              mount.mounted
-                                ? "border-emerald-500/40 text-emerald-300"
-                                : "border-slate-500/40 text-slate-300",
-                            )}
-                          >
-                            {mount.mounted ? "mounted" : "unmounted"}
-                          </span>
+                          <StatusBadge
+                            label={mount.mounted ? "mounted" : "unmounted"}
+                            tone={mount.mounted ? "success" : "neutral"}
+                          />
                           <Button
                             className={cn(
                               "text-xs sm:text-sm",
                               mount.mounted
-                                ? "border-amber-500/40 text-amber-300 hover:bg-amber-500/15"
-                                : "border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/15",
+                                ? "border-warning/30 bg-warning/10 text-warning hover:bg-warning/15"
+                                : "border-success/30 bg-success/10 text-success hover:bg-success/15",
                             )}
                             data-mount-action={mount.mounted ? "unmount" : "mount"}
                             data-mount={mount.id}
@@ -321,7 +311,7 @@ export function MountsPage() {
                           {confirmKey === deleteKey ? (
                             <span className="flex items-center gap-1.5">
                               <Button
-                                className="border-rose-500/40 text-rose-300 hover:bg-rose-500/15 text-xs sm:text-sm"
+                                className="border-danger/30 bg-danger/10 text-danger hover:bg-danger/15 text-xs sm:text-sm"
                                 data-confirm-delete-mount={mount.id}
                                 onClick={() =>
                                   void runMountAction(

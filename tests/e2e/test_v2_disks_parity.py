@@ -18,7 +18,7 @@ def _open_v2_disks(page, base_url, v2_login, install_v2_disks_api_mocks):
     v2_login(page, base_url)
     install_v2_disks_api_mocks(page)
     page.goto(f"{base_url}/v2/disks")
-    expect(page.get_by_role("heading", name="Disks")).to_be_visible()
+    expect(page.get_by_role("heading", name="disk_management")).to_be_visible()
 
 
 def test_v2_disks_inventory_renders(
@@ -77,7 +77,7 @@ def test_v2_disks_helper_unavailable_state(page: Page, v2_mode_server, v2_login)
 
     page.route("**/api/**", _handler)
     page.goto(f"{base_url}/v2/disks")
-    expect(page.get_by_role("heading", name="Disks")).to_be_visible()
+    expect(page.get_by_role("heading", name="disk_management")).to_be_visible()
 
     # Helper-unavailable surfaces as a warning, NOT a misleading "No disks found." empty state.
     expect(page.get_by_text("Privileged helper unavailable")).to_be_visible()

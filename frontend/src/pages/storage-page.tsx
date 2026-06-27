@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useLocation } from "react-router-dom";
-import { Activity, Boxes, Loader2, Plus, RefreshCw, Terminal, TriangleAlert } from "lucide-react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { Activity, Loader2, Plus, RefreshCw, Terminal, TriangleAlert } from "lucide-react";
 
+import { Badge, StatusBadge, type BadgeProps } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ModalOverlay } from "@/components/ui/modal-overlay";
+import { PageHeader } from "@/components/ui/page-header";
 import {
   type PluginCommand,
   type PluginDetail,
@@ -86,23 +88,23 @@ const EMPTY_INSTALL: InstallModalState = {
 
 const EMPTY_COMMAND: CommandConsole = { running: false, commandId: null, lines: [], error: null };
 
-function getStatusTone(plugin: StoragePlugin): string {
+function getStatusTone(plugin: StoragePlugin): BadgeProps["tone"] {
   if (!plugin.enabled) {
-    return "bg-slate-500/15 text-slate-300 border-slate-500/40";
+    return "neutral";
   }
   if (plugin.status === "active" || plugin.status === "ok") {
-    return "bg-emerald-500/15 text-emerald-300 border-emerald-500/40";
+    return "success";
   }
   if (plugin.status === "missing" || plugin.status === "error") {
-    return "bg-rose-500/15 text-rose-300 border-rose-500/40";
+    return "danger";
   }
-  return "bg-amber-500/15 text-amber-300 border-amber-500/40";
+  return "warning";
 }
 
 function getNoticeToneClass(tone: ActionNotice["tone"]): string {
-  if (tone === "success") return "border-emerald-500/40 text-emerald-300";
-  if (tone === "error") return "border-rose-500/40 text-rose-300";
-  return "border-sky-500/40 text-sky-300";
+  if (tone === "success") return "border-success/30 text-success";
+  if (tone === "error") return "border-danger/30 text-danger";
+  return "border-info/30 text-info";
 }
 
 function getErrorMessage(error: unknown): string {
@@ -132,27 +134,24 @@ function PluginCard({
   onRemoveCancel: () => void;
 }) {
   return (
-    <Card>
+    <Card className="transition-colors duration-200 hover:border-primary/25">
       <CardContent className="space-y-3 p-4">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold">{plugin.name}</p>
             <p className="line-clamp-2 text-xs text-muted-foreground">{plugin.description || plugin.id}</p>
           </div>
-          <span
-            className={cn(
-              "shrink-0 rounded-full border px-2 py-1 text-xs font-medium",
-              getStatusTone(plugin),
-            )}
-          >
-            {plugin.enabled ? plugin.status : "disabled"}
-          </span>
+          <StatusBadge
+            className="shrink-0"
+            label={plugin.enabled ? plugin.status : "disabled"}
+            tone={getStatusTone(plugin)}
+          />
         </div>
 
         <div className="flex flex-wrap gap-2 text-xs">
-          <span className={cn("rounded px-1.5 py-0.5 font-mono", plugin.installed ? "bg-emerald-500/10 text-emerald-300" : "bg-slate-500/10 text-slate-300")}>
+          <Badge tone={plugin.installed ? "success" : "neutral"}>
             {plugin.installed ? "installed" : "not installed"}
-          </span>
+          </Badge>
           {plugin.status_message ? (
             <span className="text-muted-foreground">{plugin.status_message}</span>
           ) : null}
@@ -164,8 +163,8 @@ function PluginCard({
             className={cn(
               "gap-1.5 text-xs sm:text-sm",
               plugin.enabled
-                ? "border-amber-500/40 text-amber-300 hover:bg-amber-500/15"
-                : "border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/15",
+                ? "border-warning/30 bg-warning/10 text-warning hover:bg-warning/15"
+                : "border-success/30 bg-success/10 text-success hover:bg-success/15",
             )}
             data-plugin={plugin.id}
             data-plugin-action={plugin.enabled ? "disable" : "enable"}
@@ -193,7 +192,7 @@ function PluginCard({
             confirmingRemove ? (
               <span className="flex items-center gap-1.5">
                 <Button
-                  className="border-rose-500/40 text-rose-300 hover:bg-rose-500/15 text-xs sm:text-sm"
+                  className="border-danger/30 bg-danger/10 text-danger hover:bg-danger/15 text-xs sm:text-sm"
                   data-confirm-remove={plugin.id}
                   onClick={() => onRemoveConfirm(plugin)}
                   size="sm"
@@ -228,6 +227,7 @@ function PluginCard({
 
 export function StoragePage() {
   const location = useLocation();
+  const navigate = useNavigate();
   const [plugins, setPlugins] = useState<StoragePlugin[]>([]);
   const [tab, setTab] = useState<StorageTab>(location.pathname.includes("/pools") ? "pools" : "plugins");
   const [isLoading, setIsLoading] = useState(true);
@@ -497,58 +497,53 @@ export function StoragePage() {
 
   return (
     <section className="space-y-4 sm:space-y-6">
-      <Card>
-        <CardHeader className="space-y-3">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-            <div className="min-w-0 space-y-1">
-              <CardTitle className="flex items-center gap-2 text-lg sm:text-xl">
-                <Boxes aria-hidden="true" className="h-5 w-5 text-primary" />
-                Storage
-              </CardTitle>
-              <CardDescription>Storage plugins and pools.</CardDescription>
-            </div>
-            <span className="inline-flex min-h-11 items-center rounded-md border border-border bg-muted/70 px-3 text-xs text-muted-foreground">
-              Last updated: {lastUpdated}
-            </span>
-          </div>
+      <PageHeader
+        actions={
+          <>
+            <Button
+              className="gap-2"
+              id="v2-plugin-install-open"
+              onClick={() => setInstallModal({ ...EMPTY_INSTALL, open: true })}
+              variant="secondary"
+            >
+              <Plus aria-hidden="true" className="h-4 w-4" />
+              install plugin
+            </Button>
+            <Button
+              className="gap-2"
+              disabled={isRefreshing}
+              onClick={() => void loadPlugins("manual")}
+              variant="secondary"
+            >
+              <RefreshCw aria-hidden="true" className={cn("h-4 w-4", isRefreshing ? "animate-spin" : "")} />
+              {isRefreshing ? "refreshing" : "refresh"}
+            </Button>
+          </>
+        }
+        description={`${visiblePlugins.length} ${tab} · synced ${lastUpdated}`}
+        status={
+          <StatusBadge
+            label={`${visiblePlugins.filter((plugin) => plugin.enabled).length} enabled`}
+            tone="success"
+          />
+        }
+        title={tab === "pools" ? "storage_pools" : "storage_plugins"}
+      />
 
-          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-            <div aria-label="Storage tabs" className="flex flex-wrap items-center gap-2" role="group">
-              {(["plugins", "pools"] as StorageTab[]).map((item) => (
-                <Button
-                  aria-pressed={tab === item}
-                  data-storage-tab={item}
-                  key={item}
-                  onClick={() => setTab(item)}
-                  variant={tab === item ? "default" : "outline"}
-                >
-                  {item === "plugins" ? "Plugins" : "Pools"}
-                </Button>
-              ))}
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                className="gap-2"
-                id="v2-plugin-install-open"
-                onClick={() => setInstallModal({ ...EMPTY_INSTALL, open: true })}
-                variant="outline"
-              >
-                <Plus aria-hidden="true" className="h-4 w-4" />
-                Install plugin
-              </Button>
-              <Button
-                className="gap-2"
-                disabled={isRefreshing}
-                onClick={() => void loadPlugins("manual")}
-                variant="outline"
-              >
-                <RefreshCw aria-hidden="true" className={cn("h-4 w-4", isRefreshing ? "animate-spin" : "")} />
-                {isRefreshing ? "Refreshing" : "Refresh"}
-              </Button>
-            </div>
-          </div>
-        </CardHeader>
-      </Card>
+      <div aria-label="Storage tabs" className="flex flex-wrap items-center gap-2" role="group">
+        {(["plugins", "pools"] as StorageTab[]).map((item) => (
+          <Button
+            aria-pressed={tab === item}
+            data-storage-tab={item}
+            key={item}
+            onClick={() => navigate(item === "pools" ? "/pools" : "/plugins")}
+            size="sm"
+            variant={tab === item ? "default" : "outline"}
+          >
+            {item === "plugins" ? "Plugins" : "Pools"}
+          </Button>
+        ))}
+      </div>
 
       {actionNotice ? (
         <Card
@@ -568,9 +563,9 @@ export function StoragePage() {
       ) : null}
 
       {error && !plugins.length ? (
-        <Card className="border-rose-500/40">
+        <Card className="border-danger/30">
           <CardContent className="flex flex-col items-start gap-3 p-4 sm:p-6">
-            <div className="flex items-center gap-2 text-rose-300">
+            <div className="flex items-center gap-2 text-danger">
               <TriangleAlert aria-hidden="true" className="h-4 w-4" />
               <p className="text-sm font-medium">Unable to load plugins</p>
             </div>
@@ -641,7 +636,7 @@ export function StoragePage() {
               {detailModal.status === "loading" ? (
                 <p className="text-sm text-muted-foreground">Loading plugin details...</p>
               ) : detailModal.status === "error" ? (
-                <p className="text-sm text-rose-300">{detailModal.error || "Failed to load plugin details"}</p>
+                <p className="text-sm text-danger">{detailModal.error || "Failed to load plugin details"}</p>
               ) : detailModal.detail ? (
                 <>
                   <div className="rounded-lg border border-border/70 bg-muted/25 p-3">
@@ -722,7 +717,7 @@ export function StoragePage() {
                     <p className="text-xs uppercase tracking-wide text-muted-foreground">Configuration (JSON)</p>
                     <textarea
                       aria-label="Plugin configuration JSON"
-                      className="h-[24vh] w-full resize-y rounded-lg border border-border/70 bg-muted/25 p-3 font-mono text-xs sm:text-sm"
+                      className="h-[24vh] w-full resize-y rounded-md border border-border bg-background p-3 font-mono text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:text-sm"
                       id="v2-plugin-config-textarea"
                       onChange={(event) =>
                         setDetailModal((current) => ({
@@ -734,7 +729,7 @@ export function StoragePage() {
                       value={detailModal.config.text}
                     />
                     {detailModal.config.error ? (
-                      <p className="text-sm text-rose-300" id="v2-plugin-config-error">
+                      <p className="text-sm text-danger" id="v2-plugin-config-error">
                         {detailModal.config.error}
                         {detailModal.config.details.length ? `: ${detailModal.config.details.join("; ")}` : ""}
                       </p>
@@ -749,7 +744,7 @@ export function StoragePage() {
                       </Button>
                       <span
                         aria-live="polite"
-                        className="text-sm text-emerald-300"
+                        className="text-sm text-success"
                         id="v2-plugin-config-status"
                         role="status"
                       >
@@ -835,7 +830,7 @@ export function StoragePage() {
                 </label>
               ))}
               {installModal.error ? (
-                <p className="text-sm text-rose-300" id="v2-plugin-install-error">
+                <p className="text-sm text-danger" id="v2-plugin-install-error">
                   {installModal.error}
                 </p>
               ) : null}

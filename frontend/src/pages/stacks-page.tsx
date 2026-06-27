@@ -4,7 +4,6 @@ import {
   Archive,
   Download,
   FileText,
-  Layers,
   Loader2,
   Pencil,
   Play,
@@ -14,9 +13,12 @@ import {
   TriangleAlert,
 } from "lucide-react";
 
+import { StatusBadge, type BadgeProps } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { MetricBar } from "@/components/ui/metric-bar";
 import { ModalOverlay } from "@/components/ui/modal-overlay";
+import { PageHeader } from "@/components/ui/page-header";
 import {
   type StackAction,
   type StackSummary,
@@ -44,27 +46,27 @@ const ACTION_META: Record<
   { label: string; pendingLabel: string; className: string; Icon: typeof Play }
 > = {
   up: {
-    label: "Up",
+    label: "Start",
     pendingLabel: "Starting...",
-    className: "border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/15",
+    className: "border-success/30 bg-success/10 text-success hover:bg-success/15",
     Icon: Play,
   },
   down: {
-    label: "Down",
+    label: "Stop",
     pendingLabel: "Stopping...",
-    className: "border-rose-500/40 text-rose-300 hover:bg-rose-500/15",
+    className: "border-danger/30 bg-danger/10 text-danger hover:bg-danger/15",
     Icon: Square,
   },
   restart: {
     label: "Restart",
     pendingLabel: "Restarting...",
-    className: "border-sky-500/40 text-sky-300 hover:bg-sky-500/15",
+    className: "border-warning/30 bg-warning/10 text-warning hover:bg-warning/15",
     Icon: RotateCw,
   },
   pull: {
     label: "Pull",
     pendingLabel: "Pulling...",
-    className: "border-violet-500/40 text-violet-300 hover:bg-violet-500/15",
+    className: "border-info/30 bg-info/10 text-info hover:bg-info/15",
     Icon: Download,
   },
 };
@@ -122,17 +124,17 @@ interface BackupsModalState {
   notice: string | null;
 }
 
-function getStatusTone(status: string): string {
+function getStatusTone(status: string): BadgeProps["tone"] {
   switch (status) {
     case "running":
-      return "bg-emerald-500/15 text-emerald-300 border-emerald-500/40";
+      return "success";
     case "stopped":
     case "exited":
-      return "bg-rose-500/15 text-rose-300 border-rose-500/40";
+      return "danger";
     case "partial":
-      return "bg-amber-500/15 text-amber-300 border-amber-500/40";
+      return "warning";
     default:
-      return "bg-slate-500/15 text-slate-300 border-slate-500/40";
+      return "neutral";
   }
 }
 
@@ -145,12 +147,12 @@ function getErrorMessage(error: unknown): string {
 
 function getNoticeToneClass(tone: ActionNotice["tone"]): string {
   if (tone === "success") {
-    return "border-emerald-500/40 text-emerald-300";
+    return "border-success/30 text-success";
   }
   if (tone === "error") {
-    return "border-rose-500/40 text-rose-300";
+    return "border-danger/30 text-danger";
   }
-  return "border-sky-500/40 text-sky-300";
+  return "border-info/30 text-info";
 }
 
 function StackCard({
@@ -175,7 +177,7 @@ function StackCard({
   const rowBusy = Boolean(pendingAction);
 
   return (
-    <Card>
+    <Card className="transition-colors duration-200 hover:border-primary/25">
       <CardContent className="space-y-3 p-4">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
@@ -184,26 +186,14 @@ function StackCard({
               <p className="truncate text-xs text-muted-foreground">{stack.compose_file}</p>
             ) : null}
           </div>
-          <span
-            className={cn(
-              "shrink-0 rounded-full border px-2 py-1 text-xs font-medium capitalize",
-              getStatusTone(stack.status),
-            )}
-          >
-            {stack.status}
-          </span>
+          <StatusBadge className="shrink-0" label={stack.status} tone={getStatusTone(stack.status)} />
         </div>
 
         <div className="space-y-1">
           <p className="text-xs text-muted-foreground">
             {running} / {total} services up
           </p>
-          <div className="h-1.5 rounded-full bg-muted">
-            <div
-              className="h-1.5 rounded-full bg-emerald-500 transition-[width] duration-300"
-              style={{ width: `${barWidth}%` }}
-            />
-          </div>
+          <MetricBar label={`${stack.name} services ${barWidth}%`} tone="success" value={barWidth} />
         </div>
 
         <div className="flex flex-wrap gap-2">
@@ -716,34 +706,27 @@ export function StacksPage() {
 
   return (
     <section className="space-y-4 sm:space-y-6">
-      <Card>
-        <CardHeader className="space-y-3">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-            <div className="min-w-0 space-y-1">
-              <CardTitle className="flex items-center gap-2 text-lg sm:text-xl">
-                <Layers aria-hidden="true" className="h-5 w-5 text-primary" />
-                Docker Stacks
-              </CardTitle>
-              <CardDescription>Compose stacks discovered on the host.</CardDescription>
-            </div>
-            <span className="inline-flex min-h-11 items-center rounded-md border border-border bg-muted/70 px-3 text-xs text-muted-foreground">
-              Last updated: {lastUpdated}
-            </span>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            <Button
-              className="gap-2"
-              disabled={isRefreshing}
-              onClick={() => void loadStacks("manual")}
-              variant="outline"
-            >
-              <RefreshCw aria-hidden="true" className={cn("h-4 w-4", isRefreshing ? "animate-spin" : "")} />
-              {isRefreshing ? "Refreshing" : "Refresh"}
-            </Button>
-          </div>
-        </CardHeader>
-      </Card>
+      <PageHeader
+        actions={
+          <Button
+            className="gap-2"
+            disabled={isRefreshing}
+            onClick={() => void loadStacks("manual")}
+            variant="secondary"
+          >
+            <RefreshCw aria-hidden="true" className={cn("h-4 w-4", isRefreshing ? "animate-spin" : "")} />
+            {isRefreshing ? "refreshing" : "refresh"}
+          </Button>
+        }
+        description={`${stacks.length} stacks · synced ${lastUpdated}`}
+        status={
+          <StatusBadge
+            label={`${stacks.filter((stack) => stack.status === "running").length} running`}
+            tone="success"
+          />
+        }
+        title="docker_stacks"
+      />
 
       {actionNotice ? (
         <Card
@@ -765,9 +748,9 @@ export function StacksPage() {
       ) : null}
 
       {error && !stacks.length ? (
-        <Card className="border-rose-500/40">
+        <Card className="border-danger/30">
           <CardContent className="flex flex-col items-start gap-3 p-4 sm:p-6">
-            <div className="flex items-center gap-2 text-rose-300">
+            <div className="flex items-center gap-2 text-danger">
               <TriangleAlert aria-hidden="true" className="h-4 w-4" />
               <p className="text-sm font-medium">Unable to load stacks</p>
             </div>
@@ -780,8 +763,8 @@ export function StacksPage() {
       ) : null}
 
       {error && stacks.length ? (
-        <Card aria-live="polite" className="border-amber-500/40" role="status">
-          <CardContent className="flex items-center gap-2 p-4 text-sm text-amber-300">
+        <Card aria-live="polite" className="border-warning/30" role="status">
+          <CardContent className="flex items-center gap-2 p-4 text-sm text-warning">
             <TriangleAlert aria-hidden="true" className="h-4 w-4" />
             Refresh failed: {error}
           </CardContent>
@@ -948,13 +931,13 @@ export function StacksPage() {
               {editorModal.status === "loading" ? (
                 <p className="text-sm text-muted-foreground">Loading...</p>
               ) : editorModal.status === "error" ? (
-                <p className="text-sm text-rose-300">{editorModal.loadError || "Failed to load files"}</p>
+                <p className="text-sm text-danger">{editorModal.loadError || "Failed to load files"}</p>
               ) : (
                 <>
                   <textarea
                     aria-label={editorModal.tab === "compose" ? "Compose file content" : "Env file content"
                     }
-                    className="h-[40vh] w-full resize-y rounded-lg border border-border/70 bg-muted/25 p-3 font-mono text-xs sm:text-sm"
+                  className="h-[40vh] w-full resize-y rounded-md border border-border bg-background p-3 font-mono text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:text-sm"
                     id="v2-stack-editor-textarea"
                     onChange={(event) =>
                       setEditorModal((current) => ({
@@ -981,7 +964,7 @@ export function StacksPage() {
                       aria-live="polite"
                       className={cn(
                         "text-sm",
-                        editorModal.saveStatus === "error" ? "text-rose-300" : "text-emerald-300",
+                        editorModal.saveStatus === "error" ? "text-danger" : "text-success",
                       )}
                       id="v2-stack-editor-status"
                       role="status"
@@ -1022,12 +1005,12 @@ export function StacksPage() {
             </CardHeader>
             <CardContent className="space-y-3 overflow-auto p-4">
               {backupsModal.notice ? (
-                <p aria-live="polite" className="text-sm text-emerald-300" role="status">
+                <p aria-live="polite" className="text-sm text-success" role="status">
                   {backupsModal.notice}
                 </p>
               ) : null}
               {backupsModal.error ? (
-                <p aria-live="assertive" className="text-sm text-rose-300" role="status">
+                <p aria-live="assertive" className="text-sm text-danger" role="status">
                   {backupsModal.error}
                 </p>
               ) : null}
@@ -1040,14 +1023,14 @@ export function StacksPage() {
                 <ul className="space-y-2">
                   {backupsModal.backups.map((backup) => (
                     <li
-                      className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/70 bg-muted/25 p-3"
+                      className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/20 p-3"
                       key={backup}
                     >
                       <span className="break-all font-mono text-xs sm:text-sm">{backup}</span>
                       {backupsModal.confirming === backup ? (
                         <span className="flex items-center gap-2">
                           <Button
-                            className="border-rose-500/40 text-rose-300 hover:bg-rose-500/15"
+                            className="border-danger/30 bg-danger/10 text-danger hover:bg-danger/15"
                             data-confirm-restore={backup}
                             disabled={backupsModal.restoring === backup}
                             onClick={() => void restoreBackup(backupsModal.stackName, backup)}

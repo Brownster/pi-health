@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Activity, RefreshCw, Settings as SettingsIcon, TriangleAlert } from "lucide-react";
+import { Activity, RefreshCw, TriangleAlert } from "lucide-react";
 
+import { StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageHeader } from "@/components/ui/page-header";
 import {
   type AutoUpdateConfig,
   type BackupConfig,
@@ -54,7 +56,7 @@ function TextField({
       <span className="text-xs uppercase tracking-wide text-muted-foreground">{label}</span>
       <input
         className={cn(
-          "w-full rounded-md border border-border bg-background px-3 py-2 text-xs sm:text-sm",
+          "w-full rounded-md border border-border bg-background px-3 py-2 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:text-sm",
           mono ? "font-mono" : "",
         )}
         data-setting={testId}
@@ -81,7 +83,7 @@ function ToggleField({
     <label className="flex items-center gap-2 text-sm">
       <input
         checked={checked}
-        className="h-4 w-4"
+        className="h-4 w-4 accent-primary"
         data-setting={testId}
         onChange={(event) => onChange(event.target.checked)}
         type="checkbox"
@@ -194,33 +196,27 @@ export function SettingsPage() {
 
   return (
     <section className="space-y-4 sm:space-y-6">
-      <Card>
-        <CardHeader className="space-y-3">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-            <div className="min-w-0 space-y-1">
-              <CardTitle className="flex items-center gap-2 text-lg sm:text-xl">
-                <SettingsIcon aria-hidden="true" className="h-5 w-5 text-primary" />
-                Settings
-              </CardTitle>
-              <CardDescription>Self-update, backups, and container auto-update.</CardDescription>
-            </div>
-            <span className="inline-flex min-h-11 items-center rounded-md border border-border bg-muted/70 px-3 text-xs text-muted-foreground">
-              Last updated: {lastUpdated}
-            </span>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button className="gap-2" disabled={isRefreshing} onClick={() => void loadAll("manual")} variant="outline">
-              <RefreshCw aria-hidden="true" className={cn("h-4 w-4", isRefreshing ? "animate-spin" : "")} />
-              {isRefreshing ? "Refreshing" : "Refresh"}
-            </Button>
-          </div>
-        </CardHeader>
-      </Card>
+      <PageHeader
+        actions={
+          <Button
+            className="gap-2"
+            disabled={isRefreshing}
+            onClick={() => void loadAll("manual")}
+            variant="secondary"
+          >
+            <RefreshCw aria-hidden="true" className={cn("h-4 w-4", isRefreshing ? "animate-spin" : "")} />
+            {isRefreshing ? "refreshing" : "refresh"}
+          </Button>
+        }
+        description={`system configuration · synced ${lastUpdated}`}
+        status={<StatusBadge label="config ready" tone="success" />}
+        title="system_settings"
+      />
 
       {actionNotice ? (
         <Card
           aria-live={actionNotice.tone === "error" ? "assertive" : "polite"}
-          className={actionNotice.tone === "error" ? "border-rose-500/40 text-rose-300" : "border-emerald-500/40 text-emerald-300"}
+          className={actionNotice.tone === "error" ? "border-danger/30 text-danger" : "border-success/30 text-success"}
           role="status"
         >
           <CardContent className="flex items-center gap-2 p-4 text-sm">
@@ -235,8 +231,8 @@ export function SettingsPage() {
       ) : null}
 
       {error ? (
-        <Card aria-live="polite" className="border-amber-500/40" role="status">
-          <CardContent className="flex items-center gap-2 p-4 text-sm text-amber-300">
+        <Card aria-live="polite" className="border-warning/30" role="status">
+          <CardContent className="flex items-center gap-2 p-4 text-sm text-warning">
             <TriangleAlert aria-hidden="true" className="h-4 w-4" />
             {error}
           </CardContent>
@@ -251,9 +247,9 @@ export function SettingsPage() {
           </CardContent>
         </Card>
       ) : (
-        <>
+        <div className="grid gap-3 xl:grid-cols-3 xl:items-start">
           {/* Pi-Health self-update */}
-          <Card id="v2-settings-pihealth">
+          <Card className="transition-colors duration-200 hover:border-primary/25" id="v2-settings-pihealth">
             <CardHeader>
               <CardTitle className="text-base sm:text-lg">Pi-Health self-update</CardTitle>
               <CardDescription>Update Pi-Health from its git repository and restart the service.</CardDescription>
@@ -284,7 +280,7 @@ export function SettingsPage() {
                 {confirmKey === "update-pihealth" ? (
                   <span className="flex items-center gap-1.5">
                     <Button
-                      className="border-violet-500/40 text-violet-300 hover:bg-violet-500/15"
+                      className="border-info/30 bg-info/10 text-info hover:bg-info/15"
                       id="v2-settings-pihealth-update-confirm"
                       onClick={() =>
                         void runAction("update-pihealth", async () => {
@@ -314,7 +310,7 @@ export function SettingsPage() {
           </Card>
 
           {/* Backups */}
-          <Card id="v2-settings-backups">
+          <Card className="transition-colors duration-200 hover:border-primary/25" id="v2-settings-backups">
             <CardHeader>
               <CardTitle className="text-base sm:text-lg">Backups</CardTitle>
               <CardDescription>
@@ -379,14 +375,14 @@ export function SettingsPage() {
                     const restoreKey = `restore:${archive}`;
                     return (
                       <div
-                        className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/70 bg-muted/20 p-2 text-xs"
+                        className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/20 p-2 text-xs"
                         key={archive}
                       >
                         <span className="break-all font-mono">{archive}</span>
                         {confirmKey === restoreKey ? (
                           <span className="flex items-center gap-1.5">
                             <Button
-                              className="border-amber-500/40 text-amber-300 hover:bg-amber-500/15 text-xs sm:text-sm"
+                              className="border-warning/30 bg-warning/10 text-warning hover:bg-warning/15 text-xs sm:text-sm"
                               data-confirm-restore={archive}
                               onClick={() =>
                                 void runAction(restoreKey, () => restoreBackup(archive), `Restored ${archive}`, true)
@@ -421,7 +417,7 @@ export function SettingsPage() {
           </Card>
 
           {/* Auto-update */}
-          <Card id="v2-settings-auto-update">
+          <Card className="transition-colors duration-200 hover:border-primary/25" id="v2-settings-auto-update">
             <CardHeader>
               <CardTitle className="text-base sm:text-lg">Container auto-update</CardTitle>
               <CardDescription>Scheduled container image updates.</CardDescription>
@@ -467,7 +463,7 @@ export function SettingsPage() {
               </div>
             </CardContent>
           </Card>
-        </>
+        </div>
       )}
     </section>
   );

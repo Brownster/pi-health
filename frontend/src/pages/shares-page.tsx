@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Activity, Loader2, RefreshCw, Share2, TriangleAlert } from "lucide-react";
+import { Activity, Loader2, RefreshCw, TriangleAlert } from "lucide-react";
 
+import { StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageHeader } from "@/components/ui/page-header";
 import {
   type PluginShares,
   type ShareEntry,
@@ -112,38 +114,32 @@ export function SharesPage() {
 
   return (
     <section className="space-y-4 sm:space-y-6">
-      <Card>
-        <CardHeader className="space-y-3">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-            <div className="min-w-0 space-y-1">
-              <CardTitle className="flex items-center gap-2 text-lg sm:text-xl">
-                <Share2 aria-hidden="true" className="h-5 w-5 text-primary" />
-                Shares
-              </CardTitle>
-              <CardDescription>Network shares exposed by storage plugins.</CardDescription>
-            </div>
-            <span className="inline-flex min-h-11 items-center rounded-md border border-border bg-muted/70 px-3 text-xs text-muted-foreground">
-              Last updated: {lastUpdated}
-            </span>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              className="gap-2"
-              disabled={isRefreshing}
-              onClick={() => void loadAll("manual")}
-              variant="outline"
-            >
-              <RefreshCw aria-hidden="true" className={cn("h-4 w-4", isRefreshing ? "animate-spin" : "")} />
-              {isRefreshing ? "Refreshing" : "Refresh"}
-            </Button>
-          </div>
-        </CardHeader>
-      </Card>
+      <PageHeader
+        actions={
+          <Button
+            className="gap-2"
+            disabled={isRefreshing}
+            onClick={() => void loadAll("manual")}
+            variant="secondary"
+          >
+            <RefreshCw aria-hidden="true" className={cn("h-4 w-4", isRefreshing ? "animate-spin" : "")} />
+            {isRefreshing ? "refreshing" : "refresh"}
+          </Button>
+        }
+        description={`${pluginShares.reduce((total, group) => total + group.shares.length, 0)} shares · synced ${lastUpdated}`}
+        status={
+          <StatusBadge
+            label={`${pluginShares.reduce((total, group) => total + group.shares.filter((share) => share.enabled).length, 0)} enabled`}
+            tone="success"
+          />
+        }
+        title="network_shares"
+      />
 
       {actionNotice ? (
         <Card
           aria-live={actionNotice.tone === "error" ? "assertive" : "polite"}
-          className={actionNotice.tone === "error" ? "border-rose-500/40 text-rose-300" : "border-emerald-500/40 text-emerald-300"}
+          className={actionNotice.tone === "error" ? "border-danger/30 text-danger" : "border-success/30 text-success"}
           role="status"
         >
           <CardContent className="flex items-center gap-2 p-4 text-sm">
@@ -158,8 +154,8 @@ export function SharesPage() {
       ) : null}
 
       {error ? (
-        <Card aria-live="polite" className="border-amber-500/40" role="status">
-          <CardContent className="flex items-center gap-2 p-4 text-sm text-amber-300">
+        <Card aria-live="polite" className="border-warning/30" role="status">
+          <CardContent className="flex items-center gap-2 p-4 text-sm text-warning">
             <TriangleAlert aria-hidden="true" className="h-4 w-4" />
             {error}
           </CardContent>
@@ -185,22 +181,17 @@ export function SharesPage() {
 
       {!isLoading
         ? pluginShares.map((group) => (
-            <Card key={group.pluginId}>
+            <Card className="transition-colors duration-200 hover:border-primary/25" key={group.pluginId}>
               <CardHeader className="flex flex-row items-start justify-between gap-3">
                 <div className="space-y-1">
                   <CardTitle className="text-base sm:text-lg">{group.pluginName}</CardTitle>
                   <CardDescription>{group.message || "Shares"}</CardDescription>
                 </div>
-                <span
-                  className={cn(
-                    "shrink-0 rounded-full border px-2 py-1 text-xs font-medium",
-                    group.serviceRunning
-                      ? "border-emerald-500/40 text-emerald-300"
-                      : "border-slate-500/40 text-slate-300",
-                  )}
-                >
-                  {group.serviceRunning ? "running" : "stopped"}
-                </span>
+                <StatusBadge
+                  className="shrink-0"
+                  label={group.serviceRunning ? "running" : "stopped"}
+                  tone={group.serviceRunning ? "success" : "neutral"}
+                />
               </CardHeader>
               <CardContent className="space-y-2">
                 {group.shares.length ? (
@@ -209,7 +200,7 @@ export function SharesPage() {
                     const deleteKey = `delete:${group.pluginId}:${share.name}`;
                     return (
                       <div
-                        className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/70 bg-muted/20 p-3 text-xs"
+                        className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/20 p-3 text-xs"
                         key={share.name}
                       >
                         <div className="min-w-0">
@@ -217,16 +208,10 @@ export function SharesPage() {
                           <p className="break-all text-muted-foreground">{share.path || "—"}</p>
                         </div>
                         <div className="flex flex-wrap items-center gap-2">
-                          <span
-                            className={cn(
-                              "rounded-full border px-2 py-0.5 font-mono",
-                              share.enabled
-                                ? "border-emerald-500/40 text-emerald-300"
-                                : "border-slate-500/40 text-slate-300",
-                            )}
-                          >
-                            {share.enabled ? "enabled" : "disabled"}
-                          </span>
+                          <StatusBadge
+                            label={share.enabled ? "enabled" : "disabled"}
+                            tone={share.enabled ? "success" : "neutral"}
+                          />
                           <Button
                             className="text-xs sm:text-sm"
                             data-share={share.name}
@@ -250,7 +235,7 @@ export function SharesPage() {
                           {confirmKey === deleteKey ? (
                             <span className="flex items-center gap-1.5">
                               <Button
-                                className="border-rose-500/40 text-rose-300 hover:bg-rose-500/15 text-xs sm:text-sm"
+                                className="border-danger/30 bg-danger/10 text-danger hover:bg-danger/15 text-xs sm:text-sm"
                                 data-confirm-delete-share={share.name}
                                 onClick={() =>
                                   void runShareAction(

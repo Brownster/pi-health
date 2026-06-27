@@ -17,7 +17,7 @@ def _open_v2_containers(page, base_url, v2_login, install_v2_containers_api_mock
     v2_login(page, base_url)
     install_v2_containers_api_mocks(page)
     page.goto(f"{base_url}/v2/containers")
-    expect(page.get_by_role("heading", name="Docker Containers")).to_be_visible()
+    expect(page.get_by_role("heading", name="docker_containers")).to_be_visible()
 
 
 def _focus_is_inside(page, modal_id: str) -> bool:
@@ -131,7 +131,7 @@ def test_v2_containers_stopped_filter_includes_exited(
     v2_login(page, base_url)
     install_v2_containers_api_mocks(page, extra_containers=[exited_container])
     page.goto(f"{base_url}/v2/containers")
-    expect(page.get_by_role("heading", name="Docker Containers")).to_be_visible()
+    expect(page.get_by_role("heading", name="docker_containers")).to_be_visible()
 
     # Under "All" both containers are present.
     expect(page.get_by_text("v2-mock-exited")).not_to_have_count(0)

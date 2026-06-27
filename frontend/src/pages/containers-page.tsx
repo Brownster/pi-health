@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Activity, FileText, Loader2, RefreshCw, Server, TriangleAlert, Wifi } from "lucide-react";
+import { Activity, FileText, Loader2, RefreshCw, TriangleAlert, Wifi } from "lucide-react";
 
+import { StatusBadge, type BadgeProps } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ModalOverlay } from "@/components/ui/modal-overlay";
+import { PageHeader } from "@/components/ui/page-header";
 import {
   type ContainerAction,
   type ContainerActionResult,
@@ -48,27 +50,27 @@ const ACTION_META: Record<
   start: {
     label: "Start",
     pendingLabel: "Starting...",
-    className: "border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/15",
+    className: "border-success/30 bg-success/10 text-success hover:bg-success/15",
   },
   stop: {
     label: "Stop",
     pendingLabel: "Stopping...",
-    className: "border-amber-500/40 text-amber-300 hover:bg-amber-500/15",
+    className: "border-danger/30 bg-danger/10 text-danger hover:bg-danger/15",
   },
   restart: {
     label: "Restart",
     pendingLabel: "Restarting...",
-    className: "border-sky-500/40 text-sky-300 hover:bg-sky-500/15",
+    className: "border-warning/30 bg-warning/10 text-warning hover:bg-warning/15",
   },
   check_update: {
     label: "Check Update",
     pendingLabel: "Checking...",
-    className: "border-slate-500/50 text-slate-200 hover:bg-slate-500/15",
+    className: "border-border text-muted-foreground hover:bg-muted",
   },
   update: {
     label: "Update",
     pendingLabel: "Updating...",
-    className: "border-violet-500/40 text-violet-300 hover:bg-violet-500/15",
+    className: "border-info/30 bg-info/10 text-info hover:bg-info/15",
   },
 };
 
@@ -111,17 +113,17 @@ interface HostNetworkPanelState {
   error: string | null;
 }
 
-function getStatusTone(status: string): string {
+function getStatusTone(status: string): BadgeProps["tone"] {
   switch (status) {
     case "running":
-      return "bg-emerald-500/15 text-emerald-300 border-emerald-500/40";
+      return "success";
     case "stopped":
     case "exited":
-      return "bg-rose-500/15 text-rose-300 border-rose-500/40";
+      return "danger";
     case "unavailable":
-      return "bg-amber-500/15 text-amber-300 border-amber-500/40";
+      return "warning";
     default:
-      return "bg-slate-500/15 text-slate-300 border-slate-500/40";
+      return "neutral";
   }
 }
 
@@ -130,25 +132,25 @@ function getMetricTone(percent: number | null): string {
     return "text-muted-foreground";
   }
   if (percent < 50) {
-    return "text-emerald-300";
+    return "text-success";
   }
   if (percent < 80) {
-    return "text-amber-300";
+    return "text-warning";
   }
-  return "text-rose-300";
+  return "text-danger";
 }
 
 function getMetricBarTone(percent: number | null): string {
   if (percent === null) {
-    return "bg-slate-500";
+    return "bg-dim";
   }
   if (percent < 50) {
-    return "bg-emerald-500";
+    return "bg-success";
   }
   if (percent < 80) {
-    return "bg-amber-500";
+    return "bg-warning";
   }
-  return "bg-rose-500";
+  return "bg-danger";
 }
 
 function getErrorMessage(error: unknown): string {
@@ -160,12 +162,12 @@ function getErrorMessage(error: unknown): string {
 
 function getNoticeToneClass(tone: ActionNotice["tone"]): string {
   if (tone === "success") {
-    return "border-emerald-500/40 text-emerald-300";
+    return "border-success/30 text-success";
   }
   if (tone === "error") {
-    return "border-rose-500/40 text-rose-300";
+    return "border-danger/30 text-danger";
   }
-  return "border-sky-500/40 text-sky-300";
+  return "border-info/30 text-info";
 }
 
 function isUnavailableStatus(status: string): boolean {
@@ -410,37 +412,37 @@ function DesktopContainerTable({
 }) {
   return (
     <div className="hidden xl:block">
-      <div className="overflow-x-auto rounded-xl border border-border/70 bg-card/70">
-        <table className="min-w-full divide-y divide-border/80 text-sm">
-          <thead className="bg-muted/55">
+      <div className="overflow-x-auto rounded-lg border border-border bg-card">
+        <table className="min-w-full divide-y divide-divider text-sm">
+          <thead className="bg-[#0e131a]">
             <tr>
-              <th className="px-4 py-3 text-left text-xs uppercase tracking-wide text-muted-foreground">
+              <th className="px-4 py-3 text-left font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-dim">
                 Container
               </th>
-              <th className="px-4 py-3 text-left text-xs uppercase tracking-wide text-muted-foreground">
+              <th className="px-4 py-3 text-left font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-dim">
                 Image
               </th>
-              <th className="px-4 py-3 text-left text-xs uppercase tracking-wide text-muted-foreground">
+              <th className="px-4 py-3 text-left font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-dim">
                 Status
               </th>
-              <th className="px-4 py-3 text-left text-xs uppercase tracking-wide text-muted-foreground">
+              <th className="px-4 py-3 text-left font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-dim">
                 CPU
               </th>
-              <th className="px-4 py-3 text-left text-xs uppercase tracking-wide text-muted-foreground">
+              <th className="px-4 py-3 text-left font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-dim">
                 Memory
               </th>
-              <th className="px-4 py-3 text-left text-xs uppercase tracking-wide text-muted-foreground">
+              <th className="px-4 py-3 text-left font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-dim">
                 Network
               </th>
-              <th className="px-4 py-3 text-left text-xs uppercase tracking-wide text-muted-foreground">
+              <th className="px-4 py-3 text-left font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-dim">
                 Web UI
               </th>
-              <th className="px-4 py-3 text-right text-xs uppercase tracking-wide text-muted-foreground">
+              <th className="px-4 py-3 text-right font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-dim">
                 Actions
               </th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-border/70">
+          <tbody className="divide-y divide-divider">
             {containers.map((container) => {
               const webPort = getContainerWebPort(container);
               const rowBusy = Boolean(pendingActions[container.id]);
@@ -466,14 +468,7 @@ function DesktopContainerTable({
                     <span className="line-clamp-2 break-all">{container.image}</span>
                   </td>
                   <td className="px-4 py-3">
-                    <span
-                      className={cn(
-                        "inline-flex items-center rounded-full border px-2 py-1 text-xs font-medium capitalize",
-                        getStatusTone(container.status),
-                      )}
-                    >
-                      {container.status}
-                    </span>
+                    <StatusBadge label={container.status} tone={getStatusTone(container.status)} />
                   </td>
                   <td className="px-4 py-3">
                     <MetricCell percent={container.cpu_percent} />
@@ -562,23 +557,20 @@ function MobileContainerCards({
                   <p className="truncate text-sm font-semibold">{container.name}</p>
                   <p className="line-clamp-2 break-all text-xs text-muted-foreground">{container.image}</p>
                 </div>
-                <span
-                  className={cn(
-                    "shrink-0 rounded-full border px-2 py-1 text-xs font-medium capitalize",
-                    getStatusTone(container.status),
-                  )}
-                >
-                  {container.status}
-                </span>
+                <StatusBadge
+                  className="shrink-0"
+                  label={container.status}
+                  tone={getStatusTone(container.status)}
+                />
               </div>
 
               <div className="grid gap-2 text-xs sm:grid-cols-2">
-                <div className="space-y-1 rounded-lg border border-border/70 bg-muted/30 p-2">
-                  <p className="uppercase tracking-wide text-muted-foreground">CPU</p>
+                <div className="space-y-1 rounded-md border border-border bg-muted/20 p-2">
+                  <p className="font-mono text-[10px] uppercase tracking-[0.1em] text-dim">CPU</p>
                   <MetricCell percent={container.cpu_percent} />
                 </div>
-                <div className="space-y-1 rounded-lg border border-border/70 bg-muted/30 p-2">
-                  <p className="uppercase tracking-wide text-muted-foreground">Memory</p>
+                <div className="space-y-1 rounded-md border border-border bg-muted/20 p-2">
+                  <p className="font-mono text-[10px] uppercase tracking-[0.1em] text-dim">Memory</p>
                   <MetricCell
                     detail={`${formatBytes(container.memory_used)} / ${formatBytes(container.memory_limit)}`}
                     percent={container.memory_percent}
@@ -586,8 +578,8 @@ function MobileContainerCards({
                 </div>
               </div>
 
-              <div className="grid gap-1 rounded-lg border border-border/70 bg-muted/30 p-2 text-xs">
-                <p className="uppercase tracking-wide text-muted-foreground">Network</p>
+              <div className="grid gap-1 rounded-md border border-border bg-muted/20 p-2 text-xs">
+                <p className="font-mono text-[10px] uppercase tracking-[0.1em] text-dim">Network</p>
                 <NetworkCell
                   rate={networkRates[container.id]}
                   rx={container.net_rx}
@@ -1033,68 +1025,59 @@ export function ContainersPage() {
 
   return (
     <section className="space-y-4 sm:space-y-6">
-      <Card>
-        <CardHeader className="space-y-3">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-            <div className="min-w-0 space-y-1">
-              <CardTitle className="flex items-center gap-2 text-lg sm:text-xl">
-                <Server aria-hidden="true" className="h-5 w-5 text-primary" />
-                Docker Containers
-              </CardTitle>
-              <CardDescription>
-                Phase 2 pilot now serves live telemetry, lifecycle actions, and diagnostics on
-                v2 containers.
-              </CardDescription>
-            </div>
-            <span className="inline-flex min-h-11 items-center rounded-md border border-border bg-muted/70 px-3 text-xs text-muted-foreground">
-              Last updated: {lastUpdated}
-            </span>
-          </div>
+      <PageHeader
+        actions={
+          <>
+            <Button
+              className="gap-2"
+              id="v2-host-network-test-button"
+              onClick={() => void runHostDiagnostics()}
+              variant="secondary"
+            >
+              {hostNetworkPanel.status === "loading" ? (
+                <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
+              ) : (
+                <Wifi aria-hidden="true" className="h-4 w-4" />
+              )}
+              network test
+            </Button>
+            <Button
+              className="gap-2"
+              disabled={isRefreshing}
+              onClick={() => void refreshNow("manual")}
+              variant="secondary"
+            >
+              <RefreshCw
+                aria-hidden="true"
+                className={cn("h-4 w-4", isRefreshing ? "animate-spin" : "")}
+              />
+              {isRefreshing ? "refreshing" : "refresh"}
+            </Button>
+          </>
+        }
+        description={`docker · ${containers.length} containers · synced ${lastUpdated}`}
+        status={
+          <StatusBadge
+            label={`${containers.filter((container) => container.status === "running").length} running`}
+            tone="success"
+          />
+        }
+        title="docker_containers"
+      />
 
-          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-            <div aria-label="Container filters" className="flex flex-wrap items-center gap-2" role="group">
-              {FILTER_ITEMS.map((item) => (
-                <Button
-                  aria-pressed={filter === item.key}
-                  key={item.key}
-                  onClick={() => setFilter(item.key)}
-                  variant={filter === item.key ? "default" : "outline"}
-                >
-                  {item.label}
-                </Button>
-              ))}
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              <Button
-                className="gap-2"
-                id="v2-host-network-test-button"
-                onClick={() => void runHostDiagnostics()}
-                variant="outline"
-              >
-                {hostNetworkPanel.status === "loading" ? (
-                  <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Wifi aria-hidden="true" className="h-4 w-4" />
-                )}
-                Host Network Test
-              </Button>
-              <Button
-                className="gap-2"
-                disabled={isRefreshing}
-                onClick={() => void refreshNow("manual")}
-                variant="outline"
-              >
-                <RefreshCw
-                  aria-hidden="true"
-                  className={cn("h-4 w-4", isRefreshing ? "animate-spin" : "")}
-                />
-                {isRefreshing ? "Refreshing" : "Refresh"}
-              </Button>
-            </div>
-          </div>
-        </CardHeader>
-      </Card>
+      <div aria-label="Container filters" className="flex flex-wrap items-center gap-2" role="group">
+        {FILTER_ITEMS.map((item) => (
+          <Button
+            aria-pressed={filter === item.key}
+            key={item.key}
+            onClick={() => setFilter(item.key)}
+            size="sm"
+            variant={filter === item.key ? "default" : "outline"}
+          >
+            {item.label}
+          </Button>
+        ))}
+      </div>
 
       {hostNetworkPanel.visible ? (
         <Card className="border-sky-500/30" id="v2-host-network-panel">

@@ -23,6 +23,9 @@ export async function requestApi<T>(path: string, init?: RequestInit): Promise<T
 }
 
 export function toNullableNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : null;
 }

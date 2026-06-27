@@ -14,7 +14,7 @@ def _open_v2_stacks(page, base_url, v2_login, install_v2_stacks_api_mocks):
     v2_login(page, base_url)
     install_v2_stacks_api_mocks(page)
     page.goto(f"{base_url}/v2/stacks")
-    expect(page.get_by_role("heading", name="Docker Stacks")).to_be_visible()
+    expect(page.get_by_role("heading", name="docker_stacks")).to_be_visible()
 
 
 def test_v2_stacks_list_renders(

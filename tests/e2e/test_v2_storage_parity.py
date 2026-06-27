@@ -14,7 +14,9 @@ def _open_v2_storage(page, base_url, route, v2_login, install_v2_storage_api_moc
     v2_login(page, base_url)
     install_v2_storage_api_mocks(page)
     page.goto(f"{base_url}/v2/{route}")
-    expect(page.get_by_role("heading", name="Storage")).to_be_visible()
+    expect(
+        page.get_by_role("heading", name="storage_pools" if route == "pools" else "storage_plugins")
+    ).to_be_visible()
 
 
 def test_v2_storage_plugins_list_and_pools_tab(
@@ -36,6 +38,9 @@ def test_v2_storage_plugins_list_and_pools_tab(
 
     # Pools tab filters to pool-capable plugins (mergerfs), hiding samba.
     page.click("button[data-storage-tab='pools']")
+    expect(page).to_have_url(f"{base_url}/v2/pools")
+    expect(page.locator("button[data-storage-tab='pools']")).to_have_attribute("aria-pressed", "true")
+    expect(page.locator("button[data-storage-tab='plugins']")).to_have_attribute("aria-pressed", "false")
     expect(page.get_by_text("MergerFS").first).to_be_visible()
     expect(page.get_by_text("Samba")).to_have_count(0)
 

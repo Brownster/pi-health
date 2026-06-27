@@ -12,6 +12,7 @@ import { StoragePage } from "@/pages/storage-page";
 export interface AppRoute {
   path: string;
   label: string;
+  navGroup: "Main" | "My Apps" | "Storage" | "System";
   requiresAuth?: boolean;
   showInNav: boolean;
   component: ComponentType;
@@ -20,13 +21,16 @@ export interface AppRoute {
 export const appRoutes: AppRoute[] = [
   {
     path: "/",
-    label: "Overview",
+    label: "Home",
+    navGroup: "Main",
+    requiresAuth: true,
     showInNav: true,
     component: DashboardHomePage,
   },
   {
     path: "/containers",
     label: "Containers",
+    navGroup: "My Apps",
     requiresAuth: true,
     showInNav: true,
     component: ContainersPage,
@@ -34,6 +38,7 @@ export const appRoutes: AppRoute[] = [
   {
     path: "/stacks",
     label: "Stacks",
+    navGroup: "My Apps",
     requiresAuth: true,
     showInNav: true,
     component: StacksPage,
@@ -41,6 +46,7 @@ export const appRoutes: AppRoute[] = [
   {
     path: "/disks",
     label: "Disks",
+    navGroup: "Storage",
     requiresAuth: true,
     showInNav: true,
     component: DisksPage,
@@ -48,6 +54,7 @@ export const appRoutes: AppRoute[] = [
   {
     path: "/plugins",
     label: "Plugins",
+    navGroup: "Storage",
     requiresAuth: true,
     showInNav: true,
     component: StoragePage,
@@ -55,6 +62,7 @@ export const appRoutes: AppRoute[] = [
   {
     path: "/pools",
     label: "Pools",
+    navGroup: "Storage",
     requiresAuth: true,
     showInNav: true,
     component: StoragePage,
@@ -62,6 +70,7 @@ export const appRoutes: AppRoute[] = [
   {
     path: "/mounts",
     label: "Mounts",
+    navGroup: "Storage",
     requiresAuth: true,
     showInNav: true,
     component: MountsPage,
@@ -69,6 +78,7 @@ export const appRoutes: AppRoute[] = [
   {
     path: "/shares",
     label: "Shares",
+    navGroup: "Storage",
     requiresAuth: true,
     showInNav: true,
     component: SharesPage,
@@ -76,6 +86,7 @@ export const appRoutes: AppRoute[] = [
   {
     path: "/settings",
     label: "Settings",
+    navGroup: "System",
     requiresAuth: true,
     showInNav: true,
     component: SettingsPage,

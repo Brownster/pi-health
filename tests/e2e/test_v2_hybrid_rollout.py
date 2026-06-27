@@ -41,7 +41,7 @@ def test_hybrid_containers_rollout_redirects_only_selected_route(
 
     page.goto(f"{base_url}/containers.html")
     expect(page).to_have_url(f"{base_url}/v2/containers")
-    expect(page.get_by_role("heading", name="Docker Containers")).to_be_visible()
+    expect(page.get_by_role("heading", name="docker_containers")).to_be_visible()
 
     page.goto(f"{base_url}/system.html")
     expect(page).to_have_url(f"{base_url}/system.html")

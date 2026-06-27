@@ -305,6 +305,7 @@ def v2_login():
         page.fill("#password", PASSWORD)
         page.click("#login-button")
         page.wait_for_url(re.compile(rf"{re.escape(base_url)}/(v2/?|$)"), timeout=10000)
+        page.wait_for_load_state("load")
 
     return _login
 

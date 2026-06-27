@@ -3,51 +3,43 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
-  --radius: 0.75rem;
+  --radius: 0.5rem;
 
-  --background: #f8fafc;
-  --foreground: #0f172a;
+  --background: #0a0d12;
+  --foreground: #e6edf3;
 
-  --card: #ffffff;
-  --card-foreground: #0f172a;
+  --card: #11161d;
+  --card-foreground: #e6edf3;
 
-  --primary: #2563eb;
-  --primary-foreground: #ffffff;
+  --primary: #c7f24a;
+  --primary-foreground: #0a0d12;
 
-  --muted: #e2e8f0;
-  --muted-foreground: #475569;
+  --muted: #1a2029;
+  --muted-foreground: #8b97a6;
 
-  --accent: #dbeafe;
-  --accent-foreground: #1e293b;
+  --accent: #1f291d;
+  --accent-foreground: #dff78f;
 
-  --border: #d1d5db;
-  --ring: #2563eb;
-  color-scheme: light;
+  --border: #1d2530;
+  --ring: #c7f24a;
+
+  --sidebar: #0d1117;
+  --divider: #1b222c;
+  --dim: #5a6573;
+  --success: #3fb950;
+  --warning: #e3a008;
+  --danger: #f85149;
+  --info: #58a6ff;
+  color-scheme: dark;
 }
 
 .dark {
-  --background: #09090b;
-  --foreground: #fafafa;
-
-  --card: #18181b;
-  --card-foreground: #fafafa;
-
-  --primary: #3b82f6;
-  --primary-foreground: #ffffff;
-
-  --muted: #27272a;
-  --muted-foreground: #a1a1aa;
-
-  --accent: #27272a;
-  --accent-foreground: #fafafa;
-
-  --border: #27272a;
-  --ring: #3b82f6;
   color-scheme: dark;
 }
 
 @theme inline {
-  --font-sans: "Sora", "Inter", "Segoe UI", "Noto Sans", sans-serif;
+  --font-sans: "IBM Plex Sans", "Segoe UI", "Noto Sans", sans-serif;
+  --font-mono: "IBM Plex Mono", "Cascadia Code", "SFMono-Regular", Consolas, monospace;
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -66,14 +58,23 @@
 
   --color-border: var(--border);
   --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-divider: var(--divider);
+  --color-dim: var(--dim);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+  --color-info: var(--info);
 
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
 }
 
-* {
-  border-color: var(--border);
+@layer base {
+  * {
+    border-color: var(--border);
+  }
 }
 
 html,
@@ -89,6 +90,23 @@ body {
   font-family: var(--font-sans);
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
+}
+
+button,
+a,
+input,
+select,
+textarea {
+  letter-spacing: 0;
+}
+
+::selection {
+  background: rgb(199 242 74 / 22%);
+  color: var(--foreground);
+}
+
+* {
+  scrollbar-color: #303b48 var(--background);
 }
 
 @media (prefers-reduced-motion: reduce) {

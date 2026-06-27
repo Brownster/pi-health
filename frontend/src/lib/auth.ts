@@ -33,3 +33,16 @@ export async function fetchAuthSession(signal?: AbortSignal): Promise<AuthSessio
     username: payload.username ?? null,
   };
 }
+
+export async function logoutToLogin(): Promise<void> {
+  try {
+    await fetch("/api/logout", {
+      method: "POST",
+      credentials: "same-origin",
+    });
+  } finally {
+    window.sessionStorage.removeItem("loggedIn");
+    window.sessionStorage.removeItem("username");
+    window.location.assign("/login.html");
+  }
+}
