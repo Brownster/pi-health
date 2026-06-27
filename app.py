@@ -347,6 +347,17 @@ def get_temperature_fallback():
     if not temps:
         return None
 
+    # Prefer the actual CPU package sensor; chipset/ambient sensors (e.g. acpitz)
+    # read much lower and would misreport CPU temperature on x86 hosts.
+    preferred = ('cpu_thermal', 'cpu-thermal', 'coretemp', 'k10temp',
+                 'soc_thermal', 'cpu')
+    for key in preferred:
+        for entry in temps.get(key, []):
+            current = getattr(entry, 'current', None)
+            if current is not None:
+                return current
+
+    # Fall back to the first sensor that reports a reading.
     for entries in temps.values():
         for entry in entries:
             current = getattr(entry, 'current', None)
@@ -355,21 +366,77 @@ def get_temperature_fallback():
     return None
 
 
-def get_system_stats():
-    """Gather system statistics including CPU, memory, disk, and network."""
-    # CPU usage - try /host_proc/stat first (Docker), then fall back to /proc/stat
-    cpu_usage = None
-    per_core = []
+def _read_proc_stat_cpu(path):
+    """Read aggregate + per-core CPU jiffy counters from a /proc/stat-style file.
+
+    Returns {name: [user, nice, system, idle, iowait, irq, softirq, steal]}."""
+    counters = {}
+    with open(path, 'r') as f:
+        for line in f:
+            if line.startswith('cpu'):
+                parts = line.split()
+                try:
+                    counters[parts[0]] = list(map(int, parts[1:9]))
+                except (ValueError, IndexError):
+                    continue
+            elif counters:
+                break  # cpu lines are first/contiguous in /proc/stat
+    return counters
+
+
+def _cpu_percent_from_delta(start, end):
+    """Percent busy between two jiffy snapshots of one cpu line."""
+    total = sum(end) - sum(start)
+    idle = (end[3] + end[4]) - (start[3] + start[4])  # idle + iowait
+    if total <= 0:
+        return None
+    return round(100 * (total - idle) / total, 1)
+
+
+def get_cpu_usage_delta(interval=0.1):
+    """Current CPU usage via two /proc/stat snapshots (delta), aggregate + per-core.
+
+    Unlike a single snapshot (which yields the average since boot), this reflects
+    actual instantaneous load. Tries /host_proc/stat (Docker) then /proc/stat."""
     for stat_path in ['/host_proc/stat', '/proc/stat']:
         try:
-            with open(stat_path, 'r') as f:
-                stat_lines = f.readlines()
-                cpu_line = stat_lines[0].split() if stat_lines else []
-                cpu_usage = calculate_cpu_usage(cpu_line) if cpu_line else None
-                per_core = get_cpu_usage_per_core(stat_lines)
-                break  # Success, no need to try fallback
+            start = _read_proc_stat_cpu(stat_path)
+            if not start:
+                continue
+            time.sleep(interval)
+            end = _read_proc_stat_cpu(stat_path)
+            aggregate = None
+            if 'cpu' in start and 'cpu' in end:
+                aggregate = _cpu_percent_from_delta(start['cpu'], end['cpu'])
+            per_core = [
+                {'core': name, 'usage_percent': _cpu_percent_from_delta(start[name], end[name])}
+                for name in sorted(start)
+                if name != 'cpu' and name in end
+            ]
+            return aggregate, per_core
         except Exception:
             continue
+    return None, []
+
+
+def _safe_disk_usage(path):
+    """psutil.disk_usage(path) as a dict, or None if the path isn't mounted."""
+    try:
+        usage = psutil.disk_usage(path)
+    except Exception:
+        return None
+    return {
+        "total": usage.total,
+        "used": usage.used,
+        "free": usage.free,
+        "percent": usage.percent,
+    }
+
+
+def get_system_stats():
+    """Gather system statistics including CPU, memory, disk, and network."""
+    # CPU usage - instantaneous, via two /proc/stat snapshots (not since-boot avg)
+    cpu_usage, per_core = get_cpu_usage_delta()
 
     # Memory usage
     memory = psutil.virtual_memory()
@@ -380,25 +447,10 @@ def get_system_stats():
         "percent": memory.percent,
     }
 
-    # Disk usage (with configurable path)
-    disk_path = os.getenv('DISK_PATH', '/')
-    disk = psutil.disk_usage(disk_path)
-    disk_usage = {
-        "total": disk.total,
-        "used": disk.used,
-        "free": disk.free,
-        "percent": disk.percent,
-    }
-
-    # Second Disk Usage
-    disk_path_2 = os.getenv('DISK_PATH_2', '/mnt/backup')
-    disk_2 = psutil.disk_usage(disk_path_2)
-    disk_usage_2 = {
-        "total": disk_2.total,
-        "used": disk_2.used,
-        "free": disk_2.free,
-        "percent": disk_2.percent,
-    }
+    # Disk usage (with configurable path); guarded so a missing mount returns
+    # None instead of raising and 500-ing the whole stats endpoint.
+    disk_usage = _safe_disk_usage(os.getenv('DISK_PATH', '/'))
+    disk_usage_2 = _safe_disk_usage(os.getenv('DISK_PATH_2', '/mnt/backup'))
     
     # Temperature (specific to Raspberry Pi)
     if os.path.exists('/usr/bin/vcgencmd'):
