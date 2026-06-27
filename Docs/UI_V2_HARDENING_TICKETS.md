@@ -3,7 +3,7 @@
 Date: 2026-06-27
 Source: `Docs/colleagues_review_of_limeOS.txt` (validated external review)
 Branch: TBD (recommend `feature/v2-hardening`)
-Status: Draft — not started (v2 under on-Pi testing)
+Status: Active — SEC-001/002, CAT-001, STK-001, MFS-001, and UI-001 complete
 
 ## Objective
 Production-harden the migrated v2 / LimeOS stack — close the destructive failure paths and the
@@ -30,17 +30,17 @@ starting broad feature work. IDs match the review for traceability.
 ## Execution Order and Dependencies
 | ID | Title | Severity | Area | Depends | Status |
 |---|---|---|---|---|---|
-| SEC-001 | Remove default admin credentials | P0 | backend | — | Pending |
-| SEC-002 | Narrow privileged helper contract (no raw file content) | P0 | helper | — | Pending |
-| CAT-001 | Catalog remove stops only the selected service | P1 | backend | — | Pending |
-| STK-001 | Stack delete requires successful compose down | P1 | backend | — | Pending |
-| MFS-001 | MergerFS commands return real success/failure | P1 | plugin | — | Pending |
+| SEC-001 | Remove default admin credentials | P0 | backend | — | Complete |
+| SEC-002 | Narrow privileged helper contract (no raw file content) | P0 | helper | — | Complete |
+| CAT-001 | Catalog remove stops only the selected service | P1 | backend | — | Complete |
+| STK-001 | Stack delete requires successful compose down | P1 | backend | — | Complete |
+| MFS-001 | MergerFS commands return real success/failure | P1 | plugin | — | Complete |
 | SRA-001 | SnapRAID mounted-source preflight, fail closed | P1 | plugin | — | Pending |
 | SRA-002 | Reject SnapRAID paths on a MergerFS pool | P1 | plugin | — | Pending |
 | CAT-002 | Async catalog install via job/stream + operation id | P1 | backend | API-001 | Pending |
 | STK-002 | Per-stack lock + atomic compose/env/restore writes | P1 | backend | — | Pending |
 | API-001 | State-changing stream endpoints become POST + CSRF | P1 | backend+ui | — | Pending |
-| UI-001 | Modal focus survives typing (stable onClose) | P1 | frontend | — | Pending |
+| UI-001 | Modal focus survives typing (stable onClose) | P1 | frontend | — | Complete |
 | SYS-001 | `/api/stats` tolerates missing optional disks | P1 | backend+ui | — | Pending |
 | STK-003 | Round-trip YAML / managed override files | P2 | backend | — | Pending |
 | CAT-003 | Merge all allowed top-level compose sections | P2 | backend | STK-003 | Pending |
@@ -68,12 +68,36 @@ rotation); store/compare password **hashes** with a constant-time verifier; add 
 limiting. Tests for missing/default config + lockout.
 Acceptance: no usable login exists without explicit configuration; brute force is throttled.
 
+Completed: 2026-06-27. Authentication now requires Werkzeug scrypt/PBKDF2 hashes through
+`PIHEALTH_PASSWORD_HASH` or `PIHEALTH_USERS`; missing, plaintext, duplicate, and malformed
+configuration fails during startup. Password verification uses Werkzeug's constant-time hash
+checker, including equivalent hash work for unknown usernames. The login endpoint applies a
+per-client five-attempt/60-second lockout and returns `429` with `Retry-After`. Unit coverage
+includes missing/default configuration, hashed multi-user loading, lockout, and recovery.
+Operator documentation includes a dependency-free hash generator and plaintext-to-hash migration.
+
 ### SEC-002 — Narrow privileged helper contract
 Files: `pihealth_helper.py` (~671-721), `setup.sh` (~190-212).
 Tasks: move systemd unit + startup-script **templates into the helper**; accept only typed,
 validated parameters (never full executable content); add peer-credential checks, request-size
 framing, and socket security tests.
 Acceptance: web-process compromise cannot write arbitrary privileged file content.
+
+Completed: 2026-06-27. Raw `write_systemd_unit` and `write_startup_script` commands were removed
+from the helper whitelist. Startup and SnapRAID units now come from fixed helper-owned templates;
+callers send only validated mount points, compose paths, job types, and cron values. The Unix-socket
+protocol now uses 4-byte length-prefixed request/response frames capped at 64 KiB with a 10-second
+read timeout. Linux `SO_PEERCRED` checks require root or actual membership in the `pihealth` process
+group before parsing or dispatch, and the runtime directory/socket modes are `0750`/`0660`.
+
+Failure-path coverage rejects removed raw commands, content/path/cron injection, malformed parameter
+types, oversized/truncated/timed-out frames, and unauthorized peers; socket modes and typed caller
+payloads are asserted. `tox -e all` passed: Ruff clean; unit `590 passed, 1 skipped`; E2E `166 passed,
+26 skipped`.
+
+Deployment note: framing is intentionally fail-closed and incompatible with the old helper process.
+For this release, rerun `setup.sh` and restart `pihealth-helper.service` and `pi-health.service`
+together rather than applying the update through the web UI.
 
 ## P1 — Correctness, data safety, availability
 
@@ -82,15 +106,31 @@ Files: `catalog_manager.py` (~534-550), `stack_manager.py` (~255-256).
 Tasks: stop/remove only the target service (not the whole stack); abort the compose edit if the
 stop fails. Test a 2+ service stack: removing one leaves the rest running.
 
+Completed: 2026-06-27. Catalog removal now calls service-scoped `docker compose stop <service>`.
+Transport and nonzero failures return `409` before backup or compose mutation. Coverage uses a
+two-service stack, asserts the exact Compose command, verifies the unrelated service remains in the
+file, and verifies stop failure leaves both services and backup state untouched.
+
 ### STK-001 — Stack delete requires successful compose down
 Files: `stack_manager.py` (~423-446).
 Tasks: require a successful `docker compose down` before deleting the directory; surface failure to
 the UI; add an explicit, separately confirmed force-delete path. Test the down-fails case.
 
+Completed: 2026-06-27. Stack deletion now requires a successful Compose result. Failure returns
+`409` with the command detail and `force_delete_available`, preserving the stack directory and
+skipping backup/deletion. Force deletion requires both `force: true` and an exact `confirm_name`;
+the legacy stacks UI presents a second destructive confirmation before sending that request.
+
 ### MFS-001 — MergerFS commands return real success/failure
 Files: `storage_plugins/mergerfs_plugin.py` (~391-413, 451-589).
 Tasks: return a real `CommandResult` from each delegated mount/unmount/balance; propagate helper /
 non-zero / timeout / missing-binary failures so SSE no longer emits `success: true` on failure.
+
+Completed: 2026-06-27. Mount, unmount, and balance generators now return their actual
+`CommandResult`; helper errors, nonzero exits, 60-second mount/unmount timeouts, one-hour balance
+timeout, and missing binaries return failure. SSE completion events preserve the underlying `error`.
+Affected suites passed `125` tests. Full `tox -e all` passed: Ruff clean; unit `599 passed, 1
+skipped`; E2E `166 passed, 26 skipped`.
 
 ### SRA-001 — SnapRAID mounted-source preflight (fail closed)
 Files: `storage_plugins/snapraid_plugin.py` (~556-565, 785-821).
@@ -126,6 +166,15 @@ install, storage plugin install, mounts config, share config** modals (text fiel
 Tasks: hold `onClose` in a ref and run focus setup on `[]` (one central fix); OR require stable
 callbacks. Add a browser test that **types multiple characters** and asserts focus stays in field
 (current tests use `.fill()` and miss this).
+
+Completed: 2026-06-27. `ModalOverlay` keeps the latest close callback in a ref while installing its
+focus/keyboard lifecycle once per mount. The catalog parity suite now enters a value with sequential
+keypresses and asserts both retained focus and the complete typed value.
+
+Validation: `npm --prefix frontend run check` and production build passed (98.12 kB gzip). Full
+`tox -e all` passed: Ruff clean; unit `577 passed, 1 skipped`; E2E `166 passed, 26 skipped`. The gate
+also corrected the legacy System renderer/test to preserve rollback when an optional disk metric is
+`null`.
 
 ### SYS-001 — `/api/stats` tolerates missing optional disks
 Files: `app.py` (~393-400). Also unblocks the v2 **dashboard** and **System** page, which both read

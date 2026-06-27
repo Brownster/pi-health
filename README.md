@@ -92,20 +92,24 @@ Access the dashboard at `http://<host-ip>:8002`
 
 ## Quick Start
 
-1. Create `/etc/pi-health.env` with your admin credentials:
+1. Generate a password hash (enter the password at the prompt):
+   ```bash
+   python3 scripts/generate_password_hash.py
+   ```
+2. Create `/etc/pi-health.env` with the generated hash:
    ```bash
    sudo tee /etc/pi-health.env >/dev/null <<'EOF'
    PIHEALTH_USER=admin
-   PIHEALTH_PASSWORD=change-me
+   PIHEALTH_PASSWORD_HASH=replace-with-generated-hash
    EOF
    ```
-2. Install and start Pi-Health:
+3. Install and start Pi-Health:
    ```bash
    ./start.sh
    ```
-3. Log in at `http://<host-ip>:8002` (defaults to `admin` / `pihealth` if you skip step 1).
-4. Go to **Settings > Plugins** and enable the storage/share plugins you need.
-5. Use **Disks**, **Storage**, **Apps**, and **Tools** to configure mounts, pools, apps, and CopyParty.
+4. Log in at `http://<host-ip>:8002`. The service refuses to start without an explicit hashed credential.
+5. Go to **Settings > Plugins** and enable the storage/share plugins you need.
+6. Use **Disks**, **Storage**, **Apps**, and **Tools** to configure mounts, pools, apps, and CopyParty.
 
 ### Example: Split VPN and Non-VPN Stacks
 
@@ -145,13 +149,17 @@ DISK_PATH_2=/mnt/downloads
 # Docker stack directory
 STACKS_PATH=/opt/stacks
 
-# Authentication (default: admin/pihealth)
+# Authentication (required; plaintext passwords are rejected)
 PIHEALTH_USER=admin
-PIHEALTH_PASSWORD=your_secure_password
+PIHEALTH_PASSWORD_HASH='scrypt:32768:8:1$generated-salt$generated-hash'
 
-# Multi-user support
-PIHEALTH_USERS=admin:password1,user2:password2
+# Multi-user support (each value must be a Werkzeug password hash)
+PIHEALTH_USERS='admin:scrypt:32768:8:1$salt1$hash1,user2:scrypt:32768:8:1$salt2$hash2'
 ```
+
+Generate each hash with the command in Quick Start. Quote values containing `$` when setting them
+in an interactive shell. Remove the deprecated `PIHEALTH_PASSWORD` variable; startup rejects it
+even when a hash is also configured. Five failed logins from one client trigger a 60-second lockout.
 
 ### Storage Plugin Configuration
 

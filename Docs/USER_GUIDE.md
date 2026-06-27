@@ -76,7 +76,7 @@ services:
       - /path/to/app/config:/config              # Pi-Health's own config
     environment:
       - PIHEALTH_USER=admin
-      - PIHEALTH_PASSWORD=your_secure_password
+      - PIHEALTH_PASSWORD_HASH='scrypt:32768:8:1$generated-salt$generated-hash'
       - STACKS_PATH=/opt/stacks
       - DISK_PATH=/mnt
     restart: unless-stopped
@@ -91,7 +91,7 @@ services:
     *   `/mnt`: It's recommended to mount all your physical disks under `/mnt` on your host. This allows Pi-Health to manage them.
 *   **Environment Variables:**
     *   `PIHEALTH_USER`: Set your initial administrator username.
-    *   `PIHEALTH_PASSWORD`: **Set a strong, unique password for your administrator account.**
+    *   `PIHEALTH_PASSWORD_HASH`: A Werkzeug scrypt or PBKDF2 hash of a strong, unique password. Plaintext passwords are rejected.
     *   `STACKS_PATH`: Must match the volume mount for your stacks.
 
 Run `docker-compose up -d` in the same directory as your `docker-compose.yml` file to start the application.
@@ -111,16 +111,26 @@ Run these quick checks before you move the Pi to its final home.
 
 Once Pi-Health is running, open your web browser and navigate to `http://<your-server-ip>:80`.
 
-*   **Initial Login:** You will be prompted for a username and password. Use the credentials you set in the `PIHEALTH_USER` and `PIHEALTH_PASSWORD` environment variables.
+*   **Initial Login:** You will be prompted for a username and password. Use the username from `PIHEALTH_USER` and the password used to create `PIHEALTH_PASSWORD_HASH`.
 
-*   **User Management:** Pi-Health supports multiple users. You can configure users by setting the `PIHEALTH_USERS` environment variable in your `docker-compose.yml` file. The format is a comma-separated list of `username:password` pairs.
+*   **Generate a hash:** Run the following from the project environment, then place the output in `/etc/pi-health.env`:
+
+    ```bash
+    python3 scripts/generate_password_hash.py
+    ```
+
+*   **User Management:** Pi-Health supports multiple users through `PIHEALTH_USERS`. The format is a comma-separated list of `username:password_hash` pairs. Every password must be a Werkzeug scrypt or PBKDF2 hash.
 
     **Example:**
     ```yaml
     environment:
-      - PIHEALTH_USERS=admin:strong_password,user2:another_password
+      - PIHEALTH_USERS='admin:scrypt:32768:8:1$salt1$hash1,user2:scrypt:32768:8:1$salt2$hash2'
     ```
-    If you update this variable, you will need to restart the Pi-Health container for the changes to take effect.
+    If you update this variable, restart the Pi-Health service for the changes to take effect.
+
+    The service refuses to start without valid hashed credentials. Five failed login attempts from
+    one client cause a 60-second lockout. Remove the old `PIHEALTH_PASSWORD` variable during
+    migration; the service rejects plaintext configuration even when a hash is present.
 
 ### 4. Networking: VPN & Tailscale
 
