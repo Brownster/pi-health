@@ -48,7 +48,7 @@
             "description": "Parity level (1=parity, 2=2-parity, etc.)"
           }
         },
-        "required": ["id", "name", "path", "role"]
+        "required": ["id", "name", "path", "uuid", "role"]
       }
     },
     "excludes": {

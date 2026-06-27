@@ -5,6 +5,7 @@ Manages SnapRAID configuration, sync, scrub, and recovery.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import subprocess
@@ -20,6 +21,10 @@ from storage_plugins.snapraid_logtags import (
     apply_tag_event,
     LogTagParseResult,
 )
+
+
+logger = logging.getLogger(__name__)
+UUID_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
 class SnapRAIDPlugin(StoragePlugin):
@@ -164,10 +169,32 @@ class SnapRAIDPlugin(StoragePlugin):
         if len(names) != len(set(names)):
             errors.append("Drive names must be unique")
 
+        try:
+            mergerfs_mount_points = self._get_mergerfs_mount_points()
+        except (OSError, ValueError) as exc:
+            errors.append(f"Unable to validate MergerFS pool paths: {exc}")
+            mergerfs_mount_points = []
+
         for drive in drives:
             path = drive.get("path", "")
             if not path.startswith("/mnt/"):
                 errors.append(f"Drive path must be under /mnt/: {path}")
+            uuid = drive.get("uuid", "")
+            if not isinstance(uuid, str) or not UUID_PATTERN.fullmatch(uuid):
+                errors.append(f"Drive UUID is required for mounted-source validation: {path}")
+            normalized_path = os.path.realpath(os.path.normpath(path))
+            for mount_point in mergerfs_mount_points:
+                try:
+                    inside_pool = os.path.commonpath(
+                        [normalized_path, mount_point]
+                    ) == mount_point
+                except ValueError:
+                    inside_pool = False
+                if inside_pool:
+                    errors.append(
+                        f"SnapRAID path is inside MergerFS pool {mount_point}: {path}"
+                    )
+                    break
 
         parity_levels = [d.get("parity_level", 1) for d in parity_drives]
         if parity_levels:
@@ -177,6 +204,26 @@ class SnapRAIDPlugin(StoragePlugin):
                     break
 
         return errors
+
+    def _get_mergerfs_mount_points(self) -> list[str]:
+        path = os.path.join(self.config_dir, "mergerfs.json")
+        if not os.path.exists(path):
+            return []
+        with open(path) as handle:
+            config = json.load(handle)
+        if not isinstance(config, dict):
+            raise ValueError("configuration must be an object")
+        pools = config.get("pools", [])
+        if not isinstance(pools, list):
+            raise ValueError("pools must be a list")
+        mount_points = []
+        for pool in pools:
+            if not isinstance(pool, dict):
+                continue
+            mount_point = pool.get("mount_point")
+            if isinstance(mount_point, str) and mount_point.startswith("/mnt/"):
+                mount_points.append(os.path.realpath(os.path.normpath(mount_point)))
+        return mount_points
 
     def apply_config(self) -> CommandResult:
         config = self.get_config()
@@ -479,16 +526,40 @@ class SnapRAIDPlugin(StoragePlugin):
 
         args = cmd_map[command_id]
 
-        if command_id == "sync" and not params.get("force", False):
+        if command_id == "sync":
+            mount_errors = self._check_mounted_sources(self.get_config())
+            if mount_errors:
+                error = "Mounted-source preflight failed: " + "; ".join(mount_errors)
+                yield f"WARNING: {error}"
+                return CommandResult(success=False, message="", error=error)
+
             diff_check = self._check_diff_thresholds()
-            if diff_check:
-                yield f"WARNING: {diff_check}"
-                yield "Use force=true to override"
-                return CommandResult(
-                    success=False,
-                    message="",
-                    error=diff_check
+            if not diff_check.success:
+                force_allowed = bool(
+                    diff_check.data and diff_check.data.get("force_allowed")
                 )
+                force_requested = params.get("force") is True
+                if not force_allowed or not force_requested:
+                    yield f"WARNING: {diff_check.error}"
+                    if force_allowed:
+                        yield "Confirm the threshold override to continue"
+                    return diff_check
+
+                reason = params.get("force_reason")
+                if not isinstance(reason, str) or not reason.strip():
+                    error = "A force override reason is required"
+                    yield f"WARNING: {error}"
+                    return CommandResult(success=False, message="", error=error)
+                audit_persisted = self._record_force_override(
+                    username=params.get("_audit_user", "unknown"),
+                    reason=reason.strip(),
+                    warning=diff_check.error or "Threshold exceeded",
+                )
+                if not audit_persisted:
+                    error = "Unable to persist force override audit; sync aborted"
+                    yield f"WARNING: {error}"
+                    return CommandResult(success=False, message="", error=error)
+                yield f"WARNING: overriding safety threshold: {diff_check.error}"
 
         tag_result = LogTagParseResult()
         if helper_available():
@@ -708,7 +779,79 @@ class SnapRAIDPlugin(StoragePlugin):
         except Exception:
             return None
 
-    def _check_diff_thresholds(self) -> Optional[str]:
+    def _read_mount_sources(self) -> dict[str, dict[str, str]]:
+        sources = {}
+        with open("/proc/self/mountinfo") as handle:
+            for line in handle:
+                fields = line.rstrip().split()
+                try:
+                    separator = fields.index("-")
+                except ValueError:
+                    continue
+                if len(fields) <= separator + 2:
+                    continue
+                mount_point = self._decode_mountinfo_path(fields[4])
+                source = self._decode_mountinfo_path(fields[separator + 2])
+                sources[os.path.normpath(mount_point)] = {
+                    "source": os.path.realpath(source),
+                    "device_id": fields[2],
+                }
+        return sources
+
+    @staticmethod
+    def _decode_mountinfo_path(value: str) -> str:
+        for escaped, decoded in (
+            ("\\040", " "),
+            ("\\011", "\t"),
+            ("\\012", "\n"),
+            ("\\134", "\\"),
+        ):
+            value = value.replace(escaped, decoded)
+        return value
+
+    def _resolve_uuid_identity(self, uuid: str) -> dict[str, str] | None:
+        if not UUID_PATTERN.fullmatch(uuid):
+            return None
+        uuid_path = os.path.join("/dev/disk/by-uuid", uuid)
+        try:
+            source = os.path.realpath(uuid_path)
+            stat = os.stat(source)
+        except OSError:
+            return None
+        return {
+            "source": source,
+            "device_id": f"{os.major(stat.st_rdev)}:{os.minor(stat.st_rdev)}",
+        }
+
+    def _check_mounted_sources(self, config: dict) -> list[str]:
+        try:
+            mounts = self._read_mount_sources()
+        except OSError as exc:
+            return [f"unable to read mount table: {exc}"]
+
+        errors = []
+        for drive in config.get("drives", []):
+            path = os.path.normpath(str(drive.get("path", "")))
+            mount = mounts.get(path)
+            if not mount:
+                errors.append(f"{path} is not a mounted source")
+                continue
+            uuid = drive.get("uuid")
+            expected = (
+                self._resolve_uuid_identity(uuid)
+                if isinstance(uuid, str)
+                else None
+            )
+            if not expected:
+                errors.append(f"unable to resolve configured UUID for {path}")
+                continue
+            if mount["device_id"] != expected["device_id"]:
+                errors.append(
+                    f"device identity mismatch for {path}: expected UUID {uuid}"
+                )
+        return errors
+
+    def _check_diff_thresholds(self) -> CommandResult:
         config = self.get_config()
         thresholds = config.get("thresholds", {})
         del_threshold = thresholds.get("delete_threshold", 50)
@@ -722,6 +865,15 @@ class SnapRAIDPlugin(StoragePlugin):
                 timeout=60
             )
 
+            if result.returncode != 0:
+                error = result.stderr.strip() or f"exit code {result.returncode}"
+                return CommandResult(
+                    success=False,
+                    message="",
+                    error=f"SnapRAID diff failed: {error}",
+                    data={"force_allowed": False},
+                )
+
             output = result.stdout
             removed_match = re.search(r"(\d+)\s+removed", output)
             updated_match = re.search(r"(\d+)\s+updated", output)
@@ -730,21 +882,71 @@ class SnapRAIDPlugin(StoragePlugin):
             updated = int(updated_match.group(1)) if updated_match else 0
 
             if removed > del_threshold:
-                return (
-                    "Delete threshold exceeded: "
-                    f"{removed} files removed (threshold: {del_threshold})"
+                return CommandResult(
+                    success=False,
+                    message="",
+                    error=(
+                        "Delete threshold exceeded: "
+                        f"{removed} files removed (threshold: {del_threshold})"
+                    ),
+                    data={"force_allowed": True},
                 )
 
             if updated > upd_threshold:
-                return (
-                    "Update threshold exceeded: "
-                    f"{updated} files changed (threshold: {upd_threshold})"
+                return CommandResult(
+                    success=False,
+                    message="",
+                    error=(
+                        "Update threshold exceeded: "
+                        f"{updated} files changed (threshold: {upd_threshold})"
+                    ),
+                    data={"force_allowed": True},
                 )
 
-        except Exception:
-            pass
+        except subprocess.TimeoutExpired:
+            return CommandResult(
+                success=False,
+                message="",
+                error="SnapRAID diff timed out",
+                data={"force_allowed": False},
+            )
+        except Exception as exc:
+            return CommandResult(
+                success=False,
+                message="",
+                error=f"SnapRAID diff failed: {exc}",
+                data={"force_allowed": False},
+            )
 
-        return None
+        return CommandResult(success=True, message="Diff safety check passed")
+
+    def _record_force_override(self, username: object, reason: str, warning: str) -> bool:
+        event = {
+            "timestamp": datetime.now().isoformat(),
+            "username": str(username or "unknown")[:128],
+            "reason": reason[:500],
+            "warning": warning[:500],
+        }
+        state = self._load_state()
+        events = state.get("force_overrides", [])
+        if not isinstance(events, list):
+            events = []
+        state["force_overrides"] = (events + [event])[-20:]
+        try:
+            temp_path = f"{self._state_path}.tmp"
+            with open(temp_path, "w") as handle:
+                json.dump(state, handle, indent=2)
+            os.replace(temp_path, self._state_path)
+        except OSError as exc:
+            logger.error("Unable to persist SnapRAID force override audit: %s", exc)
+            return False
+        logger.warning(
+            "SnapRAID threshold override by %s: %s (%s)",
+            event["username"],
+            event["reason"],
+            event["warning"],
+        )
+        return True
 
     def is_installed(self) -> bool:
         return os.path.exists(self.SNAPRAID_BIN)

@@ -280,13 +280,19 @@ SnapRAID takes a "snapshot" of your data at a point in time and calculates parit
     *   Designate one or more drives as **Parity**.
     *   Select all the drives that are part of your MergerFS pool as **Data**.
     *   Optionally, select a drive for the **Content** file (a list of all files and their checksums). It's good practice to store this on a data drive.
+    *   Use each physical drive's filesystem UUID. SnapRAID sync now verifies that every configured path is an exact mount of that UUID and rejects MergerFS pool paths.
 4.  **Save Config:** Click **"Save Config"**, then **"Apply Config"**. This will generate the `snapraid.conf` file for you.
+
+Existing `snapraid.json` files created without a `uuid` value for every drive must be updated before
+the next sync. Find the filesystem UUID in **Disks** and assign it to the matching data or parity
+entry. Do not use the unified MergerFS mount point; configure its physical branch mounts instead.
 
 #### Running Sync and Scrub
 
 *   **`snapraid sync`**: This is the most important command. It reads all your data drives and updates the parity drive with the latest changes. **You must run this regularly.**
     *   Click the **"Sync"** button on the **"Tools"** tab.
     *   The live output of the command will be streamed to the page, so you can monitor its progress. This can take a long time, especially the first time.
+    *   Sync stops if a mount/UUID check or the preliminary `diff` fails. Threshold overrides require confirmation and are recorded with the signed-in user.
 
 *   **`snapraid scrub`**: This command checks your data for "bit rot" (silent corruption) and fixes it if possible using the parity data. It's good practice to run this periodically.
     *   Click the **"Scrub"** button on the **"Tools"** tab to start a scrub job.

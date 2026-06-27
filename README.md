@@ -188,6 +188,9 @@ SnapRAID provides parity-based backup for your data drives. Unlike RAID, it:
 **Safety Features:**
 - Delete threshold (default 50 files) - warns before large deletions
 - Update threshold (default 500 files) - warns before large changes
+- Exact mount-point and filesystem UUID verification before sync
+- Rejection of MergerFS pool paths; configure the physical branch mounts instead
+- Fail-closed diff checks with audited threshold overrides
 - Recovery status dashboard
 
 ### MergerFS

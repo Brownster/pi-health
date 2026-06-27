@@ -4,10 +4,15 @@ Stack Manager - Dockge-inspired stack management for pi-health
 Manages Docker Compose stacks as directories containing compose.yaml files.
 """
 import json
+import fcntl
 import os
 import re
 import shutil
+import stat
 import subprocess
+import tempfile
+import threading
+from contextlib import contextmanager
 from datetime import datetime
 from flask import Blueprint, jsonify, request, Response
 import yaml
@@ -22,6 +27,87 @@ STACK_FILENAMES = ['compose.yaml', 'compose.yml', 'docker-compose.yaml', 'docker
 STACK_NAME_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9._-]*$')
 BACKUP_DIR = os.getenv('STACK_BACKUP_DIR', os.path.join(STACKS_PATH, '.backups'))
 BACKUP_NAME_RE = re.compile(r'^compose-\d{14}\.ya?ml$')
+_stack_lock_state = threading.local()
+
+
+def _stack_lock_path(name):
+    lock_dir = os.path.join(STACKS_PATH, '.locks')
+    os.makedirs(lock_dir, mode=0o700, exist_ok=True)
+    return os.path.join(lock_dir, f'{name}.lock')
+
+
+@contextmanager
+def stack_lock(name):
+    """Hold a reentrant, inter-process lock for one stack."""
+    valid, error = validate_stack_name(name)
+    if not valid:
+        raise ValueError(error)
+
+    lock_path = os.path.abspath(_stack_lock_path(name))
+    current_pid = os.getpid()
+    if getattr(_stack_lock_state, 'pid', None) != current_pid:
+        _stack_lock_state.pid = current_pid
+        _stack_lock_state.held_locks = {}
+    held_locks = getattr(_stack_lock_state, 'held_locks', None)
+    if held_locks is None:
+        held_locks = {}
+        _stack_lock_state.held_locks = held_locks
+
+    held = held_locks.get(lock_path)
+    if held:
+        held['depth'] += 1
+        try:
+            yield
+        finally:
+            held['depth'] -= 1
+        return
+
+    lock_file = open(lock_path, 'a+')
+    try:
+        os.chmod(lock_path, 0o600)
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        held_locks[lock_path] = {'file': lock_file, 'depth': 1}
+        try:
+            yield
+        finally:
+            held_locks.pop(lock_path, None)
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+    finally:
+        lock_file.close()
+
+
+def atomic_write_text(path, content, mode=0o644):
+    """Durably replace a text file without exposing partial content."""
+    directory = os.path.dirname(os.path.abspath(path))
+    os.makedirs(directory, exist_ok=True)
+    if os.path.exists(path):
+        mode = stat.S_IMODE(os.stat(path).st_mode)
+
+    fd, temp_path = tempfile.mkstemp(
+        dir=directory,
+        prefix=f'.{os.path.basename(path)}.',
+        suffix='.tmp',
+    )
+    try:
+        os.fchmod(fd, mode)
+        with os.fdopen(fd, 'w') as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, path)
+        directory_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    except Exception:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
+        raise
 
 
 def validate_stack_name(name):
@@ -187,27 +273,29 @@ def get_stack_status(stack_name):
 
 def backup_stack(stack_name):
     """Create a backup of a stack's compose file."""
-    ensure_backup_directory()
-    stack_dir = get_stack_path(stack_name)
-    compose_file = find_compose_file(stack_dir)
+    with stack_lock(stack_name):
+        ensure_backup_directory()
+        stack_dir = get_stack_path(stack_name)
+        compose_file = find_compose_file(stack_dir)
 
-    if not compose_file:
-        return None
+        if not compose_file:
+            return None
 
-    timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
-    backup_subdir = os.path.join(BACKUP_DIR, stack_name)
-    os.makedirs(backup_subdir, exist_ok=True)
+        timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+        backup_subdir = os.path.join(BACKUP_DIR, stack_name)
+        os.makedirs(backup_subdir, exist_ok=True)
 
-    backup_file = os.path.join(backup_subdir, f"compose-{timestamp}.yaml")
-    shutil.copy(compose_file, backup_file)
+        backup_file = os.path.join(backup_subdir, f"compose-{timestamp}.yaml")
+        with open(compose_file) as handle:
+            atomic_write_text(backup_file, handle.read())
 
-    # Keep only the 10 most recent backups per stack
-    backups = sorted([f for f in os.listdir(backup_subdir) if f.startswith('compose-')])
-    if len(backups) > 10:
-        for old_backup in backups[:-10]:
-            os.remove(os.path.join(backup_subdir, old_backup))
+        # Keep only the 10 most recent backups per stack
+        backups = sorted([f for f in os.listdir(backup_subdir) if f.startswith('compose-')])
+        if len(backups) > 10:
+            for old_backup in backups[:-10]:
+                os.remove(os.path.join(backup_subdir, old_backup))
 
-    return backup_file
+        return backup_file
 
 
 def list_backups(stack_name):
@@ -236,58 +324,59 @@ def validate_compose_yaml(content):
 
 def run_compose_command(stack_name, command, detach=True, service=None):
     """Run a docker compose command for a stack."""
-    stack_dir = get_stack_path(stack_name)
-    compose_file = find_compose_file(stack_dir)
+    with stack_lock(stack_name):
+        stack_dir = get_stack_path(stack_name)
+        compose_file = find_compose_file(stack_dir)
 
-    if not compose_file:
-        return None, "Stack not found"
+        if not compose_file:
+            return None, "Stack not found"
 
-    cmd = ['docker', 'compose', '-f', os.path.basename(compose_file)]
+        cmd = ['docker', 'compose', '-f', os.path.basename(compose_file)]
 
-    if service:
-        valid_service, service_error = validate_stack_name(service)
-        if not valid_service:
-            return None, f"Invalid service name: {service_error}"
-        if command != 'stop':
-            return None, "Service targeting is only supported for stop"
-
-    if command == 'up':
-        cmd.extend(['up', '-d'] if detach else ['up'])
-    elif command == 'down':
-        cmd.append('down')
-    elif command == 'restart':
-        cmd.append('restart')
-    elif command == 'pull':
-        cmd.append('pull')
-    elif command == 'stop':
-        cmd.append('stop')
         if service:
-            cmd.append(service)
-    elif command == 'start':
-        cmd.append('start')
-    else:
-        return None, f"Unknown command: {command}"
+            valid_service, service_error = validate_stack_name(service)
+            if not valid_service:
+                return None, f"Invalid service name: {service_error}"
+            if command != 'stop':
+                return None, "Service targeting is only supported for stop"
 
-    try:
-        result = subprocess.run(
-            cmd,
-            cwd=stack_dir,
-            capture_output=True,
-            text=True,
-            timeout=300  # 5 minute timeout for pull operations
-        )
+        if command == 'up':
+            cmd.extend(['up', '-d'] if detach else ['up'])
+        elif command == 'down':
+            cmd.append('down')
+        elif command == 'restart':
+            cmd.append('restart')
+        elif command == 'pull':
+            cmd.append('pull')
+        elif command == 'stop':
+            cmd.append('stop')
+            if service:
+                cmd.append(service)
+        elif command == 'start':
+            cmd.append('start')
+        else:
+            return None, f"Unknown command: {command}"
 
-        return {
-            'success': result.returncode == 0,
-            'stdout': result.stdout,
-            'stderr': result.stderr,
-            'returncode': result.returncode
-        }, None
+        try:
+            result = subprocess.run(
+                cmd,
+                cwd=stack_dir,
+                capture_output=True,
+                text=True,
+                timeout=300  # 5 minute timeout for pull operations
+            )
 
-    except subprocess.TimeoutExpired:
-        return None, "Command timed out"
-    except Exception as e:
-        return None, str(e)
+            return {
+                'success': result.returncode == 0,
+                'stdout': result.stdout,
+                'stderr': result.stderr,
+                'returncode': result.returncode
+            }, None
+
+        except subprocess.TimeoutExpired:
+            return None, "Command timed out"
+        except Exception as e:
+            return None, str(e)
 
 
 # ============================================================================
@@ -382,11 +471,6 @@ def api_create_stack(name):
     if not valid:
         return jsonify({'error': error}), 400
 
-    stack_dir = get_stack_path(name)
-
-    if os.path.exists(stack_dir):
-        return jsonify({'error': 'Stack already exists'}), 409
-
     data = request.get_json() or {}
     compose_content = data.get('compose_content', '')
     env_content = data.get('env_content', '')
@@ -406,27 +490,30 @@ services:
         if error:
             return jsonify({'error': f'Compose YAML invalid: {error}'}), 400
 
-    try:
-        os.makedirs(stack_dir, exist_ok=True)
-
-        # Write compose file
-        compose_file = os.path.join(stack_dir, 'compose.yaml')
-        with open(compose_file, 'w') as f:
-            f.write(compose_content)
-
-        # Write .env file if provided
-        if env_content:
-            env_file = os.path.join(stack_dir, '.env')
-            with open(env_file, 'w') as f:
-                f.write(env_content)
-
-        return jsonify({'status': 'created', 'name': name, 'path': stack_dir})
-
-    except Exception as e:
-        # Cleanup on failure
+    stack_dir = get_stack_path(name)
+    with stack_lock(name):
         if os.path.exists(stack_dir):
-            shutil.rmtree(stack_dir, ignore_errors=True)
-        return jsonify({'error': str(e)}), 500
+            return jsonify({'error': 'Stack already exists'}), 409
+
+        try:
+            os.makedirs(stack_dir)
+            atomic_write_text(
+                os.path.join(stack_dir, 'compose.yaml'),
+                compose_content,
+            )
+            if env_content:
+                atomic_write_text(
+                    os.path.join(stack_dir, '.env'),
+                    env_content,
+                    mode=0o600,
+                )
+
+            return jsonify({'status': 'created', 'name': name, 'path': stack_dir})
+
+        except Exception as e:
+            if os.path.exists(stack_dir):
+                shutil.rmtree(stack_dir, ignore_errors=True)
+            return jsonify({'error': str(e)}), 500
 
 
 @stack_manager.route('/api/stacks/<name>', methods=['DELETE'])
@@ -437,42 +524,41 @@ def api_delete_stack(name):
     if not valid:
         return jsonify({'error': error}), 400
 
-    stack_dir = get_stack_path(name)
-
-    if not os.path.exists(stack_dir):
-        return jsonify({'error': 'Stack not found'}), 404
-
     data = request.get_json(silent=True) or {}
     force_requested = data.get('force') is True
     if force_requested and data.get('confirm_name') != name:
         return jsonify({'error': 'Force delete requires exact stack name confirmation'}), 400
 
-    down_result, down_error = run_compose_command(name, 'down')
-    down_succeeded = bool(
-        not down_error
-        and down_result
-        and down_result.get('success')
-    )
-    if not down_succeeded and not force_requested:
-        detail = down_error or (down_result or {}).get('stderr') or 'Compose down failed'
-        return jsonify({
-            'error': f'Cannot delete stack: {detail}',
-            'down_result': down_result,
-            'force_delete_available': True,
-        }), 409
+    stack_dir = get_stack_path(name)
+    with stack_lock(name):
+        if not os.path.exists(stack_dir):
+            return jsonify({'error': 'Stack not found'}), 404
 
-    # Backup before deletion
-    backup_stack(name)
+        down_result, down_error = run_compose_command(name, 'down')
+        down_succeeded = bool(
+            not down_error
+            and down_result
+            and down_result.get('success')
+        )
+        if not down_succeeded and not force_requested:
+            detail = down_error or (down_result or {}).get('stderr') or 'Compose down failed'
+            return jsonify({
+                'error': f'Cannot delete stack: {detail}',
+                'down_result': down_result,
+                'force_delete_available': True,
+            }), 409
 
-    try:
-        shutil.rmtree(stack_dir)
-        return jsonify({
-            'status': 'deleted',
-            'name': name,
-            'forced': force_requested and not down_succeeded,
-        })
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        backup_stack(name)
+
+        try:
+            shutil.rmtree(stack_dir)
+            return jsonify({
+                'status': 'deleted',
+                'name': name,
+                'forced': force_requested and not down_succeeded,
+            })
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
 
 
 @stack_manager.route('/api/stacks/<name>/compose', methods=['GET'])
@@ -505,12 +591,6 @@ def api_save_compose(name):
     if not valid:
         return jsonify({'error': error}), 400
 
-    stack_dir = get_stack_path(name)
-    compose_file = find_compose_file(stack_dir)
-
-    if not compose_file:
-        return jsonify({'error': 'Stack not found'}), 404
-
     data = request.get_json()
     if not data or 'content' not in data:
         return jsonify({'error': 'No content provided'}), 400
@@ -519,15 +599,17 @@ def api_save_compose(name):
     if error:
         return jsonify({'error': f'Compose YAML invalid: {error}'}), 400
 
-    # Backup before saving
-    backup_stack(name)
-
-    try:
-        with open(compose_file, 'w') as f:
-            f.write(data['content'])
-        return jsonify({'status': 'saved'})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    stack_dir = get_stack_path(name)
+    with stack_lock(name):
+        compose_file = find_compose_file(stack_dir)
+        if not compose_file:
+            return jsonify({'error': 'Stack not found'}), 404
+        try:
+            backup_stack(name)
+            atomic_write_text(compose_file, data['content'])
+            return jsonify({'status': 'saved'})
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
 
 
 @stack_manager.route('/api/stacks/<name>/env', methods=['GET'])
@@ -560,23 +642,20 @@ def api_save_env(name):
     if not valid:
         return jsonify({'error': error}), 400
 
-    stack_dir = get_stack_path(name)
-
-    if not os.path.exists(stack_dir):
-        return jsonify({'error': 'Stack not found'}), 404
-
     data = request.get_json()
     if not data or 'content' not in data:
         return jsonify({'error': 'No content provided'}), 400
 
-    env_file = os.path.join(stack_dir, '.env')
-
-    try:
-        with open(env_file, 'w') as f:
-            f.write(data['content'])
-        return jsonify({'status': 'saved'})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    stack_dir = get_stack_path(name)
+    with stack_lock(name):
+        if not os.path.exists(stack_dir):
+            return jsonify({'error': 'Stack not found'}), 404
+        env_file = os.path.join(stack_dir, '.env')
+        try:
+            atomic_write_text(env_file, data['content'], mode=0o600)
+            return jsonify({'status': 'saved'})
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
 
 
 @stack_manager.route('/api/stacks/<name>/backups', methods=['GET'])
@@ -634,26 +713,26 @@ def api_restore_backup(name):
     if not os.path.exists(backup_path):
         return jsonify({'error': 'Backup not found'}), 404
 
-    stack_dir = get_stack_path(name)
-    compose_file = find_compose_file(stack_dir)
-    if not compose_file:
-        return jsonify({'error': 'Stack not found'}), 404
+    with stack_lock(name):
+        stack_dir = get_stack_path(name)
+        compose_file = find_compose_file(stack_dir)
+        if not compose_file:
+            return jsonify({'error': 'Stack not found'}), 404
 
-    try:
-        with open(backup_path, 'r') as f:
-            content = f.read()
+        try:
+            with open(backup_path, 'r') as f:
+                content = f.read()
 
-        error = validate_compose_yaml(content)
-        if error:
-            return jsonify({'error': f'Compose YAML invalid: {error}'}), 400
+            error = validate_compose_yaml(content)
+            if error:
+                return jsonify({'error': f'Compose YAML invalid: {error}'}), 400
 
-        backup_stack(name)
-        with open(compose_file, 'w') as f:
-            f.write(content)
+            backup_stack(name)
+            atomic_write_text(compose_file, content)
 
-        return jsonify({'status': 'restored', 'backup': backup_name})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+            return jsonify({'status': 'restored', 'backup': backup_name})
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
 
 
 @stack_manager.route('/api/stacks/<name>/status', methods=['GET'])
@@ -776,46 +855,47 @@ def api_stack_logs(name):
 
 def stream_compose_command(stack_name, command):
     """Generator that streams compose command output via SSE."""
-    stack_dir = get_stack_path(stack_name)
-    compose_file = find_compose_file(stack_dir)
+    with stack_lock(stack_name):
+        stack_dir = get_stack_path(stack_name)
+        compose_file = find_compose_file(stack_dir)
 
-    if not compose_file:
-        yield f"data: {json.dumps({'error': 'Stack not found'})}\n\n"
-        return
+        if not compose_file:
+            yield f"data: {json.dumps({'error': 'Stack not found'})}\n\n"
+            return
 
-    cmd = ['docker', 'compose', '-f', os.path.basename(compose_file)]
+        cmd = ['docker', 'compose', '-f', os.path.basename(compose_file)]
 
-    if command == 'up':
-        cmd.extend(['up', '-d'])
-    elif command == 'down':
-        cmd.append('down')
-    elif command == 'pull':
-        cmd.append('pull')
-    elif command == 'restart':
-        cmd.append('restart')
-    else:
-        yield f"data: {json.dumps({'error': 'Unknown command'})}\n\n"
-        return
+        if command == 'up':
+            cmd.extend(['up', '-d'])
+        elif command == 'down':
+            cmd.append('down')
+        elif command == 'pull':
+            cmd.append('pull')
+        elif command == 'restart':
+            cmd.append('restart')
+        else:
+            yield f"data: {json.dumps({'error': 'Unknown command'})}\n\n"
+            return
 
-    try:
-        proc = subprocess.Popen(
-            cmd,
-            cwd=stack_dir,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1
-        )
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                cwd=stack_dir,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1
+            )
 
-        for line in iter(proc.stdout.readline, ''):
-            if line:
-                yield f"data: {json.dumps({'line': line.rstrip()})}\n\n"
+            for line in iter(proc.stdout.readline, ''):
+                if line:
+                    yield f"data: {json.dumps({'line': line.rstrip()})}\n\n"
 
-        proc.wait()
-        yield f"data: {json.dumps({'done': True, 'returncode': proc.returncode})}\n\n"
+            proc.wait()
+            yield f"data: {json.dumps({'done': True, 'returncode': proc.returncode})}\n\n"
 
-    except Exception as e:
-        yield f"data: {json.dumps({'error': str(e)})}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
 
 
 @stack_manager.route('/api/stacks/<name>/up/stream', methods=['GET'])

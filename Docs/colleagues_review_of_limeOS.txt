@@ -1,0 +1,405 @@
+# LimeOS Repository Review - Validated Findings
+
+Date: 2026-06-27
+
+Scope: current `main` after Phase 3, including the Flask API, privileged helper,
+storage plugins, stack/catalog management, and React v2 UI.
+
+Statuses:
+
+- CONFIRMED: current code demonstrates the issue.
+- PARTIAL: the concern is valid, but the original explanation or severity is inaccurate.
+- REJECTED: current code or upstream documentation does not support the claim.
+- ENHANCEMENT: useful product work, not a correctness defect.
+
+## Executive Decision
+
+Do not start broad feature work before the P0 and P1 correctness items below are
+closed. The existing automated suite passes, but it does not cover several destructive
+failure paths. Phase 3 is functionally migrated; it is not yet production-hardened.
+
+## P0 - Security Boundary
+
+### SEC-001 - Known default administrator credentials
+
+Status: NEW, CONFIRMED
+
+`app.py:62-77` falls back to `admin` / `pihealth` when no credential environment
+variables are present. `app.py:1697-1699` listens on every interface. A missed
+deployment setting therefore exposes a known privileged login to the LAN.
+
+Required fix:
+
+1. Refuse to start without explicitly configured credentials, or generate a one-time
+   credential and require rotation.
+2. Store password hashes and compare them with a constant-time password verifier.
+3. Add login rate limiting and tests for default/missing configuration.
+
+### SEC-002 - Web-process compromise can become root compromise
+
+Status: colleague claim CONFIRMED WITH NUANCE
+
+`pihealth_helper.py:671-721` restricts systemd unit names and the startup-script path,
+but accepts arbitrary file content for those privileged targets. `setup.sh:190-212`
+places the unprivileged web user in the helper socket group and runs the helper as root.
+The filename allowlist reduces exposure but does not remove the escalation primitive.
+
+Required fix:
+
+1. Move systemd unit and startup-script templates into the helper.
+2. Accept typed, validated parameters only; never accept complete executable content.
+3. Add peer-credential checks, request-size framing, and security tests at the socket.
+
+## P1 - Correctness, Data Safety, and Availability
+
+### CAT-001 - Removing one catalog app stops the whole stack
+
+Status: NEW, CONFIRMED
+
+`catalog_manager.py:534-550` invokes the generic stack `stop` command before deleting
+one service. `stack_manager.py:255-256` maps that command to `docker compose stop`
+without a service name. Removing one app therefore stops every service in its stack,
+then leaves the remaining services stopped. The compose edit proceeds even when stop
+fails.
+
+Required fix: stop/remove only the selected service, abort the edit on command failure,
+and test a stack containing at least two running services.
+
+### STK-001 - Stack deletion ignores compose-down failure
+
+Status: NEW, CONFIRMED
+
+`stack_manager.py:423-446` ignores the result of `docker compose down` and deletes the
+stack directory anyway. A Docker failure can leave running containers with their source
+compose file removed.
+
+Required fix: require successful shutdown before deletion, return the failure to the UI,
+and provide an explicit, separately confirmed force-delete path.
+
+### MFS-001 - Failed MergerFS commands are reported as successful
+
+Status: NEW, CONFIRMED
+
+`storage_plugins/mergerfs_plugin.py:391-413` always returns a successful
+`CommandResult` after delegating mount, unmount, or balance. The delegated methods only
+yield error text and do not return success state (`storage_plugins/mergerfs_plugin.py:451-589`).
+The SSE API consequently emits `success: true` after helper or subprocess failure.
+
+Required fix: return a `CommandResult` from each delegated operation and add helper,
+non-zero exit, timeout, and missing-binary tests.
+
+### SRA-001 - SnapRAID lacks an explicit mounted-disk preflight
+
+Status: colleague claim PARTIAL
+
+`storage_plugins/snapraid_plugin.py:556-565` runs only diff-threshold checks before sync.
+`storage_plugins/snapraid_plugin.py:785-821` ignores diff failures and exceptions, which
+allows sync to continue without a completed safety check. SnapRAID itself refuses a
+fully missing disk unless `--force-empty` is supplied, and this code does not supply it,
+so the original claim that parity will simply be wiped is overstated. An explicit
+mount/source/UUID preflight remains appropriate defence in depth.
+
+Required fix: verify every configured data, content, and parity path is a mounted source
+with the expected device identity; fail closed if diff cannot run; make force override
+an explicit audited action.
+
+### SRA-002 - SnapRAID can be configured against a MergerFS pool
+
+Status: colleague claim CONFIRMED
+
+SnapRAID validation only requires paths under `/mnt/`
+(`storage_plugins/snapraid_plugin.py:167-170`). It does not cross-check MergerFS mount
+points against raw branches. The UI/API can therefore accept the pooled path as a data
+disk.
+
+Required fix: add cross-plugin validation and reject any SnapRAID data/parity/content
+path that equals or sits below a configured MergerFS pool mount point.
+
+### CAT-002 - Catalog install can block a request for five minutes
+
+Status: colleague claim CONFIRMED
+
+`catalog_manager.py:461-468` starts Compose synchronously when requested.
+`stack_manager.py:262-279` allows the subprocess to occupy the request worker for up to
+300 seconds.
+
+Required fix: make install a configuration transaction, then launch via a job/stream
+endpoint with an operation ID. Do not retry an interrupted stream by launching the same
+operation a second time.
+
+### STK-002 - Stack files and Docker operations have race windows
+
+Status: colleague claim CONFIRMED
+
+Compose and `.env` writes in `stack_manager.py:368-550` are unlocked and mostly
+non-atomic. Catalog writes are atomic but share no lock with stack edits or Compose
+commands (`catalog_manager.py:120-135`). Concurrent save/install/restore/action requests
+can overwrite each other or run against partially coordinated state.
+
+Required fix: add a per-stack inter-process lock and use atomic writes for compose,
+environment, and restore operations. Hold the same lock across backup/edit/replace and
+across conflicting Docker operations.
+
+### STK-003 - Catalog rewrites destroy human-authored YAML representation
+
+Status: colleague claim CONFIRMED
+
+`catalog_manager.py:107-135` parses with PyYAML and serializes with `yaml.dump`, which
+does not preserve comments, quoting, anchors, or formatting.
+
+Required fix: either use round-trip YAML for catalog mutations or stop mutating compose
+files structurally and generate managed override files.
+
+### CAT-003 - Catalog drops valid top-level Compose sections
+
+Status: colleague claim CONFIRMED
+
+`catalog_manager.py:431-443` merges only `networks` and `volumes`. Catalog templates
+cannot carry top-level `configs`, `secrets`, or future Compose sections into the target.
+
+Required fix: define and validate the supported template schema, then merge all allowed
+top-level sections with explicit collision behavior.
+
+### DSK-001 - Unmount has no dependent-workload safety check
+
+Status: NEW; colleague runtime-drive concern PARTIAL
+
+`disk_manager.py:483-526` unmounts any authenticated `/mnt/...` target without checking
+containers, shares, pools, or SnapRAID paths. A clean unmount can expose the underlying
+directory while workloads remain active. An abrupt USB disconnect usually leaves a
+failed/stale mounted filesystem rather than automatically revealing the directory, so
+the original runtime explanation is not generally accurate.
+
+Required fix: build a dependency check, stop or block affected workloads, verify the
+mount state after the operation, and protect designated media mount points from direct
+unmount without an explicit force flow.
+
+### UI-001 - Inline modal callbacks reset focus while editing
+
+Status: NEW, CONFIRMED
+
+`frontend/src/components/ui/modal-overlay.tsx:20-68` reruns its focus-management effect
+whenever `onClose` changes. Catalog, mounts, shares, and plugin install pass a new inline
+callback on every render, for example `frontend/src/pages/catalog-page.tsx:312-379`.
+Typing changes state, rerenders the parent, tears down the effect, restores focus outside
+the dialog, and refocuses the first modal control.
+
+Required fix: store the latest close handler in a ref or require stable callbacks; add a
+browser test that types multiple characters and asserts focus remains in the field.
+
+### SYS-001 - An absent secondary disk breaks the whole stats endpoint
+
+Status: NEW, CONFIRMED
+
+`app.py:393-400` calls `psutil.disk_usage('/mnt/backup')` without handling a missing or
+unmounted default path. `/api/stats` then returns 500, hiding otherwise valid CPU,
+memory, primary-disk, and network metrics.
+
+Required fix: collect each optional metric independently and return `null` plus a scoped
+warning when one source is unavailable.
+
+### API-001 - State-changing stream endpoints use GET
+
+Status: NEW, CONFIRMED
+
+`stack_manager.py:792-865` starts, stops, pulls, and restarts stacks from GET endpoints.
+This violates HTTP semantics, complicates CSRF controls, and permits crawlers,
+prefetchers, or a top-level authenticated navigation to trigger operations.
+
+Required fix: create operations with POST plus CSRF protection, then stream a read-only
+operation resource by ID with GET.
+
+## P2 - Reliability and Product Gaps
+
+### STK-004 - Compose up leaves removed services as orphans
+
+Status: colleague claim CONFIRMED
+
+`stack_manager.py:237-268` and `stack_manager.py:748-786` run `up -d` without
+`--remove-orphans`. Add the flag only after reviewing whether LimeOS must preserve
+intentionally external services.
+
+### STK-005 - Duplicate compose filenames are silently resolved by priority
+
+Status: colleague claim CONFIRMED
+
+`stack_manager.py:20-60` returns the first matching filename. Detect multiple candidates
+and block edits/actions until the user resolves the ambiguity.
+
+### STK-006 - Status polling spawns one Compose process per stack
+
+Status: colleague claim CONFIRMED
+
+`stack_manager.py:296-305` calls `docker compose ps` sequentially for every stack.
+`frontend/src/pages/stacks-page.tsx:680-693` polls repeatedly. Cache a single Docker
+snapshot or query the Docker API, and prevent overlapping polls.
+
+### UI-002 - API clients discard server error details
+
+Status: NEW, CONFIRMED
+
+`frontend/src/lib/api.ts:18-20` replaces JSON error bodies with only status and URL.
+Users lose validation details and recovery guidance. Parse bounded JSON/text error
+payloads and preserve a stable error code and message.
+
+### UI-003 - Some plugin failures are silently presented as complete data
+
+Status: NEW, CONFIRMED
+
+Mount and share loaders catch each plugin request and omit failures
+(`frontend/src/pages/mounts-page.tsx:105-123`,
+`frontend/src/pages/shares-page.tsx:77-94`). Show partial-data warnings and fetch plugin
+details concurrently with bounded fan-out.
+
+### UI-004 - Mobile navigation is not a complete modal drawer
+
+Status: NEW, CONFIRMED
+
+`frontend/src/components/layout/app-shell.tsx:60-78,173-195` locks scrolling and handles
+Escape but does not move/trap/restore focus, mark the background inert, or contain
+overscroll. The shell also lacks a skip link to `main`.
+
+### UI-005 - Service links force insecure HTTP
+
+Status: NEW, CONFIRMED
+
+Dashboard and container links hardcode `http://`
+(`frontend/src/pages/dashboard-home.tsx:99-105`,
+`frontend/src/pages/containers-page.tsx:490-499,590-600`). An HTTPS deployment will
+open insecure or unreachable URLs. Derive the scheme from explicit service metadata or
+deployment configuration; protocol guessing is not reliable.
+
+### UI-006 - App Catalog cannot target or disambiguate stacks
+
+Status: NEW, CONFIRMED
+
+The backend supports `target_stack`, but `frontend/src/lib/catalog.ts:62-87` sends only
+the item and values. Installed status is global. If an app exists in multiple stacks,
+the remove API requires a target but v2 cannot provide one. Add stack selection and
+represent installations as `(app, stack)` pairs.
+
+### DSK-002 - fstab defaults lack a bounded device wait
+
+Status: colleague claim PARTIAL
+
+`disk_manager.py:409-447` defaults to `defaults,nofail` and accepts caller-supplied raw
+options. A bounded `x-systemd.device-timeout=` is useful for boot behavior, but it does
+not solve runtime disconnects. Define safe filesystem-specific presets instead of a raw
+free-form default.
+
+### CFG-001 - Runtime state lives in the source checkout
+
+Status: colleague claim CONFIRMED
+
+Examples include `app.py:29-39`, `catalog_manager.py:20-25`, and
+`backup_scheduler.py:24-25`. Move static configuration to `/etc/limeos`, mutable state
+to `/var/lib/limeos`, logs to `/var/log/limeos`, and secrets to root/service-readable
+credential storage. Provide a migration and backup compatibility plan.
+
+### ARCH-001 - Large modules now hide ownership boundaries
+
+Status: colleague claim CONFIRMED AS MAINTAINABILITY WORK
+
+`app.py` is 1,699 lines. Several React pages exceed 800 lines, including containers,
+stacks, and storage. Split by domain and behavior when implementing the fixes above;
+do not perform a standalone rewrite with no behavioral tests.
+
+### FEATURE-001 - Remote NFS/CIFS clients
+
+Status: colleague suggestion ENHANCEMENT
+
+Only SSHFS and rclone remote-mount plugins are registered
+(`storage_plugins/registry.py:149-160`). NFS/CIFS clients would be useful but are not a
+production-readiness defect unless they are part of the declared product scope.
+
+### FEATURE-002 - Per-mount journal diagnostics
+
+Status: colleague suggestion ENHANCEMENT
+
+No remote-mount log endpoint exists. Add a bounded, allowlisted journal reader when the
+mount troubleshooting workflow is scheduled.
+
+### FEATURE-003 - Disk prepare and power management
+
+Status: colleague suggestion ENHANCEMENT
+
+The disk API inventories, mounts, and reads SMART data; it does not wipe, partition,
+format, or configure hdparm. These are destructive/high-risk features and need a
+separate design, confirmation model, device allowlist, and integration test rig.
+
+### FEATURE-004 - Threshold notifications
+
+Status: colleague suggestion ENHANCEMENT
+
+SnapRAID threshold failures are not routed to email/chat notifications. First make the
+safety checks fail closed and persist a structured event; notification adapters can
+then consume that event.
+
+## Rejected or Corrected Claims
+
+### `.unionfs/` should be a default SnapRAID exclude
+
+Status: REJECTED
+
+Current mergerfs documentation describes the runtime control file as `.mergerfs`, not
+`.unionfs`, and mergerfs does not create branch metadata directories as claimed. Because
+SnapRAID must target raw branches rather than the pool, a virtual pool control path is
+not indexed there. Do not add an unexplained default exclude. Add only application or
+filesystem artifacts that are demonstrated on the raw data disks.
+
+Reference: https://trapexit.github.io/mergerfs/latest/faq/why_isnt_it_working/
+
+### `chattr +i` fully solves runtime disk loss
+
+Status: REJECTED AS A COMPLETE SOLUTION
+
+Immutability on the underlying mount-point directory can reduce accidental writes after
+a clean unmount, but it does not stop existing processes, detect stale FUSE/block I/O,
+or coordinate Compose. Treat it as optional defence in depth after dependency-aware
+workload shutdown is implemented.
+
+### Add `BindsTo=` to the current one-shot startup unit
+
+Status: PARTIAL; proposed implementation is insufficient
+
+The current unit starts Compose with a oneshot process and has no `ExecStop`
+(`disk_manager.py:135-148`). Stopping that unit will not automatically stop detached
+containers. Runtime fail-closed behavior needs managed per-stack services with an
+`ExecStop`, or a mount-health supervisor that explicitly stops affected stacks.
+
+## Verified Strengths
+
+- SSHFS and rclone omit secrets from app-owned JSON and write credential files with
+  mode `0600` (`storage_plugins/sshfs_plugin.py:180-227`,
+  `storage_plugins/rclone_plugin.py:157-207`, `pihealth_helper.py:1845-1851`).
+- Remote mounts use systemd mount/automount units instead of editing legacy network
+  entries into fstab (`pihealth_helper.py:1596-1609,1858-1870`).
+- MergerFS supports directory branches, validated presets, and a balance command.
+- SnapRAID uses systemd timers with low CPU/I/O priority and parses GUI telemetry.
+- Disk health supports SMART SAT passthrough for USB-to-SATA bridges
+  (`disk_manager.py:780-815`, `pihealth_helper.py:449-503`).
+- The boot guard waits for configured media mounts before running Compose
+  (`disk_manager.py:100-174`). This covers startup, not runtime loss.
+- Catalog compose writes are atomic (`catalog_manager.py:120-135`).
+- Authentication guards are consistently applied to the reviewed management APIs.
+- React v2 uses semantic controls, visible focus styles, reduced-motion handling, and
+  accessible modal mechanics when callback identity is stable.
+
+## Verification Performed
+
+- `npm run build`: pass; TypeScript checks and Vite production build succeed.
+- `pytest -q tests --ignore=tests/e2e`: 558 passed, 1 skipped.
+- Focused Phase 3 browser tests: 19 passed.
+- A full `pytest -q` run was stopped because the complete browser suite repeatedly
+  timed out/error-looped in this environment; it did not produce a valid aggregate
+  result. The focused Phase 3 run is the browser evidence used here.
+
+## Remediation Order
+
+1. Remove default credentials and narrow the privileged helper contract.
+2. Fix catalog removal, stack deletion, and MergerFS result propagation with failure-path tests.
+3. Add SnapRAID cross-plugin and mounted-source preflights that fail closed.
+4. Add per-stack locking, atomic writes, operation IDs, and safe POST-based streaming.
+5. Fix modal callback focus behavior, API error propagation, and partial-data warnings.
+6. Add runtime mount dependency management.
+7. Address performance, accessibility, config relocation, and optional feature work.

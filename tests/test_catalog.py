@@ -8,6 +8,7 @@ import sys
 import os
 import tempfile
 import shutil
+import threading
 import yaml
 from unittest.mock import patch, Mock
 
@@ -645,6 +646,82 @@ class TestCheckDependenciesEndpoint:
             catalog_manager.CATALOG_DIR = original_dir
             stack_manager.STACKS_PATH = original_stacks
             stack_manager.BACKUP_DIR = original_backup
+
+
+class TestCatalogConcurrency:
+    def test_parallel_installs_preserve_both_services(
+        self, temp_catalog_dir, temp_stacks_dir, monkeypatch
+    ):
+        import catalog_manager
+        import stack_manager
+
+        monkeypatch.setattr(catalog_manager, "CATALOG_DIR", temp_catalog_dir)
+        monkeypatch.setattr(stack_manager, "STACKS_PATH", temp_stacks_dir)
+        monkeypatch.setattr(
+            stack_manager,
+            "BACKUP_DIR",
+            os.path.join(temp_stacks_dir, ".backups"),
+        )
+        stack_dir = os.path.join(temp_stacks_dir, "media")
+        os.makedirs(stack_dir)
+        compose_path = os.path.join(stack_dir, "compose.yaml")
+        with open(compose_path, "w") as handle:
+            handle.write("services: {}\n")
+
+        for item_id in ("app-one", "app-two"):
+            with open(os.path.join(temp_catalog_dir, f"{item_id}.yaml"), "w") as handle:
+                yaml.safe_dump(
+                    {
+                        "id": item_id,
+                        "name": item_id,
+                        "requires": [],
+                        "service": {"image": f"example/{item_id}:latest"},
+                    },
+                    handle,
+                )
+
+        original_load = catalog_manager._load_stack_compose
+        load_barrier = threading.Barrier(2)
+
+        def synchronized_load(stack_path):
+            result = original_load(stack_path)
+            try:
+                load_barrier.wait(timeout=0.25)
+            except threading.BrokenBarrierError:
+                pass
+            return result
+
+        monkeypatch.setattr(
+            catalog_manager,
+            "_load_stack_compose",
+            synchronized_load,
+        )
+        responses = []
+
+        def install(item_id):
+            with app.test_client() as thread_client:
+                with thread_client.session_transaction() as session:
+                    session["authenticated"] = True
+                    session["username"] = "testuser"
+                response = thread_client.post(
+                    "/api/catalog/install",
+                    json={"id": item_id, "target_stack": "media"},
+                )
+                responses.append((item_id, response.status_code, response.get_json()))
+
+        threads = [
+            threading.Thread(target=install, args=(item_id,))
+            for item_id in ("app-one", "app-two")
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=3)
+
+        assert sorted(status for _, status, _ in responses) == [200, 200]
+        with open(compose_path) as handle:
+            compose_data = yaml.safe_load(handle)
+        assert set(compose_data["services"]) == {"app-one", "app-two"}
 
 
 class TestAppsPage:

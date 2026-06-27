@@ -694,7 +694,10 @@ async function confirmSnapraidSync() {
     const { pluginId, commandName, summary } = snapraidSyncContext;
     closeSnapraidSyncModal();
     const warning = buildSnapraidSyncWarning(pluginId, summary);
-    const payload = warning ? { force: true } : {};
+    const payload = warning ? {
+        force: true,
+        force_reason: 'Operator confirmed threshold override in the SnapRAID sync dialog'
+    } : {};
     await executePluginCommand(pluginId, 'sync', commandName || 'Sync', payload);
 }
 

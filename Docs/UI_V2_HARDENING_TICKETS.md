@@ -3,7 +3,7 @@
 Date: 2026-06-27
 Source: `Docs/colleagues_review_of_limeOS.txt` (validated external review)
 Branch: TBD (recommend `feature/v2-hardening`)
-Status: Active — SEC-001/002, CAT-001, STK-001, MFS-001, and UI-001 complete
+Status: Active — SEC-001/002, CAT-001, STK-001/002, MFS-001, SRA-001/002, and UI-001 complete
 
 ## Objective
 Production-harden the migrated v2 / LimeOS stack — close the destructive failure paths and the
@@ -35,10 +35,10 @@ starting broad feature work. IDs match the review for traceability.
 | CAT-001 | Catalog remove stops only the selected service | P1 | backend | — | Complete |
 | STK-001 | Stack delete requires successful compose down | P1 | backend | — | Complete |
 | MFS-001 | MergerFS commands return real success/failure | P1 | plugin | — | Complete |
-| SRA-001 | SnapRAID mounted-source preflight, fail closed | P1 | plugin | — | Pending |
-| SRA-002 | Reject SnapRAID paths on a MergerFS pool | P1 | plugin | — | Pending |
+| SRA-001 | SnapRAID mounted-source preflight, fail closed | P1 | plugin | — | Complete |
+| SRA-002 | Reject SnapRAID paths on a MergerFS pool | P1 | plugin | — | Complete |
 | CAT-002 | Async catalog install via job/stream + operation id | P1 | backend | API-001 | Pending |
-| STK-002 | Per-stack lock + atomic compose/env/restore writes | P1 | backend | — | Pending |
+| STK-002 | Per-stack lock + atomic compose/env/restore writes | P1 | backend | — | Complete |
 | API-001 | State-changing stream endpoints become POST + CSRF | P1 | backend+ui | — | Pending |
 | UI-001 | Modal focus survives typing (stable onClose) | P1 | frontend | — | Complete |
 | SYS-001 | `/api/stats` tolerates missing optional disks | P1 | backend+ui | — | Pending |
@@ -138,10 +138,27 @@ Tasks: verify every data/content/parity path is a mounted source with expected d
 fail closed when diff cannot run; make force override explicit + audited. (Review note: parity-wipe
 claim was overstated, but preflight is valid defence in depth.)
 
+Completed: 2026-06-27. SnapRAID configuration now requires a UUID for every drive. Before sync,
+the plugin reads `/proc/self/mountinfo`, requires every configured path to be an exact mount point,
+and compares its kernel device identity with `/dev/disk/by-uuid/<uuid>`. Missing mounts, unresolved
+UUIDs, identity mismatches, unreadable mount data, failed diff commands, and diff timeouts all abort
+sync and cannot be forced. Threshold overrides require an explicit reason and are written atomically
+to a bounded audit history with the authenticated username before sync can continue.
+
 ### SRA-002 — Reject SnapRAID paths on a MergerFS pool
 Files: `storage_plugins/snapraid_plugin.py` (~167-170).
 Tasks: cross-check against configured MergerFS mount points; reject any data/parity/content path
 equal to or below a pool mount. Test pool-path rejection.
+
+Completed: 2026-06-27. SnapRAID validation loads the sibling MergerFS configuration and rejects
+paths equal to or below every configured pool mount point, including disabled pools. Malformed or
+unreadable MergerFS configuration fails validation closed. Exact-path, descendant-path, disabled-pool,
+missing-mount, UUID-mismatch, diff-failure, force-reason, audit-failure, and actor-attribution tests
+cover the safety boundary.
+
+Validation: focused storage suites `121 passed`; frontend check and production build passed
+(`98.12 kB` initial JS gzip); full `tox -e all` passed with Ruff clean, unit `612 passed, 1 skipped`,
+and E2E `166 passed, 26 skipped`.
 
 ### CAT-002 — Async catalog install (depends API-001)
 Files: `catalog_manager.py` (~461-468), `stack_manager.py` (~262-279).
@@ -152,6 +169,22 @@ the same op on stream retry. Acceptance: install does not hold a request worker 
 Files: `stack_manager.py` (~368-550), `catalog_manager.py` (~120-135).
 Tasks: per-stack inter-process lock held across backup/edit/replace and conflicting Docker ops;
 atomic writes for compose/env/restore. Test concurrent save/install/action.
+
+Completed: 2026-06-27. Stack mutations and mutating Compose commands now share a reentrant
+per-stack `flock` stored under `.locks`, outside the stack directory so delete/recreate cannot
+replace the lock inode. Locks are independent across stacks, serialize threads and processes, and
+remain held across catalog read-modify-write transactions, backup, atomic replacement, restore,
+delete, synchronous Compose commands, and streamed Compose commands. The lock state resets after a
+process fork to prevent inherited reentrancy state from bypassing the kernel lock.
+
+Compose, `.env`, restore, catalog, initial-create, and backup writes now use a shared durable atomic
+replacement helper: same-directory temporary file, preserved/explicit permissions, file `fsync`,
+`os.replace`, and directory `fsync`. Failure-path tests prove replacement errors preserve original
+compose/env/restore content. Deterministic concurrency tests prove an action blocks a simultaneous
+save, parallel catalog installs preserve both services, separate processes serialize on one stack,
+and different stacks remain independent. Unit verification: `619 passed, 1 skipped`; Ruff and
+frontend type checks passed. Full `tox -e all`: Ruff clean; unit `619 passed, 1 skipped`; E2E
+`166 passed, 26 skipped`.
 
 ### API-001 — State-changing streams become POST + CSRF
 Files: `stack_manager.py` (~792-865) and frontend consumers (`stacks-page.tsx` console uses

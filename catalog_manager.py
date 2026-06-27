@@ -7,13 +7,21 @@ Templates are stored in catalog/ as YAML files.
 import os
 import re
 import shutil
-import tempfile
 import json
 import yaml
 from datetime import datetime
 from flask import Blueprint, jsonify, request
 from auth_utils import login_required
-from stack_manager import list_stacks, validate_stack_name, get_stack_path, find_compose_file, backup_stack, run_compose_command
+from stack_manager import (
+    atomic_write_text,
+    backup_stack,
+    find_compose_file,
+    get_stack_path,
+    list_stacks,
+    run_compose_command,
+    stack_lock,
+    validate_stack_name,
+)
 
 catalog_manager = Blueprint('catalog_manager', __name__)
 
@@ -121,17 +129,8 @@ def _save_stack_compose(stack_dir, data, filename=None):
     """Save compose data to a stack with atomic write."""
     os.makedirs(stack_dir, exist_ok=True)
     compose_path = filename or os.path.join(stack_dir, 'compose.yaml')
-    compose_dir = os.path.dirname(os.path.abspath(compose_path))
-    os.makedirs(compose_dir, exist_ok=True)
-    fd, temp_path = tempfile.mkstemp(dir=compose_dir, suffix='.yml')
-    try:
-        with os.fdopen(fd, 'w') as f:
-            yaml.dump(data, f, default_flow_style=False, sort_keys=False)
-        os.replace(temp_path, compose_path)
-    except Exception:
-        if os.path.exists(temp_path):
-            os.unlink(temp_path)
-        raise
+    content = yaml.dump(data, default_flow_style=False, sort_keys=False)
+    atomic_write_text(compose_path, content)
     return compose_path
 
 
@@ -350,11 +349,27 @@ def api_catalog_install():
     item_id = data.get('id')
     if not item_id:
         return jsonify({'error': 'Missing app id'}), 400
-
-    # Load catalog item
     item = _get_catalog_item(item_id)
     if not item:
         return jsonify({'error': f'Catalog item not found: {item_id}'}), 404
+
+    target_stack = data.get('target_stack')
+    lock_name = (
+        target_stack
+        if target_stack and target_stack != 'new'
+        else data.get('stack_name') or item_id
+    )
+    valid, error = validate_stack_name(lock_name)
+    if not valid:
+        return jsonify({'error': error}), 400
+
+    with stack_lock(lock_name):
+        return _catalog_install_locked(data, item)
+
+
+def _catalog_install_locked(data, item):
+    """Install one catalog item while its target stack lock is held."""
+    item_id = data.get('id')
 
     # Get values (with defaults filled in)
     values = dict(data.get('values', {}))
@@ -503,6 +518,13 @@ def api_catalog_remove():
             return jsonify({'error': 'Service exists in multiple stacks', 'stacks': stacks_with_service}), 409
         active_stack = stacks_with_service[0]
 
+    with stack_lock(active_stack):
+        return _catalog_remove_locked(data, item_id, active_stack)
+
+
+def _catalog_remove_locked(data, item_id, active_stack):
+    """Remove one catalog item while its target stack lock is held."""
+
     # Check for dependent services (services that require this one)
     check_dependents = data.get('check_dependents', True)
     if check_dependents:
@@ -530,6 +552,9 @@ def api_catalog_remove():
     compose_data, compose_path = _load_stack_compose(stack_dir)
     if compose_data is None:
         return jsonify({'error': 'Compose file not found'}), 404
+    services = compose_data.get('services', {})
+    if not isinstance(services, dict) or item_id not in services:
+        return jsonify({'error': f'Service not installed: {item_id}'}), 404
 
     # Optionally stop the service first
     stop_service = data.get('stop_service', True)

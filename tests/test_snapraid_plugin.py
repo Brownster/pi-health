@@ -1,5 +1,6 @@
 """Tests for SnapRAID plugin."""
 import os
+import json
 import shutil
 import tempfile
 import sys
@@ -33,6 +34,7 @@ def valid_config():
                 "id": "d1",
                 "name": "d1",
                 "path": "/mnt/disk1",
+                "uuid": "uuid-disk1",
                 "role": "data",
                 "content": True
             },
@@ -40,6 +42,7 @@ def valid_config():
                 "id": "d2",
                 "name": "d2",
                 "path": "/mnt/disk2",
+                "uuid": "uuid-disk2",
                 "role": "data",
                 "content": True
             },
@@ -47,6 +50,7 @@ def valid_config():
                 "id": "parity1",
                 "name": "parity",
                 "path": "/mnt/parity",
+                "uuid": "uuid-parity",
                 "role": "parity",
                 "parity_level": 1,
                 "content": False
@@ -118,6 +122,188 @@ class TestSnapRAIDValidation:
         }
         errors = snapraid_plugin.validate_config(config)
         assert any("/mnt" in e for e in errors)
+
+    @pytest.mark.parametrize("path", ["/mnt/pool", "/mnt/pool/media"])
+    def test_mergerfs_pool_path_fails(self, snapraid_plugin, valid_config, path):
+        with open(os.path.join(snapraid_plugin.config_dir, "mergerfs.json"), "w") as handle:
+            json.dump({"pools": [{"mount_point": "/mnt/pool", "enabled": True}]}, handle)
+        valid_config["drives"][0]["path"] = path
+
+        errors = snapraid_plugin.validate_config(valid_config)
+
+        assert any("MergerFS pool" in error and path in error for error in errors)
+
+    def test_disabled_mergerfs_pool_path_still_fails(
+        self, snapraid_plugin, valid_config
+    ):
+        with open(os.path.join(snapraid_plugin.config_dir, "mergerfs.json"), "w") as handle:
+            json.dump(
+                {"pools": [{"mount_point": "/mnt/pool", "enabled": False}]},
+                handle,
+            )
+        valid_config["drives"][0]["path"] = "/mnt/pool/media"
+
+        errors = snapraid_plugin.validate_config(valid_config)
+
+        assert any("MergerFS pool" in error for error in errors)
+
+    def test_malformed_mergerfs_config_fails_closed(
+        self, snapraid_plugin, valid_config
+    ):
+        with open(os.path.join(snapraid_plugin.config_dir, "mergerfs.json"), "w") as handle:
+            json.dump([], handle)
+
+        errors = snapraid_plugin.validate_config(valid_config)
+
+        assert any("Unable to validate MergerFS" in error for error in errors)
+
+    def test_missing_drive_uuid_fails(self, snapraid_plugin, valid_config):
+        valid_config["drives"][0].pop("uuid")
+
+        errors = snapraid_plugin.validate_config(valid_config)
+
+        assert any("UUID" in error and "/mnt/disk1" in error for error in errors)
+
+
+def consume_command(generator):
+    output = []
+    while True:
+        try:
+            output.append(next(generator))
+        except StopIteration as exc:
+            return output, exc.value
+
+
+class TestSnapRAIDSafetyPreflight:
+    def test_mounted_sources_pass_with_expected_device_identity(
+        self, snapraid_plugin, valid_config
+    ):
+        mounts = {
+            "/mnt/disk1": {"source": "/dev/sda1", "device_id": "8:1"},
+            "/mnt/disk2": {"source": "/dev/sdb1", "device_id": "8:17"},
+            "/mnt/parity": {"source": "/dev/sdc1", "device_id": "8:33"},
+        }
+        identities = {
+            "uuid-disk1": {"source": "/dev/sda1", "device_id": "8:1"},
+            "uuid-disk2": {"source": "/dev/sdb1", "device_id": "8:17"},
+            "uuid-parity": {"source": "/dev/sdc1", "device_id": "8:33"},
+        }
+        with patch.object(snapraid_plugin, "_read_mount_sources", return_value=mounts):
+            with patch.object(
+                snapraid_plugin,
+                "_resolve_uuid_identity",
+                side_effect=lambda uuid: identities.get(uuid),
+            ):
+                errors = snapraid_plugin._check_mounted_sources(valid_config)
+
+        assert errors == []
+
+    def test_mounted_sources_reject_missing_mount(self, snapraid_plugin, valid_config):
+        with patch.object(snapraid_plugin, "_read_mount_sources", return_value={}):
+            errors = snapraid_plugin._check_mounted_sources(valid_config)
+
+        assert any("not a mounted source" in error and "/mnt/disk1" in error for error in errors)
+
+    def test_mounted_sources_reject_wrong_uuid(self, snapraid_plugin, valid_config):
+        mounts = {
+            drive["path"]: {"source": f"/dev/{drive['id']}", "device_id": "8:1"}
+            for drive in valid_config["drives"]
+        }
+        with patch.object(snapraid_plugin, "_read_mount_sources", return_value=mounts):
+            with patch.object(
+                snapraid_plugin,
+                "_resolve_uuid_identity",
+                return_value={"source": "/dev/expected", "device_id": "8:99"},
+            ):
+                errors = snapraid_plugin._check_mounted_sources(valid_config)
+
+        assert any("device identity mismatch" in error for error in errors)
+
+    def test_sync_fails_closed_when_diff_fails(self, snapraid_plugin):
+        with patch.object(snapraid_plugin, "_check_mounted_sources", return_value=[]):
+            with patch(
+                "storage_plugins.snapraid_plugin.subprocess.run",
+                return_value=MagicMock(returncode=1, stdout="", stderr="diff failed"),
+            ):
+                output, result = consume_command(
+                    snapraid_plugin.run_command(
+                        "sync",
+                        {"force": True, "force_reason": "operator reviewed changes"},
+                    )
+                )
+
+        assert result.success is False
+        assert "diff failed" in result.error.lower()
+        assert any("WARNING" in str(line) for line in output)
+
+    def test_threshold_force_requires_reason(self, snapraid_plugin):
+        diff_output = "51 removed\n0 updated\n"
+        with patch.object(snapraid_plugin, "_check_mounted_sources", return_value=[]):
+            with patch(
+                "storage_plugins.snapraid_plugin.subprocess.run",
+                return_value=MagicMock(returncode=0, stdout=diff_output, stderr=""),
+            ):
+                _, result = consume_command(
+                    snapraid_plugin.run_command("sync", {"force": True})
+                )
+
+        assert result.success is False
+        assert "reason" in result.error.lower()
+
+    def test_threshold_force_is_audited(self, snapraid_plugin):
+        diff_output = "51 removed\n0 updated\n"
+        with patch.object(snapraid_plugin, "_check_mounted_sources", return_value=[]):
+            with patch(
+                "storage_plugins.snapraid_plugin.subprocess.run",
+                return_value=MagicMock(returncode=0, stdout=diff_output, stderr=""),
+            ):
+                with patch("storage_plugins.snapraid_plugin.helper_available", return_value=True):
+                    with patch(
+                        "storage_plugins.snapraid_plugin.helper_call",
+                        return_value={"success": True, "stdout": "", "stderr": ""},
+                    ):
+                        _, result = consume_command(
+                            snapraid_plugin.run_command(
+                                "sync",
+                                {
+                                    "force": True,
+                                    "force_reason": "operator confirmed threshold override",
+                                    "_audit_user": "admin",
+                                },
+                            )
+                        )
+
+        state = snapraid_plugin._load_state()
+        assert result.success is True
+        assert state["force_overrides"][-1]["username"] == "admin"
+        assert state["force_overrides"][-1]["reason"] == "operator confirmed threshold override"
+
+    def test_threshold_force_aborts_when_audit_cannot_be_saved(self, snapraid_plugin):
+        diff_output = "51 removed\n0 updated\n"
+        with patch.object(snapraid_plugin, "_check_mounted_sources", return_value=[]):
+            with patch(
+                "storage_plugins.snapraid_plugin.subprocess.run",
+                return_value=MagicMock(returncode=0, stdout=diff_output, stderr=""),
+            ):
+                with patch.object(
+                    snapraid_plugin, "_record_force_override", return_value=False
+                ):
+                    with patch(
+                        "storage_plugins.snapraid_plugin.helper_call"
+                    ) as helper_call:
+                        _, result = consume_command(
+                            snapraid_plugin.run_command(
+                                "sync",
+                                {
+                                    "force": True,
+                                    "force_reason": "operator confirmed threshold override",
+                                },
+                            )
+                        )
+
+        assert result.success is False
+        assert "audit" in result.error.lower()
+        helper_call.assert_not_called()
 
 
 class TestSnapRAIDConfigGeneration:

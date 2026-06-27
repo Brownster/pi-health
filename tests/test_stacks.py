@@ -8,6 +8,9 @@ import os
 import sys
 import tempfile
 import shutil
+import subprocess
+import threading
+import time
 from unittest.mock import patch, MagicMock
 
 # Add parent directory to path for imports
@@ -1002,6 +1005,211 @@ class TestStackAdditionalRoutes:
         assert pull_response.status_code == 200
         assert "ok" in pull_response.get_data(as_text=True)
 
+
+class TestStackConcurrencyAndAtomicWrites:
+    def _configure_stack_paths(self, monkeypatch, temp_stacks_dir):
+        import stack_manager
+
+        monkeypatch.setattr(stack_manager, "STACKS_PATH", temp_stacks_dir)
+        monkeypatch.setattr(
+            stack_manager,
+            "BACKUP_DIR",
+            os.path.join(temp_stacks_dir, ".backups"),
+        )
+
+    def _create_stack(self, temp_stacks_dir, content="services: {}\n"):
+        stack_dir = os.path.join(temp_stacks_dir, "alpha")
+        os.makedirs(stack_dir)
+        compose_path = os.path.join(stack_dir, "compose.yaml")
+        with open(compose_path, "w") as handle:
+            handle.write(content)
+        return stack_dir, compose_path
+
+    def test_compose_replace_failure_preserves_original(
+        self, authenticated_client, temp_stacks_dir, monkeypatch
+    ):
+        import stack_manager
+
+        self._configure_stack_paths(monkeypatch, temp_stacks_dir)
+        _, compose_path = self._create_stack(temp_stacks_dir)
+        real_replace = os.replace
+
+        def fail_target_replace(source, destination):
+            if destination == compose_path:
+                raise OSError("replace failed")
+            return real_replace(source, destination)
+
+        monkeypatch.setattr(stack_manager.os, "replace", fail_target_replace)
+
+        response = authenticated_client.post(
+            "/api/stacks/alpha/compose",
+            json={"content": "services:\n  changed:\n    image: redis\n"},
+        )
+
+        assert response.status_code == 500
+        assert open(compose_path).read() == "services: {}\n"
+
+    def test_env_replace_failure_preserves_original(
+        self, authenticated_client, temp_stacks_dir, monkeypatch
+    ):
+        import stack_manager
+
+        self._configure_stack_paths(monkeypatch, temp_stacks_dir)
+        stack_dir, _ = self._create_stack(temp_stacks_dir)
+        env_path = os.path.join(stack_dir, ".env")
+        with open(env_path, "w") as handle:
+            handle.write("OLD=value\n")
+        real_replace = os.replace
+
+        def fail_target_replace(source, destination):
+            if destination == env_path:
+                raise OSError("replace failed")
+            return real_replace(source, destination)
+
+        monkeypatch.setattr(stack_manager.os, "replace", fail_target_replace)
+
+        response = authenticated_client.post(
+            "/api/stacks/alpha/env",
+            json={"content": "NEW=value\n"},
+        )
+
+        assert response.status_code == 500
+        assert open(env_path).read() == "OLD=value\n"
+
+    def test_restore_replace_failure_preserves_original(
+        self, authenticated_client, temp_stacks_dir, monkeypatch
+    ):
+        import stack_manager
+
+        self._configure_stack_paths(monkeypatch, temp_stacks_dir)
+        _, compose_path = self._create_stack(
+            temp_stacks_dir,
+            "services:\n  current:\n    image: nginx\n",
+        )
+        backup_dir = os.path.join(stack_manager.BACKUP_DIR, "alpha")
+        os.makedirs(backup_dir, exist_ok=True)
+        backup_name = "compose-20240101010101.yaml"
+        with open(os.path.join(backup_dir, backup_name), "w") as handle:
+            handle.write("services:\n  restored:\n    image: redis\n")
+        real_replace = os.replace
+
+        def fail_target_replace(source, destination):
+            if destination == compose_path:
+                raise OSError("replace failed")
+            return real_replace(source, destination)
+
+        monkeypatch.setattr(stack_manager.os, "replace", fail_target_replace)
+
+        response = authenticated_client.post(
+            "/api/stacks/alpha/restore",
+            json={"backup": backup_name},
+        )
+
+        assert response.status_code == 500
+        assert "current" in open(compose_path).read()
+
+    def test_compose_action_serializes_with_save(
+        self, temp_stacks_dir, monkeypatch
+    ):
+        import stack_manager
+
+        self._configure_stack_paths(monkeypatch, temp_stacks_dir)
+        _, compose_path = self._create_stack(temp_stacks_dir)
+        action_started = threading.Event()
+        release_action = threading.Event()
+        save_finished = threading.Event()
+        responses = []
+
+        def blocked_run(*args, **kwargs):
+            action_started.set()
+            assert release_action.wait(timeout=3)
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(stack_manager.subprocess, "run", blocked_run)
+
+        action_thread = threading.Thread(
+            target=stack_manager.run_compose_command,
+            args=("alpha", "up"),
+        )
+
+        def save_compose():
+            with app.test_client() as thread_client:
+                with thread_client.session_transaction() as session:
+                    session["authenticated"] = True
+                    session["username"] = "testuser"
+                responses.append(
+                    thread_client.post(
+                        "/api/stacks/alpha/compose",
+                        json={"content": "services:\n  changed:\n    image: redis\n"},
+                    )
+                )
+            save_finished.set()
+
+        action_thread.start()
+        assert action_started.wait(timeout=2)
+        save_thread = threading.Thread(target=save_compose)
+        save_thread.start()
+        time.sleep(0.1)
+
+        assert not save_finished.is_set()
+        assert open(compose_path).read() == "services: {}\n"
+
+        release_action.set()
+        action_thread.join(timeout=3)
+        save_thread.join(timeout=3)
+        assert responses[0].status_code == 200
+        assert "changed" in open(compose_path).read()
+
+    def test_stack_lock_serializes_separate_process(
+        self, temp_stacks_dir, monkeypatch
+    ):
+        import stack_manager
+
+        self._configure_stack_paths(monkeypatch, temp_stacks_dir)
+        stack_lock = getattr(stack_manager, "stack_lock")
+        script = (
+            "import stack_manager\n"
+            "print('ready', flush=True)\n"
+            "with stack_manager.stack_lock('alpha'):\n"
+            "    print('acquired', flush=True)\n"
+        )
+        env = os.environ.copy()
+        env["STACKS_PATH"] = temp_stacks_dir
+
+        with stack_lock("alpha"):
+            process = subprocess.Popen(
+                [sys.executable, "-c", script],
+                cwd=os.path.dirname(os.path.dirname(__file__)),
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            assert process.stdout.readline().strip() == "ready"
+            time.sleep(0.1)
+            assert process.poll() is None
+
+        stdout, stderr = process.communicate(timeout=3)
+        assert process.returncode == 0, stderr
+        assert stdout.strip() == "acquired"
+
+    def test_different_stack_locks_do_not_block_each_other(
+        self, temp_stacks_dir, monkeypatch
+    ):
+        import stack_manager
+
+        self._configure_stack_paths(monkeypatch, temp_stacks_dir)
+        acquired = threading.Event()
+
+        def lock_beta():
+            with stack_manager.stack_lock("beta"):
+                acquired.set()
+
+        with stack_manager.stack_lock("alpha"):
+            thread = threading.Thread(target=lock_beta)
+            thread.start()
+            assert acquired.wait(timeout=1)
+            thread.join(timeout=1)
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

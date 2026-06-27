@@ -3,7 +3,7 @@ Storage plugins Flask blueprint.
 Provides REST API for plugin management.
 """
 import json
-from flask import Blueprint, jsonify, request, Response
+from flask import Blueprint, jsonify, request, Response, session
 from auth_utils import login_required
 from storage_plugins.registry import get_registry
 
@@ -247,6 +247,8 @@ def run_plugin_command(plugin_id: str, command_id: str):
         return jsonify({"error": f"Unknown command: {command_id}"}), 404
 
     params = request.get_json() or {}
+    if plugin_id == "snapraid" and command_id == "sync":
+        params["_audit_user"] = session.get("username", "unknown")
 
     def generate():
         try:

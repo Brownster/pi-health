@@ -289,6 +289,37 @@ def test_run_plugin_command_stream(authenticated_client, monkeypatch):
     assert "complete" in body
 
 
+def test_run_plugin_command_adds_authenticated_audit_user(authenticated_client, monkeypatch):
+    class AuditPlugin(DummyPlugin):
+        PLUGIN_ID = "snapraid"
+
+        def __init__(self):
+            super().__init__()
+            self.params = None
+
+        def run_command(self, command_id, params=None):
+            self.params = params
+            yield "running"
+            return CommandResult(success=True, message="done")
+
+    plugin = AuditPlugin()
+    plugin.get_commands = lambda: [{"id": "sync"}]
+    registry = DummyRegistry(plugin=plugin)
+    registry.get = lambda plugin_id: plugin if plugin_id == "snapraid" else None
+    monkeypatch.setattr("storage_plugins.get_registry", lambda: registry)
+
+    response = authenticated_client.post(
+        "/api/storage/plugins/snapraid/commands/sync",
+        json={"force_reason": "confirmed"},
+    )
+
+    assert response.status_code == 200
+    assert plugin.params == {
+        "force_reason": "confirmed",
+        "_audit_user": "testuser",
+    }
+
+
 def test_run_plugin_command_stream_includes_output(authenticated_client, monkeypatch):
     registry = DummyRegistry(plugin=DummyPlugin())
     monkeypatch.setattr("storage_plugins.get_registry", lambda: registry)
