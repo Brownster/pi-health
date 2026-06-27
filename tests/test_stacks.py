@@ -379,6 +379,29 @@ class TestComposeStreaming:
         finally:
             stack_manager.STACKS_PATH = original_path
 
+    def test_run_compose_command_targets_one_service(self, temp_stacks_dir):
+        import stack_manager
+        original_path = stack_manager.STACKS_PATH
+        stack_manager.STACKS_PATH = temp_stacks_dir
+
+        try:
+            stack_dir = os.path.join(temp_stacks_dir, "alpha")
+            os.makedirs(stack_dir, exist_ok=True)
+            with open(os.path.join(stack_dir, "compose.yaml"), "w") as handle:
+                handle.write("services:\n  app:\n    image: nginx\n  db:\n    image: postgres\n")
+
+            mock_run = MagicMock(returncode=0, stdout="ok", stderr="")
+            with patch("stack_manager.subprocess.run", return_value=mock_run) as run_mock:
+                result, error = run_compose_command("alpha", "stop", service="app")
+
+            assert error is None
+            assert result["success"] is True
+            assert run_mock.call_args.args[0] == [
+                "docker", "compose", "-f", "compose.yaml", "stop", "app"
+            ]
+        finally:
+            stack_manager.STACKS_PATH = original_path
+
 
 class TestStackFilenames:
     """Test supported compose filenames."""
@@ -577,7 +600,8 @@ class TestStackCRUD:
             stack_manager.STACKS_PATH = original_path
             stack_manager.BACKUP_DIR = original_backup
 
-    def test_delete_stack_success(self, authenticated_client, temp_stacks_dir):
+    @patch('stack_manager.run_compose_command')
+    def test_delete_stack_success(self, mock_run, authenticated_client, temp_stacks_dir):
         """Test deleting a stack."""
         import stack_manager
         original_path = stack_manager.STACKS_PATH
@@ -590,6 +614,7 @@ class TestStackCRUD:
         os.makedirs(stack_dir)
         with open(os.path.join(stack_dir, 'compose.yaml'), 'w') as f:
             f.write('services: {}\n')
+        mock_run.return_value = ({'success': True, 'returncode': 0, 'stdout': '', 'stderr': ''}, None)
 
         try:
             response = authenticated_client.delete('/api/stacks/to-delete')
@@ -599,6 +624,73 @@ class TestStackCRUD:
             assert data['status'] == 'deleted'
 
             # Verify directory was removed
+            assert not os.path.exists(stack_dir)
+            mock_run.assert_called_once_with('to-delete', 'down')
+        finally:
+            stack_manager.STACKS_PATH = original_path
+            stack_manager.BACKUP_DIR = original_backup
+
+    @patch('stack_manager.run_compose_command')
+    def test_delete_stack_preserves_directory_when_down_fails(
+        self, mock_run, authenticated_client, temp_stacks_dir,
+    ):
+        import stack_manager
+        original_path = stack_manager.STACKS_PATH
+        original_backup = stack_manager.BACKUP_DIR
+        stack_manager.STACKS_PATH = temp_stacks_dir
+        stack_manager.BACKUP_DIR = os.path.join(temp_stacks_dir, '.backups')
+        stack_dir = os.path.join(temp_stacks_dir, 'to-delete')
+        os.makedirs(stack_dir)
+        with open(os.path.join(stack_dir, 'compose.yaml'), 'w') as handle:
+            handle.write('services: {}\n')
+        mock_run.return_value = ({
+            'success': False,
+            'returncode': 1,
+            'stdout': '',
+            'stderr': 'network is still in use',
+        }, None)
+
+        try:
+            response = authenticated_client.delete('/api/stacks/to-delete')
+            assert response.status_code == 409
+            payload = response.get_json()
+            assert payload['force_delete_available'] is True
+            assert 'network is still in use' in payload['error']
+            assert os.path.isdir(stack_dir)
+            assert not os.path.exists(stack_manager.BACKUP_DIR)
+        finally:
+            stack_manager.STACKS_PATH = original_path
+            stack_manager.BACKUP_DIR = original_backup
+
+    @patch('stack_manager.run_compose_command')
+    def test_force_delete_requires_stack_name_confirmation(
+        self, mock_run, authenticated_client, temp_stacks_dir,
+    ):
+        import stack_manager
+        original_path = stack_manager.STACKS_PATH
+        original_backup = stack_manager.BACKUP_DIR
+        stack_manager.STACKS_PATH = temp_stacks_dir
+        stack_manager.BACKUP_DIR = os.path.join(temp_stacks_dir, '.backups')
+        stack_dir = os.path.join(temp_stacks_dir, 'to-delete')
+        os.makedirs(stack_dir)
+        with open(os.path.join(stack_dir, 'compose.yaml'), 'w') as handle:
+            handle.write('services: {}\n')
+        mock_run.return_value = ({'success': False, 'returncode': 1, 'stderr': 'down failed'}, None)
+
+        try:
+            rejected = authenticated_client.delete(
+                '/api/stacks/to-delete',
+                json={'force': True, 'confirm_name': 'wrong-name'},
+            )
+            assert rejected.status_code == 400
+            assert os.path.isdir(stack_dir)
+
+            forced = authenticated_client.delete(
+                '/api/stacks/to-delete',
+                json={'force': True, 'confirm_name': 'to-delete'},
+            )
+            assert forced.status_code == 200
+            assert forced.get_json()['forced'] is True
             assert not os.path.exists(stack_dir)
         finally:
             stack_manager.STACKS_PATH = original_path

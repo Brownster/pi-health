@@ -446,7 +446,10 @@ class TestCatalogRemove:
         with open(os.path.join(stack_dir, 'compose.yaml'), 'w') as f:
             yaml.dump({
                 'version': '3.8',
-                'services': {'test-app': {'image': 'test'}}
+                'services': {
+                    'test-app': {'image': 'test'},
+                    'keep-running': {'image': 'nginx'},
+                }
             }, f)
 
         try:
@@ -461,6 +464,55 @@ class TestCatalogRemove:
             with open(os.path.join(temp_stacks_dir, 'media', 'compose.yaml'), 'r') as f:
                 compose_data = yaml.safe_load(f)
             assert 'test-app' not in compose_data['services']
+            assert 'keep-running' in compose_data['services']
+            mock_run.assert_called_once_with('media', 'stop', service='test-app')
+        finally:
+            catalog_manager.CATALOG_DIR = original_dir
+            stack_manager.STACKS_PATH = original_stacks
+            stack_manager.BACKUP_DIR = original_backup
+
+    @patch('catalog_manager.run_compose_command')
+    def test_remove_aborts_when_target_stop_fails(
+        self, mock_run, authenticated_client, temp_catalog_dir,
+        temp_stacks_dir, sample_catalog_item,
+    ):
+        import catalog_manager
+        import stack_manager
+        original_dir = catalog_manager.CATALOG_DIR
+        original_stacks = stack_manager.STACKS_PATH
+        original_backup = stack_manager.BACKUP_DIR
+        catalog_manager.CATALOG_DIR = temp_catalog_dir
+        stack_manager.STACKS_PATH = temp_stacks_dir
+        stack_manager.BACKUP_DIR = os.path.join(temp_stacks_dir, '.backups')
+        mock_run.return_value = ({
+            'success': False,
+            'stdout': '',
+            'stderr': 'container stop failed',
+            'returncode': 1,
+        }, None)
+
+        with open(os.path.join(temp_catalog_dir, 'test-app.yaml'), 'w') as handle:
+            yaml.dump(sample_catalog_item, handle)
+        stack_dir = os.path.join(temp_stacks_dir, 'media')
+        os.makedirs(stack_dir, exist_ok=True)
+        compose_path = os.path.join(stack_dir, 'compose.yaml')
+        with open(compose_path, 'w') as handle:
+            yaml.dump({'services': {
+                'test-app': {'image': 'test'},
+                'keep-running': {'image': 'nginx'},
+            }}, handle)
+
+        try:
+            response = authenticated_client.post(
+                '/api/catalog/remove',
+                json={'id': 'test-app', 'target_stack': 'media'},
+            )
+            assert response.status_code == 409
+            assert 'container stop failed' in response.get_json()['error']
+            with open(compose_path) as handle:
+                compose_data = yaml.safe_load(handle)
+            assert set(compose_data['services']) == {'test-app', 'keep-running'}
+            assert not os.path.exists(stack_manager.BACKUP_DIR)
         finally:
             catalog_manager.CATALOG_DIR = original_dir
             stack_manager.STACKS_PATH = original_stacks

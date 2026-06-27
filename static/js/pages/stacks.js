@@ -450,6 +450,30 @@ async function confirmDeleteStack() {
 
         throw new Error(data.error || 'Unable to delete stack');
     } catch (error) {
+        if (error.payload?.force_delete_available) {
+            const confirmed = window.confirm(
+                `Docker Compose could not stop "${currentStack}".\n\n` +
+                'Force delete removes the stack files while containers may still be running. Continue?'
+            );
+            if (!confirmed) return;
+
+            try {
+                const forced = await requestApiJson(`/api/stacks/${currentStack}`, {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ force: true, confirm_name: currentStack }),
+                });
+                if (forced.status === 'deleted' && forced.forced) {
+                    showNotification(`Stack "${currentStack}" force deleted`, 'warning');
+                    hideStackModal();
+                    loadStacks();
+                    return;
+                }
+            } catch (forceError) {
+                showNotification(`Error force deleting stack: ${forceError.message}`, 'error');
+                return;
+            }
+        }
         showNotification(`Error deleting stack: ${error.message}`, 'error');
     }
 }

@@ -535,9 +535,15 @@ def api_catalog_remove():
     stop_service = data.get('stop_service', True)
     stop_result = None
     if stop_service:
-        stop_result, stop_error = run_compose_command(active_stack, 'stop')
+        stop_result, stop_error = run_compose_command(active_stack, 'stop', service=item_id)
         if stop_error:
-            stop_result = {'stopped': False, 'error': stop_error}
+            return jsonify({'error': f'Failed to stop service: {stop_error}'}), 409
+        if not stop_result or not stop_result.get('success'):
+            detail = (stop_result or {}).get('stderr') or 'Compose stop failed'
+            return jsonify({
+                'error': f'Failed to stop service: {detail}',
+                'stop_result': stop_result,
+            }), 409
 
     # Backup before modifying
     backup_file = backup_stack(active_stack)

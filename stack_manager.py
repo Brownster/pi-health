@@ -234,7 +234,7 @@ def validate_compose_yaml(content):
     return None
 
 
-def run_compose_command(stack_name, command, detach=True):
+def run_compose_command(stack_name, command, detach=True, service=None):
     """Run a docker compose command for a stack."""
     stack_dir = get_stack_path(stack_name)
     compose_file = find_compose_file(stack_dir)
@@ -243,6 +243,13 @@ def run_compose_command(stack_name, command, detach=True):
         return None, "Stack not found"
 
     cmd = ['docker', 'compose', '-f', os.path.basename(compose_file)]
+
+    if service:
+        valid_service, service_error = validate_stack_name(service)
+        if not valid_service:
+            return None, f"Invalid service name: {service_error}"
+        if command != 'stop':
+            return None, "Service targeting is only supported for stop"
 
     if command == 'up':
         cmd.extend(['up', '-d'] if detach else ['up'])
@@ -254,6 +261,8 @@ def run_compose_command(stack_name, command, detach=True):
         cmd.append('pull')
     elif command == 'stop':
         cmd.append('stop')
+        if service:
+            cmd.append(service)
     elif command == 'start':
         cmd.append('start')
     else:
@@ -433,15 +442,35 @@ def api_delete_stack(name):
     if not os.path.exists(stack_dir):
         return jsonify({'error': 'Stack not found'}), 404
 
-    # Stop containers first
-    run_compose_command(name, 'down')
+    data = request.get_json(silent=True) or {}
+    force_requested = data.get('force') is True
+    if force_requested and data.get('confirm_name') != name:
+        return jsonify({'error': 'Force delete requires exact stack name confirmation'}), 400
+
+    down_result, down_error = run_compose_command(name, 'down')
+    down_succeeded = bool(
+        not down_error
+        and down_result
+        and down_result.get('success')
+    )
+    if not down_succeeded and not force_requested:
+        detail = down_error or (down_result or {}).get('stderr') or 'Compose down failed'
+        return jsonify({
+            'error': f'Cannot delete stack: {detail}',
+            'down_result': down_result,
+            'force_delete_available': True,
+        }), 409
 
     # Backup before deletion
     backup_stack(name)
 
     try:
         shutil.rmtree(stack_dir)
-        return jsonify({'status': 'deleted', 'name': name})
+        return jsonify({
+            'status': 'deleted',
+            'name': name,
+            'forced': force_requested and not down_succeeded,
+        })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
