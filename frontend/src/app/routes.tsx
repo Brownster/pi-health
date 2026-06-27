@@ -8,6 +8,7 @@ import { SettingsPage } from "@/pages/settings-page";
 import { SharesPage } from "@/pages/shares-page";
 import { StacksPage } from "@/pages/stacks-page";
 import { StoragePage } from "@/pages/storage-page";
+import { SystemPage } from "@/pages/system-page";
 
 export interface AppRoute {
   path: string;
@@ -82,6 +83,14 @@ export const appRoutes: AppRoute[] = [
     requiresAuth: true,
     showInNav: true,
     component: SharesPage,
+  },
+  {
+    path: "/system",
+    label: "System Health",
+    navGroup: "System",
+    requiresAuth: true,
+    showInNav: true,
+    component: SystemPage,
   },
   {
     path: "/settings",

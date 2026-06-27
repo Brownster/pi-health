@@ -871,3 +871,32 @@ def install_v2_settings_api_mocks():
         page.route("**/api/**", _handler)
 
     return _install
+
+
+@pytest.fixture(scope="function")
+def install_v2_system_api_mocks():
+    """Returns a callable(page) installing a deterministic /api/stats mock."""
+
+    def _install(page: Page) -> None:
+        stats = {
+            "cpu_usage_percent": 12.5,
+            "cpu_usage_per_core": [10.0, 15.0, 8.0, 17.0],
+            "memory_usage": {"total": 8000000000, "used": 2000000000, "free": 6000000000, "percent": 25.0},
+            "disk_usage": {"total": 500000000000, "used": 250000000000, "free": 250000000000, "percent": 50.0},
+            "disk_usage_2": {"total": 1000000000000, "used": 100000000000, "free": 900000000000, "percent": 10.0},
+            "temperature_celsius": 48.0,
+            "network_usage": {"bytes_sent": 1234000, "bytes_recv": 5678000},
+            "throttling": "ok",
+            "cpu_freq_mhz": 1800,
+            "is_raspberry_pi": True,
+        }
+
+        def _handler(route):
+            if urlparse(route.request.url).path == "/api/stats":
+                route.fulfill(status=200, content_type="application/json", body=json.dumps(stats))
+                return
+            route.continue_()
+
+        page.route("**/api/**", _handler)
+
+    return _install

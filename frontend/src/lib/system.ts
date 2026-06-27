@@ -9,11 +9,16 @@ export interface UsageSummary {
 
 export interface SystemStats {
   cpuPercent: number | null;
+  perCore: number[];
   memory: UsageSummary;
   disk: UsageSummary;
+  disk2: UsageSummary;
   temperatureCelsius: number | null;
   networkReceived: number | null;
   networkSent: number | null;
+  cpuFreqMhz: number | null;
+  throttling: string | null;
+  isRaspberryPi: boolean;
 }
 
 function normalizeUsage(value: unknown): UsageSummary {
@@ -36,12 +41,21 @@ export async function fetchSystemStats(signal?: AbortSignal): Promise<SystemStat
       ? (payload.network_usage as Record<string, unknown>)
       : {};
 
+  const perCore = Array.isArray(payload.cpu_usage_per_core)
+    ? payload.cpu_usage_per_core.map((value) => toNullableNumber(value)).filter((v): v is number => v !== null)
+    : [];
+
   return {
     cpuPercent: toNullableNumber(payload.cpu_usage_percent),
+    perCore,
     memory: normalizeUsage(payload.memory_usage),
     disk: normalizeUsage(payload.disk_usage),
+    disk2: normalizeUsage(payload.disk_usage_2),
     temperatureCelsius: toNullableNumber(payload.temperature_celsius),
     networkReceived: toNullableNumber(network.bytes_recv),
     networkSent: toNullableNumber(network.bytes_sent),
+    cpuFreqMhz: toNullableNumber(payload.cpu_freq_mhz),
+    throttling: typeof payload.throttling === "string" ? payload.throttling : null,
+    isRaspberryPi: Boolean(payload.is_raspberry_pi),
   };
 }
