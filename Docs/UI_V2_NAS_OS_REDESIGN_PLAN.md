@@ -344,3 +344,15 @@ Higher-confidence case: 8-12 days if every existing modal, table, and mobile car
 4. All redesigned routes pass desktop, phone, and tablet overflow checks.
 5. Hybrid rollout behavior remains unchanged.
 6. Legacy pages remain available until final v2 signoff.
+
+## Status update (2026-06-27)
+
+- Phase 3 core-management migration is complete and signed off (`Docs/UI_PHASE3_RELEASE_SIGNOFF.md`).
+- Redesign expansion routes built: `/v2/system` (system_metrics), `/v2/apps` (app_catalog),
+  `/v2/network` (host network test + VPN groups + tailscale). Tailscale is folded into `/v2/network`.
+- **Tools / CopyParty route: DE-SCOPED.** File management is delivered as a catalog app
+  (`catalog/filebrowser.yaml`, installable one-click from `/v2/apps` with managed paths
+  pre-filled), so a dedicated v2 Tools page is unnecessary. Legacy `tools.html` remains available
+  in legacy/hybrid mode.
+- Open follow-up: verify the Filebrowser `:s6` image db/volume layout against upstream docs (or a
+  real install smoke test) and adjust `catalog/filebrowser.yaml` if needed.
