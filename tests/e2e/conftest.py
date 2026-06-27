@@ -944,3 +944,52 @@ def install_v2_catalog_api_mocks():
         page.route("**/api/**", _handler)
 
     return _install
+
+
+@pytest.fixture(scope="function")
+def install_v2_network_api_mocks():
+    """Returns a callable(page) installing deterministic network mocks."""
+
+    def _json_fulfill(route, payload, status: int = 200) -> None:
+        route.fulfill(status=status, content_type="application/json", body=json.dumps(payload))
+
+    def _install(page: Page) -> None:
+        groups = {
+            "docker_available": True,
+            "groups": [
+                {
+                    "provider": "gluetun", "provider_status": "running", "provider_health": "healthy",
+                    "members": ["sonarr", "radarr"], "member_count": 2, "orphaned_members": [], "status": "ok",
+                }
+            ],
+            "orphans": [],
+        }
+
+        def _handler(route):
+            parsed = urlparse(route.request.url)
+            path = parsed.path
+            method = route.request.method
+
+            if path == "/api/network-groups" and method == "GET":
+                _json_fulfill(route, groups)
+                return
+            if path == "/api/network-groups/gluetun/recreate" and method == "POST":
+                _json_fulfill(route, {"status": "ok"})
+                return
+            if path == "/api/network-test" and method == "POST":
+                _json_fulfill(route, {"ping_success": True, "local_ip": "192.168.1.50",
+                                      "public_ip": "203.0.113.20", "probe_method": "ping",
+                                      "ping_output": "64 bytes from 8.8.8.8"})
+                return
+            if path == "/api/tailscale/status" and method == "GET":
+                _json_fulfill(route, {"backend_state": "Running", "self_ip": "100.64.0.1"})
+                return
+            if path == "/api/tailscale/logout" and method == "POST":
+                _json_fulfill(route, {"status": "ok"})
+                return
+
+            route.continue_()
+
+        page.route("**/api/**", _handler)
+
+    return _install
