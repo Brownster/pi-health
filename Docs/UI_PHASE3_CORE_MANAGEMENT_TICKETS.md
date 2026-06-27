@@ -33,7 +33,7 @@ Migrate the core management pages to `/v2` with the same rollback model proven b
 | 4 | PH3-004 v2 Disks Read Path + SMART Views | PH3-001 | Yes | Complete (2026-06-25) |
 | 5 | PH3-005 Disks Mount/Unmount + SMART Actions | PH3-004 | Yes | Complete (2026-06-26) |
 | 6a | PH3-006a v2 Storage Plugins + Pools (mgmt + details + commands) | PH3-001 | Yes | Complete (2026-06-26) |
-| 6b | PH3-006b Storage plugin schema config editor + install wizard | PH3-006a | No | Pending |
+| 6b | PH3-006b Storage plugin config editor + install wizard | PH3-006a | No | Complete (2026-06-27) |
 | 7 | PH3-007 v2 Mounts Management (media paths + mounts) | PH3-006 | Yes | Complete (2026-06-26) |
 | 8 | PH3-008 v2 Shares Management (list + toggle/delete) | PH3-006 | Yes | Complete (2026-06-26) |
 | 9 | PH3-009 v2 Settings + Backup/Update Workflows | PH3-001 | Yes | Complete (2026-06-26) |
@@ -341,9 +341,23 @@ Evidence:
 3. Remove is only offered for non-builtin (`type !== "builtin"`) plugins, matching the backend
    which rejects removing builtins; e2e asserts builtins have no Remove and a github plugin does.
 
-### PH3-006b Status: Pending
-Schema-driven config form editor (`/config`, `/validate`, `/apply`) and the install-new-plugin
-wizard (`/install`) remain.
+### PH3-006b Status: Complete (2026-06-27)
+Evidence:
+1. `lib/storage-plugins.ts`: `fetchPluginDetail` now returns `schema` + `config`; added
+   `savePluginConfig` (surfaces server validation `details`) and `installPlugin`.
+2. `storage-page.tsx` details modal gains a **config editor** + the page header gains an
+   **Install plugin** wizard:
+   - Config editor: a JSON editor seeded from the plugin's `config`, saved via `POST /config`
+     (server-side validation errors + details surfaced), with the plugin **schema rendered as a
+     read-only field reference**. (Design choice: a plugin-agnostic JSON editor rather than a
+     generated per-field form, because plugin schemas are heterogeneous — e.g. samba's nested
+     `shares` array — and server validation is authoritative.)
+   - Install wizard: type (github/pip) + source/id/entry/class_name -> `POST /install`, then
+     refreshes the plugin list.
+3. e2e: storage mock extended (detail schema/config, `/config` POST, `/install` POST);
+   `test_v2_storage_parity.py` adds config-editor save + install-plugin coverage.
+4. Validation: `npm run check` / `build:publish` / bundle budget (JS 89.97 kB gz / 200 kB) pass;
+   `pytest test_v2_storage_parity.py -q` -> `10 passed`.
 
 ## PH3-007 - v2 Mounts Management (P0)
 Owner: Pi-Health maintainers  

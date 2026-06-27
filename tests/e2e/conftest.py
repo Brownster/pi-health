@@ -629,7 +629,9 @@ def install_v2_storage_api_mocks():
             "version": "1.0", "installed": True,
             "status": {"status": "ok", "message": "Pool active"},
             "commands": [{"id": "status", "label": "Pool Status", "params": []}],
-            "schema": {}, "config": {}, "install_instructions": "",
+            "schema": {"properties": {"mountpoint": {"type": "string", "description": "Pool mount point"}}},
+            "config": {"mountpoint": "/mnt/pool"},
+            "install_instructions": "",
         }
         command_sse = (
             'data: {"type": "output", "line": "checking pool mergerfs"}\n\n'
@@ -661,6 +663,12 @@ def install_v2_storage_api_mocks():
                 return
             if path == "/api/storage/plugins/mergerfs/commands/status" and method == "POST":
                 route.fulfill(status=200, content_type="text/event-stream", body=command_sse)
+                return
+            if path == "/api/storage/plugins/mergerfs/config" and method == "POST":
+                _json_fulfill(route, {"status": "saved", "config": {"mountpoint": "/mnt/pool"}})
+                return
+            if path == "/api/storage/plugins/install" and method == "POST":
+                _json_fulfill(route, {"status": "installed", "plugin": {"id": "newfs"}})
                 return
 
             route.continue_()

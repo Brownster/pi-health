@@ -123,3 +123,40 @@ def test_v2_storage_details_and_command(
 
     page.click("#v2-plugin-detail-close")
     expect(page.locator("#v2-plugin-detail-modal")).to_have_count(0)
+
+
+def test_v2_storage_config_editor(
+    page: Page,
+    v2_mode_server,
+    v2_login,
+    install_v2_storage_api_mocks,
+):
+    base_url = v2_mode_server["base_url"]
+    _open_v2_storage(page, base_url, "plugins", v2_login, install_v2_storage_api_mocks)
+
+    page.click("button[data-plugin-action='details'][data-plugin='mergerfs']")
+    expect(page.locator("#v2-plugin-detail-modal")).to_be_visible()
+
+    # Config editor is seeded with the plugin's JSON config and saves via /config.
+    config_box = page.locator("#v2-plugin-config-textarea")
+    expect(config_box).to_contain_text("mountpoint")
+    config_box.fill('{"mountpoint": "/mnt/pool2"}')
+    page.click("#v2-plugin-config-save")
+    expect(page.locator("#v2-plugin-config-status")).to_have_text("Saved")
+
+
+def test_v2_storage_install_plugin(
+    page: Page,
+    v2_mode_server,
+    v2_login,
+    install_v2_storage_api_mocks,
+):
+    base_url = v2_mode_server["base_url"]
+    _open_v2_storage(page, base_url, "plugins", v2_login, install_v2_storage_api_mocks)
+
+    page.click("#v2-plugin-install-open")
+    expect(page.locator("#v2-plugin-install-modal")).to_be_visible()
+    page.fill("input[data-install-field='source']", "https://github.com/example/newfs")
+    page.click("#v2-plugin-install-submit")
+    expect(page.get_by_text("Plugin installed")).to_be_visible()
+    expect(page.locator("#v2-plugin-install-modal")).to_have_count(0)

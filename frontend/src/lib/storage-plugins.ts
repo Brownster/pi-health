@@ -27,6 +27,8 @@ export interface PluginDetail {
   installed: boolean;
   status: Record<string, unknown>;
   commands: PluginCommand[];
+  schema: Record<string, unknown>;
+  config: Record<string, unknown>;
 }
 
 export interface PluginRecovery {
@@ -86,7 +88,64 @@ export async function fetchPluginDetail(pluginId: string, signal?: AbortSignal):
       label: String(cmd.label ?? cmd.id ?? ""),
       params: Array.isArray(cmd.params) ? cmd.params.map((p) => String(p)) : [],
     })),
+    schema: (payload.schema as Record<string, unknown>) ?? {},
+    config: (payload.config as Record<string, unknown>) ?? {},
   };
+}
+
+export interface SavePluginConfigResult {
+  ok: boolean;
+  error: string | null;
+  details: string[];
+}
+
+/** Save plugin config (server validates and returns field-level details on failure). */
+export async function savePluginConfig(
+  pluginId: string,
+  config: Record<string, unknown>,
+  signal?: AbortSignal,
+): Promise<SavePluginConfigResult> {
+  const response = await fetch(`/api/storage/plugins/${encodeURIComponent(pluginId)}/config`, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify(config),
+    signal,
+  });
+  const payload = (await response.json().catch(() => ({}))) as {
+    status?: string;
+    error?: string;
+    details?: unknown;
+  };
+  if (response.ok && !payload.error) {
+    return { ok: true, error: null, details: [] };
+  }
+  const details = Array.isArray(payload.details)
+    ? payload.details.map((item) => String(item))
+    : payload.details
+      ? [String(payload.details)]
+      : [];
+  return { ok: false, error: payload.error || `Save failed (${response.status})`, details };
+}
+
+export interface InstallPluginRequest {
+  type: string;
+  source: string;
+  id?: string;
+  entry?: string;
+  class_name?: string;
+}
+
+export async function installPlugin(request: InstallPluginRequest, signal?: AbortSignal): Promise<void> {
+  const payload = await requestApi<{ status?: string; error?: string }>("/api/storage/plugins/install", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+    signal,
+  });
+  if (payload.error) {
+    throw new Error(payload.error);
+  }
 }
 
 export async function togglePlugin(pluginId: string, enabled: boolean, signal?: AbortSignal): Promise<void> {

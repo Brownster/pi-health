@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
-import { Activity, Boxes, Loader2, RefreshCw, Terminal, TriangleAlert } from "lucide-react";
+import { Activity, Boxes, Loader2, Plus, RefreshCw, Terminal, TriangleAlert } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,8 +14,10 @@ import {
   fetchPluginLatestLog,
   fetchPluginRecovery,
   fetchPlugins,
+  installPlugin,
   isPoolPlugin,
   removePlugin,
+  savePluginConfig,
   streamPluginCommand,
   togglePlugin,
 } from "@/lib/storage-plugins";
@@ -37,6 +39,15 @@ interface CommandConsole {
   error: string | null;
 }
 
+type SaveStatus = "idle" | "saving" | "saved" | "error";
+
+interface ConfigEditor {
+  text: string;
+  status: SaveStatus;
+  error: string | null;
+  details: string[];
+}
+
 interface DetailModalState {
   open: boolean;
   pluginId: string;
@@ -47,7 +58,31 @@ interface DetailModalState {
   log: string | null;
   error: string | null;
   command: CommandConsole;
+  config: ConfigEditor;
 }
+
+interface InstallModalState {
+  open: boolean;
+  type: string;
+  source: string;
+  id: string;
+  entry: string;
+  class_name: string;
+  status: SaveStatus;
+  error: string | null;
+}
+
+const EMPTY_CONFIG: ConfigEditor = { text: "", status: "idle", error: null, details: [] };
+const EMPTY_INSTALL: InstallModalState = {
+  open: false,
+  type: "github",
+  source: "",
+  id: "",
+  entry: "",
+  class_name: "",
+  status: "idle",
+  error: null,
+};
 
 const EMPTY_COMMAND: CommandConsole = { running: false, commandId: null, lines: [], error: null };
 
@@ -212,7 +247,9 @@ export function StoragePage() {
     log: null,
     error: null,
     command: EMPTY_COMMAND,
+    config: EMPTY_CONFIG,
   });
+  const [installModal, setInstallModal] = useState<InstallModalState>(EMPTY_INSTALL);
   const isMountedRef = useRef(true);
 
   const loadPlugins = useCallback(async (reason: "initial" | "manual") => {
@@ -306,6 +343,7 @@ export function StoragePage() {
       log: null,
       error: null,
       command: EMPTY_COMMAND,
+      config: EMPTY_CONFIG,
     });
 
     try {
@@ -319,7 +357,14 @@ export function StoragePage() {
       }
       setDetailModal((current) =>
         current.pluginId === plugin.id && current.open
-          ? { ...current, status: "ready", detail, recovery, log }
+          ? {
+              ...current,
+              status: "ready",
+              detail,
+              recovery,
+              log,
+              config: { ...EMPTY_CONFIG, text: JSON.stringify(detail.config ?? {}, null, 2) },
+            }
           : current,
       );
     } catch (caughtError) {
@@ -374,6 +419,57 @@ export function StoragePage() {
       }
     }
   }, []);
+
+  const saveConfig = useCallback(async (pluginId: string, text: string) => {
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      setDetailModal((current) => ({
+        ...current,
+        config: { ...current.config, status: "error", error: "Config is not valid JSON", details: [] },
+      }));
+      return;
+    }
+
+    setDetailModal((current) => ({ ...current, config: { ...current.config, status: "saving", error: null, details: [] } }));
+    const result = await savePluginConfig(pluginId, parsed);
+    if (!isMountedRef.current) {
+      return;
+    }
+    if (result.ok) {
+      setDetailModal((current) => ({ ...current, config: { ...current.config, status: "saved", error: null, details: [] } }));
+      setActionNotice({ tone: "success", message: "Plugin config saved" });
+    } else {
+      setDetailModal((current) => ({
+        ...current,
+        config: { ...current.config, status: "error", error: result.error, details: result.details },
+      }));
+    }
+  }, []);
+
+  const installNewPlugin = useCallback(async () => {
+    setInstallModal((current) => ({ ...current, status: "saving", error: null }));
+    try {
+      await installPlugin({
+        type: installModal.type,
+        source: installModal.source,
+        id: installModal.id || undefined,
+        entry: installModal.entry || undefined,
+        class_name: installModal.class_name || undefined,
+      });
+      if (!isMountedRef.current) {
+        return;
+      }
+      setInstallModal(EMPTY_INSTALL);
+      setActionNotice({ tone: "success", message: "Plugin installed" });
+      await loadPlugins("manual");
+    } catch (caughtError) {
+      if (isMountedRef.current) {
+        setInstallModal((current) => ({ ...current, status: "error", error: getErrorMessage(caughtError) }));
+      }
+    }
+  }, [installModal, loadPlugins]);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -430,15 +526,26 @@ export function StoragePage() {
                 </Button>
               ))}
             </div>
-            <Button
-              className="gap-2"
-              disabled={isRefreshing}
-              onClick={() => void loadPlugins("manual")}
-              variant="outline"
-            >
-              <RefreshCw aria-hidden="true" className={cn("h-4 w-4", isRefreshing ? "animate-spin" : "")} />
-              {isRefreshing ? "Refreshing" : "Refresh"}
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                className="gap-2"
+                id="v2-plugin-install-open"
+                onClick={() => setInstallModal({ ...EMPTY_INSTALL, open: true })}
+                variant="outline"
+              >
+                <Plus aria-hidden="true" className="h-4 w-4" />
+                Install plugin
+              </Button>
+              <Button
+                className="gap-2"
+                disabled={isRefreshing}
+                onClick={() => void loadPlugins("manual")}
+                variant="outline"
+              >
+                <RefreshCw aria-hidden="true" className={cn("h-4 w-4", isRefreshing ? "animate-spin" : "")} />
+                {isRefreshing ? "Refreshing" : "Refresh"}
+              </Button>
+            </div>
           </div>
         </CardHeader>
       </Card>
@@ -610,8 +717,135 @@ export function StoragePage() {
                       </pre>
                     </div>
                   ) : null}
+
+                  <div className="space-y-2" id="v2-plugin-config">
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Configuration (JSON)</p>
+                    <textarea
+                      aria-label="Plugin configuration JSON"
+                      className="h-[24vh] w-full resize-y rounded-lg border border-border/70 bg-muted/25 p-3 font-mono text-xs sm:text-sm"
+                      id="v2-plugin-config-textarea"
+                      onChange={(event) =>
+                        setDetailModal((current) => ({
+                          ...current,
+                          config: { ...current.config, text: event.target.value, status: "idle", error: null, details: [] },
+                        }))
+                      }
+                      spellCheck={false}
+                      value={detailModal.config.text}
+                    />
+                    {detailModal.config.error ? (
+                      <p className="text-sm text-rose-300" id="v2-plugin-config-error">
+                        {detailModal.config.error}
+                        {detailModal.config.details.length ? `: ${detailModal.config.details.join("; ")}` : ""}
+                      </p>
+                    ) : null}
+                    <div className="flex items-center gap-3">
+                      <Button
+                        disabled={detailModal.config.status === "saving"}
+                        id="v2-plugin-config-save"
+                        onClick={() => void saveConfig(detailModal.detail!.id, detailModal.config.text)}
+                      >
+                        {detailModal.config.status === "saving" ? "Saving..." : "Save config"}
+                      </Button>
+                      <span
+                        aria-live="polite"
+                        className="text-sm text-emerald-300"
+                        id="v2-plugin-config-status"
+                        role="status"
+                      >
+                        {detailModal.config.status === "saved" ? "Saved" : ""}
+                      </span>
+                    </div>
+                    {Object.keys((detailModal.detail.schema?.properties as Record<string, unknown>) ?? {}).length ? (
+                      <details className="text-xs text-muted-foreground">
+                        <summary className="cursor-pointer">Schema fields</summary>
+                        <ul className="mt-1 space-y-0.5">
+                          {Object.entries((detailModal.detail.schema.properties as Record<string, Record<string, unknown>>)).map(
+                            ([key, def]) => (
+                              <li className="font-mono" key={key}>
+                                {key}
+                                {def?.type ? `: ${String(def.type)}` : ""}
+                                {def?.description ? ` — ${String(def.description)}` : ""}
+                              </li>
+                            ),
+                          )}
+                        </ul>
+                      </details>
+                    ) : null}
+                  </div>
                 </>
               ) : null}
+            </CardContent>
+          </Card>
+        </ModalOverlay>
+      ) : null}
+
+      {installModal.open ? (
+        <ModalOverlay onClose={() => setInstallModal(EMPTY_INSTALL)}>
+          <Card
+            aria-labelledby="v2-plugin-install-title"
+            aria-modal="true"
+            className="flex max-h-[90vh] w-full max-w-xl flex-col overflow-hidden"
+            id="v2-plugin-install-modal"
+            role="dialog"
+          >
+            <CardHeader className="flex flex-row items-start justify-between gap-3 border-b border-border/70 p-4 sm:p-5">
+              <div className="space-y-1">
+                <CardTitle className="text-base sm:text-lg" id="v2-plugin-install-title">
+                  Install plugin
+                </CardTitle>
+                <CardDescription>Install a storage plugin from GitHub or pip.</CardDescription>
+              </div>
+              <Button id="v2-plugin-install-close" onClick={() => setInstallModal(EMPTY_INSTALL)} variant="outline">
+                Close
+              </Button>
+            </CardHeader>
+            <CardContent className="space-y-3 overflow-auto p-4">
+              <label className="block space-y-1">
+                <span className="text-xs uppercase tracking-wide text-muted-foreground">Type</span>
+                <select
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+                  data-install-field="type"
+                  onChange={(event) => setInstallModal((current) => ({ ...current, type: event.target.value }))}
+                  value={installModal.type}
+                >
+                  <option value="github">github</option>
+                  <option value="pip">pip</option>
+                </select>
+              </label>
+              {(
+                [
+                  ["source", "Source (repo URL or package)"],
+                  ["id", "Plugin id (optional)"],
+                  ["entry", "Entry module (optional)"],
+                  ["class_name", "Class name (optional)"],
+                ] as Array<[keyof InstallModalState, string]>
+              ).map(([field, label]) => (
+                <label className="block space-y-1" key={field}>
+                  <span className="text-xs uppercase tracking-wide text-muted-foreground">{label}</span>
+                  <input
+                    className="w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-xs sm:text-sm"
+                    data-install-field={field}
+                    onChange={(event) =>
+                      setInstallModal((current) => ({ ...current, [field]: event.target.value }))
+                    }
+                    spellCheck={false}
+                    value={String(installModal[field])}
+                  />
+                </label>
+              ))}
+              {installModal.error ? (
+                <p className="text-sm text-rose-300" id="v2-plugin-install-error">
+                  {installModal.error}
+                </p>
+              ) : null}
+              <Button
+                disabled={installModal.status === "saving" || !installModal.source.trim()}
+                id="v2-plugin-install-submit"
+                onClick={() => void installNewPlugin()}
+              >
+                {installModal.status === "saving" ? "Installing..." : "Install"}
+              </Button>
             </CardContent>
           </Card>
         </ModalOverlay>
