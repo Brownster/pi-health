@@ -1,5 +1,6 @@
 import type { ComponentType } from "react";
 
+import { CatalogPage } from "@/pages/catalog-page";
 import { ContainersPage } from "@/pages/containers-page";
 import { DashboardHomePage } from "@/pages/dashboard-home";
 import { DisksPage } from "@/pages/disks-page";
@@ -43,6 +44,14 @@ export const appRoutes: AppRoute[] = [
     requiresAuth: true,
     showInNav: true,
     component: StacksPage,
+  },
+  {
+    path: "/apps",
+    label: "App Catalog",
+    navGroup: "My Apps",
+    requiresAuth: true,
+    showInNav: true,
+    component: CatalogPage,
   },
   {
     path: "/disks",

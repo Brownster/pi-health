@@ -900,3 +900,47 @@ def install_v2_system_api_mocks():
         page.route("**/api/**", _handler)
 
     return _install
+
+
+@pytest.fixture(scope="function")
+def install_v2_catalog_api_mocks():
+    """Returns a callable(page) installing deterministic /api/catalog* mocks."""
+
+    def _json_fulfill(route, payload, status: int = 200) -> None:
+        route.fulfill(status=status, content_type="application/json", body=json.dumps(payload))
+
+    def _install(page: Page) -> None:
+        items = [
+            {"id": "jellyfin", "name": "Jellyfin", "description": "Media server", "requires": []},
+            {"id": "sonarr", "name": "Sonarr", "description": "TV library", "requires": ["vpn"]},
+        ]
+
+        def _handler(route):
+            parsed = urlparse(route.request.url)
+            path = parsed.path
+            method = route.request.method
+
+            if path == "/api/catalog" and method == "GET":
+                _json_fulfill(route, {"items": items})
+                return
+            if path == "/api/catalog/status" and method == "GET":
+                _json_fulfill(route, {"services": ["jellyfin"], "service_stacks": {}})
+                return
+            if path == "/api/catalog/sonarr" and method == "GET":
+                _json_fulfill(
+                    route,
+                    {"item": {"id": "sonarr", "fields": [{"key": "PORT", "label": "Web UI port", "default": "8989", "required": True}]}},
+                )
+                return
+            if path == "/api/catalog/install" and method == "POST":
+                _json_fulfill(route, {"status": "installed"})
+                return
+            if path == "/api/catalog/remove" and method == "POST":
+                _json_fulfill(route, {"status": "removed"})
+                return
+
+            route.continue_()
+
+        page.route("**/api/**", _handler)
+
+    return _install
