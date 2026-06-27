@@ -62,3 +62,42 @@ def test_v2_mounts_mount_and_delete(
     page.click("button[data-delete-mount='gdrive']")
     page.click("button[data-confirm-delete-mount='gdrive']")
     expect(page.get_by_text("Deleted gdrive")).to_be_visible(timeout=10000)
+
+
+def test_v2_mounts_add_and_edit_mount(
+    page: Page,
+    v2_mode_server,
+    v2_login,
+    install_v2_mounts_api_mocks,
+):
+    base_url = v2_mode_server["base_url"]
+    _open_v2_mounts(page, base_url, v2_login, install_v2_mounts_api_mocks)
+
+    # Add mount via JSON config modal.
+    page.click("button[data-add-mount='rclone']")
+    expect(page.locator("#v2-mount-config-modal")).to_be_visible()
+    page.fill("textarea[data-mount-config-textarea]", '{"name": "dropbox", "type": "rclone"}')
+    page.click("#v2-mount-config-save")
+    expect(page.get_by_text("Mount created")).to_be_visible()
+
+    # Edit existing mount.
+    page.click("button[data-edit-mount='gdrive']")
+    expect(page.locator("#v2-mount-config-modal")).to_be_visible()
+    page.click("#v2-mount-config-save")
+    expect(page.get_by_text("Mount updated")).to_be_visible()
+
+
+def test_v2_mounts_startup_service_preview_and_apply(
+    page: Page,
+    v2_mode_server,
+    v2_login,
+    install_v2_mounts_api_mocks,
+):
+    base_url = v2_mode_server["base_url"]
+    _open_v2_mounts(page, base_url, v2_login, install_v2_mounts_api_mocks)
+
+    page.click("#v2-startup-preview")
+    expect(page.locator("#v2-startup-proposed")).to_be_visible()
+    page.click("#v2-startup-apply")
+    page.click("#v2-startup-apply-confirm")
+    expect(page.get_by_text("Startup service applied")).to_be_visible()

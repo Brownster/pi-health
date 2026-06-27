@@ -73,3 +73,38 @@ export function deleteShare(pluginId: string, shareName: string, signal?: AbortS
     signal,
   );
 }
+
+async function shareConfigRequest(
+  path: string,
+  method: string,
+  share: Record<string, unknown>,
+  signal?: AbortSignal,
+): Promise<void> {
+  const payload = await requestApi<{ status?: string; error?: string }>(path, {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(share),
+    signal,
+  });
+  if (payload.error) {
+    throw new Error(payload.error);
+  }
+}
+
+export function addShare(pluginId: string, share: Record<string, unknown>, signal?: AbortSignal): Promise<void> {
+  return shareConfigRequest(`/api/storage/shares/${encodeURIComponent(pluginId)}`, "POST", share, signal);
+}
+
+export function updateShare(
+  pluginId: string,
+  shareName: string,
+  share: Record<string, unknown>,
+  signal?: AbortSignal,
+): Promise<void> {
+  return shareConfigRequest(
+    `/api/storage/shares/${encodeURIComponent(pluginId)}/${encodeURIComponent(shareName)}`,
+    "PUT",
+    share,
+    signal,
+  );
+}

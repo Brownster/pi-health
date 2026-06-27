@@ -735,6 +735,24 @@ def install_v2_mounts_api_mocks():
             if path == "/api/storage/mounts/rclone/gdrive" and method == "DELETE":
                 _json_fulfill(route, {"status": "removed"})
                 return
+            if path == "/api/storage/mounts/rclone" and method == "POST":
+                _json_fulfill(route, {"status": "created", "message": "Mount created"})
+                return
+            if path == "/api/storage/mounts/rclone/gdrive" and method == "PUT":
+                _json_fulfill(route, {"status": "updated", "message": "Mount updated"})
+                return
+            if path == "/api/disks/startup-service/preview" and method == "GET":
+                _json_fulfill(
+                    route,
+                    {
+                        "script": {"path": "/usr/local/bin/x.sh", "current": "", "proposed": "#!/bin/sh\n", "exists": False, "changed": True},
+                        "service": {"path": "/etc/systemd/system/x.service", "current": "", "proposed": "[Unit]\n", "exists": False, "changed": True},
+                    },
+                )
+                return
+            if path == "/api/disks/startup-service" and method == "POST":
+                _json_fulfill(route, {"status": "applied"})
+                return
 
             route.continue_()
 
@@ -777,8 +795,14 @@ def install_v2_shares_api_mocks():
             if path == "/api/storage/shares/samba" and method == "GET":
                 _json_fulfill(route, shares_payload)
                 return
+            if path == "/api/storage/shares/samba" and method == "POST":
+                _json_fulfill(route, {"status": "created", "message": "Share created"})
+                return
             if path == "/api/storage/shares/samba/media/toggle" and method == "POST":
                 _json_fulfill(route, {"status": "ok"})
+                return
+            if path == "/api/storage/shares/samba/media" and method == "PUT":
+                _json_fulfill(route, {"status": "updated", "message": "Share updated"})
                 return
             if path == "/api/storage/shares/samba/media" and method == "DELETE":
                 _json_fulfill(route, {"status": "deleted"})

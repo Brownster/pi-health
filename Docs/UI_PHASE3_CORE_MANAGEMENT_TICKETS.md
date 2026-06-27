@@ -398,8 +398,11 @@ Complete (2026-06-26)
 4. Validation: `npm run check` / `build:publish` / bundle budget (JS 86.15 kB gz / 200 kB) pass;
    `pytest test_v2_mounts_parity.py -q` -> pass.
 
-Deferred to PH3-007b: the add/edit mount modal (with secret credential fields — overlaps the
-PH3-006b schema config editor) and the startup-service preview/apply flow.
+PH3-007b (Complete 2026-06-27): add/edit mount JSON-config modal (credential fields are not
+pre-filled on edit, honoring "secrets not echoed") and the startup-service preview + apply flow.
+`lib/mounts.ts` adds `addMount`/`updateMount`/`fetchStartupPreview`/`applyStartupService`;
+`mounts-page.tsx` adds per-plugin "Add mount", per-mount "Edit", and a Startup service
+preview/apply (keyboard-safe confirm) card; e2e covers add/edit + startup preview/apply.
 
 ## PH3-008 - v2 Shares Management (P0)
 Owner: Pi-Health maintainers  
@@ -438,7 +441,9 @@ Complete (2026-06-26)
 5. Validation: `npm run check` / `build:publish` / bundle budget (JS 87.25 kB gz / 200 kB) pass;
    `pytest test_v2_shares_parity.py -q` -> `6 passed`.
 
-Deferred to PH3-008b: the create/edit share form (overlaps the PH3-006b schema config editor).
+PH3-008b (Complete 2026-06-27): add/edit share JSON form. `lib/shares.ts` adds `addShare`/
+`updateShare`; `shares-page.tsx` adds per-plugin "Add share" and per-share "Edit" modals; e2e
+covers create + edit.
 
 ## PH3-009 - v2 Settings + Backup/Update Workflows (P0)
 Owner: Pi-Health maintainers  

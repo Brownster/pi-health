@@ -115,3 +115,80 @@ export function deleteMount(pluginId: string, mountId: string, signal?: AbortSig
     signal,
   );
 }
+
+async function mountConfigRequest(
+  path: string,
+  method: string,
+  config: Record<string, unknown>,
+  signal?: AbortSignal,
+): Promise<void> {
+  const payload = await requestApi<{ status?: string; error?: string }>(path, {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(config),
+    signal,
+  });
+  if (payload.error) {
+    throw new Error(payload.error);
+  }
+}
+
+export function addMount(pluginId: string, config: Record<string, unknown>, signal?: AbortSignal): Promise<void> {
+  return mountConfigRequest(`/api/storage/mounts/${encodeURIComponent(pluginId)}`, "POST", config, signal);
+}
+
+export function updateMount(
+  pluginId: string,
+  mountId: string,
+  config: Record<string, unknown>,
+  signal?: AbortSignal,
+): Promise<void> {
+  return mountConfigRequest(
+    `/api/storage/mounts/${encodeURIComponent(pluginId)}/${encodeURIComponent(mountId)}`,
+    "PUT",
+    config,
+    signal,
+  );
+}
+
+export interface StartupFilePreview {
+  path: string;
+  current: string;
+  proposed: string;
+  exists: boolean;
+  changed: boolean;
+}
+
+export interface StartupPreview {
+  script: StartupFilePreview;
+  service: StartupFilePreview;
+}
+
+export async function fetchStartupPreview(signal?: AbortSignal): Promise<StartupPreview> {
+  const payload = await requestApi<{
+    script?: Partial<StartupFilePreview>;
+    service?: Partial<StartupFilePreview>;
+    error?: string;
+  }>("/api/disks/startup-service/preview", { method: "GET", signal });
+  if (payload.error) {
+    throw new Error(payload.error);
+  }
+  const normalize = (raw: Partial<StartupFilePreview> | undefined): StartupFilePreview => ({
+    path: String(raw?.path ?? ""),
+    current: String(raw?.current ?? ""),
+    proposed: String(raw?.proposed ?? ""),
+    exists: Boolean(raw?.exists),
+    changed: Boolean(raw?.changed),
+  });
+  return { script: normalize(payload.script), service: normalize(payload.service) };
+}
+
+export async function applyStartupService(signal?: AbortSignal): Promise<void> {
+  const payload = await requestApi<{ status?: string; error?: string }>("/api/disks/startup-service", {
+    method: "POST",
+    signal,
+  });
+  if (payload.error) {
+    throw new Error(payload.error);
+  }
+}

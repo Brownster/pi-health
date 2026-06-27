@@ -47,3 +47,24 @@ def test_v2_shares_toggle_and_delete(
     page.click("button[data-delete-share='media']")
     page.click("button[data-confirm-delete-share='media']")
     expect(page.get_by_text("Deleted media")).to_be_visible()
+
+
+def test_v2_shares_add_and_edit_share(
+    page: Page,
+    v2_mode_server,
+    v2_login,
+    install_v2_shares_api_mocks,
+):
+    base_url = v2_mode_server["base_url"]
+    _open_v2_shares(page, base_url, v2_login, install_v2_shares_api_mocks)
+
+    page.click("button[data-add-share='samba']")
+    expect(page.locator("#v2-share-config-modal")).to_be_visible()
+    page.fill("textarea[data-share-config-textarea]", '{"name": "backups", "path": "/mnt/storage/backups"}')
+    page.click("#v2-share-config-save")
+    expect(page.get_by_text("Share created")).to_be_visible()
+
+    page.click("button[data-edit-share='media']")
+    expect(page.locator("#v2-share-config-modal")).to_be_visible()
+    page.click("#v2-share-config-save")
+    expect(page.get_by_text("Share updated")).to_be_visible()
