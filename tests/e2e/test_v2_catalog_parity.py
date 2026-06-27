@@ -47,6 +47,25 @@ def test_v2_catalog_install_with_fields(
     expect(page.get_by_text("Installed Sonarr")).to_be_visible()
 
 
+def test_v2_catalog_install_keeps_focus_while_typing(
+    page: Page,
+    v2_mode_server,
+    v2_login,
+    install_v2_catalog_api_mocks,
+):
+    base_url = v2_mode_server["base_url"]
+    _open_v2_catalog(page, base_url, v2_login, install_v2_catalog_api_mocks)
+
+    page.click("button[data-catalog-action='install'][data-item='sonarr']")
+    field = page.locator("input[data-install-field='PORT']")
+    field.click()
+    field.press("ControlOrMeta+A")
+    field.press_sequentially("12345", delay=25)
+
+    expect(field).to_be_focused()
+    expect(field).to_have_value("12345")
+
+
 def test_v2_catalog_remove_with_confirm(
     page: Page,
     v2_mode_server,

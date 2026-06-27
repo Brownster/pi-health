@@ -16,6 +16,8 @@ export function ModalOverlay({
   children: ReactNode;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     const node = containerRef.current;
@@ -37,7 +39,7 @@ export function ModalOverlay({
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (event.key !== "Tab" || !node) {
@@ -65,14 +67,14 @@ export function ModalOverlay({
       document.body.style.overflow = previousBodyOverflow;
       triggerEl?.focus?.();
     };
-  }, [onClose]);
+  }, []);
 
   return (
     <div
       className="fixed inset-0 z-[70] flex items-center justify-center bg-black/75 p-3 sm:p-4"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) {
-          onClose();
+          onCloseRef.current();
         }
       }}
       ref={containerRef}
