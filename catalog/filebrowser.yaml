@@ -1,0 +1,50 @@
+id: filebrowser
+name: File Browser
+description: Web file manager for your storage, downloads, backup, and config folders
+requires: []
+disabled_by_default: false
+fields:
+  - key: TZ
+    label: Timezone
+    default: "Europe/London"
+  - key: PUID
+    label: User ID (PUID)
+    default: "1000"
+  - key: PGID
+    label: Group ID (PGID)
+    default: "1000"
+  - key: CONFIG_DIR
+    label: Config root directory
+    default: "/home/pi/docker"
+  - key: STORAGE_DIR
+    label: Storage mount
+    default: "/mnt/storage"
+  - key: DOWNLOADS_DIR
+    label: Downloads mount
+    default: "/mnt/downloads"
+  - key: BACKUP_DIR
+    label: Backup mount
+    default: "/mnt/backup"
+  - key: PORT
+    label: HTTP port
+    default: "8085"
+service:
+  # :s6 variant supports PUID/PGID and uses directory mounts for /database and /config
+  # (so the DB is created on first boot — no pre-existing db file required).
+  image: filebrowser/filebrowser:s6
+  container_name: filebrowser
+  network_mode: bridge
+  environment:
+    - TZ={{TZ}}
+    - PUID={{PUID}}
+    - PGID={{PGID}}
+  volumes:
+    - "{{CONFIG_DIR}}/filebrowser/database:/database"
+    - "{{CONFIG_DIR}}/filebrowser/config:/config"
+    - "{{STORAGE_DIR}}:/srv/storage"
+    - "{{DOWNLOADS_DIR}}:/srv/downloads"
+    - "{{BACKUP_DIR}}:/srv/backup"
+    - "{{CONFIG_DIR}}:/srv/config"
+  ports:
+    - "{{PORT}}:80"
+  restart: unless-stopped
