@@ -6,11 +6,17 @@ import pytest
 import json
 import sys
 import os
+import subprocess
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app import app, verify_credentials, load_users, AUTH_USERS
+from app import LOGIN_RATE_LIMITER, app, load_users, verify_credentials
+from auth_utils import CredentialConfigurationError
+
+TEST_USERNAME = os.environ["PIHEALTH_USER"]
+TEST_PASSWORD = os.environ["PIHEALTH_TEST_PASSWORD"]
+TEST_PASSWORD_HASH = os.environ["PIHEALTH_PASSWORD_HASH"]
 
 
 @pytest.fixture
@@ -18,6 +24,7 @@ def client():
     """Create a test client for the Flask application."""
     app.config['TESTING'] = True
     app.config['SECRET_KEY'] = 'test-secret-key'
+    LOGIN_RATE_LIMITER.reset()
     with app.test_client() as client:
         yield client
 
@@ -36,11 +43,7 @@ class TestAuthentication:
 
     def test_verify_credentials_valid(self):
         """Test that valid credentials are accepted."""
-        # Get first user from AUTH_USERS
-        if AUTH_USERS:
-            username = list(AUTH_USERS.keys())[0]
-            password = AUTH_USERS[username]
-            assert verify_credentials(username, password) is True
+        assert verify_credentials(TEST_USERNAME, TEST_PASSWORD) is True
 
     def test_verify_credentials_invalid(self):
         """Test that invalid credentials are rejected."""
@@ -48,22 +51,84 @@ class TestAuthentication:
 
     def test_verify_credentials_wrong_password(self):
         """Test that wrong password is rejected."""
-        if AUTH_USERS:
-            username = list(AUTH_USERS.keys())[0]
-            assert verify_credentials(username, 'wrongpassword') is False
+        assert verify_credentials(TEST_USERNAME, 'wrongpassword') is False
 
     def test_login_endpoint_success(self, client):
         """Test successful login."""
-        if AUTH_USERS:
-            username = list(AUTH_USERS.keys())[0]
-            password = AUTH_USERS[username]
-            response = client.post('/api/login',
-                data=json.dumps({'username': username, 'password': password}),
-                content_type='application/json')
-            assert response.status_code == 200
-            data = json.loads(response.data)
-            assert data['status'] == 'success'
-            assert data['username'] == username
+        response = client.post('/api/login',
+            data=json.dumps({'username': TEST_USERNAME, 'password': TEST_PASSWORD}),
+            content_type='application/json')
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data['status'] == 'success'
+        assert data['username'] == TEST_USERNAME
+
+    def test_missing_credentials_are_rejected(self):
+        with pytest.raises(CredentialConfigurationError, match="not configured"):
+            load_users({})
+
+    def test_app_startup_fails_without_credentials(self):
+        result = subprocess.run(
+            [sys.executable, "-c", "import app"],
+            cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            env={},
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+
+        assert result.returncode != 0
+        assert "Authentication is not configured" in result.stderr
+
+    def test_plaintext_password_configuration_is_rejected(self):
+        with pytest.raises(CredentialConfigurationError, match="plaintext"):
+            load_users({"PIHEALTH_USER": "admin", "PIHEALTH_PASSWORD": "pihealth"})
+
+        with pytest.raises(CredentialConfigurationError, match="plaintext"):
+            load_users({
+                "PIHEALTH_USER": "admin",
+                "PIHEALTH_PASSWORD": "pihealth",
+                "PIHEALTH_PASSWORD_HASH": TEST_PASSWORD_HASH,
+            })
+
+        with pytest.raises(CredentialConfigurationError, match="hashes"):
+            load_users({"PIHEALTH_USERS": "admin:pihealth"})
+
+    def test_hashed_multi_user_configuration(self):
+        users = load_users({"PIHEALTH_USERS": f"admin:{TEST_PASSWORD_HASH}"})
+        assert users == {"admin": TEST_PASSWORD_HASH}
+
+    def test_malformed_password_hash_is_rejected(self):
+        malformed_hash = "pbkdf2:unknown:1$salt$" + ("0" * 64)
+        with pytest.raises(CredentialConfigurationError, match="PBKDF2-SHA256"):
+            load_users({
+                "PIHEALTH_USER": "admin",
+                "PIHEALTH_PASSWORD_HASH": malformed_hash,
+            })
+
+    def test_login_rate_limit_and_recovery(self, client):
+        payload = {'username': TEST_USERNAME, 'password': 'wrong'}
+        for _ in range(4):
+            response = client.post('/api/login', json=payload)
+            assert response.status_code == 401
+
+        response = client.post('/api/login', json=payload)
+        assert response.status_code == 429
+        assert int(response.headers['Retry-After']) > 0
+
+        blocked_valid_login = client.post(
+            '/api/login',
+            json={'username': TEST_USERNAME, 'password': TEST_PASSWORD},
+        )
+        assert blocked_valid_login.status_code == 429
+
+        LOGIN_RATE_LIMITER.reset('127.0.0.1')
+        recovered = client.post(
+            '/api/login',
+            json={'username': TEST_USERNAME, 'password': TEST_PASSWORD},
+        )
+        assert recovered.status_code == 200
 
     def test_login_endpoint_failure(self, client):
         """Test failed login."""

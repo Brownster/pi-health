@@ -10,7 +10,7 @@ import hashlib
 import getpass
 from urllib import request as urlrequest
 from stack_manager import stack_manager
-from auth_utils import login_required
+from auth_utils import LoginRateLimiter, load_users, login_required, verify_credentials as verify_password
 from catalog_manager import catalog_manager
 from tools_manager import tools_manager
 from storage_plugins import storage_bp
@@ -59,33 +59,14 @@ def _save_pihealth_update_config(config):
     with open(PIHEALTH_UPDATE_CONFIG, "w") as handle:
         json.dump(config, handle, indent=2)
 
-# Authentication configuration - supports multiple users via environment variables
-# Format: PIHEALTH_USERS=user1:password1,user2:password2
-def load_users():
-    """Load users from environment variable or use default."""
-    users_env = os.getenv('PIHEALTH_USERS', '')
-    users = {}
-    if users_env:
-        for user_pass in users_env.split(','):
-            if ':' in user_pass:
-                username, password = user_pass.split(':', 1)
-                users[username.strip()] = password.strip()
-    # Fallback to legacy single user config or default
-    if not users:
-        default_user = os.getenv('PIHEALTH_USER', 'admin')
-        default_pass = os.getenv('PIHEALTH_PASSWORD', 'pihealth')
-        users[default_user] = default_pass
-    return users
-
 AUTH_USERS = load_users()
+LOGIN_RATE_LIMITER = LoginRateLimiter()
 print(f"Loaded {len(AUTH_USERS)} user(s) for authentication")
 
 
 def verify_credentials(username, password):
     """Verify username and password against configured users."""
-    if username in AUTH_USERS:
-        return AUTH_USERS[username] == password
-    return False
+    return verify_password(AUTH_USERS, username, password)
 
 # Load theme configuration
 THEME_NAME = os.getenv('THEME', 'modern')
@@ -1512,6 +1493,13 @@ def serve_v2_path(path):
 @app.route('/api/login', methods=['POST'])
 def api_login():
     """API endpoint for user authentication."""
+    client_key = request.remote_addr or "unknown"
+    retry_after = LOGIN_RATE_LIMITER.retry_after(client_key)
+    if retry_after:
+        response = jsonify({'error': 'Too many login attempts. Try again later.'})
+        response.headers['Retry-After'] = str(retry_after)
+        return response, 429
+
     data = request.get_json()
     if not data:
         return jsonify({'error': 'No data provided'}), 400
@@ -1520,10 +1508,16 @@ def api_login():
     password = data.get('password', '')
 
     if verify_credentials(username, password):
+        LOGIN_RATE_LIMITER.reset(client_key)
         session['authenticated'] = True
         session['username'] = username
         return jsonify({'status': 'success', 'username': username})
     else:
+        retry_after = LOGIN_RATE_LIMITER.record_failure(client_key)
+        if retry_after:
+            response = jsonify({'error': 'Too many login attempts. Try again later.'})
+            response.headers['Retry-After'] = str(retry_after)
+            return response, 429
         return jsonify({'error': 'Invalid credentials'}), 401
 
 

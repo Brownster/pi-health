@@ -11,7 +11,7 @@ from flask import Flask, jsonify
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from auth_utils import login_required
+from auth_utils import LoginRateLimiter, login_required
 
 
 @pytest.fixture
@@ -43,3 +43,20 @@ def test_login_required_allows_authenticated(client):
 
     response = client.get('/protected')
     assert response.status_code == 200
+
+
+def test_login_rate_limiter_lockout_expires():
+    now = [100.0]
+    limiter = LoginRateLimiter(
+        max_attempts=2,
+        window_seconds=30,
+        lockout_seconds=10,
+        clock=lambda: now[0],
+    )
+
+    assert limiter.record_failure("client") == 0
+    assert limiter.record_failure("client") == 10
+    assert limiter.retry_after("client") == 10
+
+    now[0] += 11
+    assert limiter.retry_after("client") == 0

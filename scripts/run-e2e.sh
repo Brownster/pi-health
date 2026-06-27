@@ -6,6 +6,9 @@ set -e
 
 PORT=${PORT:-8002}
 BASE_URL=${BASE_URL:-http://localhost:$PORT}
+PIHEALTH_USER=${PIHEALTH_USER:-admin}
+PIHEALTH_PASSWORD_HASH=${PIHEALTH_PASSWORD_HASH:-'pbkdf2:sha256:600000$WY9hNhygYgkvb3aQ$1d1076dc15e3201c5aaac3272ab5d7410097da87d8844ab9d5aa9e27e53ff465'}
+export PIHEALTH_USER PIHEALTH_PASSWORD_HASH
 
 set +e
 python - "$PORT" <<'PY'
@@ -44,7 +47,7 @@ fi
 
 # Start the app in background
 APP_LOG=$(mktemp)
-PORT=$PORT python app.py >"$APP_LOG" 2>&1 &
+env -u PIHEALTH_PASSWORD PORT=$PORT python app.py >"$APP_LOG" 2>&1 &
 APP_PID=$!
 trap 'kill $APP_PID 2>/dev/null || true; rm -f "$APP_LOG"' EXIT
 

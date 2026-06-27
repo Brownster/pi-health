@@ -20,7 +20,12 @@ expect.set_options(timeout=10_000)
 
 # Default credentials from appropriate environment variables or defaults
 USERNAME = os.getenv('PIHEALTH_USER', 'admin')
-PASSWORD = os.getenv('PIHEALTH_PASSWORD', 'pihealth')
+PASSWORD = os.getenv('PIHEALTH_TEST_PASSWORD', os.getenv('PIHEALTH_PASSWORD', 'pihealth'))
+PASSWORD_HASH = os.getenv(
+    'PIHEALTH_PASSWORD_HASH',
+    'pbkdf2:sha256:600000$WY9hNhygYgkvb3aQ$'
+    '1d1076dc15e3201c5aaac3272ab5d7410097da87d8844ab9d5aa9e27e53ff465',
+)
 BASE_URL = os.getenv('BASE_URL', 'http://localhost:8002')
 
 VIEWPORT_PROFILES = {
@@ -212,10 +217,11 @@ def _v2_spawn(mode: str, v2_pages: str | None = None):
         {
             "PORT": str(port),
             "PIHEALTH_USER": USERNAME,
-            "PIHEALTH_PASSWORD": PASSWORD,
+            "PIHEALTH_PASSWORD_HASH": PASSWORD_HASH,
             "PIHEALTH_UI_MODE": mode,
         }
     )
+    env.pop("PIHEALTH_PASSWORD", None)
     env.pop("PIHEALTH_UI_V2_PAGES", None)
     env.update(V2_MODE_CONFIG.get(mode, {}))
     if v2_pages is not None:
