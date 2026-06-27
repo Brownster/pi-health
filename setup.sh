@@ -215,7 +215,8 @@ PrivateTmp=true
 
 # Socket permissions
 RuntimeDirectory=pihealth
-RuntimeDirectoryMode=0755
+RuntimeDirectoryMode=0750
+UMask=0007
 
 [Install]
 WantedBy=multi-user.target

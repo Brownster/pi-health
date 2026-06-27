@@ -10,6 +10,7 @@ import json
 from flask import Blueprint, jsonify, request
 from auth_utils import login_required
 from helper_client import helper_call, helper_available, HelperError, HELPER_SOCKET
+from helper_templates import render_startup_files
 from smart_monitor import parse_smartctl_json
 
 disk_manager = Blueprint('disk_manager', __name__)
@@ -37,7 +38,6 @@ DEFAULT_MEDIA_PATHS = {
 
 DOCKER_COMPOSE_PATH = os.getenv('DOCKER_COMPOSE_PATH', './docker-compose.yml')
 STARTUP_SERVICE_NAME = 'docker-compose-start.service'
-STARTUP_SCRIPT_PATH = '/usr/local/bin/check_mount_and_start.sh'
 SEEDBOX_MOUNT_POINT = '/mnt/seedbox'
 
 
@@ -97,75 +97,23 @@ def _seedbox_is_mounted():
         return False
 
 
-def _build_startup_script(paths):
+def _startup_service_params(paths):
     mount_points = []
     for key in ('storage', 'downloads', 'backup'):
         value = paths.get(key)
         if isinstance(value, str) and value.startswith('/mnt/'):
             mount_points.append(value)
-
-    compose_path = os.path.abspath(DOCKER_COMPOSE_PATH)
-    mount_checks = "\n".join([f'  "{mp}"' for mp in mount_points])
-    mounts_array = f"({mount_checks})" if mount_points else "()"
-
-    script = f"""#!/bin/bash
-MOUNT_POINTS={mounts_array}
-DOCKER_COMPOSE_FILE="{compose_path}"
-
-if [ "${{#MOUNT_POINTS[@]}}" -gt 0 ]; then
-  while true; do
-    missing=0
-    for m in "${{MOUNT_POINTS[@]}}"; do
-      if ! mountpoint -q "$m"; then
-        missing=1
-      fi
-    done
-    if [ "$missing" -eq 0 ]; then
-      break
-    fi
-    sleep 5
-  done
-fi
-
-/usr/bin/docker compose -f "$DOCKER_COMPOSE_FILE" up -d
-"""
-    return script
-
-
-def _build_startup_service():
-    return """[Unit]
-Description=Ensure drives are mounted and start Docker containers
-Requires=local-fs.target
-After=local-fs.target docker.service
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/bin/check_mount_and_start.sh
-RemainAfterExit=yes
-
-[Install]
-WantedBy=multi-user.target
-"""
+    return {
+        'mount_points': mount_points,
+        'compose_file': os.path.abspath(DOCKER_COMPOSE_PATH),
+    }
 
 
 def update_startup_service(paths):
     if not helper_available():
         return {'success': False, 'error': 'Helper service unavailable'}
 
-    script_content = _build_startup_script(paths)
-    service_content = _build_startup_service()
-
-    result = helper_call('write_startup_script', {
-        'path': STARTUP_SCRIPT_PATH,
-        'content': script_content
-    })
-    if not result.get('success'):
-        return result
-
-    result = helper_call('write_systemd_unit', {
-        'unit_name': STARTUP_SERVICE_NAME,
-        'content': service_content
-    })
+    result = helper_call('configure_startup_service', _startup_service_params(paths))
     if not result.get('success'):
         return result
 
@@ -578,60 +526,50 @@ def api_set_media_paths():
 def api_preview_startup_service():
     """Preview changes to startup service before applying."""
     paths = load_media_paths()
-
-    # Generate proposed content
-    proposed_script = _build_startup_script(paths)
-    proposed_service = _build_startup_service()
-
-    script_path = '/usr/local/bin/check_mount_and_start.sh'
-    service_path = '/etc/systemd/system/docker-compose-start.service'
-
-    # Try helper first, fall back to direct read
-    current = None
+    params = _startup_service_params(paths)
     if helper_available():
         try:
-            current = helper_call('read_startup_files', {})
-            if not current.get('success'):
-                current = None
-        except Exception:
-            current = None
-
-    # Fallback: try to read files directly (works if we have read permission)
-    if not current:
-        current = {
-            'script': {'path': script_path, 'content': '', 'exists': False},
-            'service': {'path': service_path, 'content': '', 'exists': False}
-        }
-        try:
-            if os.path.exists(script_path):
-                with open(script_path, 'r') as f:
-                    current['script']['content'] = f.read()
-                    current['script']['exists'] = True
-        except (IOError, PermissionError):
-            pass
-        try:
-            if os.path.exists(service_path):
-                with open(service_path, 'r') as f:
-                    current['service']['content'] = f.read()
-                    current['service']['exists'] = True
-        except (IOError, PermissionError):
+            result = helper_call('preview_startup_service', params)
+            if result.get('success'):
+                return jsonify({'script': result['script'], 'service': result['service']})
+        except HelperError:
             pass
 
+    proposed_script, proposed_service = render_startup_files(
+        params['mount_points'],
+        params['compose_file'],
+    )
+    script_path = '/usr/local/bin/check_mount_and_start.sh'
+    service_path = '/etc/systemd/system/docker-compose-start.service'
+    current_script = ''
+    current_service = ''
+    script_exists = os.path.exists(script_path)
+    service_exists = os.path.exists(service_path)
+    try:
+        with open(script_path, 'r') as handle:
+            current_script = handle.read()
+    except (FileNotFoundError, PermissionError, OSError):
+        pass
+    try:
+        with open(service_path, 'r') as handle:
+            current_service = handle.read()
+    except (FileNotFoundError, PermissionError, OSError):
+        pass
     return jsonify({
         'script': {
             'path': script_path,
-            'current': current['script']['content'],
+            'current': current_script,
             'proposed': proposed_script,
-            'exists': current['script']['exists'],
-            'changed': current['script']['content'] != proposed_script
+            'exists': script_exists,
+            'changed': current_script != proposed_script,
         },
         'service': {
             'path': service_path,
-            'current': current['service']['content'],
+            'current': current_service,
             'proposed': proposed_service,
-            'exists': current['service']['exists'],
-            'changed': current['service']['content'] != proposed_service
-        }
+            'exists': service_exists,
+            'changed': current_service != proposed_service,
+        },
     })
 
 

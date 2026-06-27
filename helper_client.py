@@ -4,14 +4,37 @@ Helper service client utilities.
 import json
 import os
 import socket
+import struct
 
 
 HELPER_SOCKET = os.getenv('PIHEALTH_HELPER_SOCKET', '/run/pihealth/helper.sock')
+MAX_MESSAGE_SIZE = 65536
+FRAME_HEADER_SIZE = 4
 
 
 class HelperError(Exception):
     """Error communicating with helper service."""
     pass
+
+
+def _recv_exact(sock, size):
+    chunks = []
+    remaining = size
+    while remaining:
+        chunk = sock.recv(remaining)
+        if not chunk:
+            raise HelperError('Incomplete response from helper')
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    return b''.join(chunks)
+
+
+def _recv_frame(sock):
+    header = _recv_exact(sock, FRAME_HEADER_SIZE)
+    (message_size,) = struct.unpack('!I', header)
+    if not 0 < message_size <= MAX_MESSAGE_SIZE:
+        raise HelperError('Invalid response size from helper')
+    return _recv_exact(sock, message_size)
 
 
 def helper_call(command, params=None):
@@ -40,17 +63,12 @@ def helper_call(command, params=None):
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         sock.settimeout(30)
         sock.connect(HELPER_SOCKET)
-        sock.sendall(json.dumps(request_data).encode('utf-8'))
+        payload = json.dumps(request_data, separators=(',', ':')).encode('utf-8')
+        if len(payload) > MAX_MESSAGE_SIZE:
+            raise HelperError('Helper request exceeds maximum size')
+        sock.sendall(struct.pack('!I', len(payload)) + payload)
 
-        chunks = []
-        while True:
-            chunk = sock.recv(65536)
-            if not chunk:
-                break
-            chunks.append(chunk)
-        sock.close()
-
-        response = json.loads(b''.join(chunks).decode('utf-8'))
+        response = json.loads(_recv_frame(sock).decode('utf-8'))
         return response
     except socket.timeout:
         raise HelperError('Helper request timed out')
@@ -58,6 +76,9 @@ def helper_call(command, params=None):
         raise HelperError(f'Socket error: {exc}')
     except json.JSONDecodeError:
         raise HelperError('Invalid response from helper')
+    finally:
+        if 'sock' in locals():
+            sock.close()
 
 
 def helper_available():

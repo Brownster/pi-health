@@ -4,6 +4,8 @@ Tests for helper_client module
 """
 import sys
 import os
+import json
+import struct
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -23,7 +25,8 @@ class TestHelperCall:
 
     def test_helper_call_success(self):
         mock_sock = MagicMock()
-        mock_sock.recv.side_effect = [b'{"success": true}', b""]
+        payload = b'{"success": true}'
+        mock_sock.recv.side_effect = [struct.pack('!I', len(payload)), payload]
 
         with patch("helper_client.os.path.exists", return_value=True):
             with patch("helper_client.socket.socket", return_value=mock_sock):
@@ -31,7 +34,10 @@ class TestHelperCall:
 
         assert response["success"] is True
         mock_sock.connect.assert_called_once_with(helper_client.HELPER_SOCKET)
-        mock_sock.sendall.assert_called_once()
+        request_frame = mock_sock.sendall.call_args.args[0]
+        request_size = struct.unpack('!I', request_frame[:4])[0]
+        assert request_size == len(request_frame[4:])
+        assert json.loads(request_frame[4:])["command"] == "ping"
 
     def test_helper_call_timeout(self):
         mock_sock = MagicMock()
@@ -44,11 +50,35 @@ class TestHelperCall:
 
     def test_helper_call_invalid_json(self):
         mock_sock = MagicMock()
-        mock_sock.recv.side_effect = [b"invalid", b""]
+        mock_sock.recv.side_effect = [struct.pack('!I', 7), b"invalid"]
 
         with patch("helper_client.os.path.exists", return_value=True):
             with patch("helper_client.socket.socket", return_value=mock_sock):
                 with pytest.raises(HelperError):
+                    helper_client.helper_call("ping")
+
+    def test_helper_call_rejects_oversized_request(self):
+        mock_sock = MagicMock()
+        with patch("helper_client.os.path.exists", return_value=True):
+            with patch("helper_client.socket.socket", return_value=mock_sock):
+                with pytest.raises(HelperError, match="exceeds maximum size"):
+                    helper_client.helper_call("ping", {"value": "x" * 70000})
+        mock_sock.sendall.assert_not_called()
+
+    def test_helper_call_rejects_oversized_response_frame(self):
+        mock_sock = MagicMock()
+        mock_sock.recv.return_value = struct.pack('!I', helper_client.MAX_MESSAGE_SIZE + 1)
+        with patch("helper_client.os.path.exists", return_value=True):
+            with patch("helper_client.socket.socket", return_value=mock_sock):
+                with pytest.raises(HelperError, match="Invalid response size"):
+                    helper_client.helper_call("ping")
+
+    def test_helper_call_rejects_truncated_response_frame(self):
+        mock_sock = MagicMock()
+        mock_sock.recv.side_effect = [struct.pack('!I', 10), b"{}", b""]
+        with patch("helper_client.os.path.exists", return_value=True):
+            with patch("helper_client.socket.socket", return_value=mock_sock):
+                with pytest.raises(HelperError, match="Incomplete response"):
                     helper_client.helper_call("ping")
 
 

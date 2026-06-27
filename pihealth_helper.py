@@ -23,17 +23,20 @@ import re
 import logging
 import signal
 import shutil
+import struct
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
 import urllib.request
 import urllib.error
 import shlex
+from helper_templates import cron_to_oncalendar, render_snapraid_schedule, render_startup_files
 
 # Configuration
 SOCKET_PATH = '/run/pihealth/helper.sock'
 LOG_FILE = '/var/log/pihealth-helper.log'
 MAX_MESSAGE_SIZE = 65536
+FRAME_HEADER_SIZE = 4
 COPY_PARTY_DIR = '/opt/copyparty'
 COPY_PARTY_SHARE = '/srv/copyparty'
 COPY_PARTY_UNIT = '/etc/systemd/system/copyparty.service'
@@ -65,6 +68,9 @@ SEEDBOX_AUTOMOUNT_UNIT = 'mnt-seedbox.automount'
 RCLONE_CONFIG_DIR = '/etc/rclone'
 RCLONE_CONFIG_FILE = '/etc/rclone/rclone.conf'
 RCLONE_MOUNTS_CONFIG = '/etc/rclone/mounts.json'
+STARTUP_SCRIPT_PATH = '/usr/local/bin/check_mount_and_start.sh'
+STARTUP_SERVICE_PATH = '/etc/systemd/system/docker-compose-start.service'
+SNAPRAID_JOB_TYPES = {'sync', 'scrub'}
 
 # SSHFS multi-mount configuration
 SSHFS_CONFIG_DIR = '/etc/sshfs'
@@ -74,6 +80,8 @@ PIHEALTH_REPO_DIR = os.getenv("PIHEALTH_REPO_DIR")
 PIHEALTH_SERVICE_NAME = os.getenv("PIHEALTH_SERVICE_NAME", "pi-health")
 
 PLUGIN_ID_PATTERN = re.compile(r'^[a-zA-Z0-9._-]+$')
+COMPOSE_FILE_NAMES = {'compose.yml', 'compose.yaml', 'docker-compose.yml', 'docker-compose.yaml'}
+COMPOSE_ALLOWED_ROOTS = ('/home/', '/opt/', '/srv/')
 
 
 def run_command(cmd, timeout=30, cwd=None):
@@ -95,6 +103,55 @@ def run_command(cmd, timeout=30, cwd=None):
         return {'error': 'Command timed out', 'returncode': -1}
     except Exception as e:
         return {'error': str(e), 'returncode': -1}
+
+
+def _write_managed_file(path, content, mode=0o644):
+    """Back up and atomically replace one helper-managed file."""
+    try:
+        if os.path.exists(path):
+            backup = f"{path}.backup.{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            shutil.copy(path, backup)
+
+        temp_path = f"{path}.tmp.{os.getpid()}"
+        with open(temp_path, 'w') as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temp_path, mode)
+        os.replace(temp_path, path)
+        return {'success': True, 'path': path}
+    except Exception as exc:
+        try:
+            if 'temp_path' in locals() and os.path.exists(temp_path):
+                os.unlink(temp_path)
+        except OSError:
+            pass
+        return {'success': False, 'error': str(exc)}
+
+
+def _validate_compose_path(value):
+    if not isinstance(value, str) or not value.startswith('/'):
+        return None
+    if any(character in value for character in ('\x00', '\n', '\r')):
+        return None
+    normalized = os.path.normpath(value)
+    if normalized != value or os.path.basename(normalized) not in COMPOSE_FILE_NAMES:
+        return None
+    if not normalized.startswith(COMPOSE_ALLOWED_ROOTS):
+        return None
+    return normalized
+
+
+def _validate_mount_points(values):
+    if not isinstance(values, list) or len(values) > 32:
+        return None
+    mount_points = []
+    for value in values:
+        if not isinstance(value, str) or not MOUNT_POINT_PATTERN.fullmatch(value) or '..' in value:
+            return None
+        if value not in mount_points:
+            mount_points.append(value)
+    return mount_points
 
 
 def _command_exists(name: str) -> bool:
@@ -668,91 +725,88 @@ def cmd_write_snapraid_conf(params):
         return {'success': False, 'error': str(e)}
 
 
-def cmd_write_systemd_unit(params):
-    """Write a systemd unit file for SnapRAID timers."""
-    unit_name = params.get('unit_name', '')
-    content = params.get('content', '')
-
-    allowed_units = {
-        'pihealth-snapraid-sync.service',
-        'pihealth-snapraid-sync.timer',
-        'pihealth-snapraid-scrub.service',
-        'pihealth-snapraid-scrub.timer',
-        'docker-compose-start.service'
-    }
-
-    if unit_name not in allowed_units:
-        return {'success': False, 'error': 'Unit not allowed'}
-
-    path = f"/etc/systemd/system/{unit_name}"
-
-    try:
-        import shutil
-        from datetime import datetime
-        if os.path.exists(path):
-            backup = f"{path}.backup.{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-            shutil.copy(path, backup)
-
-        with open(path, 'w') as f:
-            f.write(content)
-
-        return {'success': True, 'path': path}
-    except Exception as e:
-        return {'success': False, 'error': str(e)}
+def _startup_parameters(params):
+    mount_points = _validate_mount_points(params.get('mount_points'))
+    compose_file = _validate_compose_path(params.get('compose_file'))
+    if mount_points is None:
+        return None, None, 'Invalid mount_points'
+    if compose_file is None:
+        return None, None, 'Invalid compose_file'
+    return mount_points, compose_file, None
 
 
-def cmd_write_startup_script(params):
-    """Write the mount-and-start script."""
-    path = params.get('path', '/usr/local/bin/check_mount_and_start.sh')
-    content = params.get('content', '')
-
-    if path != '/usr/local/bin/check_mount_and_start.sh':
-        return {'success': False, 'error': 'Path not allowed'}
-
-    try:
-        import shutil
-        from datetime import datetime
-        if os.path.exists(path):
-            backup = f"{path}.backup.{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-            shutil.copy(path, backup)
-
-        with open(path, 'w') as f:
-            f.write(content)
-        os.chmod(path, 0o755)
-
-        return {'success': True, 'path': path}
-    except Exception as e:
-        return {'success': False, 'error': str(e)}
-
-
-def cmd_read_startup_files(params):
-    """Read current startup script and service files for diff preview."""
-    script_path = '/usr/local/bin/check_mount_and_start.sh'
-    service_path = '/etc/systemd/system/docker-compose-start.service'
+def _startup_file_state(script, service):
+    """Read current helper-managed files and include fixed-template previews."""
 
     result = {
         'success': True,
-        'script': {'path': script_path, 'content': '', 'exists': False},
-        'service': {'path': service_path, 'content': '', 'exists': False}
+        'script': {'path': STARTUP_SCRIPT_PATH, 'current': '', 'proposed': script, 'exists': False},
+        'service': {'path': STARTUP_SERVICE_PATH, 'current': '', 'proposed': service, 'exists': False}
     }
 
     try:
-        if os.path.exists(script_path):
-            with open(script_path, 'r') as f:
-                result['script']['content'] = f.read()
+        if os.path.exists(STARTUP_SCRIPT_PATH):
+            with open(STARTUP_SCRIPT_PATH, 'r') as f:
+                result['script']['current'] = f.read()
                 result['script']['exists'] = True
     except Exception as e:
         result['script']['error'] = str(e)
 
     try:
-        if os.path.exists(service_path):
-            with open(service_path, 'r') as f:
-                result['service']['content'] = f.read()
+        if os.path.exists(STARTUP_SERVICE_PATH):
+            with open(STARTUP_SERVICE_PATH, 'r') as f:
+                result['service']['current'] = f.read()
                 result['service']['exists'] = True
     except Exception as e:
         result['service']['error'] = str(e)
 
+    result['script']['changed'] = result['script']['current'] != script
+    result['service']['changed'] = result['service']['current'] != service
     return result
+
+
+def cmd_preview_startup_service(params):
+    mount_points, compose_file, error = _startup_parameters(params)
+    if error:
+        return {'success': False, 'error': error}
+    script, service = render_startup_files(mount_points, compose_file)
+    return _startup_file_state(script, service)
+
+
+def cmd_configure_startup_service(params):
+    mount_points, compose_file, error = _startup_parameters(params)
+    if error:
+        return {'success': False, 'error': error}
+    script, service = render_startup_files(mount_points, compose_file)
+
+    result = _write_managed_file(STARTUP_SCRIPT_PATH, script, mode=0o755)
+    if not result.get('success'):
+        return result
+    result = _write_managed_file(STARTUP_SERVICE_PATH, service)
+    if not result.get('success'):
+        return result
+    return {'success': True, 'script_path': STARTUP_SCRIPT_PATH, 'service_path': STARTUP_SERVICE_PATH}
+
+
+def cmd_configure_snapraid_schedule(params):
+    job_type = params.get('job_type')
+    on_calendar = cron_to_oncalendar(params.get('cron'))
+    if job_type not in SNAPRAID_JOB_TYPES:
+        return {'success': False, 'error': 'Invalid SnapRAID job type'}
+    if on_calendar is None:
+        return {'success': False, 'error': 'Invalid cron schedule'}
+
+    service, timer = render_snapraid_schedule(job_type, on_calendar)
+    unit_base = f"pihealth-snapraid-{job_type}"
+    service_path = f"/etc/systemd/system/{unit_base}.service"
+    timer_path = f"/etc/systemd/system/{unit_base}.timer"
+    result = _write_managed_file(service_path, service)
+    if not result.get('success'):
+        return result
+    result = _write_managed_file(timer_path, timer)
+    if not result.get('success'):
+        return result
+    return {'success': True, 'service_path': service_path, 'timer_path': timer_path}
 
 
 def cmd_systemctl(params):
@@ -2359,9 +2413,9 @@ COMMANDS = {
     'mergerfs_mount': cmd_mergerfs_mount,
     'mergerfs_umount': cmd_mergerfs_umount,
     'write_snapraid_conf': cmd_write_snapraid_conf,
-    'write_systemd_unit': cmd_write_systemd_unit,
-    'write_startup_script': cmd_write_startup_script,
-    'read_startup_files': cmd_read_startup_files,
+    'configure_startup_service': cmd_configure_startup_service,
+    'preview_startup_service': cmd_preview_startup_service,
+    'configure_snapraid_schedule': cmd_configure_snapraid_schedule,
     'systemctl': cmd_systemctl,
     'tailscale_install': cmd_tailscale_install,
     'tailscale_up': cmd_tailscale_up,
@@ -2401,11 +2455,17 @@ def handle_request(data):
     except json.JSONDecodeError:
         return {'success': False, 'error': 'Invalid JSON'}
 
+    if not isinstance(request, dict):
+        return {'success': False, 'error': 'Request must be an object'}
+
     cmd = request.get('command')
     params = request.get('params', {})
 
     if not cmd:
         return {'success': False, 'error': 'No command specified'}
+
+    if not isinstance(cmd, str) or not isinstance(params, dict):
+        return {'success': False, 'error': 'Invalid command or parameters'}
 
     if cmd not in COMMANDS:
         logger.warning(f"Rejected unknown command: {cmd}")
@@ -2418,6 +2478,109 @@ def handle_request(data):
     except Exception as e:
         logger.error(f"Command {cmd} failed: {e}")
         return {'success': False, 'error': str(e)}
+
+
+class ProtocolError(Exception):
+    """Raised for malformed or oversized helper socket frames."""
+
+
+def _recv_exact(conn, size):
+    chunks = []
+    remaining = size
+    while remaining:
+        try:
+            chunk = conn.recv(remaining)
+        except socket.timeout as exc:
+            raise ProtocolError('Request frame timed out') from exc
+        if not chunk:
+            raise ProtocolError('Incomplete request frame')
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    return b''.join(chunks)
+
+
+def _recv_frame(conn):
+    header = _recv_exact(conn, FRAME_HEADER_SIZE)
+    (message_size,) = struct.unpack('!I', header)
+    if not 0 < message_size <= MAX_MESSAGE_SIZE:
+        raise ProtocolError('Invalid request size')
+    try:
+        return _recv_exact(conn, message_size).decode('utf-8')
+    except UnicodeDecodeError as exc:
+        raise ProtocolError('Request is not valid UTF-8') from exc
+
+
+def _send_frame(conn, response):
+    payload = json.dumps(response, separators=(',', ':')).encode('utf-8')
+    if len(payload) > MAX_MESSAGE_SIZE:
+        payload = json.dumps({
+            'success': False,
+            'error': 'Helper response exceeds maximum size',
+        }, separators=(',', ':')).encode('utf-8')
+    conn.sendall(struct.pack('!I', len(payload)) + payload)
+
+
+def _get_peer_credentials(conn):
+    if not hasattr(socket, 'SO_PEERCRED'):
+        raise ProtocolError('Peer credentials are unavailable')
+    credential_size = struct.calcsize('3i')
+    raw_credentials = conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, credential_size)
+    if len(raw_credentials) != credential_size:
+        raise ProtocolError('Invalid peer credentials')
+    return struct.unpack('3i', raw_credentials)
+
+
+def _get_process_group_ids(pid):
+    try:
+        with open(f'/proc/{pid}/status', 'r') as handle:
+            for line in handle:
+                if line.startswith('Groups:'):
+                    return {int(value) for value in line.split(':', 1)[1].split()}
+    except (OSError, ValueError):
+        return set()
+    return set()
+
+
+def _peer_is_authorized(conn, allowed_gid):
+    pid, uid, primary_gid = _get_peer_credentials(conn)
+    if pid <= 0 or uid < 0 or primary_gid < 0:
+        return False, (pid, uid, primary_gid)
+    if uid == 0:
+        return True, (pid, uid, primary_gid)
+    group_ids = _get_process_group_ids(pid)
+    authorized = primary_gid == allowed_gid or allowed_gid in group_ids
+    return authorized, (pid, uid, primary_gid)
+
+
+def _secure_socket_directory(path, allowed_gid):
+    os.chown(path, 0, allowed_gid)
+    os.chmod(path, 0o750)
+
+
+def _secure_socket_file(path, allowed_gid):
+    os.chown(path, 0, allowed_gid)
+    os.chmod(path, 0o660)
+
+
+def _serve_connection(conn, allowed_gid):
+    try:
+        authorized, credentials = _peer_is_authorized(conn, allowed_gid)
+        if not authorized:
+            pid, uid, gid = credentials
+            logger.warning(f'Rejected unauthorized helper peer pid={pid} uid={uid} gid={gid}')
+            _send_frame(conn, {'success': False, 'error': 'Unauthorized helper peer'})
+            return
+        request_data = _recv_frame(conn)
+        _send_frame(conn, handle_request(request_data))
+    except ProtocolError as exc:
+        logger.warning(f'Rejected malformed helper request: {exc}')
+        _send_frame(conn, {'success': False, 'error': str(exc)})
+    except Exception as exc:
+        logger.error(f'Error handling connection: {exc}')
+        try:
+            _send_frame(conn, {'success': False, 'error': 'Helper request failed'})
+        except (OSError, ProtocolError):
+            pass
 
 
 def cleanup(signum=None, frame=None):
@@ -2438,6 +2601,14 @@ def main():
     socket_dir = os.path.dirname(SOCKET_PATH)
     os.makedirs(socket_dir, exist_ok=True)
 
+    try:
+        import grp
+        allowed_gid = grp.getgrnam('pihealth').gr_gid
+    except KeyError as exc:
+        raise RuntimeError('Required pihealth group does not exist') from exc
+
+    _secure_socket_directory(socket_dir, allowed_gid)
+
     # Remove old socket if exists
     if os.path.exists(SOCKET_PATH):
         os.unlink(SOCKET_PATH)
@@ -2446,34 +2617,17 @@ def main():
     server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     server.bind(SOCKET_PATH)
 
-    # Set socket permissions (allow pihealth user/group)
-    os.chmod(SOCKET_PATH, 0o660)
-
-    # Try to set group ownership to 'pihealth' if it exists
-    try:
-        import grp
-        gid = grp.getgrnam('pihealth').gr_gid
-        os.chown(SOCKET_PATH, 0, gid)
-    except (KeyError, PermissionError):
-        pass  # Group doesn't exist or can't change ownership
+    _secure_socket_file(SOCKET_PATH, allowed_gid)
 
     server.listen(5)
     logger.info(f"Helper service started, listening on {SOCKET_PATH}")
 
     try:
         while True:
-            conn, addr = server.accept()
+            conn, _ = server.accept()
             try:
-                data = conn.recv(MAX_MESSAGE_SIZE).decode('utf-8')
-                if data:
-                    response = handle_request(data)
-                    conn.sendall(json.dumps(response).encode('utf-8'))
-            except Exception as e:
-                logger.error(f"Error handling connection: {e}")
-                try:
-                    conn.sendall(json.dumps({'success': False, 'error': str(e)}).encode('utf-8'))
-                except:
-                    pass
+                conn.settimeout(10)
+                _serve_connection(conn, allowed_gid)
             finally:
                 conn.close()
     finally:

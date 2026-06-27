@@ -248,21 +248,12 @@ class SnapRAIDPlugin(StoragePlugin):
         for job_type in ("sync", "scrub"):
             enabled = schedule.get(f"{job_type}_enabled", False)
             unit_base = f"pihealth-snapraid-{job_type}"
-            service_name = f"{unit_base}.service"
             timer_name = f"{unit_base}.timer"
 
             if enabled:
-                service_content, timer_content = self.generate_systemd_timer(job_type)
-                result = helper_call('write_systemd_unit', {
-                    'unit_name': service_name,
-                    'content': service_content
-                })
-                if not result.get('success'):
-                    return CommandResult(success=False, message="", error=result.get('error', 'Helper failed'))
-
-                result = helper_call('write_systemd_unit', {
-                    'unit_name': timer_name,
-                    'content': timer_content
+                result = helper_call('configure_snapraid_schedule', {
+                    'job_type': job_type,
+                    'cron': schedule.get(f"{job_type}_cron", "0 3 * * *"),
                 })
                 if not result.get('success'):
                     return CommandResult(success=False, message="", error=result.get('error', 'Helper failed'))
@@ -273,71 +264,6 @@ class SnapRAIDPlugin(StoragePlugin):
                 helper_call('systemctl', {'action': 'disable', 'unit': timer_name})
 
         return CommandResult(success=True, message="Schedule updated")
-
-    def generate_systemd_timer(self, job_type: str) -> tuple[str, str]:
-        """
-        Generate systemd service and timer files.
-
-        Args:
-            job_type: "sync" or "scrub"
-
-        Returns:
-            (service_content, timer_content)
-        """
-        config = self.get_config()
-        schedule = config.get("schedule", {})
-        cron = schedule.get(f"{job_type}_cron", "0 3 * * *")
-        on_calendar = self._cron_to_oncalendar(cron)
-
-        service = (
-            "[Unit]\n"
-            f"Description=SnapRAID {job_type}\n"
-            "After=local-fs.target\n\n"
-            "[Service]\n"
-            "Type=oneshot\n"
-            f"ExecStart=/usr/bin/snapraid {job_type}\n"
-            "Nice=19\n"
-            "IOSchedulingClass=idle\n"
-        )
-
-        timer = (
-            "[Unit]\n"
-            f"Description=SnapRAID {job_type} timer\n\n"
-            "[Timer]\n"
-            f"OnCalendar={on_calendar}\n"
-            "RandomizedDelaySec=1800\n"
-            "Persistent=true\n\n"
-            "[Install]\n"
-            "WantedBy=timers.target\n"
-        )
-
-        return service, timer
-
-    def _cron_to_oncalendar(self, cron: str) -> str:
-        """Convert cron expression to systemd OnCalendar format."""
-        parts = cron.split()
-        if len(parts) != 5:
-            return "*-*-* 03:00:00"
-
-        minute, hour, day, month, dow = parts
-
-        dow_map = {
-            "0": "Sun",
-            "1": "Mon",
-            "2": "Tue",
-            "3": "Wed",
-            "4": "Thu",
-            "5": "Fri",
-            "6": "Sat",
-            "7": "Sun"
-        }
-
-        if dow in dow_map:
-            return f"{dow_map[dow]} *-*-* {hour}:{minute}:00"
-        if dow == "*" and day == "*" and month == "*":
-            return f"*-*-* {hour}:{minute}:00"
-
-        return f"*-*-* {hour}:{minute}:00"
 
     def _generate_config(self, config: dict) -> str:
         lines = [

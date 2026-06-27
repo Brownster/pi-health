@@ -336,18 +336,15 @@ class TestMediaPaths:
             disk_manager.MEDIA_PATHS_CONFIG = original_config
 
     def test_startup_service_preview_fallback(self, authenticated_client, temp_config_dir):
-        """Test startup service preview works without helper (uses fallback)."""
+        """Read-only preview remains available without the privileged helper."""
         import disk_manager
         original_config = disk_manager.MEDIA_PATHS_CONFIG
         disk_manager.MEDIA_PATHS_CONFIG = os.path.join(temp_config_dir, 'media_paths.json')
 
         try:
             response = authenticated_client.get('/api/disks/startup-service/preview')
-            # Should return 200 with fallback to direct file read
             assert response.status_code == 200
             data = json.loads(response.data)
-            assert 'script' in data
-            assert 'service' in data
             assert 'proposed' in data['script']
             assert 'proposed' in data['service']
         finally:
@@ -370,23 +367,17 @@ class TestMediaPaths:
             disk_manager.SEEDBOX_CONFIG = original_config
             disk_manager.helper_available = original_helper_available
 
-    def test_build_startup_script_includes_mounts(self):
-        """Test startup script includes mount points."""
+    def test_startup_service_params_include_mounts(self):
+        """Only typed mount and compose parameters cross the helper boundary."""
         import disk_manager
-        script = disk_manager._build_startup_script({
+        params = disk_manager._startup_service_params({
             'storage': '/mnt/storage',
             'downloads': '/mnt/downloads',
             'backup': '/mnt/backup'
         })
-        assert '/mnt/storage' in script
-        assert '/mnt/downloads' in script
-        assert '/mnt/backup' in script
-
-    def test_build_startup_service(self):
-        """Test startup service contents."""
-        import disk_manager
-        content = disk_manager._build_startup_service()
-        assert 'ExecStart=/usr/local/bin/check_mount_and_start.sh' in content
+        assert params['mount_points'] == ['/mnt/storage', '/mnt/downloads', '/mnt/backup']
+        assert params['compose_file'].endswith('docker-compose.yml')
+        assert 'content' not in params
 
     def test_set_media_paths_invalid_path(self, authenticated_client, temp_config_dir):
         """Test POST with invalid path returns error."""
@@ -553,11 +544,11 @@ class TestHelperFunctions:
         assert _parse_size_to_gb('') is None
         assert _parse_size_to_gb(None) is None
 
-    def test_build_startup_script_no_mounts(self):
-        """Test startup script when no /mnt mounts present."""
+    def test_startup_service_params_no_mounts(self):
+        """Test typed startup parameters when no /mnt mounts are present."""
         import disk_manager
-        script = disk_manager._build_startup_script({'config': '/home/pi/docker'})
-        assert "MOUNT_POINTS=()" in script
+        params = disk_manager._startup_service_params({'config': '/home/pi/docker'})
+        assert params['mount_points'] == []
 
     def test_seedbox_is_mounted_false(self):
         """Test seedbox mount detection false path."""
@@ -603,6 +594,18 @@ class TestHelperFunctions:
         with patch('disk_manager.helper_available', return_value=False):
             result = disk_manager.update_startup_service({})
         assert result['success'] is False
+
+    def test_update_startup_service_uses_typed_helper_command(self):
+        import disk_manager
+        with patch('disk_manager.helper_available', return_value=True):
+            with patch('disk_manager.helper_call', return_value={'success': True}) as helper_call:
+                result = disk_manager.update_startup_service({'storage': '/mnt/storage'})
+
+        assert result['success'] is True
+        configure_call = helper_call.call_args_list[0]
+        assert configure_call.args[0] == 'configure_startup_service'
+        assert configure_call.args[1]['mount_points'] == ['/mnt/storage']
+        assert 'content' not in configure_call.args[1]
 
 
 class TestDisksPage:

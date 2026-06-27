@@ -180,13 +180,25 @@ class TestSnapRAIDRecoveryStatus:
 
 
 class TestSnapRAIDScheduling:
-    def test_cron_to_oncalendar_daily(self, snapraid_plugin):
-        assert snapraid_plugin._cron_to_oncalendar("0 3 * * *") == "*-*-* 3:0:00"
+    def test_apply_schedule_uses_typed_helper_command(self, snapraid_plugin):
+        config = snapraid_plugin.get_config()
+        config["schedule"] = {
+            "sync_enabled": True,
+            "sync_cron": "30 4 * * 0",
+            "scrub_enabled": False,
+            "scrub_cron": "0 4 * * 0",
+        }
+        with patch("storage_plugins.snapraid_plugin.helper_available", return_value=True):
+            with patch("storage_plugins.snapraid_plugin.helper_call", return_value={"success": True}) as helper_call:
+                result = snapraid_plugin.apply_schedule(config)
 
-    def test_cron_to_oncalendar_weekly(self, snapraid_plugin):
-        assert snapraid_plugin._cron_to_oncalendar("30 4 * * 0") == "Sun *-*-* 4:30:00"
-
-    def test_generate_systemd_timer(self, snapraid_plugin):
-        service, timer = snapraid_plugin.generate_systemd_timer("sync")
-        assert "ExecStart=/usr/bin/snapraid sync" in service
-        assert "OnCalendar=" in timer
+        assert result.success is True
+        configure_call = next(
+            call for call in helper_call.call_args_list
+            if call.args[0] == "configure_snapraid_schedule"
+        )
+        assert configure_call.args[1] == {
+            "job_type": "sync",
+            "cron": "30 4 * * 0",
+        }
+        assert "content" not in configure_call.args[1]
