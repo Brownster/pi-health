@@ -393,24 +393,21 @@ class MergerFSPlugin(StoragePlugin):
             if not pool_name:
                 yield "ERROR: pool_name required"
                 return CommandResult(success=False, message="", error="pool_name required")
-            yield from self._cmd_mount(pool_name)
-            return CommandResult(success=True, message="Mounted")
+            return (yield from self._cmd_mount(pool_name))
 
         if command_id == "unmount":
             pool_name = params.get("pool_name")
             if not pool_name:
                 yield "ERROR: pool_name required"
                 return CommandResult(success=False, message="", error="pool_name required")
-            yield from self._cmd_unmount(pool_name)
-            return CommandResult(success=True, message="Unmounted")
+            return (yield from self._cmd_unmount(pool_name))
 
         if command_id == "balance":
             pool_name = params.get("pool_name")
             if not pool_name:
                 yield "ERROR: pool_name required"
                 return CommandResult(success=False, message="", error="pool_name required")
-            yield from self._cmd_balance(pool_name)
-            return CommandResult(success=True, message="Complete")
+            return (yield from self._cmd_balance(pool_name))
 
         yield f"Unknown command: {command_id}"
         return CommandResult(success=False, message="", error="Unknown command")
@@ -448,7 +445,7 @@ class MergerFSPlugin(StoragePlugin):
             else:
                 yield "Status: NOT MOUNTED"
 
-    def _cmd_mount(self, pool_name: str) -> Generator[str, None, None]:
+    def _cmd_mount(self, pool_name: str) -> Generator[str, None, CommandResult]:
         config = self.get_config()
         pool = next(
             (item for item in config.get("pools", []) if item.get("name") == pool_name),
@@ -457,13 +454,13 @@ class MergerFSPlugin(StoragePlugin):
 
         if not pool:
             yield f"Pool not found: {pool_name}"
-            return
+            return CommandResult(success=False, message="", error=f"Pool not found: {pool_name}")
 
         mount_point = pool.get("mount_point")
 
         if os.path.ismount(mount_point):
             yield f"Pool already mounted at {mount_point}"
-            return
+            return CommandResult(success=True, message="Already mounted")
 
         branches = ":".join(pool["branches"])
         opts = self._build_options(pool)
@@ -481,12 +478,14 @@ class MergerFSPlugin(StoragePlugin):
                 })
                 if result.get('success'):
                     yield "Mount successful"
+                    return CommandResult(success=True, message="Mounted")
                 else:
-                    yield f"Mount failed: {result.get('error', 'unknown error')}"
-                return
+                    error = result.get('error', 'unknown error')
+                    yield f"Mount failed: {error}"
+                    return CommandResult(success=False, message="", error=error)
             except HelperError as exc:
                 yield f"ERROR: {exc}"
-                return
+                return CommandResult(success=False, message="", error=str(exc))
 
         os.makedirs(mount_point, exist_ok=True)
 
@@ -494,19 +493,30 @@ class MergerFSPlugin(StoragePlugin):
             result = subprocess.run(
                 [self.MERGERFS_BIN, "-o", opts, branches, mount_point],
                 capture_output=True,
-                text=True
+                text=True,
+                timeout=60,
             )
 
             if result.returncode == 0:
                 yield "Mount successful"
+                return CommandResult(success=True, message="Mounted")
             else:
-                yield f"Mount failed: {result.stderr}"
+                error = result.stderr.strip() or "mergerfs exited with a non-zero status"
+                yield f"Mount failed: {error}"
+                return CommandResult(success=False, message="", error=error)
+        except subprocess.TimeoutExpired:
+            error = "MergerFS mount timed out"
+            yield f"ERROR: {error}"
+            return CommandResult(success=False, message="", error=error)
         except FileNotFoundError:
-            yield "ERROR: mergerfs not installed"
+            error = "mergerfs not installed"
+            yield f"ERROR: {error}"
+            return CommandResult(success=False, message="", error=error)
         except Exception as exc:
             yield f"ERROR: {exc}"
+            return CommandResult(success=False, message="", error=str(exc))
 
-    def _cmd_unmount(self, pool_name: str) -> Generator[str, None, None]:
+    def _cmd_unmount(self, pool_name: str) -> Generator[str, None, CommandResult]:
         config = self.get_config()
         pool = next(
             (item for item in config.get("pools", []) if item.get("name") == pool_name),
@@ -515,13 +525,13 @@ class MergerFSPlugin(StoragePlugin):
 
         if not pool:
             yield f"Pool not found: {pool_name}"
-            return
+            return CommandResult(success=False, message="", error=f"Pool not found: {pool_name}")
 
         mount_point = pool.get("mount_point")
 
         if not os.path.ismount(mount_point):
             yield f"Pool not mounted: {mount_point}"
-            return
+            return CommandResult(success=True, message="Already unmounted")
 
         yield f"Unmounting {pool_name}..."
 
@@ -530,30 +540,45 @@ class MergerFSPlugin(StoragePlugin):
                 result = helper_call('mergerfs_umount', {'mount_point': mount_point})
                 if result.get('success'):
                     yield "Unmount successful"
+                    return CommandResult(success=True, message="Unmounted")
                 else:
-                    yield f"Unmount failed: {result.get('error', 'unknown error')}"
+                    error = result.get('error', 'unknown error')
+                    yield f"Unmount failed: {error}"
                     yield "Try: umount -l for lazy unmount"
-                return
+                    return CommandResult(success=False, message="", error=error)
             except HelperError as exc:
                 yield f"ERROR: {exc}"
-                return
+                return CommandResult(success=False, message="", error=str(exc))
 
         try:
             result = subprocess.run(
                 ["umount", mount_point],
                 capture_output=True,
-                text=True
+                text=True,
+                timeout=60,
             )
 
             if result.returncode == 0:
                 yield "Unmount successful"
+                return CommandResult(success=True, message="Unmounted")
             else:
-                yield f"Unmount failed: {result.stderr}"
+                error = result.stderr.strip() or "umount exited with a non-zero status"
+                yield f"Unmount failed: {error}"
                 yield "Try: umount -l for lazy unmount"
+                return CommandResult(success=False, message="", error=error)
+        except subprocess.TimeoutExpired:
+            error = "MergerFS unmount timed out"
+            yield f"ERROR: {error}"
+            return CommandResult(success=False, message="", error=error)
+        except FileNotFoundError:
+            error = "umount not found"
+            yield f"ERROR: {error}"
+            return CommandResult(success=False, message="", error=error)
         except Exception as exc:
             yield f"ERROR: {exc}"
+            return CommandResult(success=False, message="", error=str(exc))
 
-    def _cmd_balance(self, pool_name: str) -> Generator[str, None, None]:
+    def _cmd_balance(self, pool_name: str) -> Generator[str, None, CommandResult]:
         yield f"Balancing pool: {pool_name}"
         yield "NOTE: mergerfs.balance tool required"
         yield "Install with: apt install mergerfs-tools"
@@ -566,27 +591,36 @@ class MergerFSPlugin(StoragePlugin):
 
         if not pool:
             yield f"Pool not found: {pool_name}"
-            return
+            return CommandResult(success=False, message="", error=f"Pool not found: {pool_name}")
 
         mount_point = pool.get("mount_point")
 
         try:
-            process = subprocess.Popen(
+            result = subprocess.run(
                 ["mergerfs.balance", mount_point],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True
+                capture_output=True,
+                text=True,
+                timeout=3600,
             )
-
-            for line in iter(process.stdout.readline, ""):
+            for line in result.stdout.splitlines():
                 yield line.rstrip()
-
-            process.wait()
+            if result.returncode == 0:
+                return CommandResult(success=True, message="Balance complete")
+            error = result.stderr.strip() or "mergerfs.balance exited with a non-zero status"
+            yield f"ERROR: {error}"
+            return CommandResult(success=False, message="", error=error)
+        except subprocess.TimeoutExpired:
+            error = "MergerFS balance timed out"
+            yield f"ERROR: {error}"
+            return CommandResult(success=False, message="", error=error)
         except FileNotFoundError:
-            yield "mergerfs.balance not found"
+            error = "mergerfs.balance not found"
+            yield error
             yield "Install mergerfs-tools package"
+            return CommandResult(success=False, message="", error=error)
         except Exception as exc:
             yield f"ERROR: {exc}"
+            return CommandResult(success=False, message="", error=str(exc))
 
     def is_installed(self) -> bool:
         return os.path.exists(self.MERGERFS_BIN)

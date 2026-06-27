@@ -308,6 +308,28 @@ def test_run_plugin_command_stream_includes_output(authenticated_client, monkeyp
     assert any(event.get("type") == "complete" and event.get("success") is True for event in events)
 
 
+def test_run_plugin_command_stream_includes_failure_error(authenticated_client, monkeypatch):
+    class FailedPlugin(DummyPlugin):
+        def run_command(self, command_id, params=None):
+            yield "failed"
+            return CommandResult(success=False, message="", error="mount failed")
+
+    registry = DummyRegistry(plugin=FailedPlugin())
+    monkeypatch.setattr("storage_plugins.get_registry", lambda: registry)
+    response = authenticated_client.post(
+        "/api/storage/plugins/dummy/commands/status",
+        json={},
+    )
+    events = [
+        json.loads(line.removeprefix("data: "))
+        for line in response.data.decode("utf-8").splitlines()
+        if line.startswith("data: ")
+    ]
+    completion = next(event for event in events if event.get("type") == "complete")
+    assert completion["success"] is False
+    assert completion["error"] == "mount failed"
+
+
 def test_run_plugin_command_unknown(authenticated_client, monkeypatch):
     registry = DummyRegistry(plugin=DummyPlugin())
     monkeypatch.setattr("storage_plugins.get_registry", lambda: registry)

@@ -275,6 +275,8 @@ def run_plugin_command(plugin_id: str, command_id: str):
                 }
                 if result.data:
                     payload["data"] = result.data
+                if result.error:
+                    payload["error"] = result.error
                 yield f"data: {json.dumps(payload)}\n\n"
         except Exception as exc:
             yield f"data: {json.dumps({'type': 'error', 'error': str(exc)})}\n\n"

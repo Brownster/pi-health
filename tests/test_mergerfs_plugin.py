@@ -1,6 +1,7 @@
 """Tests for MergerFS plugin."""
 import os
 import shutil
+import subprocess
 import tempfile
 import sys
 from unittest.mock import MagicMock, patch
@@ -10,6 +11,15 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from storage_plugins.mergerfs_plugin import MergerFSPlugin, POLICIES
+
+
+def consume_command(generator):
+    output = []
+    while True:
+        try:
+            output.append(next(generator))
+        except StopIteration as exc:
+            return output, exc.value
 
 
 @pytest.fixture
@@ -238,6 +248,54 @@ class TestMergerFSCommands:
         mergerfs_plugin.set_config(valid_config)
         outputs = list(mergerfs_plugin.run_command("status"))
         assert any("Pool" in line for line in outputs)
+
+    def test_mount_helper_failure_returns_failed_result(self, mergerfs_plugin, valid_config):
+        mergerfs_plugin.set_config(valid_config)
+        with patch("storage_plugins.mergerfs_plugin.os.path.ismount", return_value=False):
+            with patch("storage_plugins.mergerfs_plugin.helper_available", return_value=True):
+                with patch(
+                    "storage_plugins.mergerfs_plugin.helper_call",
+                    return_value={"success": False, "error": "helper mount failed"},
+                ):
+                    output, result = consume_command(
+                        mergerfs_plugin.run_command("mount", {"pool_name": "storage"})
+                    )
+        assert result.success is False
+        assert "helper mount failed" in result.error
+        assert any("helper mount failed" in line for line in output)
+
+    def test_mount_nonzero_exit_returns_failed_result(self, mergerfs_plugin, valid_config):
+        mergerfs_plugin.set_config(valid_config)
+        process_result = MagicMock(returncode=1, stdout="", stderr="invalid option")
+        with patch("storage_plugins.mergerfs_plugin.os.path.ismount", return_value=False):
+            with patch("storage_plugins.mergerfs_plugin.helper_available", return_value=False):
+                with patch("storage_plugins.mergerfs_plugin.subprocess.run", return_value=process_result):
+                    _, result = consume_command(
+                        mergerfs_plugin.run_command("mount", {"pool_name": "storage"})
+                    )
+        assert result.success is False
+        assert "invalid option" in result.error
+
+    def test_unmount_timeout_returns_failed_result(self, mergerfs_plugin, valid_config):
+        mergerfs_plugin.set_config(valid_config)
+        timeout = subprocess.TimeoutExpired(["umount", "/mnt/storage"], 60)
+        with patch("storage_plugins.mergerfs_plugin.os.path.ismount", return_value=True):
+            with patch("storage_plugins.mergerfs_plugin.helper_available", return_value=False):
+                with patch("storage_plugins.mergerfs_plugin.subprocess.run", side_effect=timeout):
+                    _, result = consume_command(
+                        mergerfs_plugin.run_command("unmount", {"pool_name": "storage"})
+                    )
+        assert result.success is False
+        assert "timed out" in result.error.lower()
+
+    def test_balance_missing_binary_returns_failed_result(self, mergerfs_plugin, valid_config):
+        mergerfs_plugin.set_config(valid_config)
+        with patch("storage_plugins.mergerfs_plugin.subprocess.run", side_effect=FileNotFoundError):
+            _, result = consume_command(
+                mergerfs_plugin.run_command("balance", {"pool_name": "storage"})
+            )
+        assert result.success is False
+        assert "not found" in result.error.lower()
 
 
 class TestMergerFSApplyConfig:
