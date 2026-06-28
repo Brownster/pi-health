@@ -27,6 +27,7 @@ const els = {
     networkRecvRate: document.getElementById('network-recv-rate'),
     networkSentRate: document.getElementById('network-sent-rate'),
     lastUpdated: document.getElementById('last-updated'),
+    systemWarnings: document.getElementById('system-warnings'),
     piSection: document.getElementById('pi-metrics-section'),
     throttleStatus: document.getElementById('throttle-status'),
     cpuFreq: document.getElementById('cpu-freq'),
@@ -139,6 +140,20 @@ function renderDiskUsage(usage, valueEl, barEl) {
     barEl.style.width = `${percent}%`;
 }
 
+function renderWarnings(warnings = []) {
+    els.systemWarnings.textContent = '';
+    if (!warnings.length) {
+        els.systemWarnings.classList.add('hidden');
+        return;
+    }
+    warnings.forEach((warning) => {
+        const message = document.createElement('p');
+        message.textContent = warning.message || 'A system metric is unavailable';
+        els.systemWarnings.appendChild(message);
+    });
+    els.systemWarnings.classList.remove('hidden');
+}
+
 function updatePiMetrics(data) {
     if (data.is_raspberry_pi) {
         els.piSection.classList.remove('hidden');
@@ -218,6 +233,7 @@ async function fetchSystemMetrics() {
         }
         const data = payload;
         setSystemState(null);
+        renderWarnings(data.warnings || []);
 
         const cpuPercent = data.cpu_usage_percent ? Number(data.cpu_usage_percent.toFixed(1)) : 0;
         applyValue(els.cpuUsage, `${cpuPercent}%`, cpuPercent);

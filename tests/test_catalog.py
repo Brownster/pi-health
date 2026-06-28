@@ -10,7 +10,7 @@ import tempfile
 import shutil
 import threading
 import yaml
-from unittest.mock import patch, Mock
+from unittest.mock import patch, MagicMock, Mock
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -33,6 +33,8 @@ def authenticated_client(client):
     with client.session_transaction() as sess:
         sess['authenticated'] = True
         sess['username'] = 'testuser'
+        sess['csrf_token'] = 'test-csrf-token'
+    client.environ_base['HTTP_X_CSRF_TOKEN'] = 'test-csrf-token'
     return client
 
 
@@ -205,6 +207,16 @@ class TestCatalogInstall:
                               content_type='application/json')
         assert response.status_code == 401
 
+    def test_install_requires_csrf(self, client):
+        with client.session_transaction() as sess:
+            sess['authenticated'] = True
+            sess['username'] = 'testuser'
+            sess['csrf_token'] = 'expected-token'
+
+        response = client.post('/api/catalog/install', json={'id': 'test-app'})
+
+        assert response.status_code == 403
+
     def test_install_missing_id(self, authenticated_client):
         """Test install without id returns error."""
         response = authenticated_client.post('/api/catalog/install',
@@ -336,6 +348,116 @@ class TestCatalogInstall:
             catalog_manager.CATALOG_DIR = original_dir
             stack_manager.STACKS_PATH = original_stacks
             stack_manager.BACKUP_DIR = original_backup
+
+    def test_started_install_returns_replayable_operation_without_waiting(
+        self,
+        authenticated_client,
+        temp_catalog_dir,
+        temp_stacks_dir,
+        sample_catalog_item,
+        monkeypatch,
+    ):
+        import catalog_manager
+        import stack_manager
+
+        monkeypatch.setattr(catalog_manager, 'CATALOG_DIR', temp_catalog_dir)
+        monkeypatch.setattr(stack_manager, 'STACKS_PATH', temp_stacks_dir)
+        monkeypatch.setattr(
+            stack_manager,
+            'BACKUP_DIR',
+            os.path.join(temp_stacks_dir, '.backups'),
+        )
+        with open(os.path.join(temp_catalog_dir, 'test-app.yaml'), 'w') as handle:
+            yaml.safe_dump(sample_catalog_item, handle)
+
+        producer_started = threading.Event()
+        release_producer = threading.Event()
+        runner = MagicMock()
+
+        def stream_command(stack_name, action):
+            runner(stack_name, action)
+            producer_started.set()
+            yield 'data: {"line":"creating"}\n\n'
+            release_producer.wait(timeout=2)
+            yield 'data: {"done":true,"returncode":0}\n\n'
+
+        monkeypatch.setattr(catalog_manager, 'stream_compose_command', stream_command)
+
+        response = authenticated_client.post(
+            '/api/catalog/install',
+            json={
+                'id': 'test-app',
+                'stack_name': 'media',
+                'start_service': True,
+            },
+        )
+
+        assert response.status_code == 202
+        assert producer_started.wait(timeout=1)
+        payload = response.get_json()
+        assert payload['status'] == 'installed'
+        assert payload['operation_id']
+        assert payload['stream_url'].endswith('/stream')
+        with open(os.path.join(temp_stacks_dir, 'media', 'compose.yaml')) as handle:
+            assert 'test-app' in yaml.safe_load(handle)['services']
+
+        release_producer.set()
+        first = authenticated_client.get(payload['stream_url'])
+        second = authenticated_client.get(payload['stream_url'])
+        wrong_kind = authenticated_client.get(
+            f"/api/stacks/operations/{payload['operation_id']}/stream"
+        )
+
+        assert first.status_code == 200
+        assert first.get_data() == second.get_data()
+        assert wrong_kind.status_code == 404
+        assert '"creating"' in first.get_data(as_text=True)
+        assert '"done"' in first.get_data(as_text=True)
+        runner.assert_called_once_with('media', 'up')
+
+    def test_start_thread_failure_keeps_installed_config_and_reports_error(
+        self,
+        authenticated_client,
+        temp_catalog_dir,
+        temp_stacks_dir,
+        sample_catalog_item,
+        monkeypatch,
+    ):
+        import catalog_manager
+        import operation_manager
+        import stack_manager
+
+        monkeypatch.setattr(catalog_manager, 'CATALOG_DIR', temp_catalog_dir)
+        monkeypatch.setattr(stack_manager, 'STACKS_PATH', temp_stacks_dir)
+        monkeypatch.setattr(
+            stack_manager,
+            'BACKUP_DIR',
+            os.path.join(temp_stacks_dir, '.backups'),
+        )
+        monkeypatch.setattr(
+            operation_manager.threading.Thread,
+            'start',
+            MagicMock(side_effect=RuntimeError('thread unavailable')),
+        )
+        with open(os.path.join(temp_catalog_dir, 'test-app.yaml'), 'w') as handle:
+            yaml.safe_dump(sample_catalog_item, handle)
+
+        response = authenticated_client.post(
+            '/api/catalog/install',
+            json={
+                'id': 'test-app',
+                'stack_name': 'media',
+                'start_service': True,
+            },
+        )
+
+        assert response.status_code == 500
+        payload = response.get_json()
+        assert payload['status'] == 'installed'
+        assert payload['started'] is False
+        assert 'thread unavailable' in payload['error']
+        with open(os.path.join(temp_stacks_dir, 'media', 'compose.yaml')) as handle:
+            assert 'test-app' in yaml.safe_load(handle)['services']
 
 
 class TestCatalogRemove:
@@ -703,9 +825,11 @@ class TestCatalogConcurrency:
                 with thread_client.session_transaction() as session:
                     session["authenticated"] = True
                     session["username"] = "testuser"
+                    session["csrf_token"] = "test-csrf-token"
                 response = thread_client.post(
                     "/api/catalog/install",
                     json={"id": item_id, "target_stack": "media"},
+                    headers={"X-CSRF-Token": "test-csrf-token"},
                 )
                 responses.append((item_id, response.status_code, response.get_json()))
 

@@ -1,4 +1,10 @@
 import { requestApi, toNullableNumber, toNullableString } from "@/lib/api";
+import {
+  createOperation,
+  type OperationCreated,
+  type OperationEvent,
+  streamOperation,
+} from "@/lib/operations";
 
 export interface StackSummary {
   name: string;
@@ -46,17 +52,7 @@ export async function fetchStacks(
 
 export type StackAction = "up" | "down" | "restart" | "pull";
 
-export interface StackOperationEvent {
-  line?: string;
-  done?: boolean;
-  returncode?: number;
-  error?: string;
-}
-
-interface StackOperationCreated {
-  operation_id: string;
-  stream_url: string;
-}
+export type StackOperationEvent = OperationEvent;
 
 export interface StackLogsResult {
   logs: string;
@@ -67,34 +63,12 @@ export async function createStackOperation(
   name: string,
   action: StackAction,
   signal?: AbortSignal,
-): Promise<StackOperationCreated> {
-  const auth = await requestApi<{ csrf_token?: string }>("/api/auth/check", {
-    method: "GET",
-    signal,
-  });
-  if (!auth.csrf_token) {
-    throw new Error("CSRF token unavailable");
-  }
-  const payload = await requestApi<Partial<StackOperationCreated> & { error?: string }>(
+): Promise<OperationCreated> {
+  return createOperation(
     `/api/stacks/${encodeURIComponent(name)}/operations`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-CSRF-Token": auth.csrf_token,
-      },
-      body: JSON.stringify({ action }),
-      signal,
-    },
+    { action },
+    signal,
   );
-
-  if (payload.error || !payload.operation_id || !payload.stream_url) {
-    throw new Error(payload.error);
-  }
-  return {
-    operation_id: payload.operation_id,
-    stream_url: payload.stream_url,
-  };
 }
 
 export async function fetchStackLogs(
@@ -121,40 +95,7 @@ export async function streamStackOperation(
   onEvent: (event: StackOperationEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {
-  const response = await fetch(streamUrl, {
-    method: "GET",
-    credentials: "same-origin",
-    headers: { Accept: "text/event-stream" },
-    signal,
-  });
-  if (!response.ok || !response.body) {
-    throw new Error(`Stack operation stream failed (${response.status})`);
-  }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) {
-      break;
-    }
-    buffer += decoder.decode(value, { stream: true });
-    let separator = buffer.indexOf("\n\n");
-    while (separator !== -1) {
-      const frame = buffer.slice(0, separator);
-      buffer = buffer.slice(separator + 2);
-      const dataLine = frame.split("\n").find((line) => line.startsWith("data:"));
-      if (dataLine) {
-        try {
-          onEvent(JSON.parse(dataLine.slice(5).trim()) as StackOperationEvent);
-        } catch {
-          // Ignore malformed frames; the terminal event still controls completion.
-        }
-      }
-      separator = buffer.indexOf("\n\n");
-    }
-  }
+  return streamOperation(streamUrl, onEvent, signal);
 }
 
 export interface StackComposeResult {

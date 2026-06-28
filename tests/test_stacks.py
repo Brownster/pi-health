@@ -1322,8 +1322,10 @@ class TestStackOperationApi:
         with open(os.path.join(stack_dir, "compose.yaml"), "w") as handle:
             handle.write("services: {}\n")
         self._authenticate_with_csrf(client)
+        import operation_manager
+
         monkeypatch.setattr(
-            stack_manager.threading.Thread,
+            operation_manager.threading.Thread,
             "start",
             MagicMock(side_effect=RuntimeError("thread unavailable")),
         )

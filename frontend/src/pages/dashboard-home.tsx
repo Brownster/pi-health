@@ -178,6 +178,7 @@ export function DashboardHomePage() {
 
     if (statsResult.status === "fulfilled") {
       setStats(statsResult.value);
+      nextErrors.push(...statsResult.value.warnings.map((warning) => `System metrics: ${warning.message}`));
       loaded = true;
     } else {
       nextErrors.push(`System metrics: ${getErrorMessage(statsResult.reason)}`);

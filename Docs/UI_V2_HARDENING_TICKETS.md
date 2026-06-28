@@ -3,7 +3,7 @@
 Date: 2026-06-27
 Source: `Docs/colleagues_review_of_limeOS.txt` (validated external review)
 Branch: TBD (recommend `feature/v2-hardening`)
-Status: Active — SEC-001/002, API-001, CAT-001, STK-001/002, MFS-001, SRA-001/002, and UI-001 complete
+Status: Active — SEC-001/002, API-001, CAT-001/002, STK-001/002, MFS-001, SRA-001/002, SYS-001, and UI-001 complete
 
 ## Objective
 Production-harden the migrated v2 / LimeOS stack — close the destructive failure paths and the
@@ -37,11 +37,11 @@ starting broad feature work. IDs match the review for traceability.
 | MFS-001 | MergerFS commands return real success/failure | P1 | plugin | — | Complete |
 | SRA-001 | SnapRAID mounted-source preflight, fail closed | P1 | plugin | — | Complete |
 | SRA-002 | Reject SnapRAID paths on a MergerFS pool | P1 | plugin | — | Complete |
-| CAT-002 | Async catalog install via job/stream + operation id | P1 | backend | API-001 | Pending |
+| CAT-002 | Async catalog install via job/stream + operation id | P1 | backend | API-001 | Complete |
 | STK-002 | Per-stack lock + atomic compose/env/restore writes | P1 | backend | — | Complete |
 | API-001 | State-changing stream endpoints become POST + CSRF | P1 | backend+ui | — | Complete |
 | UI-001 | Modal focus survives typing (stable onClose) | P1 | frontend | — | Complete |
-| SYS-001 | `/api/stats` tolerates missing optional disks | P1 | backend+ui | — | Pending |
+| SYS-001 | `/api/stats` tolerates missing optional disks | P1 | backend+ui | — | Complete |
 | STK-003 | Round-trip YAML / managed override files | P2 | backend | — | Pending |
 | CAT-003 | Merge all allowed top-level compose sections | P2 | backend | STK-003 | Pending |
 | STK-004 | `up -d --remove-orphans` (after review) | P2 | backend | — | Pending |
@@ -165,6 +165,22 @@ Files: `catalog_manager.py` (~461-468), `stack_manager.py` (~262-279).
 Tasks: split into a config transaction + a job/stream endpoint with an operation id; never re-launch
 the same op on stream retry. Acceptance: install does not hold a request worker for ~300s.
 
+Completed: 2026-06-28. Catalog install validation and the atomic compose update remain a synchronous
+transaction under the per-stack lock. When startup is requested, the POST now requires CSRF and
+returns `202` with an unguessable operation id and a read-only stream URL immediately after the
+configuration is persisted. Docker startup runs once in a background thread; stream replay and
+`Last-Event-ID` resume use API-001's bounded, session-owned operation registry and cannot relaunch
+the command. Stack and catalog operations share retention machinery but enforce distinct stream
+kinds.
+
+Both legacy and v2 catalog clients create the operation and consume its fetch-based SSE stream.
+They reject command failures and streams that end without a terminal event; closing the legacy
+modal aborts only the listener, not the server operation. Tests cover CSRF, configuration-before-job,
+non-blocking creation, replay without relaunch, stream-kind isolation, and thread-start failure after
+configuration persistence. Focused verification: backend `96 passed`; catalog + stack Playwright
+`13 passed`; TypeScript and production build passed (`98.56 kB` initial JS gzip). Full `tox -e all`:
+Ruff clean; unit `630 passed, 1 skipped`; E2E `166 passed, 26 skipped`.
+
 ### STK-002 — Per-stack lock + atomic writes
 Files: `stack_manager.py` (~368-550), `catalog_manager.py` (~120-135).
 Tasks: per-stack inter-process lock held across backup/edit/replace and conflicting Docker ops;
@@ -230,6 +246,18 @@ Files: `app.py` (~393-400). Also unblocks the v2 **dashboard** and **System** pa
 `/api/stats`.
 Tasks: collect each metric independently; return `null` + a scoped warning when a source (e.g.
 `/mnt/backup`) is unavailable instead of 500.
+
+Completed: 2026-06-28. Primary and secondary disk usage are collected independently. An unavailable
+path leaves only its metric as `null` and adds a structured warning containing `code`, `metric`,
+`source`, and `message`; `/api/stats` continues returning HTTP 200 with all healthy CPU, memory,
+temperature, network, and disk data. The v2 System page and dashboard surface partial-data warnings
+without discarding valid metrics, while the legacy System page renders the same warnings alongside
+its existing unavailable-disk state.
+
+Tests cover helper-level independence, the HTTP 200 partial response contract, and v2 warning
+visibility with healthy telemetry still rendered. Focused verification: backend `68 passed, 1
+skipped`; System Playwright `4 passed`; TypeScript and production build passed (`98.78 kB` initial
+JS gzip). Full `tox -e all`: Ruff clean; unit `632 passed, 1 skipped`; E2E `167 passed, 26 skipped`.
 
 ## P2 — Reliability, accessibility, product gaps
 - **STK-003** round-trip YAML (or managed override files) — `catalog_manager.py:107-135`.

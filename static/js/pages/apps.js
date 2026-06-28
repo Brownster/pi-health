@@ -15,6 +15,7 @@ let serviceStacks = {};
 let availableStacks = [];
 let activeInstall = null;
 let activeRemove = null;
+let installOperationController = null;
 
 async function requestApi(url, options = {}) {
     const response = await requestApiResponse(url, options);
@@ -287,6 +288,10 @@ async function openInstallModal(id) {
 }
 
 function closeInstallModal() {
+    if (installOperationController) {
+        installOperationController.abort();
+        installOperationController = null;
+    }
     const modal = document.getElementById('install-modal');
     modal.classList.add('hidden');
     modal.classList.remove('flex');
@@ -392,23 +397,37 @@ function getInstallValues() {
 async function submitInstall() {
     if (!activeInstall) return;
 
+    const item = activeInstall;
     const values = getInstallValues();
     const stackSelect = document.getElementById('install-stack-select');
     const stackNameInput = document.getElementById('install-stack-name');
     const targetStack = stackSelect ? stackSelect.value : 'new';
     const stackName = stackNameInput ? stackNameInput.value.trim() : '';
+    if (installOperationController) {
+        installOperationController.abort();
+    }
+    const controller = new AbortController();
+    installOperationController = controller;
 
     try {
+        const auth = await requestApiJson('/api/auth/check', { signal: controller.signal });
+        if (!auth.csrf_token) {
+            throw new Error('CSRF token unavailable');
+        }
         const { response, payload: data } = await requestApi('/api/catalog/install', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': auth.csrf_token,
+            },
             body: JSON.stringify({
-                id: activeInstall.id,
+                id: item.id,
                 values,
                 start_service: true,
                 target_stack: targetStack,
                 stack_name: stackName,
             }),
+            signal: controller.signal,
         });
 
         if (!response.ok) {
@@ -423,12 +442,55 @@ async function submitInstall() {
             throw new Error(data.error || 'Install failed');
         }
 
-        const msg = data.started ? `${data.name} installed and started` : `${data.name} installed`;
-        showNotification(msg, 'success');
+        const streamResponse = await requestApiResponse(data.stream_url, {
+            headers: { Accept: 'text/event-stream' },
+            signal: controller.signal,
+        });
+        if (!streamResponse.ok || !streamResponse.body) {
+            throw new Error(`Install operation stream failed (${streamResponse.status})`);
+        }
+        const reader = streamResponse.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let terminalEvent = false;
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            let separator = buffer.indexOf('\n\n');
+            while (separator !== -1) {
+                const frame = buffer.slice(0, separator);
+                buffer = buffer.slice(separator + 2);
+                separator = buffer.indexOf('\n\n');
+                const dataLine = frame.split('\n').find(line => line.startsWith('data:'));
+                if (!dataLine) continue;
+                let event;
+                try {
+                    event = JSON.parse(dataLine.slice(5).trim());
+                } catch (_error) {
+                    continue;
+                }
+                terminalEvent = terminalEvent || Boolean(event.done || event.error);
+                if (event.error) throw new Error(event.error);
+                if (event.done && event.returncode !== 0) {
+                    throw new Error(`App startup failed (${event.returncode ?? 'unknown status'})`);
+                }
+            }
+        }
+        if (!terminalEvent) {
+            throw new Error('Install operation stream ended before completion');
+        }
+
+        showNotification(`${data.name} installed and started`, 'success');
         closeInstallModal();
         loadCatalog();
     } catch (error) {
+        if (error.name === 'AbortError') return;
         showNotification(`Error: ${error.message}`, 'error');
+    } finally {
+        if (installOperationController === controller) {
+            installOperationController = null;
+        }
     }
 }
 

@@ -223,6 +223,25 @@ class TestProtectedEndpoints:
         # Should have expected keys
         assert 'memory_usage' in data
 
+    def test_stats_returns_partial_data_warning_for_missing_disk(
+        self, authenticated_client, monkeypatch
+    ):
+        missing_path = '/definitely/not/a/real/mount/xyz'
+        monkeypatch.setenv('DISK_PATH_2', missing_path)
+
+        response = authenticated_client.get('/api/stats')
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data['disk_usage'] is not None
+        assert data['disk_usage_2'] is None
+        assert data['warnings'] == [{
+            'code': 'source_unavailable',
+            'message': f'Disk usage unavailable for {missing_path}',
+            'metric': 'disk_usage_2',
+            'source': missing_path,
+        }]
+
     def test_containers_requires_auth(self, client):
         """Test that /api/containers requires authentication."""
         response = client.get('/api/containers')

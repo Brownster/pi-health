@@ -104,10 +104,14 @@ service:
     - vpn_network
 ```
 
-Backend API (proposal)
+Backend API
 - `GET /api/catalog` -> list templates (id, name, description, requires, disabled_by_default).
 - `GET /api/catalog/<id>` -> full template with fields + service.
-- `POST /api/catalog/install` -> payload: `{ id, values, stack }`.
+- `POST /api/catalog/install` -> payload: `{ id, values, target_stack, stack_name, start_service }`;
+  requires `X-CSRF-Token`. Returns the installed configuration directly when `start_service` is
+  false, or `202` with `operation_id` and `stream_url` when startup is requested.
+- `GET /api/catalog/operations/<operation_id>/stream` -> replay/follow startup output without
+  re-running the operation; supports `Last-Event-ID`.
 - `POST /api/catalog/remove` -> payload: `{ id, stack }`.
 - `GET /api/catalog/status` -> installed apps (based on current compose services).
 
@@ -118,7 +122,8 @@ Install flow
 4) Server loads compose file (YAML), inserts service under `services:`.
 5) If `requires` unmet (e.g., `vpn` missing), prompt:
    - "Add VPN now?" -> install `vpn` then proceed.
-6) Save compose file and optionally run `docker compose up -d <service>`.
+6) Save compose atomically and optionally start a background `docker compose up -d` operation.
+7) Follow the returned read-only stream; reconnecting replays the same operation.
 
 Remove flow
 1) Server loads compose file, removes service key.
@@ -156,6 +161,7 @@ Current status (in repo) - COMPLETE
   - `GET /api/catalog/<id>` (detail)
   - `GET /api/catalog/status` (installed services)
   - `POST /api/catalog/install` (fully implemented)
+  - `GET /api/catalog/operations/<operation_id>/stream` (replayable startup output)
   - `POST /api/catalog/remove` (fully implemented)
   - `POST /api/catalog/check-dependencies` (new endpoint)
 - Apps UI page at `static/apps.html` with:

@@ -38,6 +38,8 @@ def test_v2_catalog_install_with_fields(
     install_v2_catalog_api_mocks,
 ):
     base_url = v2_mode_server["base_url"]
+    requests = []
+    page.on("request", lambda request: requests.append((request.method, request.url)))
     _open_v2_catalog(page, base_url, v2_login, install_v2_catalog_api_mocks)
 
     page.click("button[data-catalog-action='install'][data-item='sonarr']")
@@ -45,6 +47,11 @@ def test_v2_catalog_install_with_fields(
     expect(page.locator("input[data-install-field='PORT']")).to_have_value("8989")
     page.click("#v2-catalog-install-submit")
     expect(page.get_by_text("Installed Sonarr")).to_be_visible()
+    assert any(method == "POST" and url.endswith("/api/catalog/install") for method, url in requests)
+    assert any(
+        method == "GET" and url.endswith("/api/catalog/operations/mock-catalog-operation/stream")
+        for method, url in requests
+    )
 
 
 def test_v2_catalog_install_keeps_focus_while_typing(

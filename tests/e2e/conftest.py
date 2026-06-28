@@ -887,7 +887,7 @@ def install_v2_settings_api_mocks():
 def install_v2_system_api_mocks():
     """Returns a callable(page) installing a deterministic /api/stats mock."""
 
-    def _install(page: Page) -> None:
+    def _install(page: Page, overrides=None) -> None:
         stats = {
             "cpu_usage_percent": 12.5,
             "cpu_usage_per_core": [10.0, 15.0, 8.0, 17.0],
@@ -900,6 +900,7 @@ def install_v2_system_api_mocks():
             "cpu_freq_mhz": 1800,
             "is_raspberry_pi": True,
         }
+        stats.update(overrides or {})
 
         def _handler(route):
             if urlparse(route.request.url).path == "/api/stats":
@@ -943,7 +944,22 @@ def install_v2_catalog_api_mocks():
                 )
                 return
             if path == "/api/catalog/install" and method == "POST":
-                _json_fulfill(route, {"status": "installed"})
+                _json_fulfill(
+                    route,
+                    {
+                        "status": "installed",
+                        "operation_id": "mock-catalog-operation",
+                        "stream_url": "/api/catalog/operations/mock-catalog-operation/stream",
+                    },
+                    status=202,
+                )
+                return
+            if path == "/api/catalog/operations/mock-catalog-operation/stream" and method == "GET":
+                route.fulfill(
+                    status=200,
+                    content_type="text/event-stream",
+                    body='id: 0\ndata: {"line":"creating"}\n\nid: 1\ndata: {"done":true,"returncode":0}\n\n',
+                )
                 return
             if path == "/api/catalog/remove" and method == "POST":
                 _json_fulfill(route, {"status": "removed"})

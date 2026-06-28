@@ -1,4 +1,5 @@
 import { requestApi } from "@/lib/api";
+import { createOperation, streamOperation } from "@/lib/operations";
 
 export interface CatalogItem {
   id: string;
@@ -64,15 +65,23 @@ export async function installCatalogItem(
   values: Record<string, string>,
   signal?: AbortSignal,
 ): Promise<void> {
-  const payload = await requestApi<{ status?: string; error?: string }>("/api/catalog/install", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ id: itemId, values }),
+  const operation = await createOperation(
+    "/api/catalog/install",
+    { id: itemId, values, start_service: true },
     signal,
-  });
-  if (payload.error) {
-    throw new Error(payload.error);
-  }
+  );
+  await streamOperation(
+    operation.stream_url,
+    (event) => {
+      if (event.error) {
+        throw new Error(event.error);
+      }
+      if (event.done && event.returncode !== 0) {
+        throw new Error(`App startup failed (${event.returncode ?? "unknown status"})`);
+      }
+    },
+    signal,
+  );
 }
 
 export async function removeCatalogItem(itemId: string, signal?: AbortSignal): Promise<void> {

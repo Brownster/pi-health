@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, TriangleAlert } from "lucide-react";
 
 import { Badge, StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -159,6 +159,19 @@ export function SystemPage() {
       {error && stats ? (
         <Card aria-live="polite" className="border-warning/30" role="status">
           <CardContent className="p-4 text-sm text-warning">Refresh failed: {error}</CardContent>
+        </Card>
+      ) : null}
+
+      {stats?.warnings.length ? (
+        <Card aria-live="polite" className="border-warning/30" role="status">
+          <CardContent className="flex items-start gap-3 p-4 text-sm text-warning">
+            <TriangleAlert aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
+            <div className="space-y-1">
+              {stats.warnings.map((warning) => (
+                <p key={`${warning.metric}:${warning.source}`}>{warning.message}</p>
+              ))}
+            </div>
+          </CardContent>
         </Card>
       ) : null}
 

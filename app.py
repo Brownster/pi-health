@@ -421,6 +421,19 @@ def _safe_disk_usage(path):
     }
 
 
+def _collect_disk_usage(metric, path, warnings):
+    """Collect one disk metric and append a source-scoped warning on failure."""
+    usage = _safe_disk_usage(path)
+    if usage is None:
+        warnings.append({
+            'code': 'source_unavailable',
+            'metric': metric,
+            'source': path,
+            'message': f'Disk usage unavailable for {path}',
+        })
+    return usage
+
+
 def get_system_stats():
     """Gather system statistics including CPU, memory, disk, and network."""
     # CPU usage - instantaneous, via two /proc/stat snapshots (not since-boot avg)
@@ -437,8 +450,17 @@ def get_system_stats():
 
     # Disk usage (with configurable path); guarded so a missing mount returns
     # None instead of raising and 500-ing the whole stats endpoint.
-    disk_usage = _safe_disk_usage(os.getenv('DISK_PATH', '/'))
-    disk_usage_2 = _safe_disk_usage(os.getenv('DISK_PATH_2', '/mnt/backup'))
+    warnings = []
+    disk_usage = _collect_disk_usage(
+        'disk_usage',
+        os.getenv('DISK_PATH', '/'),
+        warnings,
+    )
+    disk_usage_2 = _collect_disk_usage(
+        'disk_usage_2',
+        os.getenv('DISK_PATH_2', '/mnt/backup'),
+        warnings,
+    )
     
     # Temperature (specific to Raspberry Pi)
     if os.path.exists('/usr/bin/vcgencmd'):
@@ -477,6 +499,7 @@ def get_system_stats():
         "cpu_voltage": pi_metrics.get('cpu_voltage'),
         "wifi_signal": pi_metrics.get('wifi_signal'),
         "is_raspberry_pi": pi_metrics.get('is_raspberry_pi', False),
+        "warnings": warnings,
     }
 
 

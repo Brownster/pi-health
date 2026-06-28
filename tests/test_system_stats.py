@@ -79,3 +79,25 @@ class TestGetSystemStatsResilience:
         assert stats['disk_usage_2'] is None        # guarded, not a 500
         assert stats['disk_usage'] is not None       # first disk ('/') still works
         assert 'cpu_usage_percent' in stats
+        assert stats['warnings'] == [{
+            'code': 'source_unavailable',
+            'message': 'Disk usage unavailable for /definitely/not/a/real/mount/xyz',
+            'metric': 'disk_usage_2',
+            'source': '/definitely/not/a/real/mount/xyz',
+        }]
+
+    def test_disk_metrics_are_collected_independently(self, monkeypatch):
+        primary = {'total': 100, 'used': 25, 'free': 75, 'percent': 25.0}
+        monkeypatch.setenv('DISK_PATH', '/primary')
+        monkeypatch.setenv('DISK_PATH_2', '/secondary')
+        monkeypatch.setattr(
+            app,
+            '_safe_disk_usage',
+            lambda path: primary if path == '/primary' else None,
+        )
+
+        stats = app.get_system_stats()
+
+        assert stats['disk_usage'] == primary
+        assert stats['disk_usage_2'] is None
+        assert [warning['metric'] for warning in stats['warnings']] == ['disk_usage_2']

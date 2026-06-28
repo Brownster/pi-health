@@ -7,6 +7,13 @@ export interface UsageSummary {
   percent: number | null;
 }
 
+export interface MetricWarning {
+  code: string;
+  metric: string;
+  source: string;
+  message: string;
+}
+
 export interface SystemStats {
   cpuPercent: number | null;
   perCore: number[];
@@ -19,6 +26,7 @@ export interface SystemStats {
   cpuFreqMhz: number | null;
   throttling: string | null;
   isRaspberryPi: boolean;
+  warnings: MetricWarning[];
 }
 
 function normalizeUsage(value: unknown): UsageSummary {
@@ -29,6 +37,20 @@ function normalizeUsage(value: unknown): UsageSummary {
     free: toNullableNumber(usage.free),
     percent: toNullableNumber(usage.percent),
   };
+}
+
+function normalizeWarnings(value: unknown): MetricWarning[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .filter((warning): warning is Record<string, unknown> => Boolean(warning && typeof warning === "object"))
+    .map((warning) => ({
+      code: String(warning.code ?? "unknown"),
+      metric: String(warning.metric ?? "unknown"),
+      source: String(warning.source ?? "unknown"),
+      message: String(warning.message ?? "Metric unavailable"),
+    }));
 }
 
 export async function fetchSystemStats(signal?: AbortSignal): Promise<SystemStats> {
@@ -57,5 +79,6 @@ export async function fetchSystemStats(signal?: AbortSignal): Promise<SystemStat
     cpuFreqMhz: toNullableNumber(payload.cpu_freq_mhz),
     throttling: typeof payload.throttling === "string" ? payload.throttling : null,
     isRaspberryPi: Boolean(payload.is_raspberry_pi),
+    warnings: normalizeWarnings(payload.warnings),
   };
 }

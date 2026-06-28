@@ -10,8 +10,9 @@ import shutil
 import json
 import yaml
 from datetime import datetime
-from flask import Blueprint, jsonify, request
-from auth_utils import login_required
+from flask import Blueprint, jsonify, request, session
+from auth_utils import csrf_protect, login_required
+from operation_manager import parse_sse_payload, start_operation, stream_operation_response
 from stack_manager import (
     atomic_write_text,
     backup_stack,
@@ -20,6 +21,7 @@ from stack_manager import (
     list_stacks,
     run_compose_command,
     stack_lock,
+    stream_compose_command,
     validate_stack_name,
 )
 
@@ -326,6 +328,7 @@ def api_catalog_status():
 
 @catalog_manager.route('/api/catalog/install', methods=['POST'])
 @login_required
+@csrf_protect
 def api_catalog_install():
     """
     Install an app from the catalog.
@@ -475,14 +478,40 @@ def _catalog_install_locked(data, item):
 
     start_service = data.get('start_service', False)
     if start_service:
-        start_result, start_error = run_compose_command(active_stack, 'up')
-        result['started'] = bool(start_result and start_result.get('success'))
-        if start_error:
-            result['start_error'] = start_error
-        elif start_result and not start_result.get('success'):
-            result['start_error'] = start_result.get('stderr', 'Failed to start service')
+        def produce_events():
+            for frame in stream_compose_command(active_stack, 'up'):
+                payload = parse_sse_payload(frame)
+                if payload is not None:
+                    yield payload
+
+        try:
+            operation = start_operation(
+                owner_token=session['csrf_token'],
+                username=session.get('username', 'unknown'),
+                kind='catalog-install',
+                target=active_stack,
+                producer=produce_events,
+            )
+        except RuntimeError as exc:
+            result.update({
+                'error': f'App was installed but startup could not be scheduled: {exc}',
+                'started': False,
+            })
+            return jsonify(result), 500
+        result.update({
+            'operation_id': operation.operation_id,
+            'stream_url': f'/api/catalog/operations/{operation.operation_id}/stream',
+        })
+        return jsonify(result), 202
 
     return jsonify(result)
+
+
+@catalog_manager.route('/api/catalog/operations/<operation_id>/stream', methods=['GET'])
+@login_required
+def api_stream_catalog_operation(operation_id):
+    """Replay and follow one previously created catalog install operation."""
+    return stream_operation_response(operation_id, expected_kind='catalog-install')
 
 
 @catalog_manager.route('/api/catalog/remove', methods=['POST'])
