@@ -42,7 +42,7 @@ starting broad feature work. IDs match the review for traceability.
 | API-001 | State-changing stream endpoints become POST + CSRF | P1 | backend+ui | — | Complete |
 | UI-001 | Modal focus survives typing (stable onClose) | P1 | frontend | — | Complete |
 | SYS-001 | `/api/stats` tolerates missing optional disks | P1 | backend+ui | — | Complete |
-| STK-003 | Round-trip YAML / managed override files | P2 | backend | — | Pending |
+| STK-003 | Round-trip YAML / managed override files | P2 | backend | — | Complete |
 | CAT-003 | Merge all allowed top-level compose sections | P2 | backend | STK-003 | Pending |
 | STK-004 | `up -d --remove-orphans` (after review) | P2 | backend | — | Pending |
 | STK-005 | Detect duplicate compose filenames | P2 | backend | — | Pending |
@@ -53,7 +53,7 @@ starting broad feature work. IDs match the review for traceability.
 | UI-005 | Derive service-link scheme (no hardcoded http) | P2 | frontend | — | Pending |
 | UI-006 | Catalog stack targeting; (app, stack) install model | P2 | backend+ui | — | Complete |
 | DSK-001 | Unmount dependency check + media-mount protection | P1/P2 | backend | — | Complete |
-| DSK-002 | Safe fstab filesystem presets (no raw default) | P2 | backend | — | Pending |
+| DSK-002 | Safe fstab filesystem presets (no raw default) | P2 | backend | — | Complete |
 | CFG-001 | Relocate runtime state out of the source checkout | P2 | backend | — | Pending |
 | ARCH-001 | Split oversized modules during the above fixes | P2 | both | — | Pending |
 
@@ -260,7 +260,7 @@ skipped`; System Playwright `4 passed`; TypeScript and production build passed (
 JS gzip). Full `tox -e all`: Ruff clean; unit `632 passed, 1 skipped`; E2E `167 passed, 26 skipped`.
 
 ## P2 — Reliability, accessibility, product gaps
-- **STK-003** round-trip YAML (or managed override files) — `catalog_manager.py:107-135`.
+- **STK-003** round-trip YAML (or managed override files) — `catalog_manager.py:107-135`. **Complete 2026-06-28:** catalog-driven Compose mutations now use a bounded `ruamel.yaml` round-trip codec instead of PyYAML load/dump. Install and removal preserve user comments, quote style, anchors, aliases, top-level placement, and service ordering while retaining STK-002 atomic writes and per-stack locks. Invalid or non-mapping Compose documents fail with structured `invalid_compose_yaml` responses and are never overwritten. Raw stack-editor saves and backup/restore remain byte-preserving text operations. Focused round-trip + catalog coverage `39 passed`. Full `tox -e all`: Ruff clean; unit `663 passed, 1 skipped`; E2E `172 passed, 26 skipped`.
 - **CAT-003** merge all allowed top-level compose sections (configs/secrets) — `catalog_manager.py:431-443`.
 - **STK-004** add `--remove-orphans` after reviewing external-service preservation — `stack_manager.py:237-268,748-786`.
 - **STK-005** detect duplicate compose filenames; block until resolved — `stack_manager.py:20-60`.
@@ -271,7 +271,7 @@ JS gzip). Full `tox -e all`: Ruff clean; unit `632 passed, 1 skipped`; E2E `167 
 - **UI-005** derive service-link scheme from metadata, not hardcoded `http://` — `dashboard-home.tsx`, `containers-page.tsx`.
 - **UI-006** catalog `target_stack` + represent installs as `(app, stack)` — `frontend/src/lib/catalog.ts`. **Complete 2026-06-28:** catalog status now returns deterministic, deduplicated stack membership for each service. The v2 catalog preserves those `(app, stack)` installations, loads valid stack targets, defaults dependency-bearing apps to a stack containing all catalog dependencies, and sends explicit `target_stack`/`stack_name` values for every install. Apps can be installed into additional stacks, while each installed stack has its own labeled, confirmed remove action that sends the exact target stack. Existing-stack and named-new-stack install requests plus exact-stack removal are covered by Playwright; catalog parity `7 passed`, including modal overflow checks at desktop, tablet, and phone widths. Catalog status unit coverage `3 passed`; TypeScript and production build passed (`100.56 kB` initial JS gzip). Full `tox -e all`: Ruff clean; unit `633 passed, 1 skipped`; E2E `172 passed, 26 skipped`.
 - **DSK-001** unmount dependency check (containers/shares/pools/SnapRAID) + protect media mounts — `disk_manager.py:483-526`. **Complete 2026-06-28:** disk unmounts now run a normalized, fail-closed preflight before the privileged helper. The checker resolves symlinks and rejects `/mnt` traversal, inspects all Docker container mounts, configured media roots, Samba shares, MergerFS branches and pool mountpoints, and SnapRAID drive paths. Known consumers return structured `409 mount_in_use` details; unavailable Docker inspection or unreadable/malformed dependency configuration returns `503 dependency_check_failed`. Neither result can be forced and neither reaches the helper. Configured references remain protective regardless of UI enabled state. Focused dependency + disk-manager coverage `75 passed`. Full `tox -e all`: Ruff clean; unit `642 passed, 1 skipped`; E2E `172 passed, 26 skipped`.
-- **DSK-002** safe filesystem-specific fstab presets (no raw free-form default) — `disk_manager.py:409-447`.
+- **DSK-002** safe filesystem-specific fstab presets (no raw free-form default) — `disk_manager.py:409-447`. **Complete 2026-06-28:** one shared preset contract now covers ext2/3/4, XFS, Btrfs, NTFS, VFAT, and exFAT with explicit options, dump values, and filesystem-appropriate fsck pass values. The mount API rejects missing/unknown filesystems and every caller-supplied option string before helper execution. The privileged helper independently derives the same preset and rejects raw options, so bypassing the web API cannot restore free-form fstab writes. V2 and legacy clients no longer default unknown filesystems to ext4 or send option strings; Playwright verifies the v2 request body. Focused preset + disk + helper coverage `132 passed`; disk parity `10 passed`; TypeScript and production build passed (`100.54 kB` initial JS gzip). Full `tox -e all`: Ruff clean; unit `657 passed, 1 skipped`; E2E `172 passed, 26 skipped`.
 - **CFG-001** relocate runtime state: config `/etc/limeos`, state `/var/lib/limeos`, logs `/var/log/limeos`, secrets in credential storage (+ migration plan) — `app.py:29-39`, `catalog_manager.py:20-25`, `backup_scheduler.py:24-25`.
 - **ARCH-001** split oversized modules (`app.py` ~1699 lines; containers/stacks/storage pages >800) **as part of** the above fixes, not a standalone rewrite.
 

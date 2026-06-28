@@ -146,7 +146,7 @@ class TestDiskManagerEndpoints:
         with patch('disk_manager.helper_call', side_effect=HelperError("no helper")):
             response = authenticated_client.post(
                 '/api/disks/mount',
-                data=json.dumps({'uuid': 'abc-123', 'mountpoint': '/mnt/test'}),
+                data=json.dumps({'uuid': 'abc-123', 'mountpoint': '/mnt/test', 'fstype': 'ext4'}),
                 content_type='application/json'
             )
         assert response.status_code == 503
@@ -160,14 +160,13 @@ class TestDiskManagerEndpoints:
                 return {'success': True}
             return {'success': False, 'error': 'unexpected'}
 
-        with patch('disk_manager.helper_call', side_effect=helper_call_side_effect):
+        with patch('disk_manager.helper_call', side_effect=helper_call_side_effect) as helper_call:
             response = authenticated_client.post(
                 '/api/disks/mount',
                 data=json.dumps({
                     'uuid': 'abc-123',
                     'mountpoint': '/mnt/test',
                     'fstype': 'ext4',
-                    'options': 'defaults',
                     'add_to_fstab': True
                 }),
                 content_type='application/json'
@@ -175,6 +174,39 @@ class TestDiskManagerEndpoints:
         assert response.status_code == 200
         data = response.get_json()
         assert data['status'] == 'mounted'
+        assert helper_call.call_args_list[0].args == (
+            'fstab_add',
+            {'uuid': 'abc-123', 'mountpoint': '/mnt/test', 'fstype': 'ext4'},
+        )
+
+    def test_mount_rejects_raw_options(self, authenticated_client):
+        with patch('disk_manager.helper_call') as helper_call:
+            response = authenticated_client.post(
+                '/api/disks/mount',
+                json={
+                    'uuid': 'abc-123',
+                    'mountpoint': '/mnt/test',
+                    'fstype': 'ext4',
+                    'options': 'defaults,nofail',
+                },
+            )
+
+        assert response.status_code == 400
+        assert response.get_json()['code'] == 'mount_options_not_allowed'
+        helper_call.assert_not_called()
+
+    @pytest.mark.parametrize('fstype', [None, '', 'auto', 'zfs'])
+    def test_mount_rejects_missing_or_unsupported_fstype(self, authenticated_client, fstype):
+        payload = {'uuid': 'abc-123', 'mountpoint': '/mnt/test'}
+        if fstype is not None:
+            payload['fstype'] = fstype
+
+        with patch('disk_manager.helper_call') as helper_call:
+            response = authenticated_client.post('/api/disks/mount', json=payload)
+
+        assert response.status_code == 400
+        assert response.get_json()['code'] == 'unsupported_filesystem'
+        helper_call.assert_not_called()
 
     def test_mount_without_fstab_resolves_device(self, authenticated_client):
         """Test mount without fstab resolves device via blkid."""
@@ -191,6 +223,7 @@ class TestDiskManagerEndpoints:
                 data=json.dumps({
                     'uuid': 'abc-123',
                     'mountpoint': '/mnt/test',
+                    'fstype': 'ext4',
                     'add_to_fstab': False
                 }),
                 content_type='application/json'
@@ -207,6 +240,7 @@ class TestDiskManagerEndpoints:
                 data=json.dumps({
                     'uuid': 'abc-123',
                     'mountpoint': '/mnt/test',
+                    'fstype': 'ext4',
                     'add_to_fstab': False
                 }),
                 content_type='application/json'
@@ -218,7 +252,7 @@ class TestDiskManagerEndpoints:
         with patch('disk_manager.helper_call', return_value={'success': False, 'error': 'nope'}):
             response = authenticated_client.post(
                 '/api/disks/mount',
-                data=json.dumps({'uuid': 'abc-123', 'mountpoint': '/mnt/test'}),
+                data=json.dumps({'uuid': 'abc-123', 'mountpoint': '/mnt/test', 'fstype': 'ext4'}),
                 content_type='application/json'
             )
         assert response.status_code == 400

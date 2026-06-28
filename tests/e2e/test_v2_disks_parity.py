@@ -91,12 +91,24 @@ def test_v2_disks_suggested_mount_with_confirm(
     install_v2_disks_api_mocks,
 ):
     base_url = v2_mode_server["base_url"]
+    requests = []
+    page.on("request", lambda request: requests.append(request))
     _open_v2_disks(page, base_url, v2_login, install_v2_disks_api_mocks)
 
     expect(page.locator("#v2-disk-suggestions")).to_be_visible()
     page.click("button[data-mount='sdb-uuid-1']")
     page.click("button[data-confirm-mount='sdb-uuid-1']")
     expect(page.get_by_text("Mounted /dev/sdb1 at /mnt/backup")).to_be_visible(timeout=10000)
+    mount_request = next(
+        request for request in requests
+        if request.method == "POST" and request.url.endswith("/api/disks/mount")
+    )
+    assert mount_request.post_data_json == {
+        "uuid": "sdb-uuid-1",
+        "mountpoint": "/mnt/backup",
+        "fstype": "ext4",
+        "add_to_fstab": True,
+    }
 
 
 def test_v2_disks_unmount_with_confirm(

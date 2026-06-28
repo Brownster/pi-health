@@ -875,6 +875,127 @@ class TestCatalogConcurrency:
         assert set(compose_data["services"]) == {"app-one", "app-two"}
 
 
+class TestCatalogComposeRoundTrip:
+    def test_install_and_remove_preserve_user_yaml_formatting(
+        self,
+        authenticated_client,
+        temp_catalog_dir,
+        temp_stacks_dir,
+        monkeypatch,
+    ):
+        import catalog_manager
+        import stack_manager
+
+        monkeypatch.setattr(catalog_manager, "CATALOG_DIR", temp_catalog_dir)
+        monkeypatch.setattr(stack_manager, "STACKS_PATH", temp_stacks_dir)
+        monkeypatch.setattr(
+            stack_manager,
+            "BACKUP_DIR",
+            os.path.join(temp_stacks_dir, ".backups"),
+        )
+        stack_dir = os.path.join(temp_stacks_dir, "media")
+        os.makedirs(stack_dir)
+        compose_path = os.path.join(stack_dir, "compose.yaml")
+        original = (
+            "# keep this stack comment\n"
+            "x-shared: &shared\n"
+            '  image: "redis:7" # keep this image comment\n'
+            "services:\n"
+            "  existing:\n"
+            "    <<: *shared\n"
+            "    environment:\n"
+            "      MODE: 'prod'\n"
+        )
+        with open(compose_path, "w") as handle:
+            handle.write(original)
+        with open(os.path.join(temp_catalog_dir, "test-app.yaml"), "w") as handle:
+            yaml.safe_dump(
+                {
+                    "id": "test-app",
+                    "name": "Test App",
+                    "requires": [],
+                    "service": {"image": "example/test-app:latest"},
+                },
+                handle,
+            )
+
+        install_response = authenticated_client.post(
+            "/api/catalog/install",
+            json={"id": "test-app", "target_stack": "media"},
+        )
+
+        assert install_response.status_code == 200
+        installed = open(compose_path).read()
+        assert "# keep this stack comment" in installed
+        assert 'image: "redis:7" # keep this image comment' in installed
+        assert "x-shared: &shared" in installed
+        assert "<<: *shared" in installed
+        assert "MODE: 'prod'" in installed
+        assert installed.index("existing:") < installed.index("test-app:")
+
+        monkeypatch.setattr(
+            catalog_manager,
+            "run_compose_command",
+            lambda *args, **kwargs: ({"success": True}, None),
+        )
+        remove_response = authenticated_client.post(
+            "/api/catalog/remove",
+            json={"id": "test-app", "target_stack": "media"},
+        )
+
+        assert remove_response.status_code == 200
+        removed = open(compose_path).read()
+        assert "# keep this stack comment" in removed
+        assert 'image: "redis:7" # keep this image comment' in removed
+        assert "x-shared: &shared" in removed
+        assert "<<: *shared" in removed
+        assert "MODE: 'prod'" in removed
+        assert "test-app:" not in removed
+
+    def test_install_rejects_malformed_compose_without_overwriting(
+        self,
+        authenticated_client,
+        temp_catalog_dir,
+        temp_stacks_dir,
+        monkeypatch,
+    ):
+        import catalog_manager
+        import stack_manager
+
+        monkeypatch.setattr(catalog_manager, "CATALOG_DIR", temp_catalog_dir)
+        monkeypatch.setattr(stack_manager, "STACKS_PATH", temp_stacks_dir)
+        monkeypatch.setattr(
+            stack_manager,
+            "BACKUP_DIR",
+            os.path.join(temp_stacks_dir, ".backups"),
+        )
+        stack_dir = os.path.join(temp_stacks_dir, "media")
+        os.makedirs(stack_dir)
+        compose_path = os.path.join(stack_dir, "compose.yaml")
+        malformed = "services: [\n"
+        with open(compose_path, "w") as handle:
+            handle.write(malformed)
+        with open(os.path.join(temp_catalog_dir, "test-app.yaml"), "w") as handle:
+            yaml.safe_dump(
+                {
+                    "id": "test-app",
+                    "name": "Test App",
+                    "requires": [],
+                    "service": {"image": "example/test-app:latest"},
+                },
+                handle,
+            )
+
+        response = authenticated_client.post(
+            "/api/catalog/install",
+            json={"id": "test-app", "target_stack": "media"},
+        )
+
+        assert response.status_code == 400
+        assert response.get_json()["code"] == "invalid_compose_yaml"
+        assert open(compose_path).read() == malformed
+
+
 class TestAppsPage:
     """Test apps page accessibility."""
 

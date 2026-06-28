@@ -129,6 +129,40 @@ class TestValidationFailures:
         result = helper.cmd_fstab_add({"uuid": "abc-123", "mountpoint": "/mnt/data", "fstype": "weird"})
         assert result["success"] is False
 
+    def test_cmd_fstab_add_rejects_raw_options(self):
+        result = helper.cmd_fstab_add({
+            "uuid": "abc-123",
+            "mountpoint": "/mnt/data",
+            "fstype": "ext4",
+            "options": "defaults,nofail",
+        })
+        assert result == {"success": False, "error": "Custom mount options are not allowed"}
+
+    @pytest.mark.parametrize(
+        ("fstype", "expected_entry"),
+        [
+            ("ext4", "UUID=abc-123 /mnt/data ext4 defaults,nofail 0 2\n"),
+            ("xfs", "UUID=abc-123 /mnt/data xfs defaults,nofail 0 0\n"),
+            (
+                "exfat",
+                "UUID=abc-123 /mnt/data exfat defaults,nofail,uid=1000,gid=1000,umask=0022 0 0\n",
+            ),
+        ],
+    )
+    def test_cmd_fstab_add_uses_filesystem_preset(self, fstype, expected_entry):
+        opened = mock_open(read_data="")
+        with patch("pihealth_helper.shutil.copy"):
+            with patch("pihealth_helper.os.makedirs"):
+                with patch("builtins.open", opened):
+                    result = helper.cmd_fstab_add({
+                        "uuid": "abc-123",
+                        "mountpoint": "/mnt/data",
+                        "fstype": fstype,
+                    })
+
+        assert result["success"] is True
+        opened().write.assert_any_call(expected_entry)
+
     def test_cmd_mount_invalid_mountpoint(self):
         result = helper.cmd_mount({"mountpoint": "/tmp"})
         assert result["success"] is False

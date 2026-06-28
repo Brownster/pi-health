@@ -172,7 +172,7 @@ function renderPartition(part) {
                     class="coraline-button disk-action-btn px-3 py-2 text-sm rounded text-white js-open-mount"
                     data-device="${encodeDataAttr(part.path || '')}"
                     data-uuid="${encodeDataAttr(part.uuid || '')}"
-                    data-fstype="${encodeDataAttr(part.fstype || 'ext4')}">
+                    data-fstype="${encodeDataAttr(part.fstype || '')}">
                 Mount
             </button>
         `;
@@ -215,7 +215,7 @@ function bindDiskActions(diskList) {
             openMountModal(
                 button.dataset.device || '',
                 button.dataset.uuid || '',
-                button.dataset.fstype || 'ext4'
+                button.dataset.fstype || ''
             );
         });
     });
@@ -266,7 +266,7 @@ async function loadSuggestions() {
                 openMountModal(
                     button.dataset.device || '',
                     button.dataset.uuid || '',
-                    button.dataset.fstype || 'ext4',
+                    button.dataset.fstype || '',
                     button.dataset.suggestedMount || ''
                 );
             });

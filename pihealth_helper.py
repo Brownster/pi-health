@@ -31,6 +31,7 @@ import urllib.request
 import urllib.error
 import shlex
 from helper_templates import cron_to_oncalendar, render_snapraid_schedule, render_startup_files
+from fstab_presets import get_fstab_preset, normalize_fstype
 
 # Configuration
 SOCKET_PATH = '/run/pihealth/helper.sock'
@@ -295,21 +296,25 @@ def cmd_fstab_add(params):
     """Add an entry to fstab."""
     uuid = params.get('uuid', '')
     mountpoint = params.get('mountpoint', '')
-    fstype = params.get('fstype', 'ext4')
-    options = params.get('options', 'defaults,nofail')
+    fstype = params.get('fstype')
 
     # Validate inputs
     if not uuid or not UUID_PATTERN.match(uuid):
         return {'success': False, 'error': 'Invalid UUID format'}
     if not mountpoint or not MOUNT_POINT_PATTERN.match(mountpoint) or '..' in mountpoint:
         return {'success': False, 'error': 'Invalid mountpoint (must be /mnt/<name>)'}
-    if fstype not in ['ext4', 'ext3', 'ext2', 'xfs', 'btrfs', 'ntfs', 'vfat', 'exfat']:
+    if 'options' in params:
+        return {'success': False, 'error': 'Custom mount options are not allowed'}
+    try:
+        fstype = normalize_fstype(fstype)
+        preset = get_fstab_preset(fstype)
+    except ValueError:
         return {'success': False, 'error': 'Invalid filesystem type'}
 
-    # Sanitize options
-    safe_options = re.sub(r'[^a-zA-Z0-9,_=-]', '', options)
-
-    fstab_line = f"UUID={uuid} {mountpoint} {fstype} {safe_options} 0 2\n"
+    fstab_line = (
+        f"UUID={uuid} {mountpoint} {fstype} {preset['options']} "
+        f"{preset['dump']} {preset['pass']}\n"
+    )
 
     try:
         # Backup fstab first

@@ -165,7 +165,7 @@ export interface SuggestedMount {
   device: string;
   uuid: string;
   size: string | null;
-  fstype: string | null;
+  fstype: string;
   label: string | null;
   suggested_mount: string;
   reason: string;
@@ -184,19 +184,18 @@ export async function fetchSuggestedMounts(signal?: AbortSignal): Promise<Sugges
       device: String(raw.device ?? ""),
       uuid: String(raw.uuid ?? ""),
       size: toNullableString(raw.size),
-      fstype: toNullableString(raw.fstype),
+      fstype: String(raw.fstype ?? ""),
       label: toNullableString(raw.label),
       suggested_mount: String(raw.suggested_mount ?? ""),
       reason: String(raw.reason ?? ""),
     }))
-    .filter((item) => item.uuid && item.suggested_mount);
+    .filter((item) => item.uuid && item.fstype && item.suggested_mount);
 }
 
 export interface MountRequest {
   uuid: string;
   mountpoint: string;
-  fstype?: string | null;
-  options?: string;
+  fstype: string;
   add_to_fstab?: boolean;
 }
 
@@ -207,8 +206,7 @@ export async function mountDisk(request: MountRequest, signal?: AbortSignal): Pr
     body: JSON.stringify({
       uuid: request.uuid,
       mountpoint: request.mountpoint,
-      fstype: request.fstype || "ext4",
-      options: request.options ?? "defaults,nofail",
+      fstype: request.fstype,
       add_to_fstab: request.add_to_fstab ?? true,
     }),
     signal,

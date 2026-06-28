@@ -2,4 +2,5 @@ flask
 psutil
 docker
 pyyaml
+ruamel.yaml>=0.18,<0.19
 apscheduler>=3.10.0

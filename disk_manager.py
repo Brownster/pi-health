@@ -11,6 +11,7 @@ from flask import Blueprint, current_app, jsonify, request
 from auth_utils import login_required
 from helper_client import helper_call, helper_available, HelperError, HELPER_SOCKET
 from helper_templates import render_startup_files
+from fstab_presets import FSTAB_PRESETS, normalize_fstype
 from mount_dependencies import (
     DependencyInspectionError,
     find_mount_dependencies,
@@ -376,7 +377,6 @@ def api_mount():
         "uuid": "abc-123-...",
         "mountpoint": "/mnt/storage",
         "fstype": "ext4",
-        "options": "defaults,nofail",
         "add_to_fstab": true
     }
     """
@@ -384,8 +384,7 @@ def api_mount():
 
     uuid = data.get('uuid', '')
     mountpoint = data.get('mountpoint', '')
-    fstype = data.get('fstype', 'ext4')
-    options = data.get('options', 'defaults,nofail')
+    fstype = data.get('fstype')
     add_to_fstab = data.get('add_to_fstab', True)
 
     if not uuid:
@@ -394,6 +393,20 @@ def api_mount():
         return jsonify({'error': 'Mountpoint is required'}), 400
     if not mountpoint.startswith('/mnt/'):
         return jsonify({'error': 'Mountpoint must be under /mnt/'}), 400
+    if 'options' in data:
+        return jsonify({
+            'code': 'mount_options_not_allowed',
+            'error': 'Custom mount options are not allowed',
+            'message': 'Remove options and use the filesystem preset',
+        }), 400
+    try:
+        fstype = normalize_fstype(fstype)
+    except ValueError as exc:
+        return jsonify({
+            'code': 'unsupported_filesystem',
+            'error': str(exc),
+            'details': sorted(FSTAB_PRESETS),
+        }), 400
 
     try:
         # Add to fstab if requested
@@ -402,7 +415,6 @@ def api_mount():
                 'uuid': uuid,
                 'mountpoint': mountpoint,
                 'fstype': fstype,
-                'options': options
             })
             if not fstab_result.get('success'):
                 return jsonify({'error': fstab_result.get('error', 'Failed to add fstab entry')}), 400
@@ -652,7 +664,7 @@ def api_suggested_mounts():
                 continue
 
             fstype = part.get('fstype', '')
-            if fstype not in ['ext4', 'ext3', 'xfs', 'btrfs', 'ntfs', 'exfat', 'vfat']:
+            if fstype not in FSTAB_PRESETS:
                 continue
 
             suggestion = {

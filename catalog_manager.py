@@ -9,6 +9,7 @@ import re
 import shutil
 import json
 import yaml
+from compose_yaml import ComposeYamlError, dump_compose_yaml, load_compose_yaml
 from datetime import datetime
 from flask import Blueprint, jsonify, request, session
 from auth_utils import csrf_protect, login_required
@@ -115,23 +116,23 @@ def _summarize_item(item):
 
 
 def _load_stack_compose(stack_dir):
-    """Load a stack compose file as a dict."""
+    """Load a stack compose file with round-trip presentation metadata."""
     compose_path = find_compose_file(stack_dir)
     if not compose_path or not os.path.exists(compose_path):
         return None, None
     try:
         with open(compose_path, 'r') as f:
-            data = yaml.safe_load(f)
-        return (data if isinstance(data, dict) else None), compose_path
-    except Exception:
-        return None, compose_path
+            data = load_compose_yaml(f.read())
+        return data, compose_path
+    except OSError as exc:
+        raise ComposeYamlError(f'Unable to read compose file: {exc}') from exc
 
 
 def _save_stack_compose(stack_dir, data, filename=None):
-    """Save compose data to a stack with atomic write."""
+    """Save compose data atomically without discarding YAML presentation."""
     os.makedirs(stack_dir, exist_ok=True)
     compose_path = filename or os.path.join(stack_dir, 'compose.yaml')
-    content = yaml.dump(data, default_flow_style=False, sort_keys=False)
+    content = dump_compose_yaml(data)
     atomic_write_text(compose_path, content)
     return compose_path
 
@@ -147,7 +148,10 @@ def _list_stack_services(stack_name=None):
         if stack_name and name != stack_name:
             continue
         stack_dir = get_stack_path(name)
-        data, _ = _load_stack_compose(stack_dir)
+        try:
+            data, _ = _load_stack_compose(stack_dir)
+        except ComposeYamlError:
+            continue
         if not data:
             continue
         stack_services = data.get('services', {})
@@ -165,7 +169,10 @@ def _find_service_stacks(service_name):
     for stack in stacks:
         name = stack.get('name')
         stack_dir = get_stack_path(name)
-        data, _ = _load_stack_compose(stack_dir)
+        try:
+            data, _ = _load_stack_compose(stack_dir)
+        except ComposeYamlError:
+            continue
         if not data:
             continue
         services = data.get('services', {})
@@ -430,7 +437,14 @@ def _catalog_install_locked(data, item):
         }), 400
 
     # Load or create compose file in the stack
-    compose_data, compose_path = _load_stack_compose(stack_dir)
+    try:
+        compose_data, compose_path = _load_stack_compose(stack_dir)
+    except ComposeYamlError as exc:
+        return jsonify({
+            'code': 'invalid_compose_yaml',
+            'error': 'Cannot update invalid Compose YAML',
+            'message': str(exc),
+        }), 400
     if compose_data is None:
         compose_data = {
             'version': '3.8',
@@ -578,7 +592,14 @@ def _catalog_remove_locked(data, item_id, active_stack):
             }), 400
 
     stack_dir = get_stack_path(active_stack)
-    compose_data, compose_path = _load_stack_compose(stack_dir)
+    try:
+        compose_data, compose_path = _load_stack_compose(stack_dir)
+    except ComposeYamlError as exc:
+        return jsonify({
+            'code': 'invalid_compose_yaml',
+            'error': 'Cannot update invalid Compose YAML',
+            'message': str(exc),
+        }), 400
     if compose_data is None:
         return jsonify({'error': 'Compose file not found'}), 404
     services = compose_data.get('services', {})
