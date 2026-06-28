@@ -232,16 +232,70 @@ class TestDiskManagerEndpoints:
                 return {'success': False, 'error': 'failed'}
             return {'success': False}
 
-        with patch('disk_manager.helper_call', side_effect=helper_call_side_effect):
-            response = authenticated_client.post(
-                '/api/disks/unmount',
-                data=json.dumps({'mountpoint': '/mnt/test', 'remove_from_fstab': True}),
-                content_type='application/json'
-            )
+        with patch('disk_manager.find_mount_dependencies', return_value=[]):
+            with patch('disk_manager.helper_call', side_effect=helper_call_side_effect):
+                response = authenticated_client.post(
+                    '/api/disks/unmount',
+                    data=json.dumps({'mountpoint': '/mnt/test', 'remove_from_fstab': True}),
+                    content_type='application/json'
+                )
         assert response.status_code == 200
         data = response.get_json()
         assert data['status'] == 'unmounted'
         assert 'warning' in data
+
+    def test_unmount_blocks_known_dependency(self, authenticated_client):
+        from mount_dependencies import MountDependency
+
+        blocker = MountDependency('container', 'media', '/mnt/storage/media')
+        with patch('disk_manager.find_mount_dependencies', return_value=[blocker]):
+            with patch('disk_manager.helper_call') as helper_call:
+                response = authenticated_client.post(
+                    '/api/disks/unmount',
+                    json={'mountpoint': '/mnt/storage'},
+                )
+
+        assert response.status_code == 409
+        assert response.get_json() == {
+            'code': 'mount_in_use',
+            'error': 'Unmount blocked',
+            'message': 'Stop or reconfigure dependent services and retry',
+            'details': ['container: media (/mnt/storage/media)'],
+            'dependencies': [
+                {'type': 'container', 'name': 'media', 'path': '/mnt/storage/media'}
+            ],
+        }
+        helper_call.assert_not_called()
+
+    def test_unmount_fails_closed_when_dependencies_cannot_be_checked(self, authenticated_client):
+        from mount_dependencies import DependencyInspectionError
+
+        error = DependencyInspectionError(['Docker service unavailable'])
+        with patch('disk_manager.find_mount_dependencies', side_effect=error):
+            with patch('disk_manager.helper_call') as helper_call:
+                response = authenticated_client.post(
+                    '/api/disks/unmount',
+                    json={'mountpoint': '/mnt/storage'},
+                )
+
+        assert response.status_code == 503
+        assert response.get_json() == {
+            'code': 'dependency_check_failed',
+            'error': 'Unable to verify mount dependencies',
+            'message': 'Restore dependency checks and retry',
+            'details': ['Docker service unavailable'],
+        }
+        helper_call.assert_not_called()
+
+    def test_unmount_rejects_normalized_path_escape(self, authenticated_client):
+        with patch('disk_manager.helper_call') as helper_call:
+            response = authenticated_client.post(
+                '/api/disks/unmount',
+                json={'mountpoint': '/mnt/../etc'},
+            )
+
+        assert response.status_code == 400
+        helper_call.assert_not_called()
 
 
 class TestMediaPaths:

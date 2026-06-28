@@ -230,7 +230,7 @@ Navigate to the **"Disks"** page. You will see a list of all physical storage de
 #### Mounting and Unmounting Disks
 
 *   **To Mount a Disk:** Find the unmounted partition you want to use and click the **"Mount"** button. Pi-Health will ask for a mount point. **It is strongly recommended to use a mount point inside `/mnt/` (e.g., `/mnt/media`, `/mnt/downloads`).**
-*   **To Unmount a Disk:** Click the **"Unmount"** button next to a mounted partition.
+*   **To Unmount a Disk:** Click the **"Unmount"** button next to a mounted partition. Unmounting is blocked while the path is referenced by a container, media path, network share, MergerFS pool, or SnapRAID configuration. Stop or reconfigure every listed dependency first.
 
 #### Auto-mounting on Boot (`fstab`)
 

@@ -7,10 +7,15 @@ Communicates with the privileged helper service over Unix socket.
 
 import os
 import json
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, current_app, jsonify, request
 from auth_utils import login_required
 from helper_client import helper_call, helper_available, HelperError, HELPER_SOCKET
 from helper_templates import render_startup_files
+from mount_dependencies import (
+    DependencyInspectionError,
+    find_mount_dependencies,
+    normalize_managed_mountpoint,
+)
 from smart_monitor import parse_smartctl_json
 
 disk_manager = Blueprint('disk_manager', __name__)
@@ -26,6 +31,12 @@ SEEDBOX_CONFIG = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
     'config',
     'seedbox_mount.json'
+)
+
+STORAGE_PLUGIN_CONFIG_DIR = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    'config',
+    'storage_plugins',
 )
 
 # Default media paths
@@ -447,8 +458,35 @@ def api_unmount():
 
     if not mountpoint:
         return jsonify({'error': 'Mountpoint is required'}), 400
-    if not mountpoint.startswith('/mnt/'):
-        return jsonify({'error': 'Mountpoint must be under /mnt/'}), 400
+    try:
+        mountpoint = normalize_managed_mountpoint(mountpoint)
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+    try:
+        dependencies = find_mount_dependencies(
+            mountpoint,
+            docker_client=current_app.extensions.get('docker_client'),
+            media_paths_config=MEDIA_PATHS_CONFIG,
+            storage_plugin_config_dir=STORAGE_PLUGIN_CONFIG_DIR,
+            default_media_paths=DEFAULT_MEDIA_PATHS,
+        )
+    except DependencyInspectionError as exc:
+        return jsonify({
+            'code': 'dependency_check_failed',
+            'error': 'Unable to verify mount dependencies',
+            'message': 'Restore dependency checks and retry',
+            'details': exc.details,
+        }), 503
+
+    if dependencies:
+        return jsonify({
+            'code': 'mount_in_use',
+            'error': 'Unmount blocked',
+            'message': 'Stop or reconfigure dependent services and retry',
+            'details': [dependency.detail() for dependency in dependencies],
+            'dependencies': [dependency.as_dict() for dependency in dependencies],
+        }), 409
 
     try:
         # Unmount first

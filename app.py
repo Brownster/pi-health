@@ -117,6 +117,8 @@ except Exception as e:
     docker_client = None
     docker_available = False
 
+app.extensions['docker_client'] = docker_client
+
 app.register_blueprint(stack_manager)
 app.register_blueprint(catalog_manager)
 app.register_blueprint(tools_manager)
