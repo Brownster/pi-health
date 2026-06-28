@@ -12,6 +12,7 @@ from typing import Generator
 
 from storage_plugins.base import StoragePlugin, CommandResult, PluginStatus
 from helper_client import helper_call, helper_available, HelperError
+from runtime_paths import STATIC_SCHEMA_DIR
 
 
 POLICIES = {
@@ -66,11 +67,7 @@ class MergerFSPlugin(StoragePlugin):
 
     def get_schema(self) -> dict:
         if self._schema is None:
-            schema_path = os.path.join(
-                os.path.dirname(self.config_dir),
-                "schemas",
-                "mergerfs.schema.json"
-            )
+            schema_path = STATIC_SCHEMA_DIR / "mergerfs.schema.json"
             if os.path.exists(schema_path):
                 with open(schema_path) as handle:
                     self._schema = json.load(handle)

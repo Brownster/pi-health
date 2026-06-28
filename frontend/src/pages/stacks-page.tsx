@@ -315,6 +315,7 @@ export function StacksPage() {
   });
 
   const isMountedRef = useRef(true);
+  const stacksLoadInFlightRef = useRef(false);
   const pendingActionsRef = useRef<Record<string, StackAction>>({});
   const stackStreamAbortRef = useRef<{ controller: AbortController; stackName: string } | null>(null);
 
@@ -332,6 +333,11 @@ export function StacksPage() {
   }, []);
 
   const loadStacks = useCallback(async (reason: "initial" | "manual" | "poll" | "action") => {
+    if (stacksLoadInFlightRef.current) {
+      return;
+    }
+    stacksLoadInFlightRef.current = true;
+
     if (reason === "initial") {
       setIsLoading(true);
     }
@@ -353,6 +359,7 @@ export function StacksPage() {
       }
       setError(getErrorMessage(caughtError));
     } finally {
+      stacksLoadInFlightRef.current = false;
       if (isMountedRef.current) {
         if (reason === "initial") {
           setIsLoading(false);

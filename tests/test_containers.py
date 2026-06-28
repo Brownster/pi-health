@@ -369,7 +369,10 @@ class TestListContainersFunction:
         mock_container.name = 'test-container'
         mock_container.status = 'running'
         mock_container.image.tags = ['nginx:latest']
-        mock_container.attrs = {'Config': {}, 'NetworkSettings': {'Ports': {}}}
+        mock_container.attrs = {
+            'Config': {'Labels': {'limeos.web.scheme': 'https'}},
+            'NetworkSettings': {'Ports': {}},
+        }
         mock_container.ports = {}
 
         mock_docker.containers.list.return_value = [mock_container]
@@ -380,6 +383,8 @@ class TestListContainersFunction:
         assert len(result) == 1
         assert result[0]['name'] == 'test-container'
         assert result[0]['status'] == 'running'
+        assert result[0]['web_url'] is None
+        assert result[0]['web_scheme'] == 'https'
 
     @patch('app.docker_available', False)
     def test_list_containers_docker_unavailable(self):

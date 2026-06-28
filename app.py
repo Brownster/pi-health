@@ -9,6 +9,7 @@ import secrets
 import hashlib
 import getpass
 from urllib import request as urlrequest
+from urllib.parse import urlsplit
 from stack_manager import stack_manager
 from auth_utils import (
     LoginRateLimiter,
@@ -28,22 +29,23 @@ from backup_scheduler import backup_scheduler, init_backup_scheduler
 from disk_manager import disk_manager
 from setup_manager import setup_manager
 from helper_client import helper_call, HelperError
+from runtime_paths import (
+    CONFIG_DIR as RUNTIME_CONFIG_DIR,
+    SOURCE_ROOT,
+    STORAGE_PLUGIN_CONFIG_DIR as RUNTIME_STORAGE_PLUGIN_CONFIG_DIR,
+)
 from werkzeug.utils import safe_join
 
 # Initialize Flask
 app = Flask(__name__, static_folder='static')
 
 # Storage plugin configuration directory
-STORAGE_PLUGIN_CONFIG_DIR = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)),
-    "config",
-    "storage_plugins"
-)
+STORAGE_PLUGIN_CONFIG_DIR = str(RUNTIME_STORAGE_PLUGIN_CONFIG_DIR)
 
 # Configure session
 app.secret_key = os.getenv('SECRET_KEY', secrets.token_hex(32))
 
-PIHEALTH_UPDATE_CONFIG = os.path.join(os.path.dirname(__file__), "config", "pihealth_update.json")
+PIHEALTH_UPDATE_CONFIG = str(RUNTIME_CONFIG_DIR / "pihealth_update.json")
 DEFAULT_PIHEALTH_UPDATE_CONFIG = {
     "repo_path": f"/home/{os.getenv('USER', 'pi')}/pi-health",
     "service_name": "pi-health"
@@ -77,7 +79,7 @@ def verify_credentials(username, password):
 
 # Load theme configuration
 THEME_NAME = os.getenv('THEME', 'modern')
-THEME_PATH = os.path.join('themes', THEME_NAME)
+THEME_PATH = os.path.join(SOURCE_ROOT, 'themes', THEME_NAME)
 THEME_CONFIG_PATH = os.path.join(THEME_PATH, 'theme.json')
 
 def load_theme_config():
@@ -88,7 +90,7 @@ def load_theme_config():
     except FileNotFoundError:
         print(f"Warning: Theme '{THEME_NAME}' not found at {THEME_CONFIG_PATH}")
         print("Falling back to default 'professional' theme")
-        fallback_path = os.path.join('themes', 'professional', 'theme.json')
+        fallback_path = os.path.join(SOURCE_ROOT, 'themes', 'professional', 'theme.json')
         with open(fallback_path, 'r') as f:
             return json.load(f)
     except Exception as e:
@@ -223,6 +225,42 @@ def get_container_ports(container):
         )
 
     return ports
+
+
+def get_container_web_metadata(container):
+    """Return validated explicit service-link metadata for one container."""
+    try:
+        labels = (container.attrs.get('Config') or {}).get('Labels') or {}
+    except Exception:
+        labels = {}
+    if not isinstance(labels, dict):
+        labels = {}
+
+    explicit_url = str(labels.get('limeos.web.url') or '').strip()
+    if explicit_url and not any(ord(char) < 32 for char in explicit_url):
+        try:
+            parsed = urlsplit(explicit_url)
+            scheme = parsed.scheme.lower()
+            if (
+                scheme in {'http', 'https'}
+                and parsed.hostname
+                and parsed.username is None
+                and parsed.password is None
+            ):
+                return {'web_url': explicit_url, 'web_scheme': scheme}
+        except ValueError:
+            pass
+
+    candidates = [
+        labels.get('limeos.web.scheme'),
+        os.getenv('PIHEALTH_SERVICE_LINK_SCHEME'),
+    ]
+    for candidate in candidates:
+        scheme = str(candidate or '').strip().lower()
+        if scheme in {'http', 'https'}:
+            return {'web_url': None, 'web_scheme': scheme}
+
+    return {'web_url': None, 'web_scheme': None}
 
 
 def get_container_ports_cached(container, port_cache):
@@ -651,6 +689,7 @@ def list_containers(include_stats=True):
                 "memory_limit": None,
                 "net_rx": None,
                 "net_tx": None,
+                **get_container_web_metadata(container),
             }
 
             if stats:

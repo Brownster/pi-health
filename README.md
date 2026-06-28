@@ -96,12 +96,14 @@ Access the dashboard at `http://<host-ip>:8002`
    ```bash
    python3 scripts/generate_password_hash.py
    ```
-2. Create `/etc/pi-health.env` with the generated hash:
+2. Create `/etc/limeos/credentials.env` with the generated hash:
    ```bash
-   sudo tee /etc/pi-health.env >/dev/null <<'EOF'
+   sudo install -d -m 0750 /etc/limeos
+   sudo tee /etc/limeos/credentials.env >/dev/null <<'EOF'
    PIHEALTH_USER=admin
    PIHEALTH_PASSWORD_HASH=replace-with-generated-hash
    EOF
+   sudo chmod 0640 /etc/limeos/credentials.env
    ```
 3. Install and start Pi-Health:
    ```bash
@@ -136,7 +138,7 @@ sudo cp examples/stacks/.env.example /opt/stacks/media-stack/.env
 
 ### Environment Variables
 
-Create `/etc/pi-health.env` for configuration overrides:
+Create `/etc/limeos/credentials.env` for credentials and environment overrides:
 
 ```bash
 # Theme selection (coraline, professional, minimal)
@@ -161,9 +163,19 @@ Generate each hash with the command in Quick Start. Quote values containing `$` 
 in an interactive shell. Remove the deprecated `PIHEALTH_PASSWORD` variable; startup rejects it
 even when a hash is also configured. Five failed logins from one client trigger a 60-second lockout.
 
+Runtime data is stored outside the source checkout:
+
+- Operator configuration: `/etc/limeos`
+- Scheduler and plugin state: `/var/lib/limeos`
+- Application logs: `/var/log/limeos`
+
+During installation, legacy runtime files are copied into these directories without
+overwriting existing destinations. Legacy files remain in place for rollback but are
+not used by the installed service.
+
 ### Storage Plugin Configuration
 
-Storage plugins store their configuration in `config/storage_plugins/`:
+Storage plugins store their configuration in `/etc/limeos/storage_plugins/`:
 
 - `snapraid.json` - SnapRAID array configuration
 - `mergerfs.json` - MergerFS pool configuration

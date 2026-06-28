@@ -103,7 +103,7 @@ Run these quick checks before you move the Pi to its final home.
 1.  **Services running:** `systemctl status pi-health` and `systemctl status pihealth-helper`
 2.  **Port 80 free:** Make sure nothing else is bound to port 80.
 3.  **Docker group:** Log out/in if you were just added to the `docker` group.
-4.  **Stacks path:** Confirm `STACKS_PATH` in `/etc/pi-health.env` if you changed it.
+4.  **Stacks path:** Confirm `STACKS_PATH` in `/etc/limeos/credentials.env` if you changed it.
 5.  **Mounts ready:** Use **Disks** to mount drives, then click **Regenerate Startup Service**.
 6.  **VPN/Tailscale:** Use **Settings > Setup** or confirm they are installed.
 
@@ -113,7 +113,7 @@ Once Pi-Health is running, open your web browser and navigate to `http://<your-s
 
 *   **Initial Login:** You will be prompted for a username and password. Use the username from `PIHEALTH_USER` and the password used to create `PIHEALTH_PASSWORD_HASH`.
 
-*   **Generate a hash:** Run the following from the project environment, then place the output in `/etc/pi-health.env`:
+*   **Generate a hash:** Run the following from the project environment, then place the output in `/etc/limeos/credentials.env`:
 
     ```bash
     python3 scripts/generate_password_hash.py
@@ -154,6 +154,29 @@ Pi-Health provides a powerful interface for managing your Docker containers, org
 A **Stack** is simply a directory containing a `compose.yaml` or `docker-compose.yml` file. Each stack represents a single application or a group of related services (e.g., a "media" stack with Sonarr, Radarr, and Plex).
 
 This approach is much cleaner than managing one giant `docker-compose.yml` file. Your stacks are located in the directory defined by `STACKS_PATH` (default: `/opt/stacks`).
+
+#### Service Web Links
+
+Dashboard and container web links are shown only when their HTTP scheme is configured explicitly.
+Set a complete per-container URL when a service is reached through a reverse proxy:
+
+```yaml
+labels:
+  limeos.web.url: "https://media.example.com/jellyfin"
+```
+
+For a service reached through its published host port, set its scheme instead:
+
+```yaml
+labels:
+  limeos.web.scheme: "https"
+```
+
+Deployments where every published service uses the same scheme may set
+`PIHEALTH_SERVICE_LINK_SCHEME=http` or `PIHEALTH_SERVICE_LINK_SCHEME=https` on Pi-Health. A valid
+`limeos.web.url` takes precedence over `limeos.web.scheme`, which takes precedence over the global
+setting. Only `http` and `https` are accepted; links remain hidden when no valid metadata is
+available.
 
 #### Example: Split VPN and Non-VPN Stacks
 

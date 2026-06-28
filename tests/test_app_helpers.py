@@ -90,7 +90,6 @@ class TestContainerPorts:
             and p["host_port"] is None
             for p in ports
         )
-
     def test_inherit_ports_from_network_service(self):
         service_container = FakeContainer(
             "web",
@@ -129,6 +128,79 @@ class TestContainerPorts:
             and p["via_service"] == "web"
             for p in ports
         )
+
+
+class TestContainerWebMetadata:
+    def test_explicit_url_takes_precedence(self, monkeypatch):
+        from app import get_container_web_metadata
+
+        monkeypatch.setenv("PIHEALTH_SERVICE_LINK_SCHEME", "http")
+        container = FakeContainer(
+            "app",
+            {
+                "Config": {
+                    "Labels": {
+                        "limeos.web.url": "https://media.example.test/app",
+                        "limeos.web.scheme": "http",
+                    }
+                }
+            },
+        )
+
+        assert get_container_web_metadata(container) == {
+            "web_url": "https://media.example.test/app",
+            "web_scheme": "https",
+        }
+
+    def test_scheme_label_precedes_deployment_fallback(self, monkeypatch):
+        from app import get_container_web_metadata
+
+        monkeypatch.setenv("PIHEALTH_SERVICE_LINK_SCHEME", "http")
+        container = FakeContainer(
+            "app",
+            {"Config": {"Labels": {"limeos.web.scheme": "HTTPS"}}},
+        )
+
+        assert get_container_web_metadata(container) == {
+            "web_url": None,
+            "web_scheme": "https",
+        }
+
+    def test_deployment_fallback_is_explicit_and_bounded(self, monkeypatch):
+        from app import get_container_web_metadata
+
+        container = FakeContainer("app", {"Config": {"Labels": {}}})
+        monkeypatch.setenv("PIHEALTH_SERVICE_LINK_SCHEME", "https")
+        assert get_container_web_metadata(container)["web_scheme"] == "https"
+
+        monkeypatch.setenv("PIHEALTH_SERVICE_LINK_SCHEME", "ftp")
+        assert get_container_web_metadata(container) == {
+            "web_url": None,
+            "web_scheme": None,
+        }
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "javascript:alert(1)",
+            "ftp://media.example.test/app",
+            "https://user:password@media.example.test/app",
+            "https:///missing-host",
+        ],
+    )
+    def test_unsafe_explicit_url_is_rejected(self, monkeypatch, url):
+        from app import get_container_web_metadata
+
+        monkeypatch.delenv("PIHEALTH_SERVICE_LINK_SCHEME", raising=False)
+        container = FakeContainer(
+            "app",
+            {"Config": {"Labels": {"limeos.web.url": url}}},
+        )
+
+        assert get_container_web_metadata(container) == {
+            "web_url": None,
+            "web_scheme": None,
+        }
 
 
 class TestContainerStatsHelpers:

@@ -56,6 +56,7 @@ def test_v2_lime_dashboard(
             "image": "jellyfin/jellyfin:latest",
             "status": "running",
             "ports": [{"host_port": 8096, "container_port": 8096, "protocol": "tcp"}],
+            "web_url": "https://media.example.test/jellyfin",
         },
         {
             "id": "sonarr-1",
@@ -88,11 +89,53 @@ def test_v2_lime_dashboard(
     expect(page.get_by_role("heading", name="web_services")).to_be_visible()
     expect(page.get_by_text("2 up", exact=True)).to_be_visible()
     expect(page.get_by_role("heading", name="Jellyfin")).to_be_visible()
+    expect(page.locator("a[href='https://media.example.test/jellyfin']")).to_be_visible()
     expect(page.get_by_role("heading", name="Sonarr")).to_be_visible()
     expect(page.get_by_text("12.5%", exact=True)).to_be_visible()
     expect(page.get_by_text("52.4 °C", exact=True)).to_be_visible()
     if viewport_profile_name in ("phone", "tablet"):
         assert_no_horizontal_overflow(page, f"Lime OS dashboard ({viewport_profile_name})")
+
+
+def test_v2_mobile_drawer_keyboard_and_background_isolation(
+    page: Page,
+    v2_mode_server,
+    v2_login,
+):
+    base_url = v2_mode_server["base_url"]
+    page.set_viewport_size({"width": 390, "height": 844})
+    v2_login(page, base_url)
+    page.goto(f"{base_url}/v2")
+
+    skip_link = page.get_by_role("link", name="Skip to main content")
+    page.keyboard.press("Tab")
+    expect(skip_link).to_be_focused()
+    expect(skip_link).to_be_visible()
+    page.keyboard.press("Enter")
+    expect(page.locator("#lime-os-main-content")).to_be_focused()
+
+    menu_button = page.get_by_role("button", name="Open navigation")
+    menu_button.click()
+    drawer = page.locator("#lime-os-mobile-navigation")
+    background = page.locator("#lime-os-app-background")
+    expect(drawer).to_be_visible()
+    expect(page.get_by_role("button", name="Close navigation")).to_be_focused()
+    assert background.get_attribute("inert") is not None
+    expect(background).to_have_attribute("aria-hidden", "true")
+    assert page.evaluate("document.body.style.overflow") == "hidden"
+    assert page.evaluate("document.body.style.overscrollBehavior") == "none"
+
+    page.keyboard.press("Shift+Tab")
+    assert drawer.evaluate("(node) => node.contains(document.activeElement)")
+    page.keyboard.press("Tab")
+    assert drawer.evaluate("(node) => node.contains(document.activeElement)")
+
+    page.keyboard.press("Escape")
+    expect(drawer).to_have_count(0)
+    expect(menu_button).to_be_focused()
+    assert background.get_attribute("inert") is None
+    assert page.evaluate("document.body.style.overflow") == ""
+    assert page.evaluate("document.body.style.overscrollBehavior") == ""
 
 
 def test_mode_switch_for_containers_route(

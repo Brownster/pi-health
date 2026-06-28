@@ -11,11 +11,12 @@ from typing import Optional
 from helper_client import helper_call, HelperError
 from storage_plugins.base import StoragePlugin
 from storage_plugins.remote_base import RemoteMountPlugin
+from runtime_paths import CONFIG_DIR as RUNTIME_CONFIG_DIR, SOURCE_ROOT
 
 
-CONFIG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config")
+CONFIG_DIR = str(RUNTIME_CONFIG_DIR)
 CONFIG_FILE = os.path.join(CONFIG_DIR, "plugins.json")
-PLUGIN_DIR = os.getenv("PIHEALTH_PLUGIN_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "plugins"))
+PLUGIN_DIR = os.getenv("PIHEALTH_PLUGIN_DIR", str(SOURCE_ROOT / "plugins"))
 
 BUILTIN_DEFAULTS = [
     {

@@ -15,14 +15,22 @@ from flask import Blueprint, jsonify, request
 from auth_utils import login_required
 from helper_client import helper_call, helper_available, HelperError
 from disk_manager import load_media_paths
+from runtime_paths import (
+    CONFIG_DIR as RUNTIME_CONFIG_DIR,
+    CREDENTIALS_FILE,
+    STATE_DIR as RUNTIME_STATE_DIR,
+    SNAPRAID_LOG_DIR,
+    STORAGE_PLUGIN_CONFIG_DIR,
+    STORAGE_PLUGIN_STATE_DIR,
+)
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 backup_scheduler = Blueprint('backup_scheduler', __name__)
 
-CONFIG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config')
-CONFIG_FILE = os.path.join(CONFIG_DIR, 'backup_config.json')
+CONFIG_DIR = str(RUNTIME_STATE_DIR)
+CONFIG_FILE = str(RUNTIME_STATE_DIR / 'backup_config.json')
 
 DEFAULT_CONFIG = {
     'version': 1,
@@ -130,8 +138,9 @@ def _get_sources(config):
         sources.append(config_dir)
     if stacks_path:
         sources.append(stacks_path)
+    sources.extend([str(RUNTIME_CONFIG_DIR), str(RUNTIME_STATE_DIR)])
     if config.get('include_env', True):
-        sources.append('/etc/pi-health.env')
+        sources.append(str(CREDENTIALS_FILE))
     return sources
 
 
@@ -186,7 +195,11 @@ def run_backup_job():
                 })
                 if config.get('plugin_backup_enabled', True):
                     plugin_result = helper_call('backup_create', {
-                        'sources': [os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config', 'storage_plugins')],
+                        'sources': [
+                            str(STORAGE_PLUGIN_CONFIG_DIR),
+                            str(STORAGE_PLUGIN_STATE_DIR),
+                            str(SNAPRAID_LOG_DIR),
+                        ],
                         'dest_dir': config.get('dest_dir'),
                         'retention_count': config.get('plugin_retention_count', 10),
                         'compression': config.get('compression', 'zst'),

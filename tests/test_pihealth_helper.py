@@ -262,6 +262,22 @@ class TestValidationFailures:
             )
         assert result["success"] is False
 
+    def test_cmd_backup_create_accepts_runtime_roots(self):
+        sources = ["/etc/limeos", "/var/lib/limeos", "/var/log/limeos"]
+        with (
+            patch("pihealth_helper.os.path.exists", return_value=True),
+            patch("pihealth_helper.os.makedirs"),
+            patch("pihealth_helper.os.listdir", return_value=[]),
+            patch(
+                "pihealth_helper.run_command",
+                return_value={"returncode": 0, "stdout": "", "stderr": ""},
+            ),
+        ):
+            result = helper.cmd_backup_create(
+                {"sources": sources, "dest_dir": "/mnt/backups"}
+            )
+        assert result["success"] is True
+
     def test_cmd_backup_restore_invalid_archive(self):
         result = helper.cmd_backup_restore({"archive_path": "/tmp/file.txt"})
         assert result["success"] is False

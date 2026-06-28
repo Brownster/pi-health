@@ -341,6 +341,7 @@ def install_v2_containers_api_mocks():
                 "net_rx": 1234000,
                 "net_tx": 2345000,
                 "ports": [{"container_port": 8080, "host_port": 18080, "protocol": "tcp"}],
+                "web_scheme": "https",
                 "update_available": False,
             },
             *(extra_containers or []),

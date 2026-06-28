@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUN_USER="${SUDO_USER:-$USER}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 VENV_DIR="${REPO_DIR}/.venv"
 SERVICE_FILE="/etc/systemd/system/pi-health.service"
-ENV_FILE="/etc/pi-health.env"
+LEGACY_ENV_FILE="/etc/pi-health.env"
+LIMEOS_CONFIG_DIR="${LIMEOS_CONFIG_DIR:-/etc/limeos}"
+LIMEOS_STATE_DIR="${LIMEOS_STATE_DIR:-/var/lib/limeos}"
+LIMEOS_LOG_DIR="${LIMEOS_LOG_DIR:-/var/log/limeos}"
+CREDENTIALS_FILE="${LIMEOS_CREDENTIALS_FILE:-${LIMEOS_CONFIG_DIR}/credentials.env}"
 HELPER_SERVICE_FILE="/etc/systemd/system/pihealth-helper.service"
 HELPER_LINK="/usr/local/bin/pihealth_helper.py"
 
@@ -191,6 +195,29 @@ usermod -aG pihealth "$RUN_USER"
 
 # Create directories required by helper service (ReadWritePaths needs them to exist)
 mkdir -p /backups /run/pihealth /etc/sshfs /mnt
+install -d -m 0750 -o "${RUN_USER}" -g pihealth \
+  "${LIMEOS_CONFIG_DIR}" "${LIMEOS_CONFIG_DIR}/storage_plugins" \
+  "${LIMEOS_STATE_DIR}" "${LIMEOS_STATE_DIR}/storage_plugins" \
+  "${LIMEOS_LOG_DIR}" "${LIMEOS_LOG_DIR}/snapraid"
+
+echo ">>> Migrating legacy runtime data..."
+"${PYTHON_BIN}" "${REPO_DIR}/scripts/migrate_runtime_state.py" \
+  --source-root "${REPO_DIR}" \
+  --config-dir "${LIMEOS_CONFIG_DIR}" \
+  --state-dir "${LIMEOS_STATE_DIR}" \
+  --log-dir "${LIMEOS_LOG_DIR}" \
+  --legacy-credentials "${LEGACY_ENV_FILE}" \
+  --credentials-file "${CREDENTIALS_FILE}"
+chown -R "${RUN_USER}:pihealth" \
+  "${LIMEOS_CONFIG_DIR}" "${LIMEOS_STATE_DIR}" "${LIMEOS_LOG_DIR}"
+find "${LIMEOS_CONFIG_DIR}" "${LIMEOS_STATE_DIR}" "${LIMEOS_LOG_DIR}" \
+  -type d -exec chmod 0750 {} +
+find "${LIMEOS_CONFIG_DIR}" "${LIMEOS_STATE_DIR}" "${LIMEOS_LOG_DIR}" \
+  -type f -exec chmod 0640 {} +
+if [[ -f "${CREDENTIALS_FILE}" ]]; then
+  chown "${RUN_USER}:pihealth" "${CREDENTIALS_FILE}"
+  chmod 0640 "${CREDENTIALS_FILE}"
+fi
 
 cat > "$HELPER_SERVICE_FILE" <<EOF
 [Unit]
@@ -209,7 +236,7 @@ RestartSec=5
 NoNewPrivileges=false
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/etc/fstab /etc/systemd/system /etc/sshfs /mnt /run/pihealth /var/log
+ReadWritePaths=/etc/fstab /etc/systemd/system /etc/sshfs /mnt /run/pihealth ${LIMEOS_LOG_DIR}
 ReadWritePaths=/backups
 PrivateTmp=true
 
@@ -232,12 +259,24 @@ Wants=docker.service
 [Service]
 Type=simple
 User=${RUN_USER}
+Group=pihealth
 WorkingDirectory=${REPO_DIR}
-EnvironmentFile=-${ENV_FILE}
+EnvironmentFile=-${CREDENTIALS_FILE}
 Environment=DOCKER_COMPOSE_PATH=${DOCKER_COMPOSE_PATH}
+Environment=LIMEOS_CONFIG_DIR=${LIMEOS_CONFIG_DIR}
+Environment=LIMEOS_STATE_DIR=${LIMEOS_STATE_DIR}
+Environment=LIMEOS_LOG_DIR=${LIMEOS_LOG_DIR}
+Environment=LIMEOS_CREDENTIALS_FILE=${CREDENTIALS_FILE}
 ExecStart=${VENV_DIR}/bin/python ${REPO_DIR}/app.py
 Restart=on-failure
 RestartSec=3
+UMask=0027
+ConfigurationDirectory=limeos
+ConfigurationDirectoryMode=0750
+StateDirectory=limeos
+StateDirectoryMode=0750
+LogsDirectory=limeos
+LogsDirectoryMode=0750
 
 [Install]
 WantedBy=multi-user.target
@@ -249,5 +288,5 @@ systemctl enable --now pihealth-helper.service
 
 echo ">>> Pi-Health is running."
 echo "Open: http://$(hostname -I | awk '{print $1}'):8002"
-echo "Optional config env: ${ENV_FILE}"
+echo "Credentials: ${CREDENTIALS_FILE}"
 echo "Helper service: pihealth-helper.service"

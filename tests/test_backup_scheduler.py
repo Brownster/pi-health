@@ -106,11 +106,15 @@ class TestBackupConfig:
         sources = backup_scheduler._get_sources(config)
         assert '/etc/pi' in sources
         assert '/opt/stacks' in sources
-        assert '/etc/pi-health.env' in sources
+        assert str(backup_scheduler.RUNTIME_CONFIG_DIR) in sources
+        assert str(backup_scheduler.RUNTIME_STATE_DIR) in sources
+        assert str(backup_scheduler.CREDENTIALS_FILE) in sources
 
         config['include_env'] = False
         sources = backup_scheduler._get_sources(config)
-        assert '/etc/pi-health.env' not in sources
+        assert str(backup_scheduler.RUNTIME_CONFIG_DIR) in sources
+        assert str(backup_scheduler.RUNTIME_STATE_DIR) in sources
+        assert str(backup_scheduler.CREDENTIALS_FILE) not in sources
 
     def test_list_backups_filters_and_sorts(self, temp_config_dir):
         import backup_scheduler

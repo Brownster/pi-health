@@ -14,7 +14,9 @@ from datetime import datetime
 from flask import Blueprint, jsonify, request, session
 from auth_utils import csrf_protect, login_required
 from operation_manager import parse_sse_payload, start_operation, stream_operation_response
+from runtime_paths import CONFIG_DIR as RUNTIME_CONFIG_DIR, STATIC_CATALOG_DIR
 from stack_manager import (
+    ComposeFileConflictError,
     atomic_write_text,
     backup_stack,
     find_compose_file,
@@ -29,11 +31,7 @@ from stack_manager import (
 catalog_manager = Blueprint('catalog_manager', __name__)
 
 # Media paths config (shared with disk_manager)
-MEDIA_PATHS_CONFIG = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)),
-    'config',
-    'media_paths.json'
-)
+MEDIA_PATHS_CONFIG = str(RUNTIME_CONFIG_DIR / 'media_paths.json')
 
 
 def _load_media_paths():
@@ -53,11 +51,19 @@ def _load_media_paths():
         pass
     return defaults
 
-CATALOG_DIR = os.getenv('CATALOG_DIR', 'catalog')
+CATALOG_DIR = os.getenv('CATALOG_DIR', str(STATIC_CATALOG_DIR))
 STACKS_PATH = os.getenv('STACKS_PATH', '/opt/stacks')
 
 # Template variable pattern: {{KEY}}
 TEMPLATE_VAR_PATTERN = re.compile(r'\{\{(\w+)\}\}')
+CATALOG_COMPOSE_SECTIONS = ('networks', 'volumes', 'configs', 'secrets')
+
+
+class CatalogComposeSectionError(ValueError):
+    def __init__(self, code, message, status_code):
+        self.code = code
+        self.status_code = status_code
+        super().__init__(message)
 
 
 def _catalog_path():
@@ -150,7 +156,7 @@ def _list_stack_services(stack_name=None):
         stack_dir = get_stack_path(name)
         try:
             data, _ = _load_stack_compose(stack_dir)
-        except ComposeYamlError:
+        except (ComposeYamlError, ComposeFileConflictError):
             continue
         if not data:
             continue
@@ -171,7 +177,7 @@ def _find_service_stacks(service_name):
         stack_dir = get_stack_path(name)
         try:
             data, _ = _load_stack_compose(stack_dir)
-        except ComposeYamlError:
+        except (ComposeYamlError, ComposeFileConflictError):
             continue
         if not data:
             continue
@@ -223,16 +229,41 @@ def _find_unresolved_placeholders(obj, path=""):
 
 
 def _merge_compose_section(compose_data, section, section_data):
-    """Merge a top-level compose section like networks/volumes."""
+    """Merge one validated catalog resource section without overwriting users."""
+    if section not in CATALOG_COMPOSE_SECTIONS:
+        raise CatalogComposeSectionError(
+            'invalid_catalog_section',
+            f'Catalog section is not managed: {section}',
+            400,
+        )
+    if not isinstance(section_data, dict):
+        raise CatalogComposeSectionError(
+            'invalid_catalog_section',
+            f'Catalog {section} section must be a mapping',
+            400,
+        )
     if not section_data:
         return
 
-    if section not in compose_data or not isinstance(compose_data.get(section), dict):
+    if section not in compose_data:
         compose_data[section] = {}
+    elif not isinstance(compose_data.get(section), dict):
+        raise CatalogComposeSectionError(
+            'compose_section_conflict',
+            f'Existing Compose {section} section must be a mapping',
+            409,
+        )
 
     for key, value in section_data.items():
-        if key not in compose_data[section]:
-            compose_data[section][key] = value
+        if key in compose_data[section] and compose_data[section][key] != value:
+            raise CatalogComposeSectionError(
+                'compose_resource_conflict',
+                f'Compose {section} resource already has a different definition: {key}',
+                409,
+            )
+
+    for key, value in section_data.items():
+        compose_data[section].setdefault(key, value)
 
 
 def _validate_install_request(item, values):
@@ -439,6 +470,8 @@ def _catalog_install_locked(data, item):
     # Load or create compose file in the stack
     try:
         compose_data, compose_path = _load_stack_compose(stack_dir)
+    except ComposeFileConflictError as exc:
+        return jsonify(exc.as_dict()), 409
     except ComposeYamlError as exc:
         return jsonify({
             'code': 'invalid_compose_yaml',
@@ -453,26 +486,36 @@ def _catalog_install_locked(data, item):
 
     if 'services' not in compose_data:
         compose_data['services'] = {}
+    elif not isinstance(compose_data.get('services'), dict):
+        return jsonify({
+            'code': 'compose_section_conflict',
+            'error': 'Existing Compose services section must be a mapping',
+        }), 409
+
+    # Merge required top-level sections
+    try:
+        for section in CATALOG_COMPOSE_SECTIONS:
+            if section not in item:
+                continue
+            rendered_section = _render_template(item.get(section), values)
+            unresolved_section = _find_unresolved_placeholders(rendered_section)
+            if unresolved_section:
+                return jsonify({
+                    'error': 'Template has unresolved variables',
+                    'unresolved': unresolved_section
+                }), 400
+            _merge_compose_section(compose_data, section, rendered_section)
+    except CatalogComposeSectionError as exc:
+        return jsonify({
+            'code': exc.code,
+            'error': str(exc),
+        }), exc.status_code
 
     backup_file = None
     if os.path.exists(stack_dir):
         backup_file = backup_stack(active_stack)
 
     compose_data['services'][item_id] = rendered_service
-
-    # Merge required top-level sections
-    for section in ('networks', 'volumes'):
-        section_data = item.get(section)
-        if not section_data:
-            continue
-        rendered_section = _render_template(section_data, values)
-        unresolved_section = _find_unresolved_placeholders(rendered_section)
-        if unresolved_section:
-            return jsonify({
-                'error': 'Template has unresolved variables',
-                'unresolved': unresolved_section
-            }), 400
-        _merge_compose_section(compose_data, section, rendered_section)
 
     try:
         _save_stack_compose(stack_dir, compose_data, compose_path)
@@ -549,14 +592,48 @@ def api_catalog_remove():
         return jsonify({'error': 'Missing app id'}), 400
 
     target_stack = data.get('target_stack')
-    stacks_with_service = _find_service_stacks(item_id)
-    if not stacks_with_service:
-        return jsonify({'error': f'Service not installed: {item_id}'}), 404
     if target_stack:
-        if target_stack not in stacks_with_service:
+        valid, error = validate_stack_name(target_stack)
+        if not valid:
+            return jsonify({'error': error}), 400
+        try:
+            target_compose, _ = _load_stack_compose(get_stack_path(target_stack))
+        except ComposeFileConflictError as exc:
+            return jsonify(exc.as_dict()), 409
+        except ComposeYamlError as exc:
+            return jsonify({
+                'code': 'invalid_compose_yaml',
+                'error': 'Cannot update invalid Compose YAML',
+                'message': str(exc),
+            }), 400
+        target_services = (target_compose or {}).get('services', {})
+        if not isinstance(target_services, dict) or item_id not in target_services:
             return jsonify({'error': f'Service not found in stack: {target_stack}'}), 404
         active_stack = target_stack
     else:
+        stacks, stacks_error = list_stacks()
+        if stacks_error:
+            return jsonify({'error': stacks_error}), 500
+        conflicted_stack = next(
+            (
+                stack for stack in stacks
+                if stack.get('code') == ComposeFileConflictError.code
+            ),
+            None,
+        )
+        if conflicted_stack:
+            return jsonify({
+                'code': ComposeFileConflictError.code,
+                'error': (
+                    f'Cannot locate service while stack '
+                    f'{conflicted_stack["name"]} has multiple Compose files'
+                ),
+                'stack': conflicted_stack['name'],
+                'files': conflicted_stack['compose_files'],
+            }), 409
+        stacks_with_service = _find_service_stacks(item_id)
+        if not stacks_with_service:
+            return jsonify({'error': f'Service not installed: {item_id}'}), 404
         if len(stacks_with_service) > 1:
             return jsonify({'error': 'Service exists in multiple stacks', 'stacks': stacks_with_service}), 409
         active_stack = stacks_with_service[0]
@@ -594,6 +671,8 @@ def _catalog_remove_locked(data, item_id, active_stack):
     stack_dir = get_stack_path(active_stack)
     try:
         compose_data, compose_path = _load_stack_compose(stack_dir)
+    except ComposeFileConflictError as exc:
+        return jsonify(exc.as_dict()), 409
     except ComposeYamlError as exc:
         return jsonify({
             'code': 'invalid_compose_yaml',

@@ -35,7 +35,7 @@ from fstab_presets import get_fstab_preset, normalize_fstype
 
 # Configuration
 SOCKET_PATH = '/run/pihealth/helper.sock'
-LOG_FILE = '/var/log/pihealth-helper.log'
+LOG_FILE = '/var/log/limeos/pihealth-helper.log'
 MAX_MESSAGE_SIZE = 65536
 FRAME_HEADER_SIZE = 4
 COPY_PARTY_DIR = '/opt/copyparty'
@@ -61,7 +61,14 @@ DEVICE_PATTERN = re.compile(r'^/dev/[a-zA-Z0-9_-]+$')
 # Valid UUID pattern
 UUID_PATTERN = re.compile(r'^[a-fA-F0-9-]+$')
 BACKUP_DEST_PATTERN = re.compile(r'^/(mnt|backups)(/[a-zA-Z0-9._-]+)*$')
-BACKUP_SOURCE_ALLOWED = ('/home/', '/opt/', '/etc/pi-health.env')
+BACKUP_SOURCE_ALLOWED = (
+    '/home/',
+    '/opt/',
+    '/etc/pi-health.env',
+    '/etc/limeos/',
+    '/var/lib/limeos/',
+    '/var/log/limeos/',
+)
 SEEDBOX_MOUNT_POINT = '/mnt/seedbox'
 SEEDBOX_PASSFILE = '/etc/sshfs/seedbox.pass'
 SEEDBOX_MOUNT_UNIT = 'mnt-seedbox.mount'
@@ -1112,7 +1119,10 @@ def cmd_backup_create(params):
             continue
         if '..' in source:
             continue
-        if not any(source.startswith(prefix) for prefix in BACKUP_SOURCE_ALLOWED):
+        if not any(
+            source == prefix.rstrip('/') or source.startswith(prefix)
+            for prefix in BACKUP_SOURCE_ALLOWED
+        ):
             continue
         if os.path.exists(source):
             valid_sources.append(source)

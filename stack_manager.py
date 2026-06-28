@@ -33,7 +33,39 @@ STACK_FILENAMES = ['compose.yaml', 'compose.yml', 'docker-compose.yaml', 'docker
 STACK_NAME_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9._-]*$')
 BACKUP_DIR = os.getenv('STACK_BACKUP_DIR', os.path.join(STACKS_PATH, '.backups'))
 BACKUP_NAME_RE = re.compile(r'^compose-\d{14}\.ya?ml$')
+DOCKER_PS_STACK_FORMAT = '\t'.join([
+    '{{.ID}}',
+    '{{.Names}}',
+    '{{.State}}',
+    '{{.Status}}',
+    '{{.Ports}}',
+    '{{.Label "com.docker.compose.project.working_dir"}}',
+    '{{.Label "com.docker.compose.project.config_files"}}',
+    '{{.Label "com.docker.compose.service"}}',
+])
 _stack_lock_state = threading.local()
+
+
+class ComposeFileConflictError(RuntimeError):
+    code = 'compose_file_conflict'
+
+    def __init__(self, filenames):
+        self.filenames = list(filenames)
+        super().__init__(f'Multiple Compose files found: {", ".join(self.filenames)}')
+
+    def as_dict(self):
+        return {
+            'code': self.code,
+            'error': str(self),
+            'files': self.filenames,
+        }
+
+
+@stack_manager.errorhandler(ComposeFileConflictError)
+def handle_compose_file_conflict(error):
+    return jsonify(error.as_dict()), 409
+
+
 def _stack_lock_path(name):
     lock_dir = os.path.join(STACKS_PATH, '.locks')
     os.makedirs(lock_dir, mode=0o700, exist_ok=True)
@@ -133,21 +165,22 @@ def get_stack_path(name):
 
 
 def find_compose_file(stack_dir):
-    """Find the compose file in a stack directory."""
-    for filename in STACK_FILENAMES:
-        path = os.path.join(stack_dir, filename)
-        if os.path.exists(path):
-            return path
-    return None
+    """Find the only supported compose file, rejecting ambiguous stacks."""
+    matches = [
+        filename for filename in STACK_FILENAMES
+        if os.path.exists(os.path.join(stack_dir, filename))
+    ]
+    if len(matches) > 1:
+        raise ComposeFileConflictError(matches)
+    if not matches:
+        return None
+    return os.path.join(stack_dir, matches[0])
 
 
 def get_compose_filename(stack_dir):
     """Get just the filename of the compose file."""
-    for filename in STACK_FILENAMES:
-        path = os.path.join(stack_dir, filename)
-        if os.path.exists(path):
-            return filename
-    return None
+    compose_file = find_compose_file(stack_dir)
+    return os.path.basename(compose_file) if compose_file else None
 
 
 def ensure_stacks_directory():
@@ -178,7 +211,19 @@ def list_stacks():
             if not os.path.isdir(stack_dir):
                 continue
 
-            compose_file = find_compose_file(stack_dir)
+            try:
+                compose_file = find_compose_file(stack_dir)
+            except ComposeFileConflictError as exc:
+                stacks.append({
+                    'name': entry,
+                    'path': stack_dir,
+                    'compose_file': None,
+                    'compose_files': exc.filenames,
+                    'status': 'conflict',
+                    'error': str(exc),
+                    'code': exc.code,
+                })
+                continue
             if compose_file:
                 stacks.append({
                     'name': entry,
@@ -275,6 +320,78 @@ def get_stack_status(stack_name):
         return {'status': 'unknown', 'containers': [], 'error': str(e)}, None
 
 
+def get_stack_status_snapshot(stacks):
+    """Resolve all stack summaries from one labeled Docker container snapshot."""
+    stack_by_file = {}
+    stack_by_dir = {}
+    counts = {}
+    for stack in stacks:
+        compose_file = stack.get('compose_file')
+        stack_path = stack.get('path')
+        if not compose_file or not stack_path:
+            continue
+        name = stack['name']
+        stack_by_file[os.path.realpath(os.path.join(stack_path, compose_file))] = name
+        stack_by_dir[os.path.realpath(stack_path)] = name
+        counts[name] = {'container_count': 0, 'running_count': 0}
+
+    if not counts:
+        return {}, None
+
+    try:
+        result = subprocess.run(
+            ['docker', 'ps', '-a', '--format', DOCKER_PS_STACK_FORMAT],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired:
+        return {}, 'Timeout getting Docker container snapshot'
+    except Exception as exc:
+        return {}, str(exc)
+
+    if result.returncode != 0:
+        return {}, result.stderr.strip() or 'Unable to get Docker container snapshot'
+
+    for line in result.stdout.splitlines():
+        fields = line.split('\t')
+        if len(fields) != 8:
+            continue
+        _container_id, _name, state, _status, _ports, working_dir, config_files, _service = fields
+        normalized_working_dir = os.path.realpath(working_dir) if working_dir else None
+        stack_name = None
+        for config_file in config_files.split(','):
+            config_file = config_file.strip()
+            if not config_file:
+                continue
+            if not os.path.isabs(config_file) and normalized_working_dir:
+                config_file = os.path.join(normalized_working_dir, config_file)
+            stack_name = stack_by_file.get(os.path.realpath(config_file))
+            if stack_name:
+                break
+        if not stack_name and normalized_working_dir:
+            stack_name = stack_by_dir.get(normalized_working_dir)
+        if not stack_name:
+            continue
+
+        counts[stack_name]['container_count'] += 1
+        if state.lower() == 'running':
+            counts[stack_name]['running_count'] += 1
+
+    snapshot = {}
+    for name, stack_counts in counts.items():
+        total = stack_counts['container_count']
+        running = stack_counts['running_count']
+        if total == 0 or running == 0:
+            status = 'stopped'
+        elif running == total:
+            status = 'running'
+        else:
+            status = 'partial'
+        snapshot[name] = {'status': status, **stack_counts}
+    return snapshot, None
+
+
 def backup_stack(stack_name):
     """Create a backup of a stack's compose file."""
     with stack_lock(stack_name):
@@ -326,6 +443,15 @@ def validate_compose_yaml(content):
     return None
 
 
+def _compose_up_args(detach=True):
+    """Build project reconciliation args for the canonical stack file."""
+    args = ['up']
+    if detach:
+        args.append('-d')
+    args.append('--remove-orphans')
+    return args
+
+
 def run_compose_command(stack_name, command, detach=True, service=None):
     """Run a docker compose command for a stack."""
     with stack_lock(stack_name):
@@ -345,7 +471,7 @@ def run_compose_command(stack_name, command, detach=True, service=None):
                 return None, "Service targeting is only supported for stop"
 
         if command == 'up':
-            cmd.extend(['up', '-d'] if detach else ['up'])
+            cmd.extend(_compose_up_args(detach))
         elif command == 'down':
             cmd.append('down')
         elif command == 'restart':
@@ -399,14 +525,23 @@ def api_list_stacks():
     include_status = request.args.get('status', 'false').lower() == 'true'
 
     if include_status:
+        status_snapshot, status_error = get_stack_status_snapshot(stacks)
         for stack in stacks:
-            status_info, _ = get_stack_status(stack['name'])
-            if status_info:
-                stack['status'] = status_info['status']
-                stack['running_count'] = status_info.get('running_count', 0)
-                stack['container_count'] = status_info.get('container_count', 0)
-            else:
-                stack['status'] = 'unknown'
+            if stack.get('code') == ComposeFileConflictError.code:
+                continue
+            if status_error:
+                stack.update({
+                    'status': 'unknown',
+                    'running_count': 0,
+                    'container_count': 0,
+                    'status_error': status_error,
+                })
+                continue
+            stack.update(status_snapshot.get(stack['name'], {
+                'status': 'stopped',
+                'running_count': 0,
+                'container_count': 0,
+            }))
 
     return jsonify({'stacks': stacks})
 
@@ -870,7 +1005,7 @@ def stream_compose_command(stack_name, command):
         cmd = ['docker', 'compose', '-f', os.path.basename(compose_file)]
 
         if command == 'up':
-            cmd.extend(['up', '-d'])
+            cmd.extend(_compose_up_args())
         elif command == 'down':
             cmd.append('down')
         elif command == 'pull':

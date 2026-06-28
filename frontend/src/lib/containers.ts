@@ -24,6 +24,8 @@ export interface ContainerSummary {
   memory_limit: number | null;
   net_rx: number | null;
   net_tx: number | null;
+  web_url: string | null;
+  web_scheme: "http" | "https" | null;
 }
 
 interface FetchContainersOptions {
@@ -95,6 +97,7 @@ function normalizeContainer(
   container: Partial<ContainerSummary> | undefined,
 ): ContainerSummary {
   const id = String(container?.id ?? "");
+  const webScheme = container?.web_scheme;
   return {
     id: id || "unknown-container",
     name: String(container?.name ?? "Unnamed"),
@@ -110,6 +113,8 @@ function normalizeContainer(
     memory_limit: toNullableNumber(container?.memory_limit),
     net_rx: toNullableNumber(container?.net_rx),
     net_tx: toNullableNumber(container?.net_tx),
+    web_url: toNullableString(container?.web_url),
+    web_scheme: webScheme === "http" || webScheme === "https" ? webScheme : null,
   };
 }
 
@@ -317,4 +322,33 @@ export function getContainerWebPort(container: ContainerSummary): number | null 
     }
   }
   return null;
+}
+
+export function getContainerWebUrl(
+  container: ContainerSummary,
+  hostname = typeof window === "undefined" ? null : window.location.hostname,
+): string | null {
+  if (container.web_url) {
+    try {
+      const explicitUrl = new URL(container.web_url);
+      if (
+        (explicitUrl.protocol === "http:" || explicitUrl.protocol === "https:") &&
+        !explicitUrl.username &&
+        !explicitUrl.password
+      ) {
+        return explicitUrl.href;
+      }
+    } catch {
+      // Invalid metadata is intentionally treated as unavailable.
+    }
+  }
+
+  const port = getContainerWebPort(container);
+  if (!container.web_scheme || !port || !hostname) {
+    return null;
+  }
+  const formattedHostname = hostname.includes(":") && !hostname.startsWith("[")
+    ? `[${hostname}]`
+    : hostname;
+  return `${container.web_scheme}://${formattedHostname}:${port}`;
 }

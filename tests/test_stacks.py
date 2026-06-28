@@ -136,6 +136,21 @@ class TestFindComposeFile:
         found = find_compose_file(stack_dir)
         assert found is None
 
+    def test_duplicate_compose_files_raise_conflict(self, temp_stacks_dir):
+        stack_dir = os.path.join(temp_stacks_dir, 'test-stack')
+        os.makedirs(stack_dir)
+        for filename in ('docker-compose.yml', 'compose.yaml'):
+            with open(os.path.join(stack_dir, filename), 'w') as handle:
+                handle.write('services: {}\n')
+
+        with pytest.raises(RuntimeError) as exc_info:
+            find_compose_file(stack_dir)
+
+        assert getattr(exc_info.value, 'code', None) == 'compose_file_conflict'
+        assert getattr(exc_info.value, 'filenames', None) == [
+            'compose.yaml', 'docker-compose.yml'
+        ]
+
 
 class TestStackEndpointsAuth:
     """Test that stack endpoints require authentication."""
@@ -303,6 +318,26 @@ class TestComposeCommands:
         finally:
             stack_manager.STACKS_PATH = original_path
 
+    def test_run_compose_command_blocks_duplicate_files(self, temp_stacks_dir):
+        import stack_manager
+        original_path = stack_manager.STACKS_PATH
+        stack_manager.STACKS_PATH = temp_stacks_dir
+
+        try:
+            stack_dir = os.path.join(temp_stacks_dir, "alpha")
+            os.makedirs(stack_dir, exist_ok=True)
+            for filename in ("compose.yaml", "docker-compose.yml"):
+                with open(os.path.join(stack_dir, filename), "w") as handle:
+                    handle.write("services: {}\n")
+
+            with patch("stack_manager.subprocess.run") as run_mock:
+                with pytest.raises(RuntimeError, match="compose.yaml"):
+                    run_compose_command("alpha", "up")
+
+            run_mock.assert_not_called()
+        finally:
+            stack_manager.STACKS_PATH = original_path
+
 
 class TestComposeStreaming:
     """Test SSE streaming command output."""
@@ -350,15 +385,28 @@ class TestComposeStreaming:
             fake_proc.wait.return_value = 0
             fake_proc.returncode = 0
 
-            with patch("stack_manager.subprocess.Popen", return_value=fake_proc):
+            with patch("stack_manager.subprocess.Popen", return_value=fake_proc) as popen_mock:
                 events = list(stream_compose_command("alpha", "up"))
 
             assert any("line one" in event for event in events)
             assert any('"done": true' in event for event in events)
+            assert popen_mock.call_args.args[0] == [
+                "docker", "compose", "-f", "compose.yaml",
+                "up", "-d", "--remove-orphans",
+            ]
         finally:
             stack_manager.STACKS_PATH = original_path
 
-    def test_run_compose_command_builds_args(self, temp_stacks_dir):
+    @pytest.mark.parametrize(
+        ("detach", "expected_tail"),
+        [
+            (True, ["up", "-d", "--remove-orphans"]),
+            (False, ["up", "--remove-orphans"]),
+        ],
+    )
+    def test_run_compose_command_builds_up_args(
+        self, temp_stacks_dir, detach, expected_tail
+    ):
         import stack_manager
         original_path = stack_manager.STACKS_PATH
         stack_manager.STACKS_PATH = temp_stacks_dir
@@ -371,13 +419,15 @@ class TestComposeStreaming:
 
             mock_run = MagicMock(returncode=0, stdout="ok", stderr="")
             with patch("stack_manager.subprocess.run", return_value=mock_run) as run_mock:
-                result, error = run_compose_command("alpha", "up")
+                result, error = run_compose_command("alpha", "up", detach=detach)
 
             assert error is None
             assert result["success"] is True
             run_mock.assert_called_once()
             args, kwargs = run_mock.call_args
-            assert args[0][:3] == ["docker", "compose", "-f"]
+            assert args[0] == [
+                "docker", "compose", "-f", "compose.yaml", *expected_tail
+            ]
             assert kwargs["cwd"] == stack_dir
         finally:
             stack_manager.STACKS_PATH = original_path
@@ -401,6 +451,41 @@ class TestComposeStreaming:
             assert result["success"] is True
             assert run_mock.call_args.args[0] == [
                 "docker", "compose", "-f", "compose.yaml", "stop", "app"
+            ]
+        finally:
+            stack_manager.STACKS_PATH = original_path
+
+    @pytest.mark.parametrize(
+        ("command", "expected_tail"),
+        [
+            ("down", ["down"]),
+            ("restart", ["restart"]),
+            ("pull", ["pull"]),
+            ("start", ["start"]),
+            ("stop", ["stop"]),
+        ],
+    )
+    def test_run_compose_command_does_not_remove_orphans_for_other_actions(
+        self, temp_stacks_dir, command, expected_tail
+    ):
+        import stack_manager
+        original_path = stack_manager.STACKS_PATH
+        stack_manager.STACKS_PATH = temp_stacks_dir
+
+        try:
+            stack_dir = os.path.join(temp_stacks_dir, "alpha")
+            os.makedirs(stack_dir, exist_ok=True)
+            with open(os.path.join(stack_dir, "compose.yaml"), "w") as handle:
+                handle.write("services: {}\n")
+
+            mock_run = MagicMock(returncode=0, stdout="ok", stderr="")
+            with patch("stack_manager.subprocess.run", return_value=mock_run) as run_mock:
+                result, error = run_compose_command("alpha", command)
+
+            assert error is None
+            assert result["success"] is True
+            assert run_mock.call_args.args[0] == [
+                "docker", "compose", "-f", "compose.yaml", *expected_tail
             ]
         finally:
             stack_manager.STACKS_PATH = original_path
@@ -455,6 +540,140 @@ class TestListStacks:
             assert len(stacks) == 1
             assert stacks[0]['name'] == 'test-stack'
             assert stacks[0]['compose_file'] == 'compose.yaml'
+        finally:
+            stack_manager.STACKS_PATH = original_path
+
+    def test_list_stacks_reports_duplicate_compose_files(self, temp_stacks_dir):
+        import stack_manager
+        original_path = stack_manager.STACKS_PATH
+        stack_manager.STACKS_PATH = temp_stacks_dir
+
+        stack_dir = os.path.join(temp_stacks_dir, 'test-stack')
+        os.makedirs(stack_dir)
+        for filename in ('compose.yml', 'docker-compose.yaml'):
+            with open(os.path.join(stack_dir, filename), 'w') as handle:
+                handle.write('services: {}\n')
+
+        try:
+            stacks, error = list_stacks()
+            assert error is None
+            assert stacks == [{
+                'name': 'test-stack',
+                'path': stack_dir,
+                'compose_file': None,
+                'compose_files': ['compose.yml', 'docker-compose.yaml'],
+                'status': 'conflict',
+                'error': 'Multiple Compose files found: compose.yml, docker-compose.yaml',
+                'code': 'compose_file_conflict',
+            }]
+        finally:
+            stack_manager.STACKS_PATH = original_path
+
+    def test_list_endpoint_exposes_conflict_without_status_probe(
+        self, authenticated_client, temp_stacks_dir
+    ):
+        import stack_manager
+        original_path = stack_manager.STACKS_PATH
+        stack_manager.STACKS_PATH = temp_stacks_dir
+
+        stack_dir = os.path.join(temp_stacks_dir, 'test-stack')
+        os.makedirs(stack_dir)
+        for filename in ('compose.yaml', 'compose.yml'):
+            with open(os.path.join(stack_dir, filename), 'w') as handle:
+                handle.write('services: {}\n')
+
+        try:
+            with patch('stack_manager.subprocess.run') as run_mock:
+                response = authenticated_client.get('/api/stacks?status=true')
+
+            assert response.status_code == 200
+            conflict = response.get_json()['stacks'][0]
+            assert conflict['status'] == 'conflict'
+            assert conflict['code'] == 'compose_file_conflict'
+            assert conflict['compose_files'] == ['compose.yaml', 'compose.yml']
+            run_mock.assert_not_called()
+        finally:
+            stack_manager.STACKS_PATH = original_path
+
+    def test_list_endpoint_uses_one_docker_snapshot_for_all_stacks(
+        self, authenticated_client, temp_stacks_dir
+    ):
+        import stack_manager
+        original_path = stack_manager.STACKS_PATH
+        stack_manager.STACKS_PATH = temp_stacks_dir
+
+        for stack_name, filename in (
+            ('alpha', 'compose.yaml'),
+            ('beta', 'docker-compose.yml'),
+        ):
+            stack_dir = os.path.join(temp_stacks_dir, stack_name)
+            os.makedirs(stack_dir)
+            with open(os.path.join(stack_dir, filename), 'w') as handle:
+                handle.write('services: {}\n')
+
+        alpha_dir = os.path.join(temp_stacks_dir, 'alpha')
+        beta_dir = os.path.join(temp_stacks_dir, 'beta')
+        stdout = '\n'.join([
+            '\t'.join([
+                'alpha-web-id', 'alpha-web-1', 'running', 'Up 2 minutes', '8080/tcp',
+                alpha_dir,
+                f"{os.path.join(alpha_dir, 'compose.override.yaml')},"
+                f"{os.path.join(alpha_dir, 'compose.yaml')}",
+                'web',
+            ]),
+            '\t'.join([
+                'alpha-db-id', 'alpha-db-1', 'exited', 'Exited (0)', '',
+                alpha_dir, os.path.join(alpha_dir, 'compose.yaml'), 'db',
+            ]),
+            '\t'.join([
+                'beta-web-id', 'beta-web-1', 'running', 'Up 1 minute', '',
+                beta_dir, '', 'web',
+            ]),
+        ])
+        mock_run = MagicMock(returncode=0, stdout=stdout, stderr='')
+
+        try:
+            with patch('stack_manager.subprocess.run', return_value=mock_run) as run_mock:
+                response = authenticated_client.get('/api/stacks?status=true')
+
+            assert response.status_code == 200
+            stacks = {stack['name']: stack for stack in response.get_json()['stacks']}
+            assert stacks['alpha']['status'] == 'partial'
+            assert stacks['alpha']['running_count'] == 1
+            assert stacks['alpha']['container_count'] == 2
+            assert stacks['beta']['status'] == 'running'
+            assert stacks['beta']['running_count'] == 1
+            assert stacks['beta']['container_count'] == 1
+            run_mock.assert_called_once()
+            command = run_mock.call_args.args[0]
+            assert command[:3] == ['docker', 'ps', '-a']
+            assert 'compose' not in command
+        finally:
+            stack_manager.STACKS_PATH = original_path
+
+    def test_list_endpoint_snapshot_failure_marks_all_stacks_unknown(
+        self, authenticated_client, temp_stacks_dir
+    ):
+        import stack_manager
+        original_path = stack_manager.STACKS_PATH
+        stack_manager.STACKS_PATH = temp_stacks_dir
+
+        for stack_name in ('alpha', 'beta'):
+            stack_dir = os.path.join(temp_stacks_dir, stack_name)
+            os.makedirs(stack_dir)
+            with open(os.path.join(stack_dir, 'compose.yaml'), 'w') as handle:
+                handle.write('services: {}\n')
+
+        mock_run = MagicMock(returncode=1, stdout='', stderr='Docker unavailable')
+        try:
+            with patch('stack_manager.subprocess.run', return_value=mock_run) as run_mock:
+                response = authenticated_client.get('/api/stacks?status=true')
+
+            assert response.status_code == 200
+            stacks = response.get_json()['stacks']
+            assert [stack['status'] for stack in stacks] == ['unknown', 'unknown']
+            assert all(stack['status_error'] == 'Docker unavailable' for stack in stacks)
+            run_mock.assert_called_once()
         finally:
             stack_manager.STACKS_PATH = original_path
 
@@ -599,6 +818,50 @@ class TestStackCRUD:
             # Verify file was updated
             with open(os.path.join(stack_dir, 'compose.yaml'), 'r') as f:
                 assert f.read() == new_content
+        finally:
+            stack_manager.STACKS_PATH = original_path
+            stack_manager.BACKUP_DIR = original_backup
+
+    def test_compose_endpoints_block_duplicate_files_without_writing(
+        self, authenticated_client, temp_stacks_dir
+    ):
+        import stack_manager
+        original_path = stack_manager.STACKS_PATH
+        original_backup = stack_manager.BACKUP_DIR
+        stack_manager.STACKS_PATH = temp_stacks_dir
+        stack_manager.BACKUP_DIR = os.path.join(temp_stacks_dir, '.backups')
+
+        stack_dir = os.path.join(temp_stacks_dir, 'test-stack')
+        os.makedirs(stack_dir)
+        originals = {}
+        for filename in ('compose.yaml', 'docker-compose.yml'):
+            content = f'# {filename}\nservices: {{}}\n'
+            originals[filename] = content
+            with open(os.path.join(stack_dir, filename), 'w') as handle:
+                handle.write(content)
+
+        try:
+            get_response = authenticated_client.get('/api/stacks/test-stack/compose')
+            save_response = authenticated_client.post(
+                '/api/stacks/test-stack/compose',
+                data=json.dumps({'content': 'services:\n  changed: {}\n'}),
+                content_type='application/json',
+            )
+
+            for response in (get_response, save_response):
+                assert response.status_code == 409
+                assert response.get_json() == {
+                    'code': 'compose_file_conflict',
+                    'error': (
+                        'Multiple Compose files found: '
+                        'compose.yaml, docker-compose.yml'
+                    ),
+                    'files': ['compose.yaml', 'docker-compose.yml'],
+                }
+            for filename, content in originals.items():
+                with open(os.path.join(stack_dir, filename)) as handle:
+                    assert handle.read() == content
+            assert not os.path.exists(stack_manager.BACKUP_DIR)
         finally:
             stack_manager.STACKS_PATH = original_path
             stack_manager.BACKUP_DIR = original_backup

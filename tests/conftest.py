@@ -1,6 +1,21 @@
 import os
+import tempfile
 
 from werkzeug.security import generate_password_hash
+
+
+TEST_RUNTIME_ROOT = os.path.join(
+    tempfile.gettempdir(),
+    f"limeos-test-runtime-{os.getpid()}",
+)
+os.environ["LIMEOS_CONFIG_DIR"] = os.path.join(TEST_RUNTIME_ROOT, "config")
+os.environ["LIMEOS_STATE_DIR"] = os.path.join(TEST_RUNTIME_ROOT, "state")
+os.environ["LIMEOS_LOG_DIR"] = os.path.join(TEST_RUNTIME_ROOT, "log")
+os.environ["LIMEOS_CREDENTIALS_FILE"] = os.path.join(
+    TEST_RUNTIME_ROOT,
+    "config",
+    "credentials.env",
+)
 
 
 TEST_USERNAME = os.getenv("PIHEALTH_USER", "admin")

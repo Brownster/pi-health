@@ -443,6 +443,11 @@ def test_settings_auto_update_section(authenticated_page: Page):
     expect(toggle_slider).to_be_visible()
     expect(page.locator("#run-now-btn")).to_be_visible()
 
+    if not toggle_input.is_checked():
+        toggle_slider.click()
+        expect(toggle_input).to_be_checked()
+    expect(page.locator("#exclusions-section")).to_be_visible()
+
     stacks_list = page.locator("#stacks-list")
     expect(stacks_list).to_be_visible()
     expect(stacks_list).not_to_have_text("Loading stacks...", timeout=10000)

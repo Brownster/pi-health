@@ -14,6 +14,7 @@ let currentStack = null;
 let stackStreamController = null;
 let editComposeEditor = null;
 let newComposeEditor = null;
+let stacksLoadInFlight = false;
 
 function statusClass(status) {
     const value = status || 'unknown';
@@ -25,6 +26,11 @@ function formatNowTime() {
 }
 
 async function loadStacks() {
+    if (stacksLoadInFlight) {
+        return;
+    }
+    stacksLoadInFlight = true;
+
     const grid = document.getElementById('stacks-grid');
     const refreshBtn = document.getElementById('refresh-btn');
 
@@ -49,6 +55,7 @@ async function loadStacks() {
             subtitle: 'Make sure STACKS_PATH is configured and accessible.',
         }));
     } finally {
+        stacksLoadInFlight = false;
         refreshBtn.classList.remove('animate-pulse');
     }
 }

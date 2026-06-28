@@ -18,27 +18,16 @@ from mount_dependencies import (
     normalize_managed_mountpoint,
 )
 from smart_monitor import parse_smartctl_json
+from runtime_paths import CONFIG_DIR as RUNTIME_CONFIG_DIR, STORAGE_PLUGIN_CONFIG_DIR as RUNTIME_STORAGE_PLUGIN_CONFIG_DIR
 
 disk_manager = Blueprint('disk_manager', __name__)
 
 # Media paths config file
-MEDIA_PATHS_CONFIG = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)),
-    'config',
-    'media_paths.json'
-)
+MEDIA_PATHS_CONFIG = str(RUNTIME_CONFIG_DIR / 'media_paths.json')
 
-SEEDBOX_CONFIG = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)),
-    'config',
-    'seedbox_mount.json'
-)
+SEEDBOX_CONFIG = str(RUNTIME_CONFIG_DIR / 'seedbox_mount.json')
 
-STORAGE_PLUGIN_CONFIG_DIR = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)),
-    'config',
-    'storage_plugins',
-)
+STORAGE_PLUGIN_CONFIG_DIR = str(RUNTIME_STORAGE_PLUGIN_CONFIG_DIR)
 
 # Default media paths
 DEFAULT_MEDIA_PATHS = {

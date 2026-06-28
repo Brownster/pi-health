@@ -14,6 +14,7 @@ from flask import Blueprint, jsonify, request
 
 from auth_utils import login_required
 from stack_manager import list_stacks, run_compose_command
+from runtime_paths import STATE_DIR as RUNTIME_STATE_DIR
 
 # APScheduler imports
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -23,8 +24,8 @@ from apscheduler.triggers.cron import CronTrigger
 update_scheduler_bp = Blueprint('update_scheduler', __name__)
 
 # Config file location
-CONFIG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config')
-CONFIG_FILE = os.path.join(CONFIG_DIR, 'auto_update.json')
+CONFIG_DIR = str(RUNTIME_STATE_DIR)
+CONFIG_FILE = str(RUNTIME_STATE_DIR / 'auto_update.json')
 
 # Default configuration
 DEFAULT_CONFIG = {

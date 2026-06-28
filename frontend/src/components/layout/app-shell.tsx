@@ -1,4 +1,4 @@
-import { useEffect, useState, type ComponentType, type PropsWithChildren } from "react";
+import { useEffect, useRef, useState, type ComponentType, type PropsWithChildren } from "react";
 import {
   Boxes,
   Container,
@@ -22,6 +22,8 @@ import { logoutToLogin } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
 const groupOrder = ["Main", "My Apps", "Storage", "System"] as const;
+const FOCUSABLE_SELECTOR =
+  'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])';
 
 const routeIcons: Record<string, ComponentType<LucideProps>> = {
   "/": Gauge,
@@ -52,30 +54,88 @@ export function AppShell({ children }: PropsWithChildren) {
   const { state, username } = useAuth();
   const location = useLocation();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const backgroundRef = useRef<HTMLDivElement>(null);
+  const drawerRef = useRef<HTMLElement>(null);
+  const drawerCloseRef = useRef<HTMLButtonElement>(null);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     setDrawerOpen(false);
   }, [location.pathname]);
 
   useEffect(() => {
+    backgroundRef.current?.toggleAttribute("inert", drawerOpen);
+  }, [drawerOpen]);
+
+  useEffect(() => {
     if (!drawerOpen) {
       return undefined;
     }
 
+    const drawer = drawerRef.current;
+    const trigger = menuButtonRef.current;
     const previousOverflow = document.body.style.overflow;
+    const previousBodyOverscroll = document.body.style.overscrollBehavior;
+    const previousRootOverscroll = document.documentElement.style.overscrollBehavior;
+    const focusFrame = window.requestAnimationFrame(() => {
+      (drawerCloseRef.current ?? drawer)?.focus();
+    });
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        event.preventDefault();
         setDrawerOpen(false);
+        return;
+      }
+      if (event.key !== "Tab" || !drawer) {
+        return;
+      }
+
+      const focusables = Array.from(drawer.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
+      if (!focusables.length) {
+        event.preventDefault();
+        drawer.focus();
+        return;
+      }
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement;
+      if (event.shiftKey && (active === first || !drawer.contains(active))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (active === last || !drawer.contains(active))) {
+        event.preventDefault();
+        first.focus();
       }
     };
 
     document.body.style.overflow = "hidden";
-    document.addEventListener("keydown", onKeyDown);
+    document.body.style.overscrollBehavior = "none";
+    document.documentElement.style.overscrollBehavior = "none";
+    document.addEventListener("keydown", onKeyDown, true);
     return () => {
+      window.cancelAnimationFrame(focusFrame);
       document.body.style.overflow = previousOverflow;
-      document.removeEventListener("keydown", onKeyDown);
+      document.body.style.overscrollBehavior = previousBodyOverscroll;
+      document.documentElement.style.overscrollBehavior = previousRootOverscroll;
+      document.removeEventListener("keydown", onKeyDown, true);
+      window.requestAnimationFrame(() => {
+        if (trigger?.isConnected) {
+          trigger.focus();
+        }
+      });
     };
   }, [drawerOpen]);
+
+  useEffect(() => {
+    const desktopQuery = window.matchMedia("(min-width: 980px)");
+    const closeDrawerOnDesktop = (event: MediaQueryListEvent) => {
+      if (event.matches) {
+        setDrawerOpen(false);
+      }
+    };
+    desktopQuery.addEventListener("change", closeDrawerOnDesktop);
+    return () => desktopQuery.removeEventListener("change", closeDrawerOnDesktop);
+  }, []);
 
   const sidebar = (
     <div className="flex h-full flex-col bg-sidebar">
@@ -152,52 +212,75 @@ export function AppShell({ children }: PropsWithChildren) {
 
   return (
     <div className="min-h-screen overflow-x-hidden bg-background text-foreground">
-      <aside className="fixed inset-y-0 left-0 z-40 hidden w-[248px] border-r border-divider min-[980px]:block">
-        {sidebar}
-      </aside>
-
-      <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-divider bg-sidebar px-4 min-[980px]:hidden">
-        <Brand />
-        <button
-          aria-controls="lime-os-mobile-navigation"
-          aria-expanded={drawerOpen}
-          aria-label="Open navigation"
-          className="flex h-11 w-11 cursor-pointer items-center justify-center rounded-md border border-border bg-card text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          onClick={() => setDrawerOpen(true)}
-          type="button"
+      <div
+        aria-hidden={drawerOpen ? "true" : undefined}
+        id="lime-os-app-background"
+        ref={backgroundRef}
+      >
+        <a
+          className="sr-only fixed left-3 top-3 z-[80] rounded-md bg-primary px-4 py-3 font-mono text-sm font-semibold text-primary-foreground focus:not-sr-only focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
+          href="#lime-os-main-content"
         >
-          <Menu aria-hidden="true" className="h-5 w-5" />
-        </button>
-      </header>
+          Skip to main content
+        </a>
+
+        <aside className="fixed inset-y-0 left-0 z-40 hidden w-[248px] border-r border-divider min-[980px]:block">
+          {sidebar}
+        </aside>
+
+        <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-divider bg-sidebar px-4 min-[980px]:hidden">
+          <Brand />
+          <button
+            aria-controls="lime-os-mobile-navigation"
+            aria-expanded={drawerOpen}
+            aria-label="Open navigation"
+            className="flex h-11 w-11 cursor-pointer items-center justify-center rounded-md border border-border bg-card text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            onClick={() => setDrawerOpen(true)}
+            ref={menuButtonRef}
+            type="button"
+          >
+            <Menu aria-hidden="true" className="h-5 w-5" />
+          </button>
+        </header>
+
+        <main
+          className="w-full px-4 py-5 focus:outline-none sm:px-6 sm:py-7 min-[980px]:ml-[248px] min-[980px]:w-[calc(100%-248px)] min-[980px]:px-8 min-[980px]:py-8 xl:px-10"
+          id="lime-os-main-content"
+          tabIndex={-1}
+        >
+          <div className="mx-auto w-full max-w-[1440px]">{children}</div>
+        </main>
+      </div>
 
       {drawerOpen && (
-        <div className="fixed inset-0 z-50 min-[980px]:hidden">
-          <button
-            aria-label="Close navigation"
-            className="absolute inset-0 cursor-default bg-black/70"
+        <div className="fixed inset-0 z-50 overscroll-none min-[980px]:hidden">
+          <div
+            aria-hidden="true"
+            className="absolute inset-0 bg-black/70"
             onClick={() => setDrawerOpen(false)}
-            type="button"
           />
           <aside
-            className="absolute inset-y-0 left-0 w-[min(86vw,300px)] border-r border-divider shadow-2xl"
+            aria-label="Navigation"
+            aria-modal="true"
+            className="absolute inset-y-0 left-0 w-[min(86vw,300px)] overscroll-contain border-r border-divider shadow-2xl"
             id="lime-os-mobile-navigation"
+            ref={drawerRef}
+            role="dialog"
+            tabIndex={-1}
           >
-            {sidebar}
             <button
               aria-label="Close navigation"
               className="absolute right-3 top-3 flex h-11 w-11 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               onClick={() => setDrawerOpen(false)}
+              ref={drawerCloseRef}
               type="button"
             >
               <X aria-hidden="true" className="h-5 w-5" />
             </button>
+            {sidebar}
           </aside>
         </div>
       )}
-
-      <main className="w-full px-4 py-5 sm:px-6 sm:py-7 min-[980px]:ml-[248px] min-[980px]:w-[calc(100%-248px)] min-[980px]:px-8 min-[980px]:py-8 xl:px-10">
-        <div className="mx-auto w-full max-w-[1440px]">{children}</div>
-      </main>
     </div>
   );
 }

@@ -7,7 +7,12 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { MetricBar } from "@/components/ui/metric-bar";
 import { PageHeader } from "@/components/ui/page-header";
-import { type ContainerSummary, fetchContainers, getContainerWebPort } from "@/lib/containers";
+import {
+  type ContainerSummary,
+  fetchContainers,
+  getContainerWebPort,
+  getContainerWebUrl,
+} from "@/lib/containers";
 import { formatBytes, formatClockTime, formatPercent } from "@/lib/format";
 import { fetchSystemStats, type SystemStats } from "@/lib/system";
 import { cn } from "@/lib/utils";
@@ -100,9 +105,7 @@ function ServiceCard({ container }: { container: ContainerSummary }) {
   const port = getContainerWebPort(container);
   const isRunning = container.status === "running";
   const friendlyName = getFriendlyName(container.name);
-  const serviceUrl = port
-    ? `http://${typeof window === "undefined" ? "localhost" : window.location.hostname}:${port}`
-    : null;
+  const serviceUrl = getContainerWebUrl(container);
 
   return (
     <Card className="transition-colors duration-200 hover:border-primary/25">

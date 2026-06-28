@@ -21,6 +21,12 @@ from storage_plugins.snapraid_logtags import (
     apply_tag_event,
     LogTagParseResult,
 )
+from runtime_paths import (
+    SNAPRAID_LOG_DIR,
+    STATIC_SCHEMA_DIR,
+    STORAGE_PLUGIN_CONFIG_DIR,
+    STORAGE_PLUGIN_STATE_DIR,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -59,17 +65,18 @@ class SnapRAIDPlugin(StoragePlugin):
     def __init__(self, config_dir: str):
         super().__init__(config_dir)
         self._schema = None
-        self._state_path = os.path.join(config_dir, "snapraid_state.json")
-        self._log_dir = os.path.join(config_dir, "snapraid-logs")
+        if os.path.realpath(config_dir) == os.path.realpath(STORAGE_PLUGIN_CONFIG_DIR):
+            self._state_path = str(STORAGE_PLUGIN_STATE_DIR / "snapraid_state.json")
+            self._log_dir = str(SNAPRAID_LOG_DIR)
+        else:
+            self._state_path = os.path.join(config_dir, "snapraid_state.json")
+            self._log_dir = os.path.join(config_dir, "snapraid-logs")
+        os.makedirs(os.path.dirname(self._state_path), exist_ok=True)
         os.makedirs(self._log_dir, exist_ok=True)
 
     def get_schema(self) -> dict:
         if self._schema is None:
-            schema_path = os.path.join(
-                os.path.dirname(self.config_dir),
-                "schemas",
-                "snapraid.schema.json"
-            )
+            schema_path = STATIC_SCHEMA_DIR / "snapraid.schema.json"
             if os.path.exists(schema_path):
                 with open(schema_path) as handle:
                     self._schema = json.load(handle)

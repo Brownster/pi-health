@@ -8,11 +8,12 @@ from flask import Blueprint, jsonify, request
 
 from auth_utils import login_required
 from helper_client import helper_call, HelperError
+from runtime_paths import CONFIG_DIR as RUNTIME_CONFIG_DIR
 
 
 tools_manager = Blueprint("tools_manager", __name__)
 
-CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config", "copyparty.json")
+CONFIG_PATH = RUNTIME_CONFIG_DIR / "copyparty.json"
 DEFAULT_CONFIG = {
     "share_path": "/srv/copyparty",
     "port": 3923,

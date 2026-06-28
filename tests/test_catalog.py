@@ -996,6 +996,252 @@ class TestCatalogComposeRoundTrip:
         assert open(compose_path).read() == malformed
 
 
+class TestCatalogTopLevelSections:
+    @staticmethod
+    def _configure(temp_catalog_dir, temp_stacks_dir, monkeypatch):
+        import catalog_manager
+        import stack_manager
+
+        monkeypatch.setattr(catalog_manager, "CATALOG_DIR", temp_catalog_dir)
+        monkeypatch.setattr(stack_manager, "STACKS_PATH", temp_stacks_dir)
+        backup_dir = os.path.join(temp_stacks_dir, ".backups")
+        monkeypatch.setattr(stack_manager, "BACKUP_DIR", backup_dir)
+        stack_dir = os.path.join(temp_stacks_dir, "media")
+        os.makedirs(stack_dir)
+        return stack_dir, backup_dir
+
+    def test_install_merges_all_allowed_top_level_sections(
+        self,
+        authenticated_client,
+        temp_catalog_dir,
+        temp_stacks_dir,
+        monkeypatch,
+    ):
+        stack_dir, _ = self._configure(temp_catalog_dir, temp_stacks_dir, monkeypatch)
+        compose_path = os.path.join(stack_dir, "compose.yaml")
+        with open(compose_path, "w") as handle:
+            handle.write(
+                "# user resources\n"
+                "services: {}\n"
+                "networks:\n  user-net:\n    external: true\n"
+                "volumes:\n  user-data: {}\n"
+                "configs:\n  user-config:\n    file: ./user.conf\n"
+                "secrets:\n  user-secret:\n    external: true\n"
+            )
+        item = {
+            "id": "resource-app",
+            "name": "Resource App",
+            "requires": [],
+            "fields": [
+                {"key": "CONFIG_DIR", "label": "Config", "default": "/etc/resource-app"}
+            ],
+            "service": {
+                "image": "example/resource-app:latest",
+                "networks": ["app-net"],
+                "volumes": ["app-data:/data"],
+                "configs": [{"source": "app-config", "target": "/app/config"}],
+                "secrets": ["app-secret"],
+            },
+            "networks": {"app-net": {"driver": "bridge"}},
+            "volumes": {"app-data": {}},
+            "configs": {"app-config": {"file": "{{CONFIG_DIR}}/app.conf"}},
+            "secrets": {"app-secret": {"file": "{{CONFIG_DIR}}/app.secret"}},
+        }
+        with open(os.path.join(temp_catalog_dir, "resource-app.yaml"), "w") as handle:
+            yaml.safe_dump(item, handle)
+
+        response = authenticated_client.post(
+            "/api/catalog/install",
+            json={
+                "id": "resource-app",
+                "target_stack": "media",
+                "values": {"CONFIG_DIR": "/srv/resource-app"},
+            },
+        )
+
+        assert response.status_code == 200
+        with open(compose_path) as handle:
+            content = handle.read()
+        assert content.startswith("# user resources\n")
+        compose = yaml.safe_load(content)
+        assert set(compose["networks"]) == {"user-net", "app-net"}
+        assert set(compose["volumes"]) == {"user-data", "app-data"}
+        assert set(compose["configs"]) == {"user-config", "app-config"}
+        assert set(compose["secrets"]) == {"user-secret", "app-secret"}
+        assert compose["configs"]["app-config"]["file"] == "/srv/resource-app/app.conf"
+        assert compose["secrets"]["app-secret"]["file"] == "/srv/resource-app/app.secret"
+
+    def test_catalog_mutations_block_duplicate_compose_files(
+        self,
+        authenticated_client,
+        temp_catalog_dir,
+        temp_stacks_dir,
+        monkeypatch,
+    ):
+        stack_dir, backup_dir = self._configure(
+            temp_catalog_dir, temp_stacks_dir, monkeypatch
+        )
+        originals = {
+            "compose.yaml": "services:\n  resource-app:\n    image: old\n",
+            "docker-compose.yml": "services: {}\n",
+        }
+        for filename, content in originals.items():
+            with open(os.path.join(stack_dir, filename), "w") as handle:
+                handle.write(content)
+        with open(os.path.join(temp_catalog_dir, "resource-app.yaml"), "w") as handle:
+            yaml.safe_dump(
+                {
+                    "id": "resource-app",
+                    "requires": [],
+                    "service": {"image": "example/resource-app:latest"},
+                },
+                handle,
+            )
+
+        install_response = authenticated_client.post(
+            "/api/catalog/install",
+            json={"id": "resource-app", "target_stack": "media"},
+        )
+        remove_response = authenticated_client.post(
+            "/api/catalog/remove",
+            json={"id": "resource-app", "target_stack": "media"},
+        )
+        untargeted_remove_response = authenticated_client.post(
+            "/api/catalog/remove",
+            json={"id": "resource-app"},
+        )
+
+        for response in (
+            install_response,
+            remove_response,
+            untargeted_remove_response,
+        ):
+            assert response.status_code == 409
+            assert response.get_json()["code"] == "compose_file_conflict"
+            assert response.get_json()["files"] == [
+                "compose.yaml", "docker-compose.yml"
+            ]
+        for filename, content in originals.items():
+            assert open(os.path.join(stack_dir, filename)).read() == content
+        assert not os.path.exists(backup_dir)
+
+    @pytest.mark.parametrize("section", ["networks", "volumes", "configs", "secrets"])
+    def test_install_rejects_conflicting_resource_without_writing(
+        self,
+        authenticated_client,
+        temp_catalog_dir,
+        temp_stacks_dir,
+        monkeypatch,
+        section,
+    ):
+        stack_dir, backup_dir = self._configure(temp_catalog_dir, temp_stacks_dir, monkeypatch)
+        compose_path = os.path.join(stack_dir, "compose.yaml")
+        original = f"# unchanged\nservices: {{}}\n{section}:\n  shared:\n    external: true\n"
+        with open(compose_path, "w") as handle:
+            handle.write(original)
+        with open(os.path.join(temp_catalog_dir, "resource-app.yaml"), "w") as handle:
+            yaml.safe_dump(
+                {
+                    "id": "resource-app",
+                    "requires": [],
+                    "service": {"image": "example/resource-app:latest"},
+                    section: {"shared": {"external": False}},
+                },
+                handle,
+            )
+
+        response = authenticated_client.post(
+            "/api/catalog/install",
+            json={"id": "resource-app", "target_stack": "media"},
+        )
+
+        assert response.status_code == 409
+        assert response.get_json()["code"] == "compose_resource_conflict"
+        assert open(compose_path).read() == original
+        assert not os.path.exists(backup_dir)
+
+    def test_install_reuses_identical_existing_resource(
+        self,
+        authenticated_client,
+        temp_catalog_dir,
+        temp_stacks_dir,
+        monkeypatch,
+    ):
+        stack_dir, _ = self._configure(temp_catalog_dir, temp_stacks_dir, monkeypatch)
+        compose_path = os.path.join(stack_dir, "compose.yaml")
+        with open(compose_path, "w") as handle:
+            handle.write(
+                "services: {}\n"
+                "networks:\n"
+                "  shared:\n"
+                "    external: true # keep shared network\n"
+            )
+        with open(os.path.join(temp_catalog_dir, "resource-app.yaml"), "w") as handle:
+            yaml.safe_dump(
+                {
+                    "id": "resource-app",
+                    "requires": [],
+                    "service": {"image": "example/resource-app:latest"},
+                    "networks": {"shared": {"external": True}},
+                },
+                handle,
+            )
+
+        response = authenticated_client.post(
+            "/api/catalog/install",
+            json={"id": "resource-app", "target_stack": "media"},
+        )
+
+        assert response.status_code == 200
+        with open(compose_path) as handle:
+            content = handle.read()
+        assert "external: true # keep shared network" in content
+        assert list(yaml.safe_load(content)["networks"]) == ["shared"]
+
+    @pytest.mark.parametrize(
+        ("catalog_section", "compose_section", "expected_code"),
+        [
+            (["not-a-mapping"], {}, "invalid_catalog_section"),
+            ({"app-config": {"file": "./app.conf"}}, [], "compose_section_conflict"),
+        ],
+    )
+    def test_install_rejects_invalid_section_shape_without_writing(
+        self,
+        authenticated_client,
+        temp_catalog_dir,
+        temp_stacks_dir,
+        monkeypatch,
+        catalog_section,
+        compose_section,
+        expected_code,
+    ):
+        stack_dir, backup_dir = self._configure(temp_catalog_dir, temp_stacks_dir, monkeypatch)
+        compose_path = os.path.join(stack_dir, "compose.yaml")
+        original = yaml.safe_dump({"services": {}, "configs": compose_section})
+        with open(compose_path, "w") as handle:
+            handle.write(original)
+        with open(os.path.join(temp_catalog_dir, "resource-app.yaml"), "w") as handle:
+            yaml.safe_dump(
+                {
+                    "id": "resource-app",
+                    "requires": [],
+                    "service": {"image": "example/resource-app:latest"},
+                    "configs": catalog_section,
+                },
+                handle,
+            )
+
+        response = authenticated_client.post(
+            "/api/catalog/install",
+            json={"id": "resource-app", "target_stack": "media"},
+        )
+
+        assert response.status_code in (400, 409)
+        assert response.get_json()["code"] == expected_code
+        assert open(compose_path).read() == original
+        assert not os.path.exists(backup_dir)
+
+
 class TestAppsPage:
     """Test apps page accessibility."""
 

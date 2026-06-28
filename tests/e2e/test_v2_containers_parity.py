@@ -42,6 +42,13 @@ def test_v2_containers_overflow_through_workflows(
     base_url = v2_mode_server["base_url"]
 
     _open_v2_containers(page, base_url, v2_login, install_v2_containers_api_mocks)
+    service_link = page.locator(
+        "a[aria-label='Open v2-mock-service web UI in a new tab']:visible"
+    ).first
+    expect(service_link).to_have_attribute(
+        "href",
+        f"https://{page.evaluate('window.location.hostname')}:18080",
+    )
     assert_no_horizontal_overflow(page, f"v2 containers load ({viewport_profile_name})")
 
     # Logs modal open -> overflow-safe -> close

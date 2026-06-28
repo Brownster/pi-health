@@ -17,7 +17,7 @@ import {
   fetchContainerStats,
   fetchContainers,
   filterContainers,
-  getContainerWebPort,
+  getContainerWebUrl,
   runContainerAction,
   runContainerNetworkTest,
   runHostNetworkTest,
@@ -444,7 +444,7 @@ function DesktopContainerTable({
           </thead>
           <tbody className="divide-y divide-divider">
             {containers.map((container) => {
-              const webPort = getContainerWebPort(container);
+              const webUrl = getContainerWebUrl(container);
               const rowBusy = Boolean(pendingActions[container.id]);
 
               return (
@@ -487,11 +487,11 @@ function DesktopContainerTable({
                     />
                   </td>
                   <td className="px-4 py-3">
-                    {webPort ? (
+                    {webUrl ? (
                       <a
                         aria-label={`Open ${container.name} web UI in a new tab`}
                         className="inline-flex min-h-11 items-center text-sm text-primary underline-offset-2 hover:underline"
-                        href={`http://${window.location.hostname}:${webPort}`}
+                        href={webUrl}
                         rel="noopener noreferrer"
                         target="_blank"
                       >
@@ -546,7 +546,7 @@ function MobileContainerCards({
   return (
     <div className="grid gap-3 xl:hidden">
       {containers.map((container) => {
-        const webPort = getContainerWebPort(container);
+        const webUrl = getContainerWebUrl(container);
         const rowBusy = Boolean(pendingActions[container.id]);
 
         return (
@@ -588,11 +588,11 @@ function MobileContainerCards({
               </div>
 
               <div className="grid gap-2 sm:flex sm:items-center sm:justify-between">
-                {webPort ? (
+                {webUrl ? (
                   <a
                     aria-label={`Open ${container.name} web UI in a new tab`}
                     className="inline-flex min-h-11 items-center rounded-md border border-border px-3 text-sm text-primary underline-offset-2 hover:bg-muted hover:underline"
-                    href={`http://${window.location.hostname}:${webPort}`}
+                    href={webUrl}
                     rel="noopener noreferrer"
                     target="_blank"
                   >
