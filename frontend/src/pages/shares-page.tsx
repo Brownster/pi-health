@@ -15,6 +15,7 @@ import {
   toggleShare,
   updateShare,
 } from "@/lib/shares";
+import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import { fetchPlugins } from "@/lib/storage-plugins";
 import { formatClockTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -60,6 +61,7 @@ export function SharesPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
   const [lastUpdated, setLastUpdated] = useState("Never");
   const [actionNotice, setActionNotice] = useState<ActionNotice | null>(null);
   const [pendingKey, setPendingKey] = useState<string | null>(null);
@@ -78,21 +80,32 @@ export function SharesPage() {
       // No explicit share-capability flag in the list payload; treat "shares" category plugins
       // as share providers (documented heuristic).
       const sharePlugins = plugins.filter((plugin) => plugin.category.toLowerCase().includes("share"));
+      const shareResults = await mapSettledWithConcurrency(
+        sharePlugins,
+        4,
+        (plugin) => fetchShares(plugin.id, plugin.name),
+      );
       const collected: PluginShares[] = [];
-      for (const plugin of sharePlugins) {
-        const shares = await fetchShares(plugin.id, plugin.name).catch(() => null);
-        if (shares) {
-          collected.push(shares);
+      const nextWarnings: string[] = [];
+      shareResults.forEach((result, index) => {
+        if (result.status === "fulfilled") {
+          collected.push(result.value);
+        } else {
+          nextWarnings.push(
+            `${sharePlugins[index].name} shares unavailable: ${getErrorMessage(result.reason)}`,
+          );
         }
-      }
+      });
       if (!isMountedRef.current) {
         return;
       }
       setPluginShares(collected);
+      setWarnings(nextWarnings);
       setError(null);
       setLastUpdated(formatClockTime(new Date()));
     } catch (caughtError) {
       if (isMountedRef.current) {
+        setWarnings([]);
         setError(getErrorMessage(caughtError));
       }
     } finally {
@@ -212,12 +225,14 @@ export function SharesPage() {
           </Button>
         }
         description={`${pluginShares.reduce((total, group) => total + group.shares.length, 0)} shares · synced ${lastUpdated}`}
-        status={
+        status={warnings.length ? (
+          <StatusBadge label="partial data" tone="warning" />
+        ) : (
           <StatusBadge
             label={`${pluginShares.reduce((total, group) => total + group.shares.filter((share) => share.enabled).length, 0)} enabled`}
             tone="success"
           />
-        }
+        )}
         title="network_shares"
       />
 
@@ -234,6 +249,19 @@ export function SharesPage() {
               <Activity aria-hidden="true" className="h-4 w-4" />
             )}
             {actionNotice.message}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {warnings.length ? (
+        <Card aria-live="polite" className="border-warning/30" role="status">
+          <CardContent className="flex items-start gap-2 p-4 text-sm text-warning">
+            <TriangleAlert aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
+            <div className="space-y-1">
+              {warnings.map((warning) => (
+                <p key={warning}>{warning}</p>
+              ))}
+            </div>
           </CardContent>
         </Card>
       ) : null}
@@ -256,7 +284,7 @@ export function SharesPage() {
         </Card>
       ) : null}
 
-      {!isLoading && !pluginShares.length ? (
+      {!isLoading && !pluginShares.length && !warnings.length ? (
         <Card>
           <CardContent className="flex min-h-[10rem] items-center justify-center p-6 text-sm text-muted-foreground">
             No share plugins configured.

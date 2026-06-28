@@ -113,6 +113,69 @@ def test_v2_disks_unmount_with_confirm(
     expect(page.get_by_text("Unmounted /mnt/storage")).to_be_visible(timeout=10000)
 
 
+def test_v2_disks_preserves_json_error_guidance(
+    page: Page,
+    v2_mode_server,
+    v2_login,
+    install_v2_disks_api_mocks,
+):
+    base_url = v2_mode_server["base_url"]
+    v2_login(page, base_url)
+    install_v2_disks_api_mocks(
+        page,
+        {
+            ("POST", "/api/disks/unmount"): (
+                409,
+                "application/json",
+                {
+                    "code": "mount_in_use",
+                    "error": "Unmount blocked",
+                    "message": "Stop dependent containers and retry",
+                    "details": ["container: media"],
+                },
+            )
+        },
+    )
+    page.goto(f"{base_url}/v2/disks")
+
+    page.click("button[data-unmount='/mnt/storage']")
+    page.click("button[data-confirm-unmount='/mnt/storage']")
+
+    expect(
+        page.get_by_text(
+            "Unmount blocked: Stop dependent containers and retry (container: media)"
+        )
+    ).to_be_visible()
+
+
+def test_v2_disks_preserves_text_error(
+    page: Page,
+    v2_mode_server,
+    v2_login,
+    install_v2_disks_api_mocks,
+):
+    base_url = v2_mode_server["base_url"]
+    v2_login(page, base_url)
+    install_v2_disks_api_mocks(
+        page,
+        {
+            ("POST", "/api/disks/mount"): (
+                503,
+                "text/plain",
+                "Mount helper unavailable; reconnect the helper service",
+            )
+        },
+    )
+    page.goto(f"{base_url}/v2/disks")
+
+    page.click("button[data-mount='sdb-uuid-1']")
+    page.click("button[data-confirm-mount='sdb-uuid-1']")
+
+    expect(
+        page.get_by_text("Mount helper unavailable; reconnect the helper service")
+    ).to_be_visible()
+
+
 def test_v2_disks_smart_self_test_with_confirm(
     page: Page,
     v2_mode_server,

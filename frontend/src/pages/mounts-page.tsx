@@ -24,6 +24,7 @@ import {
   unmountEntry,
   updateMount,
 } from "@/lib/mounts";
+import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import { fetchPlugins } from "@/lib/storage-plugins";
 import { formatClockTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -81,6 +82,7 @@ export function MountsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
   const [lastUpdated, setLastUpdated] = useState("Never");
   const [actionNotice, setActionNotice] = useState<ActionNotice | null>(null);
   const [pendingKey, setPendingKey] = useState<string | null>(null);
@@ -106,22 +108,36 @@ export function MountsPage() {
         fetchMediaPaths().catch(() => EMPTY_PATHS),
         fetchPlugins(),
       ]);
+      const nextWarnings: string[] = [];
+      const mountResults = await mapSettledWithConcurrency(plugins, 4, async (plugin) => {
+        const mounts = await fetchPluginMounts(plugin.id);
+        return mounts === null
+          ? null
+          : { pluginId: plugin.id, pluginName: plugin.name, mounts };
+      });
       const collected: PluginMounts[] = [];
-      for (const plugin of plugins) {
-        const mounts = await fetchPluginMounts(plugin.id).catch(() => null);
-        if (mounts) {
-          collected.push({ pluginId: plugin.id, pluginName: plugin.name, mounts });
+      mountResults.forEach((result, index) => {
+        if (result.status === "fulfilled") {
+          if (result.value) {
+            collected.push(result.value);
+          }
+        } else {
+          nextWarnings.push(
+            `${plugins[index].name} mounts unavailable: ${getErrorMessage(result.reason)}`,
+          );
         }
-      }
+      });
       if (!isMountedRef.current) {
         return;
       }
       setMediaPaths(paths);
       setPluginMounts(collected);
+      setWarnings(nextWarnings);
       setError(null);
       setLastUpdated(formatClockTime(new Date()));
     } catch (caughtError) {
       if (isMountedRef.current) {
+        setWarnings([]);
         setError(getErrorMessage(caughtError));
       }
     } finally {
@@ -307,12 +323,14 @@ export function MountsPage() {
           </Button>
         }
         description={`${pluginMounts.reduce((total, group) => total + group.mounts.length, 0)} mounts · synced ${lastUpdated}`}
-        status={
+        status={warnings.length ? (
+          <StatusBadge label="partial data" tone="warning" />
+        ) : (
           <StatusBadge
             label={`${pluginMounts.reduce((total, group) => total + group.mounts.filter((mount) => mount.mounted).length, 0)} mounted`}
             tone="success"
           />
-        }
+        )}
         title="mount_management"
       />
 
@@ -329,6 +347,19 @@ export function MountsPage() {
               <Activity aria-hidden="true" className="h-4 w-4" />
             )}
             {actionNotice.message}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {warnings.length ? (
+        <Card aria-live="polite" className="border-warning/30" role="status">
+          <CardContent className="flex items-start gap-2 p-4 text-sm text-warning">
+            <TriangleAlert aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
+            <div className="space-y-1">
+              {warnings.map((warning) => (
+                <p key={warning}>{warning}</p>
+              ))}
+            </div>
           </CardContent>
         </Card>
       ) : null}
@@ -509,7 +540,7 @@ export function MountsPage() {
                 </CardContent>
               </Card>
             ))
-          ) : (
+          ) : warnings.length ? null : (
             <Card>
               <CardContent className="p-6 text-sm text-muted-foreground">
                 No remote/local mount plugins configured.

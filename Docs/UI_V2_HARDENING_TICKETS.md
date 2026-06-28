@@ -3,7 +3,7 @@
 Date: 2026-06-27
 Source: `Docs/colleagues_review_of_limeOS.txt` (validated external review)
 Branch: TBD (recommend `feature/v2-hardening`)
-Status: Active — SEC-001/002, API-001, CAT-001/002, STK-001/002, MFS-001, SRA-001/002, SYS-001, and UI-001 complete
+Status: Active — SEC-001/002, API-001, CAT-001/002, STK-001/002, MFS-001, SRA-001/002, SYS-001, and UI-001/002/003 complete
 
 ## Objective
 Production-harden the migrated v2 / LimeOS stack — close the destructive failure paths and the
@@ -47,8 +47,8 @@ starting broad feature work. IDs match the review for traceability.
 | STK-004 | `up -d --remove-orphans` (after review) | P2 | backend | — | Pending |
 | STK-005 | Detect duplicate compose filenames | P2 | backend | — | Pending |
 | STK-006 | Cache one Docker snapshot for status polling | P2 | backend+ui | — | Pending |
-| UI-002 | Preserve server error details in API client | P2 | frontend | — | Pending |
-| UI-003 | Surface partial-data warnings (mounts/shares) | P2 | frontend | — | Pending |
+| UI-002 | Preserve server error details in API client | P2 | frontend | — | Complete |
+| UI-003 | Surface partial-data warnings (mounts/shares) | P2 | frontend | — | Complete |
 | UI-004 | Mobile drawer: focus trap, inert bg, skip link | P2 | frontend | — | Pending |
 | UI-005 | Derive service-link scheme (no hardcoded http) | P2 | frontend | — | Pending |
 | UI-006 | Catalog stack targeting; (app, stack) install model | P2 | backend+ui | — | Pending |
@@ -265,8 +265,8 @@ JS gzip). Full `tox -e all`: Ruff clean; unit `632 passed, 1 skipped`; E2E `167 
 - **STK-004** add `--remove-orphans` after reviewing external-service preservation — `stack_manager.py:237-268,748-786`.
 - **STK-005** detect duplicate compose filenames; block until resolved — `stack_manager.py:20-60`.
 - **STK-006** cache one Docker snapshot for status; prevent overlapping polls — `stack_manager.py:296-305`, `stacks-page.tsx`.
-- **UI-002** preserve server error JSON in the client — `frontend/src/lib/api.ts:18-20` (`requestApi`); ripples to all pages' error display.
-- **UI-003** partial-data warnings + bounded concurrent fan-out — `mounts-page.tsx:105-123`, `shares-page.tsx:77-94`.
+- **UI-002** preserve server error JSON in the client — `frontend/src/lib/api.ts:18-20` (`requestApi`); ripples to all pages' error display. **Complete 2026-06-28:** failed responses now become typed `ApiError` instances carrying stable `status`, `code`, `path`, `message`, `details`, and truncation state. The shared client reads at most 64 KiB, limits displayed messages to 2,000 characters, combines distinct `error`/`message` recovery guidance plus string details, preserves plain-text failures, and safely falls back for empty, malformed JSON, HTML, or unreadable bodies. Existing domain clients and page notices inherit the behavior without page-specific error parsing. Disks parity tests cover structured JSON validation guidance and plain-text helper failure; all `10 passed`. TypeScript and production build passed (`99.48 kB` initial JS gzip). Full `tox -e all`: Ruff clean; unit `632 passed, 1 skipped`; E2E `169 passed, 26 skipped`.
+- **UI-003** partial-data warnings + bounded concurrent fan-out — `mounts-page.tsx:105-123`, `shares-page.tsx:77-94`. **Complete 2026-06-28:** mounts and shares now fetch provider details through an ordered four-worker settled mapper instead of sequential loops. Unsupported mount providers (`400`) remain intentional skips; missing, failed, or malformed provider responses produce scoped warnings using UI-002's preserved server guidance. Healthy provider cards remain visible, page status changes to `partial data`, stale warnings clear on subsequent loads, and all-provider failure cannot render a false “no plugins configured” state. Mixed healthy/failing provider coverage passes for both pages; focused mounts + shares Playwright `14 passed`. TypeScript and production build passed (`99.86 kB` initial JS gzip). Full `tox -e all`: Ruff clean; unit `632 passed, 1 skipped`; E2E `171 passed, 26 skipped`.
 - **UI-004** mobile drawer focus trap / inert background / overscroll / skip-link — `app-shell.tsx`.
 - **UI-005** derive service-link scheme from metadata, not hardcoded `http://` — `dashboard-home.tsx`, `containers-page.tsx`.
 - **UI-006** catalog `target_stack` + represent installs as `(app, stack)` — `frontend/src/lib/catalog.ts`.

@@ -512,7 +512,8 @@ def install_v2_disks_api_mocks():
     def _json_fulfill(route, payload, status: int = 200) -> None:
         route.fulfill(status=status, content_type="application/json", body=json.dumps(payload))
 
-    def _install(page: Page) -> None:
+    def _install(page: Page, failures=None) -> None:
+        failures = failures or {}
         inventory = {
             "helper_available": True,
             "disks": [
@@ -562,6 +563,16 @@ def install_v2_disks_api_mocks():
             parsed = urlparse(route.request.url)
             path = parsed.path
             method = route.request.method
+
+            failure = failures.get((method, path))
+            if failure:
+                status, content_type, body = failure
+                route.fulfill(
+                    status=status,
+                    content_type=content_type,
+                    body=json.dumps(body) if content_type == "application/json" else str(body),
+                )
+                return
 
             if path == "/api/disks" and method == "GET":
                 _json_fulfill(route, inventory)
@@ -696,7 +707,7 @@ def install_v2_mounts_api_mocks():
     def _json_fulfill(route, payload, status: int = 200) -> None:
         route.fulfill(status=status, content_type="application/json", body=json.dumps(payload))
 
-    def _install(page: Page) -> None:
+    def _install(page: Page, include_failed_provider: bool = False) -> None:
         paths = {
             "downloads": "/mnt/downloads",
             "storage": "/mnt/storage",
@@ -711,6 +722,12 @@ def install_v2_mounts_api_mocks():
              "installed": True, "enabled": True, "configured": True, "status": "active",
              "status_message": "", "category": "shares", "type": "builtin"},
         ]
+        if include_failed_provider:
+            plugins.append(
+                {"id": "sshfs", "name": "SSHFS", "description": "SSH mounts", "version": "1.0",
+                 "installed": True, "enabled": True, "configured": True, "status": "error",
+                 "status_message": "Helper offline", "category": "mounts", "type": "builtin"}
+            )
 
         def _handler(route):
             parsed = urlparse(route.request.url)
@@ -735,6 +752,13 @@ def install_v2_mounts_api_mocks():
                 return
             if path == "/api/storage/mounts/samba" and method == "GET":
                 _json_fulfill(route, {"error": "Not a remote mount plugin"}, status=400)
+                return
+            if path == "/api/storage/mounts/sshfs" and method == "GET":
+                _json_fulfill(
+                    route,
+                    {"error": "SSHFS helper offline", "message": "Reconnect helper and retry"},
+                    status=503,
+                )
                 return
             if path == "/api/storage/mounts/rclone/gdrive/mount" and method == "POST":
                 _json_fulfill(route, {"status": "mounted"})
@@ -778,7 +802,7 @@ def install_v2_shares_api_mocks():
     def _json_fulfill(route, payload, status: int = 200) -> None:
         route.fulfill(status=status, content_type="application/json", body=json.dumps(payload))
 
-    def _install(page: Page) -> None:
+    def _install(page: Page, include_failed_provider: bool = False) -> None:
         plugins = [
             {"id": "samba", "name": "Samba", "description": "SMB shares", "version": "1.0",
              "installed": True, "enabled": True, "configured": True, "status": "active",
@@ -787,6 +811,12 @@ def install_v2_shares_api_mocks():
              "installed": True, "enabled": True, "configured": True, "status": "active",
              "status_message": "", "category": "storage", "type": "builtin"},
         ]
+        if include_failed_provider:
+            plugins.append(
+                {"id": "nfs", "name": "NFS", "description": "NFS shares", "version": "1.0",
+                 "installed": True, "enabled": True, "configured": True, "status": "error",
+                 "status_message": "Service unavailable", "category": "shares", "type": "builtin"}
+            )
         shares_payload = {
             "shares": [{"name": "media", "path": "/mnt/storage/media", "enabled": True}],
             "service_running": True,
@@ -804,6 +834,13 @@ def install_v2_shares_api_mocks():
                 return
             if path == "/api/storage/shares/samba" and method == "GET":
                 _json_fulfill(route, shares_payload)
+                return
+            if path == "/api/storage/shares/nfs" and method == "GET":
+                _json_fulfill(
+                    route,
+                    {"error": "NFS status unavailable", "message": "Check the NFS service"},
+                    status=503,
+                )
                 return
             if path == "/api/storage/shares/samba" and method == "POST":
                 _json_fulfill(route, {"status": "created", "message": "Share created"})

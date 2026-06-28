@@ -33,6 +33,28 @@ def test_v2_mounts_media_paths_and_list(
     assert_no_horizontal_overflow(page, f"v2 mounts ({viewport_profile_name})")
 
 
+def test_v2_mounts_surfaces_partial_provider_failure(
+    page: Page,
+    v2_mode_server,
+    v2_login,
+    install_v2_mounts_api_mocks,
+):
+    base_url = v2_mode_server["base_url"]
+    v2_login(page, base_url)
+    install_v2_mounts_api_mocks(page, include_failed_provider=True)
+    page.goto(f"{base_url}/v2/mounts")
+
+    expect(page.get_by_text("Rclone mounts")).to_be_visible()
+    expect(page.get_by_text("gdrive").first).to_be_visible()
+    expect(
+        page.get_by_text(
+            "SSHFS mounts unavailable: SSHFS helper offline: Reconnect helper and retry"
+        )
+    ).to_be_visible()
+    expect(page.get_by_text("partial data")).to_be_visible()
+    expect(page.get_by_text("No remote/local mount plugins configured.")).to_have_count(0)
+
+
 def test_v2_mounts_save_media_paths(
     page: Page,
     v2_mode_server,

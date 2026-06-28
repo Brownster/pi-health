@@ -40,6 +40,9 @@ export async function fetchShares(
   if (payload.error) {
     throw new Error(payload.error);
   }
+  if (!Array.isArray(payload.shares)) {
+    throw new Error("Share list response is invalid");
+  }
 
   return {
     pluginId,
@@ -47,7 +50,7 @@ export async function fetchShares(
     serviceRunning: Boolean(payload.service_running),
     status: toNullableString(payload.status),
     message: toNullableString(payload.message),
-    shares: Array.isArray(payload.shares) ? payload.shares.map((share) => normalizeShare(share)) : [],
+    shares: payload.shares.map((share) => normalizeShare(share)),
   };
 }
 

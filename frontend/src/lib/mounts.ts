@@ -1,4 +1,4 @@
-import { requestApi, toNullableString } from "@/lib/api";
+import { ApiError, requestApi, toNullableString } from "@/lib/api";
 
 export interface MediaPaths {
   downloads: string;
@@ -64,23 +64,25 @@ function normalizeMount(raw: Record<string, unknown> | undefined): MountEntry {
   };
 }
 
-/** Returns mounts for a plugin, or null if the plugin is not a remote-mount plugin (400/404). */
+/** Returns mounts for a plugin, or null when the plugin reports that mounts are unsupported (400). */
 export async function fetchPluginMounts(pluginId: string, signal?: AbortSignal): Promise<MountEntry[] | null> {
-  const response = await fetch(`/api/storage/mounts/${encodeURIComponent(pluginId)}`, {
-    method: "GET",
-    credentials: "same-origin",
-    headers: { Accept: "application/json" },
-    signal,
-  });
-  if (response.status === 400 || response.status === 404) {
-    return null;
+  let payload: { mounts?: Record<string, unknown>[]; error?: string };
+  try {
+    payload = await requestApi<{ mounts?: Record<string, unknown>[]; error?: string }>(
+      `/api/storage/mounts/${encodeURIComponent(pluginId)}`,
+      { method: "GET", signal },
+    );
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 400) {
+      return null;
+    }
+    throw error;
   }
-  if (!response.ok) {
-    throw new Error(`Mounts request failed (${response.status})`);
+  if (payload.error) {
+    throw new Error(payload.error);
   }
-  const payload = (await response.json()) as { mounts?: Record<string, unknown>[]; error?: string };
-  if (payload.error || !Array.isArray(payload.mounts)) {
-    return null;
+  if (!Array.isArray(payload.mounts)) {
+    throw new Error("Mount list response is invalid");
   }
   return payload.mounts.map((mount) => normalizeMount(mount));
 }
