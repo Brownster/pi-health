@@ -1,6 +1,7 @@
 export interface AuthSession {
   authenticated: boolean;
   username: string | null;
+  csrfToken: string | null;
 }
 
 export async function fetchAuthSession(signal?: AbortSignal): Promise<AuthSession> {
@@ -16,6 +17,7 @@ export async function fetchAuthSession(signal?: AbortSignal): Promise<AuthSessio
     return {
       authenticated: false,
       username: null,
+      csrfToken: null,
     };
   }
 
@@ -26,11 +28,13 @@ export async function fetchAuthSession(signal?: AbortSignal): Promise<AuthSessio
   const payload = (await response.json()) as {
     authenticated?: boolean;
     username?: string;
+    csrf_token?: string;
   };
 
   return {
     authenticated: Boolean(payload.authenticated),
     username: payload.username ?? null,
+    csrfToken: payload.csrf_token ?? null,
   };
 }
 

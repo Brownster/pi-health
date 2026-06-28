@@ -62,6 +62,8 @@ class TestAuthentication:
         data = json.loads(response.data)
         assert data['status'] == 'success'
         assert data['username'] == TEST_USERNAME
+        assert isinstance(data['csrf_token'], str)
+        assert len(data['csrf_token']) >= 32
 
     def test_missing_credentials_are_rejected(self):
         with pytest.raises(CredentialConfigurationError, match="not configured"):
@@ -158,6 +160,8 @@ class TestAuthentication:
         assert response.status_code == 200
         data = json.loads(response.data)
         assert data['authenticated'] is True
+        assert isinstance(data['csrf_token'], str)
+        assert len(data['csrf_token']) >= 32
 
     def test_auth_check_unauthenticated(self, client):
         """Test auth check when not authenticated."""

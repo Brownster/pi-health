@@ -10,7 +10,14 @@ import hashlib
 import getpass
 from urllib import request as urlrequest
 from stack_manager import stack_manager
-from auth_utils import LoginRateLimiter, load_users, login_required, verify_credentials as verify_password
+from auth_utils import (
+    LoginRateLimiter,
+    get_csrf_token,
+    load_users,
+    login_required,
+    rotate_csrf_token,
+    verify_credentials as verify_password,
+)
 from catalog_manager import catalog_manager
 from tools_manager import tools_manager
 from storage_plugins import storage_bp
@@ -1511,7 +1518,11 @@ def api_login():
         LOGIN_RATE_LIMITER.reset(client_key)
         session['authenticated'] = True
         session['username'] = username
-        return jsonify({'status': 'success', 'username': username})
+        return jsonify({
+            'status': 'success',
+            'username': username,
+            'csrf_token': rotate_csrf_token(),
+        })
     else:
         retry_after = LOGIN_RATE_LIMITER.record_failure(client_key)
         if retry_after:
@@ -1534,7 +1545,8 @@ def api_auth_check():
     if session.get('authenticated'):
         return jsonify({
             'authenticated': True,
-            'username': session.get('username', 'unknown')
+            'username': session.get('username', 'unknown'),
+            'csrf_token': get_csrf_token(),
         })
     return jsonify({'authenticated': False}), 401
 

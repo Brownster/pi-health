@@ -22,17 +22,17 @@ import { PageHeader } from "@/components/ui/page-header";
 import {
   type StackAction,
   type StackSummary,
+  createStackOperation,
   fetchStackBackups,
   fetchStackCompose,
   fetchStackEnv,
   fetchStackLogs,
   fetchStacks,
   getStackServicesPercent,
-  getStackStreamUrl,
   restoreStackBackup,
-  runStackAction,
   saveStackCompose,
   saveStackEnv,
+  streamStackOperation,
 } from "@/lib/stacks";
 import { formatClockTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -316,7 +316,7 @@ export function StacksPage() {
 
   const isMountedRef = useRef(true);
   const pendingActionsRef = useRef<Record<string, StackAction>>({});
-  const eventSourceRef = useRef<EventSource | null>(null);
+  const stackStreamAbortRef = useRef<{ controller: AbortController; stackName: string } | null>(null);
 
   const setPendingAction = useCallback((name: string, action: StackAction | null) => {
     setPendingActions((current) => {
@@ -364,10 +364,10 @@ export function StacksPage() {
     }
   }, []);
 
-  const closeEventSource = useCallback(() => {
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close();
-      eventSourceRef.current = null;
+  const closeStackStream = useCallback(() => {
+    if (stackStreamAbortRef.current) {
+      stackStreamAbortRef.current.controller.abort();
+      stackStreamAbortRef.current = null;
     }
   }, []);
 
@@ -390,126 +390,91 @@ export function StacksPage() {
         error: null,
       });
 
-      let doneReceived = false;
+      if (stackStreamAbortRef.current) {
+        stackStreamAbortRef.current.controller.abort();
+        setPendingAction(stackStreamAbortRef.current.stackName, null);
+      }
+      const controller = new AbortController();
+      stackStreamAbortRef.current = { controller, stackName: stack.name };
+      let terminalReceived = false;
 
-      const finish = () => {
-        closeEventSource();
-        if (isMountedRef.current) {
-          setPendingAction(stack.name, null);
-        }
-        void loadStacks("action");
-      };
-
-      const fallbackToPost = async () => {
+      const execute = async () => {
         try {
-          const result = await runStackAction(stack.name, action);
-          if (!isMountedRef.current) {
+          const operation = await createStackOperation(stack.name, action, controller.signal);
+          await streamStackOperation(
+            operation.stream_url,
+            (data) => {
+              if (!isMountedRef.current || controller.signal.aborted) {
+                return;
+              }
+              if (data.error) {
+                terminalReceived = true;
+                setConsoleModal((current) => ({ ...current, status: "error", error: data.error ?? "Stream error" }));
+                setActionNotice({ tone: "error", message: `${meta.label} failed for ${stack.name}` });
+                return;
+              }
+              if (data.done) {
+                terminalReceived = true;
+                const failed = typeof data.returncode === "number" && data.returncode !== 0;
+                setConsoleModal((current) => ({
+                  ...current,
+                  status: failed ? "error" : "done",
+                  returncode: data.returncode ?? null,
+                  error: failed ? `Command exited with code ${data.returncode}` : null,
+                }));
+                setActionNotice({
+                  tone: failed ? "error" : "success",
+                  message: failed
+                    ? `${meta.label} failed for ${stack.name}`
+                    : `${meta.label} completed for ${stack.name}`,
+                });
+                return;
+              }
+              if (typeof data.line === "string") {
+                setConsoleModal((current) => ({ ...current, lines: [...current.lines, data.line as string] }));
+              }
+            },
+            controller.signal,
+          );
+          if (!terminalReceived) {
+            throw new Error("Stack operation ended without a result");
+          }
+        } catch (caughtError) {
+          if (controller.signal.aborted) {
             return;
           }
-          const output = [result.stdout, result.stderr]
-            .filter((part) => part && part.trim().length > 0)
-            .join("\n")
-            .trim();
-          const failed = result.success === false;
-          setConsoleModal((current) => ({
-            ...current,
-            status: failed ? "error" : "done",
-            lines: output ? output.split("\n") : current.lines,
-            returncode: result.returncode ?? null,
-            error: failed ? `Command exited with code ${result.returncode}` : null,
-          }));
-          setActionNotice({
-            tone: failed ? "error" : "success",
-            message: failed
-              ? `${meta.label} failed for ${stack.name}`
-              : `${meta.label} completed for ${stack.name}`,
-          });
-        } catch (caughtError) {
           if (!isMountedRef.current) {
             return;
           }
           setConsoleModal((current) => ({ ...current, status: "error", error: getErrorMessage(caughtError) }));
           setActionNotice({ tone: "error", message: `${meta.label} failed for ${stack.name}: ${getErrorMessage(caughtError)}` });
         } finally {
-          finish();
+          if (stackStreamAbortRef.current?.controller === controller) {
+            stackStreamAbortRef.current = null;
+          }
+          if (!controller.signal.aborted && isMountedRef.current) {
+            setPendingAction(stack.name, null);
+            void loadStacks("action");
+          }
         }
       };
-
-      let source: EventSource;
-      try {
-        source = new EventSource(getStackStreamUrl(stack.name, action));
-      } catch {
-        void fallbackToPost();
-        return;
-      }
-      eventSourceRef.current = source;
-
-      source.onmessage = (event) => {
-        let data: { line?: string; done?: boolean; returncode?: number; error?: string };
-        try {
-          data = JSON.parse(event.data);
-        } catch {
-          return;
-        }
-        if (!isMountedRef.current) {
-          return;
-        }
-
-        if (data.error) {
-          doneReceived = true;
-          setConsoleModal((current) => ({ ...current, status: "error", error: data.error ?? "Stream error" }));
-          setActionNotice({ tone: "error", message: `${meta.label} failed for ${stack.name}` });
-          finish();
-          return;
-        }
-        if (data.done) {
-          doneReceived = true;
-          const failed = typeof data.returncode === "number" && data.returncode !== 0;
-          setConsoleModal((current) => ({
-            ...current,
-            status: failed ? "error" : "done",
-            returncode: data.returncode ?? null,
-            error: failed ? `Command exited with code ${data.returncode}` : null,
-          }));
-          setActionNotice({
-            tone: failed ? "error" : "success",
-            message: failed
-              ? `${meta.label} failed for ${stack.name}`
-              : `${meta.label} completed for ${stack.name}`,
-          });
-          finish();
-          return;
-        }
-        if (typeof data.line === "string") {
-          setConsoleModal((current) => ({ ...current, lines: [...current.lines, data.line as string] }));
-        }
-      };
-
-      source.onerror = () => {
-        if (doneReceived) {
-          // Normal close after the server finished the stream.
-          return;
-        }
-        // Stream unavailable/interrupted before completion: fall back to the POST action.
-        closeEventSource();
-        void fallbackToPost();
-      };
+      void execute();
     },
-    [closeEventSource, loadStacks, setPendingAction],
+    [loadStacks, setPendingAction],
   );
 
   const closeConsole = useCallback(() => {
     setConsoleModal((current) => {
       if (current.status === "streaming") {
-        // User dismissed mid-run: stop listening and release the row lock.
-        closeEventSource();
+        // User dismissed mid-run: stop listening; the server operation continues once.
+        closeStackStream();
         if (current.stackName) {
           setPendingAction(current.stackName, null);
         }
       }
       return { ...current, open: false };
     });
-  }, [closeEventSource, setPendingAction]);
+  }, [closeStackStream, setPendingAction]);
 
   const onLogs = useCallback(async (stack: StackSummary) => {
     setLogsModal({ open: true, status: "loading", stackName: stack.name, logs: "", error: null });
@@ -688,9 +653,9 @@ export function StacksPage() {
     return () => {
       isMountedRef.current = false;
       window.clearInterval(intervalId);
-      closeEventSource();
+      closeStackStream();
     };
-  }, [loadStacks, closeEventSource]);
+  }, [loadStacks, closeStackStream]);
 
   useEffect(() => {
     if (!actionNotice || actionNotice.tone === "error") {

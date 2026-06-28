@@ -3,7 +3,7 @@
 Date: 2026-06-27
 Source: `Docs/colleagues_review_of_limeOS.txt` (validated external review)
 Branch: TBD (recommend `feature/v2-hardening`)
-Status: Active — SEC-001/002, CAT-001, STK-001/002, MFS-001, SRA-001/002, and UI-001 complete
+Status: Active — SEC-001/002, API-001, CAT-001, STK-001/002, MFS-001, SRA-001/002, and UI-001 complete
 
 ## Objective
 Production-harden the migrated v2 / LimeOS stack — close the destructive failure paths and the
@@ -39,7 +39,7 @@ starting broad feature work. IDs match the review for traceability.
 | SRA-002 | Reject SnapRAID paths on a MergerFS pool | P1 | plugin | — | Complete |
 | CAT-002 | Async catalog install via job/stream + operation id | P1 | backend | API-001 | Pending |
 | STK-002 | Per-stack lock + atomic compose/env/restore writes | P1 | backend | — | Complete |
-| API-001 | State-changing stream endpoints become POST + CSRF | P1 | backend+ui | — | Pending |
+| API-001 | State-changing stream endpoints become POST + CSRF | P1 | backend+ui | — | Complete |
 | UI-001 | Modal focus survives typing (stable onClose) | P1 | frontend | — | Complete |
 | SYS-001 | `/api/stats` tolerates missing optional disks | P1 | backend+ui | — | Pending |
 | STK-003 | Round-trip YAML / managed override files | P2 | backend | — | Pending |
@@ -191,6 +191,22 @@ Files: `stack_manager.py` (~792-865) and frontend consumers (`stacks-page.tsx` c
 EventSource/GET; `storage-page.tsx` already uses POST-SSE — reuse that fetch-reader pattern).
 Tasks: create ops via POST + CSRF, stream a read-only op resource by id via GET; migrate the stacks
 console off GET EventSource.
+
+Completed: 2026-06-28. Login and authenticated session checks now issue a per-session CSRF token.
+Stack lifecycle streaming starts only through `POST /api/stacks/<name>/operations` with an exact
+`X-CSRF-Token`; the old state-changing GET stream routes are removed. Creation returns `202` with
+an unguessable operation id and a read-only stream URL. A single background thread executes each
+operation, while stream reads replay buffered events and honor `Last-Event-ID` without launching
+Docker again.
+
+Operations are bound to the creating browser session, capped at 100 retained operations and 5,000
+events each, and completed operations expire after 15 minutes. Thread-start failure removes the
+pending record. Both legacy and v2 stack consoles now use an abortable fetch reader for POST-create
+and GET-stream; the v2 duplicate POST fallback is gone. Tests cover missing/invalid CSRF, invalid
+actions, session ownership, replay/resume without relaunch, thread-start failure, and retired GET
+routes. Focused verification: backend `119 passed, 1 skipped`; v2 Playwright `7 passed`; Ruff,
+TypeScript, and production build passed (`98.43 kB` initial JS gzip). Full `tox -e all`: Ruff clean;
+unit `627 passed, 1 skipped`; E2E `166 passed, 26 skipped`.
 
 ### UI-001 — Modal focus survives typing
 Files: `frontend/src/components/ui/modal-overlay.tsx` (effect dep `[onClose]`, ~20-68).

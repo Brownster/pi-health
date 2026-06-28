@@ -1,17 +1,50 @@
 import math
+import hmac
 import os
+import secrets
 import string
 import threading
 import time
 from collections import deque
 from functools import wraps
 
-from flask import jsonify, session
+from flask import jsonify, request, session
 from werkzeug.security import check_password_hash
 
 
 class CredentialConfigurationError(RuntimeError):
     """Raised when no safe login credential configuration is available."""
+
+
+def rotate_csrf_token():
+    """Issue a fresh CSRF token for the current authenticated session."""
+    token = secrets.token_urlsafe(32)
+    session['csrf_token'] = token
+    return token
+
+
+def get_csrf_token():
+    """Return the session CSRF token, creating one for migrated sessions."""
+    token = session.get('csrf_token')
+    if not isinstance(token, str) or len(token) < 32:
+        token = rotate_csrf_token()
+    return token
+
+
+def csrf_protect(f):
+    """Require the session CSRF token in the X-CSRF-Token header."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        expected = session.get('csrf_token')
+        provided = request.headers.get('X-CSRF-Token', '')
+        if (
+            not isinstance(expected, str)
+            or not isinstance(provided, str)
+            or not hmac.compare_digest(expected, provided)
+        ):
+            return jsonify({'error': 'CSRF token missing or invalid'}), 403
+        return f(*args, **kwargs)
+    return decorated_function
 
 
 def _validate_password_hash(password_hash):

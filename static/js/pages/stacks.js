@@ -1,7 +1,7 @@
 import { ensureAuthenticated, logoutToLogin } from '/js/lib/auth.js';
 import { ensureDashboardShell } from '/js/lib/layout.js';
 import { clearElement, createEmptyState, createErrorState } from '/js/lib/states.js';
-import { requestApiJson } from '/js/lib/http.js';
+import { requestApiJson, requestApiResponse } from '/js/lib/http.js';
 import { showNotification } from '/js/lib/notify.js';
 
 ensureDashboardShell({
@@ -11,7 +11,7 @@ ensureDashboardShell({
 
 let stacks = [];
 let currentStack = null;
-let eventSource = null;
+let stackStreamController = null;
 let editComposeEditor = null;
 let newComposeEditor = null;
 
@@ -214,9 +214,9 @@ function hideStackModal() {
     document.getElementById('stack-modal').classList.add('hidden');
     currentStack = null;
 
-    if (eventSource) {
-        eventSource.close();
-        eventSource = null;
+    if (stackStreamController) {
+        stackStreamController.abort();
+        stackStreamController = null;
     }
 }
 
@@ -240,59 +240,91 @@ function showTab(tabName) {
 
 async function stackAction(action) {
     if (!currentStack) return;
+    const stackName = currentStack;
 
     const terminal = document.getElementById('terminal-output');
     terminal.textContent = `Running ${action}...\n`;
     showTab('terminal');
 
-    if (eventSource) {
-        eventSource.close();
+    if (stackStreamController) {
+        stackStreamController.abort();
     }
+    const controller = new AbortController();
+    stackStreamController = controller;
 
-    eventSource = new EventSource(`/api/stacks/${currentStack}/${action}/stream`);
+    try {
+        const auth = await requestApiJson('/api/auth/check');
+        if (!auth.csrf_token) {
+            throw new Error('CSRF token unavailable');
+        }
+        const operation = await requestApiJson(`/api/stacks/${encodeURIComponent(stackName)}/operations`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': auth.csrf_token,
+            },
+            body: JSON.stringify({ action }),
+            signal: controller.signal,
+        });
+        const response = await requestApiResponse(operation.stream_url, {
+            headers: { Accept: 'text/event-stream' },
+            signal: controller.signal,
+        });
+        if (!response.ok || !response.body) {
+            throw new Error(`Stack operation stream failed (${response.status})`);
+        }
 
-    eventSource.onmessage = (event) => {
-        try {
-            const data = JSON.parse(event.data);
-            if (data.line) {
-                terminal.textContent += `${data.line}\n`;
-                terminal.scrollTop = terminal.scrollHeight;
-            }
-            if (data.done) {
-                terminal.textContent += `\n--- Command completed (exit code: ${data.returncode}) ---\n`;
-                eventSource.close();
-                eventSource = null;
-
-                if (data.returncode === 0) {
-                    showNotification(`${action} completed successfully`, 'success');
-                } else {
-                    showNotification(`${action} completed with errors`, 'warning');
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            let separator = buffer.indexOf('\n\n');
+            while (separator !== -1) {
+                const frame = buffer.slice(0, separator);
+                buffer = buffer.slice(separator + 2);
+                const dataLine = frame.split('\n').find(line => line.startsWith('data:'));
+                separator = buffer.indexOf('\n\n');
+                if (!dataLine) continue;
+                let data;
+                try {
+                    data = JSON.parse(dataLine.slice(5).trim());
+                } catch (_error) {
+                    continue;
                 }
-
-                window.setTimeout(() => {
-                    loadStacks();
-                    if (currentStack) {
-                        openStack(currentStack);
-                    }
-                }, 1000);
+                if (data.line) {
+                    terminal.textContent += `${data.line}\n`;
+                    terminal.scrollTop = terminal.scrollHeight;
+                }
+                if (data.error) {
+                    terminal.textContent += `Error: ${data.error}\n`;
+                    showNotification(`${action} failed`, 'error');
+                }
+                if (data.done) {
+                    terminal.textContent += `\n--- Command completed (exit code: ${data.returncode}) ---\n`;
+                    showNotification(
+                        data.returncode === 0 ? `${action} completed successfully` : `${action} completed with errors`,
+                        data.returncode === 0 ? 'success' : 'warning'
+                    );
+                }
             }
-            if (data.error) {
-                terminal.textContent += `Error: ${data.error}\n`;
-                eventSource.close();
-                eventSource = null;
-            }
-        } catch (_error) {
-            terminal.textContent += `${event.data}\n`;
         }
-    };
-
-    eventSource.onerror = () => {
-        terminal.textContent += '\n--- Connection closed ---\n';
-        if (eventSource) {
-            eventSource.close();
-            eventSource = null;
+        window.setTimeout(() => {
+            loadStacks();
+            if (currentStack === stackName) openStack(stackName);
+        }, 1000);
+    } catch (error) {
+        if (error?.name !== 'AbortError') {
+            terminal.textContent += `Error: ${error.message || error}\n`;
+            showNotification(`${action} failed`, 'error');
         }
-    };
+    } finally {
+        if (stackStreamController === controller) {
+            stackStreamController = null;
+        }
+    }
 }
 
 async function saveCompose() {

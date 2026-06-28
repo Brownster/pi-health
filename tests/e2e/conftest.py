@@ -454,8 +454,19 @@ def install_v2_stacks_api_mocks():
                 _json_fulfill(route, stacks_payload)
                 return
 
-            # Streaming lifecycle output (EventSource / SSE).
-            if path.startswith("/api/stacks/media/") and path.endswith("/stream") and method == "GET":
+            if path == "/api/stacks/media/operations" and method == "POST":
+                _json_fulfill(
+                    route,
+                    {
+                        "operation_id": "mock-stack-operation",
+                        "stream_url": "/api/stacks/operations/mock-stack-operation/stream",
+                    },
+                    status=202,
+                )
+                return
+
+            # Read-only lifecycle operation stream.
+            if path == "/api/stacks/operations/mock-stack-operation/stream" and method == "GET":
                 route.fulfill(status=200, content_type="text/event-stream", body=sse_body)
                 return
 
@@ -486,13 +497,6 @@ def install_v2_stacks_api_mocks():
             if path == "/api/stacks/media/restore" and method == "POST":
                 _json_fulfill(route, {"status": "restored", "backup": "docker-compose.yml.20260101-000000.bak"})
                 return
-
-            # Non-streaming lifecycle fallback.
-            if path.startswith("/api/stacks/media/") and method == "POST":
-                action = path.rsplit("/", 1)[-1]
-                if action in {"up", "down", "restart", "pull"}:
-                    _json_fulfill(route, {"success": True, "stdout": "done", "stderr": "", "returncode": 0})
-                    return
 
             route.continue_()
 

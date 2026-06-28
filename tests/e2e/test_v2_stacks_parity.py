@@ -59,12 +59,27 @@ def test_v2_stacks_lifecycle_streaming_console(
 ):
     base_url = v2_mode_server["base_url"]
     _open_v2_stacks(page, base_url, v2_login, install_v2_stacks_api_mocks)
+    lifecycle_requests = []
+    page.on(
+        "request",
+        lambda request: lifecycle_requests.append((request.method, request.url)),
+    )
 
     page.locator("button[data-action='up'][data-stack='media']:visible").first.click()
     expect(page.locator("#v2-stack-console")).to_be_visible()
     # Streamed output line, then completion status.
     expect(page.locator("#v2-stack-console-output")).to_contain_text("Started", timeout=15000)
     expect(page.locator("#v2-stack-console")).to_contain_text("Completed", timeout=15000)
+    assert any(
+        method == "POST" and url.endswith("/api/stacks/media/operations")
+        for method, url in lifecycle_requests
+    )
+    assert any(
+        method == "GET" and url.endswith("/api/stacks/operations/mock-stack-operation/stream")
+        for method, url in lifecycle_requests
+    )
+    assert not any(url.endswith("/api/stacks/media/up/stream") for _, url in lifecycle_requests)
+    assert not any(url.endswith("/api/stacks/media/up") for _, url in lifecycle_requests)
     page.click("#v2-stack-console-close")
     expect(page.locator("#v2-stack-console")).to_have_count(0)
 

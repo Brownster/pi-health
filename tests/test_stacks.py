@@ -991,21 +991,6 @@ class TestStackAdditionalRoutes:
             stack_manager.STACKS_PATH = original_path
             stack_manager.BACKUP_DIR = original_backup
 
-    def test_stack_stream_routes(self, authenticated_client, monkeypatch):
-        monkeypatch.setattr(
-            "stack_manager.stream_compose_command",
-            lambda _name, _command: iter(['data: {"line":"ok"}\n\n', 'data: {"done":true}\n\n']),
-        )
-
-        up_response = authenticated_client.get("/api/stacks/alpha/up/stream")
-        assert up_response.status_code == 200
-        assert "done" in up_response.get_data(as_text=True)
-
-        pull_response = authenticated_client.get("/api/stacks/alpha/pull/stream")
-        assert pull_response.status_code == 200
-        assert "ok" in pull_response.get_data(as_text=True)
-
-
 class TestStackConcurrencyAndAtomicWrites:
     def _configure_stack_paths(self, monkeypatch, temp_stacks_dir):
         import stack_manager
@@ -1210,6 +1195,155 @@ class TestStackConcurrencyAndAtomicWrites:
             thread.start()
             assert acquired.wait(timeout=1)
             thread.join(timeout=1)
+
+
+class TestStackOperationApi:
+    def _authenticate_with_csrf(self, client, username="testuser"):
+        with client.session_transaction() as session:
+            session["authenticated"] = True
+            session["username"] = username
+            session["csrf_token"] = "test-csrf-token"
+
+    def test_operation_create_requires_csrf(self, authenticated_client):
+        missing = authenticated_client.post(
+            "/api/stacks/alpha/operations",
+            json={"action": "up"},
+        )
+        with authenticated_client.session_transaction() as session:
+            session["csrf_token"] = "expected-token"
+        invalid = authenticated_client.post(
+            "/api/stacks/alpha/operations",
+            json={"action": "up"},
+            headers={"X-CSRF-Token": "wrong-token"},
+        )
+
+        assert missing.status_code == 403
+        assert invalid.status_code == 403
+
+    def test_operation_create_rejects_unknown_action(
+        self, client, temp_stacks_dir, monkeypatch
+    ):
+        import stack_manager
+
+        monkeypatch.setattr(stack_manager, "STACKS_PATH", temp_stacks_dir)
+        self._authenticate_with_csrf(client)
+        response = client.post(
+            "/api/stacks/alpha/operations",
+            json={"action": "destroy"},
+            headers={"X-CSRF-Token": "test-csrf-token"},
+        )
+
+        assert response.status_code == 400
+
+    def test_operation_stream_replays_without_relaunch(
+        self, client, temp_stacks_dir, monkeypatch
+    ):
+        import stack_manager
+
+        monkeypatch.setattr(stack_manager, "STACKS_PATH", temp_stacks_dir)
+        stack_dir = os.path.join(temp_stacks_dir, "alpha")
+        os.makedirs(stack_dir)
+        with open(os.path.join(stack_dir, "compose.yaml"), "w") as handle:
+            handle.write("services: {}\n")
+        self._authenticate_with_csrf(client)
+        runner = MagicMock(
+            return_value=iter([
+                'data: {"line":"starting"}\n\n',
+                'data: {"done":true,"returncode":0}\n\n',
+            ])
+        )
+        monkeypatch.setattr(stack_manager, "stream_compose_command", runner)
+
+        created = client.post(
+            "/api/stacks/alpha/operations",
+            json={"action": "up"},
+            headers={"X-CSRF-Token": "test-csrf-token"},
+        )
+
+        assert created.status_code == 202
+        payload = created.get_json()
+        assert payload["operation_id"]
+        assert payload["stream_url"].endswith("/stream")
+
+        first = client.get(payload["stream_url"])
+        second = client.get(payload["stream_url"])
+        resumed = client.get(
+            payload["stream_url"],
+            headers={"Last-Event-ID": "0"},
+        )
+
+        assert first.status_code == 200
+        assert first.mimetype == "text/event-stream"
+        assert '"starting"' in first.get_data(as_text=True)
+        assert first.get_data() == second.get_data()
+        assert '"starting"' not in resumed.get_data(as_text=True)
+        assert '"done"' in resumed.get_data(as_text=True)
+        runner.assert_called_once_with("alpha", "up")
+
+    def test_operation_stream_is_owned_by_creating_user(
+        self, client, temp_stacks_dir, monkeypatch
+    ):
+        import stack_manager
+
+        monkeypatch.setattr(stack_manager, "STACKS_PATH", temp_stacks_dir)
+        stack_dir = os.path.join(temp_stacks_dir, "alpha")
+        os.makedirs(stack_dir)
+        with open(os.path.join(stack_dir, "compose.yaml"), "w") as handle:
+            handle.write("services: {}\n")
+        self._authenticate_with_csrf(client, username="alice")
+        monkeypatch.setattr(
+            stack_manager,
+            "stream_compose_command",
+            lambda _name, _action: iter(['data: {"done":true,"returncode":0}\n\n']),
+        )
+        created = client.post(
+            "/api/stacks/alpha/operations",
+            json={"action": "up"},
+            headers={"X-CSRF-Token": "test-csrf-token"},
+        )
+        stream_url = created.get_json()["stream_url"]
+
+        with client.session_transaction() as session:
+            session["authenticated"] = True
+            session["username"] = "bob"
+            session["csrf_token"] = "different-browser-token"
+        response = client.get(stream_url)
+
+        assert response.status_code == 404
+
+    def test_thread_start_failure_removes_operation(
+        self, client, temp_stacks_dir, monkeypatch
+    ):
+        import stack_manager
+
+        monkeypatch.setattr(stack_manager, "STACKS_PATH", temp_stacks_dir)
+        stack_dir = os.path.join(temp_stacks_dir, "alpha")
+        os.makedirs(stack_dir)
+        with open(os.path.join(stack_dir, "compose.yaml"), "w") as handle:
+            handle.write("services: {}\n")
+        self._authenticate_with_csrf(client)
+        monkeypatch.setattr(
+            stack_manager.threading.Thread,
+            "start",
+            MagicMock(side_effect=RuntimeError("thread unavailable")),
+        )
+
+        response = client.post(
+            "/api/stacks/alpha/operations",
+            json={"action": "up"},
+            headers={"X-CSRF-Token": "test-csrf-token"},
+        )
+
+        assert response.status_code == 500
+        assert "thread unavailable" in response.get_json()["error"]
+
+    @pytest.mark.parametrize("action", ["up", "down", "pull", "restart"])
+    def test_legacy_get_stream_trigger_is_retired(
+        self, authenticated_client, action
+    ):
+        response = authenticated_client.get(f"/api/stacks/alpha/{action}/stream")
+
+        assert response.status_code == 404
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
