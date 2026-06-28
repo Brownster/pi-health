@@ -1,12 +1,18 @@
 import { requestApi } from "@/lib/api";
 import { createOperation, streamOperation } from "@/lib/operations";
+import { fetchStacks } from "@/lib/stacks";
 
 export interface CatalogItem {
   id: string;
   name: string;
   description: string;
   requires: string[];
-  installed: boolean;
+  installedStacks: string[];
+}
+
+export interface CatalogSnapshot {
+  items: CatalogItem[];
+  availableStacks: string[];
 }
 
 export interface CatalogField {
@@ -16,29 +22,44 @@ export interface CatalogField {
   required: boolean;
 }
 
-function normalizeItem(raw: Record<string, unknown> | undefined, installedSet: Set<string>): CatalogItem {
+function normalizeStackNames(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return [...new Set(value.map((stack) => String(stack).trim()).filter(Boolean))].sort();
+}
+
+function normalizeItem(
+  raw: Record<string, unknown> | undefined,
+  serviceStacks: Record<string, unknown>,
+): CatalogItem {
   const id = String(raw?.id ?? "");
   return {
     id,
     name: String(raw?.name ?? id),
     description: String(raw?.description ?? ""),
     requires: Array.isArray(raw?.requires) ? raw.requires.map((r) => String(r)) : [],
-    installed: installedSet.has(id),
+    installedStacks: normalizeStackNames(serviceStacks[id]),
   };
 }
 
-/** Fetch catalog items + installed status in one call, merged into CatalogItem[]. */
-export async function fetchCatalog(signal?: AbortSignal): Promise<CatalogItem[]> {
-  const [catalog, status] = await Promise.all([
+/** Fetch catalog items, stack-specific install status, and valid target stacks. */
+export async function fetchCatalog(signal?: AbortSignal): Promise<CatalogSnapshot> {
+  const [catalog, status, stacks] = await Promise.all([
     requestApi<{ items?: Record<string, unknown>[] }>("/api/catalog", { method: "GET", signal }),
-    requestApi<{ services?: unknown[] }>("/api/catalog/status", { method: "GET", signal }).catch(() => ({
-      services: [],
-    })),
+    requestApi<{ service_stacks?: Record<string, unknown> }>("/api/catalog/status", {
+      method: "GET",
+      signal,
+    }),
+    fetchStacks({ includeStatus: false, signal }),
   ]);
-  const installedSet = new Set(
-    Array.isArray(status.services) ? status.services.map((s) => String(s)) : [],
-  );
-  return Array.isArray(catalog.items) ? catalog.items.map((item) => normalizeItem(item, installedSet)) : [];
+  const serviceStacks = status.service_stacks ?? {};
+  return {
+    items: Array.isArray(catalog.items)
+      ? catalog.items.map((item) => normalizeItem(item, serviceStacks))
+      : [],
+    availableStacks: [...new Set(stacks.map((stack) => stack.name).filter(Boolean))].sort(),
+  };
 }
 
 export async function fetchCatalogItemFields(itemId: string, signal?: AbortSignal): Promise<CatalogField[]> {
@@ -63,11 +84,19 @@ export async function fetchCatalogItemFields(itemId: string, signal?: AbortSigna
 export async function installCatalogItem(
   itemId: string,
   values: Record<string, string>,
+  targetStack: string,
+  stackName: string,
   signal?: AbortSignal,
 ): Promise<void> {
   const operation = await createOperation(
     "/api/catalog/install",
-    { id: itemId, values, start_service: true },
+    {
+      id: itemId,
+      values,
+      start_service: true,
+      target_stack: targetStack,
+      stack_name: stackName,
+    },
     signal,
   );
   await streamOperation(
@@ -84,11 +113,15 @@ export async function installCatalogItem(
   );
 }
 
-export async function removeCatalogItem(itemId: string, signal?: AbortSignal): Promise<void> {
+export async function removeCatalogItem(
+  itemId: string,
+  targetStack: string,
+  signal?: AbortSignal,
+): Promise<void> {
   const payload = await requestApi<{ status?: string; error?: string }>("/api/catalog/remove", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ id: itemId }),
+    body: JSON.stringify({ id: itemId, stop_service: true, target_stack: targetStack }),
     signal,
   });
   if (payload.error) {

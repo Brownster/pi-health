@@ -192,6 +192,33 @@ class TestCatalogEndpoints:
             assert 'services' in data
             assert 'app1' in data['services']
             assert 'app2' in data['services']
+            assert data['service_stacks'] == {'app1': ['media'], 'app2': ['media']}
+        finally:
+            stack_manager.STACKS_PATH = original_stacks
+            stack_manager.BACKUP_DIR = original_backup
+
+    def test_catalog_status_deduplicates_stack_membership(self, authenticated_client, temp_stacks_dir):
+        """Each installed app is represented once per stack."""
+        import stack_manager
+        original_stacks = stack_manager.STACKS_PATH
+        original_backup = stack_manager.BACKUP_DIR
+        stack_manager.STACKS_PATH = temp_stacks_dir
+        stack_manager.BACKUP_DIR = os.path.join(temp_stacks_dir, '.backups')
+
+        for stack_name in ('family', 'media'):
+            stack_dir = os.path.join(temp_stacks_dir, stack_name)
+            os.makedirs(stack_dir, exist_ok=True)
+            with open(os.path.join(stack_dir, 'compose.yaml'), 'w') as f:
+                yaml.dump({'services': {'jellyfin': {'image': 'jellyfin'}}}, f)
+
+        try:
+            response = authenticated_client.get('/api/catalog/status')
+
+            assert response.status_code == 200
+            assert response.get_json() == {
+                'services': ['jellyfin'],
+                'service_stacks': {'jellyfin': ['family', 'media']},
+            }
         finally:
             stack_manager.STACKS_PATH = original_stacks
             stack_manager.BACKUP_DIR = original_backup

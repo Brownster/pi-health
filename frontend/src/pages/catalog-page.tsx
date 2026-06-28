@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Activity, Loader2, RefreshCw, TriangleAlert } from "lucide-react";
+import { Activity, Loader2, RefreshCw, Trash2, TriangleAlert } from "lucide-react";
 
 import { Badge, StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -33,6 +33,8 @@ interface InstallModalState {
   status: AsyncStatus;
   fields: CatalogField[];
   values: Record<string, string>;
+  targetStack: string;
+  newStackName: string;
   error: string | null;
   saving: boolean;
 }
@@ -44,6 +46,8 @@ const EMPTY_INSTALL: InstallModalState = {
   status: "idle",
   fields: [],
   values: {},
+  targetStack: "new",
+  newStackName: "",
   error: null,
   saving: false,
 };
@@ -52,15 +56,30 @@ function getErrorMessage(error: unknown): string {
   return error instanceof Error && error.message ? error.message : "Unable to complete the request";
 }
 
+function installationKey(itemId: string, stack: string): string {
+  return `${itemId}:${stack}`;
+}
+
+function getDefaultTarget(item: CatalogItem, items: CatalogItem[], stacks: string[]): string {
+  if (!item.requires.length) {
+    return "new";
+  }
+  const dependencies = item.requires.map(
+    (dependencyId) => items.find((candidate) => candidate.id === dependencyId)?.installedStacks ?? [],
+  );
+  return stacks.find((stack) => dependencies.every((installedStacks) => installedStacks.includes(stack))) ?? "new";
+}
+
 export function CatalogPage() {
   const [items, setItems] = useState<CatalogItem[]>([]);
+  const [availableStacks, setAvailableStacks] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState("Never");
   const [actionNotice, setActionNotice] = useState<ActionNotice | null>(null);
-  const [pendingId, setPendingId] = useState<string | null>(null);
-  const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
+  const [pendingInstallation, setPendingInstallation] = useState<string | null>(null);
+  const [confirmRemoveInstallation, setConfirmRemoveInstallation] = useState<string | null>(null);
   const [installModal, setInstallModal] = useState<InstallModalState>(EMPTY_INSTALL);
   const isMountedRef = useRef(true);
 
@@ -76,7 +95,8 @@ export function CatalogPage() {
       if (!isMountedRef.current) {
         return;
       }
-      setItems(next);
+      setItems(next.items);
+      setAvailableStacks(next.availableStacks);
       setError(null);
       setLastUpdated(formatClockTime(new Date()));
     } catch (caughtError) {
@@ -96,13 +116,14 @@ export function CatalogPage() {
   }, []);
 
   const onRemove = useCallback(
-    async (item: CatalogItem) => {
-      setConfirmRemoveId(null);
-      setPendingId(item.id);
+    async (item: CatalogItem, stack: string) => {
+      const key = installationKey(item.id, stack);
+      setConfirmRemoveInstallation(null);
+      setPendingInstallation(key);
       try {
-        await removeCatalogItem(item.id);
+        await removeCatalogItem(item.id, stack);
         if (isMountedRef.current) {
-          setActionNotice({ tone: "success", message: `Removed ${item.name}` });
+          setActionNotice({ tone: "success", message: `Removed ${item.name} from ${stack}` });
           await loadCatalog("manual");
         }
       } catch (caughtError) {
@@ -111,44 +132,65 @@ export function CatalogPage() {
         }
       } finally {
         if (isMountedRef.current) {
-          setPendingId(null);
+          setPendingInstallation(null);
         }
       }
     },
     [loadCatalog],
   );
 
-  const onOpenInstall = useCallback(async (item: CatalogItem) => {
-    setInstallModal({ ...EMPTY_INSTALL, open: true, itemId: item.id, itemName: item.name, status: "loading" });
-    try {
-      const fields = await fetchCatalogItemFields(item.id);
-      if (!isMountedRef.current) {
-        return;
-      }
-      const values: Record<string, string> = {};
-      for (const field of fields) {
-        values[field.key] = field.default;
-      }
-      setInstallModal((current) =>
-        current.itemId === item.id && current.open
-          ? { ...current, status: "ready", fields, values }
-          : current,
-      );
-    } catch (caughtError) {
-      if (isMountedRef.current) {
+  const onOpenInstall = useCallback(
+    async (item: CatalogItem) => {
+      setInstallModal({
+        ...EMPTY_INSTALL,
+        open: true,
+        itemId: item.id,
+        itemName: item.name,
+        status: "loading",
+        targetStack: getDefaultTarget(item, items, availableStacks),
+        newStackName: item.id,
+      });
+      try {
+        const fields = await fetchCatalogItemFields(item.id);
+        if (!isMountedRef.current) {
+          return;
+        }
+        const values: Record<string, string> = {};
+        for (const field of fields) {
+          values[field.key] = field.default;
+        }
         setInstallModal((current) =>
           current.itemId === item.id && current.open
-            ? { ...current, status: "error", error: getErrorMessage(caughtError) }
+            ? { ...current, status: "ready", fields, values }
             : current,
         );
+      } catch (caughtError) {
+        if (isMountedRef.current) {
+          setInstallModal((current) =>
+            current.itemId === item.id && current.open
+              ? { ...current, status: "error", error: getErrorMessage(caughtError) }
+              : current,
+          );
+        }
       }
-    }
-  }, []);
+    },
+    [availableStacks, items],
+  );
 
   const submitInstall = useCallback(async () => {
+    const stackName = installModal.targetStack === "new" ? installModal.newStackName.trim() : "";
+    if (installModal.targetStack === "new" && !stackName) {
+      setInstallModal((current) => ({ ...current, error: "New stack name is required" }));
+      return;
+    }
     setInstallModal((current) => ({ ...current, saving: true, error: null }));
     try {
-      await installCatalogItem(installModal.itemId, installModal.values);
+      await installCatalogItem(
+        installModal.itemId,
+        installModal.values,
+        installModal.targetStack,
+        stackName,
+      );
       if (!isMountedRef.current) {
         return;
       }
@@ -173,7 +215,8 @@ export function CatalogPage() {
     };
   }, [loadCatalog]);
 
-  const installedCount = items.filter((item) => item.installed).length;
+  const installedCount = items.reduce((count, item) => count + item.installedStacks.length, 0);
+  const modalItem = items.find((item) => item.id === installModal.itemId);
 
   return (
     <section className="space-y-4 sm:space-y-6">
@@ -189,7 +232,7 @@ export function CatalogPage() {
             {isRefreshing ? "refreshing" : "refresh"}
           </Button>
         }
-        description={`${installedCount} installed · ${items.length - installedCount} available`}
+        description={`${installedCount} installations · ${items.length} catalog apps`}
         title="app_catalog"
       />
 
@@ -240,7 +283,7 @@ export function CatalogPage() {
                     <p className="truncate text-sm font-semibold">{item.name}</p>
                     <p className="line-clamp-2 text-xs text-muted-foreground">{item.description}</p>
                   </div>
-                  {item.installed ? <StatusBadge label="installed" tone="success" /> : null}
+                  {item.installedStacks.length ? <StatusBadge label="installed" tone="success" /> : null}
                 </div>
                 {item.requires.length ? (
                   <div className="flex flex-wrap gap-1.5">
@@ -251,49 +294,72 @@ export function CatalogPage() {
                     ))}
                   </div>
                 ) : null}
-                <div className="mt-auto flex flex-wrap gap-2">
-                  {item.installed ? (
-                    confirmRemoveId === item.id ? (
-                      <span className="flex items-center gap-1.5">
-                        <Button
-                          className="border-danger/30 bg-danger/10 text-danger hover:bg-danger/15 text-xs sm:text-sm"
-                          data-confirm-remove={item.id}
-                          disabled={pendingId === item.id}
-                          onClick={() => void onRemove(item)}
-                          size="sm"
-                          variant="outline"
+                {item.installedStacks.length ? (
+                  <div className="space-y-1.5" role="list" aria-label={`${item.name} installations`}>
+                    {item.installedStacks.map((stack) => {
+                      const key = installationKey(item.id, stack);
+                      const isConfirming = confirmRemoveInstallation === key;
+                      const isPending = pendingInstallation === key;
+                      return (
+                        <div
+                          className="flex min-h-11 items-center justify-between gap-2 rounded-md border border-border/70 bg-muted/30 px-2"
+                          key={stack}
+                          role="listitem"
                         >
-                          {pendingId === item.id ? "Removing..." : "Confirm remove"}
-                        </Button>
-                        <Button onClick={() => setConfirmRemoveId(null)} size="sm" variant="outline">
-                          Cancel
-                        </Button>
-                      </span>
-                    ) : (
-                      <Button
-                        className="text-xs sm:text-sm"
-                        data-catalog-action="remove"
-                        data-item={item.id}
-                        disabled={Boolean(pendingId)}
-                        onClick={() => setConfirmRemoveId(item.id)}
-                        size="sm"
-                        variant="outline"
-                      >
-                        Remove
-                      </Button>
-                    )
-                  ) : (
-                    <Button
-                      className="text-xs sm:text-sm"
-                      data-catalog-action="install"
-                      data-item={item.id}
-                      disabled={Boolean(pendingId)}
-                      onClick={() => void onOpenInstall(item)}
-                      size="sm"
-                    >
-                      Install
-                    </Button>
-                  )}
+                          <Badge className="max-w-32 truncate" title={stack} tone="success">
+                            {stack}
+                          </Badge>
+                          {isConfirming ? (
+                            <span className="flex items-center gap-1.5">
+                              <Button
+                                className="border-danger/30 bg-danger/10 px-3 text-xs text-danger hover:bg-danger/15"
+                                data-confirm-remove={item.id}
+                                data-stack={stack}
+                                disabled={isPending}
+                                onClick={() => void onRemove(item, stack)}
+                                variant="outline"
+                              >
+                                {isPending ? "Removing..." : "Confirm"}
+                              </Button>
+                              <Button
+                                aria-label={`Cancel removing ${item.name} from ${stack}`}
+                                className="px-3 text-xs"
+                                onClick={() => setConfirmRemoveInstallation(null)}
+                                variant="ghost"
+                              >
+                                Cancel
+                              </Button>
+                            </span>
+                          ) : (
+                            <Button
+                              aria-label={`Remove ${item.name} from ${stack}`}
+                              className="w-11 px-0"
+                              data-catalog-action="remove"
+                              data-item={item.id}
+                              data-stack={stack}
+                              disabled={Boolean(pendingInstallation)}
+                              onClick={() => setConfirmRemoveInstallation(key)}
+                              title={`Remove from ${stack}`}
+                              variant="ghost"
+                            >
+                              <Trash2 aria-hidden="true" className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : null}
+                <div className="mt-auto flex flex-wrap gap-2">
+                  <Button
+                    className="px-3 text-xs sm:text-sm"
+                    data-catalog-action="install"
+                    data-item={item.id}
+                    disabled={Boolean(pendingInstallation)}
+                    onClick={() => void onOpenInstall(item)}
+                  >
+                    Install
+                  </Button>
                 </div>
               </CardContent>
             </Card>
@@ -336,6 +402,41 @@ export function CatalogPage() {
                 <p className="text-sm text-danger">{installModal.error}</p>
               ) : (
                 <>
+                  <label className="block space-y-1">
+                    <span className="text-xs uppercase tracking-wide text-muted-foreground">Target stack</span>
+                    <select
+                      className="min-h-11 w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      data-install-target
+                      onChange={(event) =>
+                        setInstallModal((current) => ({ ...current, targetStack: event.target.value }))
+                      }
+                      value={installModal.targetStack}
+                    >
+                      <option value="new">Create new stack</option>
+                      {availableStacks.map((stack) => {
+                        const alreadyInstalled = modalItem?.installedStacks.includes(stack) ?? false;
+                        return (
+                          <option disabled={alreadyInstalled} key={stack} value={stack}>
+                            {stack}{alreadyInstalled ? " (installed)" : ""}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </label>
+                  {installModal.targetStack === "new" ? (
+                    <label className="block space-y-1">
+                      <span className="text-xs uppercase tracking-wide text-muted-foreground">New stack name</span>
+                      <input
+                        className="min-h-11 w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:text-sm"
+                        data-install-stack-name
+                        onChange={(event) =>
+                          setInstallModal((current) => ({ ...current, newStackName: event.target.value }))
+                        }
+                        spellCheck={false}
+                        value={installModal.newStackName}
+                      />
+                    </label>
+                  ) : null}
                   {installModal.fields.length ? (
                     installModal.fields.map((field) => (
                       <label className="block space-y-1" key={field.key}>
@@ -363,7 +464,10 @@ export function CatalogPage() {
                     </p>
                   ) : null}
                   <Button
-                    disabled={installModal.saving}
+                    disabled={
+                      installModal.saving
+                      || (installModal.targetStack === "new" && !installModal.newStackName.trim())
+                    }
                     id="v2-catalog-install-submit"
                     onClick={() => void submitInstall()}
                   >

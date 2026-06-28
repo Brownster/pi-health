@@ -318,12 +318,12 @@ def api_catalog_get(item_id):
 @login_required
 def api_catalog_status():
     """Get list of installed services from compose file."""
-    services = _list_stack_services()
-    service_map = {}
-    for svc in services:
-        service_map.setdefault(svc, [])
-        service_map[svc].extend(_find_service_stacks(svc))
-    return jsonify({'services': sorted(set(services)), 'service_stacks': service_map})
+    services = sorted(set(_list_stack_services()))
+    service_map = {
+        service: sorted(set(_find_service_stacks(service)))
+        for service in services
+    }
+    return jsonify({'services': services, 'service_stacks': service_map})
 
 
 @catalog_manager.route('/api/catalog/install', methods=['POST'])

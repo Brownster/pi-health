@@ -961,6 +961,7 @@ def install_v2_catalog_api_mocks():
         items = [
             {"id": "jellyfin", "name": "Jellyfin", "description": "Media server", "requires": []},
             {"id": "sonarr", "name": "Sonarr", "description": "TV library", "requires": ["vpn"]},
+            {"id": "vpn", "name": "VPN", "description": "Network provider", "requires": []},
         ]
 
         def _handler(route):
@@ -972,13 +973,28 @@ def install_v2_catalog_api_mocks():
                 _json_fulfill(route, {"items": items})
                 return
             if path == "/api/catalog/status" and method == "GET":
-                _json_fulfill(route, {"services": ["jellyfin"], "service_stacks": {}})
+                _json_fulfill(
+                    route,
+                    {
+                        "services": ["jellyfin", "vpn"],
+                        "service_stacks": {
+                            "jellyfin": ["family", "media"],
+                            "vpn": ["media"],
+                        },
+                    },
+                )
+                return
+            if path == "/api/stacks" and method == "GET":
+                _json_fulfill(route, {"stacks": [{"name": "family"}, {"name": "media"}]})
                 return
             if path == "/api/catalog/sonarr" and method == "GET":
                 _json_fulfill(
                     route,
                     {"item": {"id": "sonarr", "fields": [{"key": "PORT", "label": "Web UI port", "default": "8989", "required": True}]}},
                 )
+                return
+            if path == "/api/catalog/jellyfin" and method == "GET":
+                _json_fulfill(route, {"item": {"id": "jellyfin", "fields": []}})
                 return
             if path == "/api/catalog/install" and method == "POST":
                 _json_fulfill(
