@@ -1,0 +1,138 @@
+# Legacy v1 UI Removal — Plan
+
+Date: 2026-06-29
+Status: Draft — do not start until the entry gate passes
+Owner: Pi-Health / LimeOS maintainers
+Predecessors: Phase 3 signoff (`Docs/UI_PHASE3_RELEASE_SIGNOFF.md`), v2 hardening
+(`Docs/UI_V2_HARDENING_TICKETS.md`), v2 redesign (`Docs/UI_V2_NAS_OS_REDESIGN_PLAN.md`)
+
+## Objective
+Commit fully to the v2 (LimeOS / nasOS) React UI: make v2 the only UI, then delete the legacy
+v1 static pages, their ES modules, the legacy theme system, and the `legacy|hybrid|v2` routing
+machinery — without breaking authentication, the backend API, or the test suite.
+
+## Entry Gate (must all be true before LR-001 starts)
+1. **v2 confirmed stable in production** on the Pi over a sustained window (this removes the
+   instant rollback path — see Rollback). Current state: full v2 deployed to Holly's Pi for
+   validation with legacy retained as rollback.
+2. **ARCH-001 complete** (oversized-module split) — avoids reshuffling legacy and v2 code in the
+   same churn.
+3. Working tree clean; full `tox -e all` green on `main`.
+
+## Scope
+
+### In scope (delete)
+1. Legacy static pages: all `static/*.html` **except `login.html`** (16 pages → remove 15).
+2. Legacy ES modules: `static/js/**` — `api.js`, `nav.js`, `theme.js`, `lib/*`, `pages/*`
+   **except `pages/login.js`** and anything `login.html` needs.
+3. Legacy theme system: `themes/`, `/api/theme` banner serving, `THEME*` config in `app.py`,
+   `test_theme.py` — **only if** nothing shared still needs it (see Risks: theme + readiness probe).
+4. Routing machinery in `app.py`: `serve_ui_page`, `should_redirect_legacy_page_to_v2`,
+   `get_ui_mode`/`normalize_ui_mode`/`get_v2_enabled_pages`/`parse_v2_pages`, the
+   `UI_MODE_*`/`PIHEALTH_UI_MODE`/`PIHEALTH_UI_V2_PAGES` concept, and the per-page
+   `@app.route('/<page>.html')` handlers.
+5. Legacy/mode-matrix tests (migrate or delete — see LR-005).
+
+### Explicitly OUT of scope (keep)
+1. **`login.html` + `login.js`** — the v2 SPA redirects unauthenticated users to `/login.html`
+   (`frontend/src/components/auth/protected-route.tsx`, `frontend/src/lib/auth.ts`). Removing it
+   breaks v2 login. (Replacing it with an in-SPA login route is a separate, optional follow-up.)
+2. Backend APIs and blueprints (containers/stacks/catalog/storage/disks/network/etc.) — v2 runs
+   on them unchanged.
+3. The v2 build/publish pipeline and `static/v2/` output.
+
+## Legacy surface (audited 2026-06-29)
+- Pages (16): apps, containers, disks, index, **login**, mounts, network, plugins, pools,
+  settings, shares, stacks, storage, system, tailscale, tools.
+- JS modules (26): `api.js`, `nav.js`, `theme.js` + `lib/{auth,dom,format,http,layout,notify,
+  session,states}.js` + `pages/{15 pages}.js`.
+- No 1:1 v2 route for three legacy pages — handled by v2 elsewhere, so their removal is clean:
+  - `tools.html` → file management is the Filebrowser **catalog app**; CopyParty de-scoped.
+  - `tailscale.html` → folded into `/v2/network`.
+  - `storage.html` → split into `/v2/plugins` + `/v2/pools`.
+
+## Tickets
+
+| ID | Title | Depends | Status |
+|---|---|---|---|
+| LR-001 | Make v2 the default + only UI mode | gate | Pending |
+| LR-002 | Redirect legacy URLs to v2 equivalents (compat shims) | LR-001 | Pending |
+| LR-003 | Decouple shared deps (login.html, /api/theme readiness probe) | LR-001 | Pending |
+| LR-004 | Delete legacy static pages + ES modules | LR-002, LR-003 | Pending |
+| LR-005 | Migrate/retire legacy + mode-matrix tests | LR-004 | Pending |
+| LR-006 | Remove legacy theme system (conditional) | LR-003 | Pending |
+| LR-007 | Docs + config cleanup, signoff | LR-001..LR-006 | Pending |
+
+### LR-001 — Make v2 the default and only UI mode
+- Flip `get_ui_mode` default from `UI_MODE_LEGACY` to v2; then collapse the mode concept so the
+  app always serves v2 (remove `hybrid`/`legacy` branches, `PIHEALTH_UI_MODE`,
+  `PIHEALTH_UI_V2_PAGES`).
+- `/` serves the v2 SPA; `/v2/*` continues to work (or fold `/v2` into root — decide in LR-002).
+- Acceptance: with no env vars set, the app serves v2 at `/`; no path serves a legacy page.
+
+### LR-002 — Legacy URL → v2 redirect shims
+- Keep thin 301/302 redirects from `'/<page>.html'` to the v2 route (`/v2/<page>` or `/<page>`)
+  for bookmarks/links, mapping the three special cases (tools→apps or a note, tailscale→network,
+  storage→plugins). Decide whether v2 lives under `/v2/*` or is promoted to root `/*`.
+- Acceptance: old bookmarks land on the right v2 page; no 404s for previously-valid routes.
+
+### LR-003 — Decouple shared dependencies
+- **`login.html`**: confirm it has no dependency on the about-to-be-deleted `static/js/lib/*`
+  it can't keep; vendor what it needs so login survives module deletion. (Login is otherwise
+  untouched.)
+- **e2e readiness probe**: `tests/e2e/conftest.py::_v2_wait_for_server_ready` polls `/api/theme`.
+  Repoint it to a stable non-theme endpoint (e.g. `/api/auth/check` or a `/healthz`) **before**
+  LR-006 removes `/api/theme`.
+- Acceptance: login works; e2e readiness no longer depends on the theme endpoint.
+
+### LR-004 — Delete legacy static pages + ES modules
+- Remove the 15 legacy `*.html` (keep `login.html`) and all `static/js/**` except login's needs.
+- Remove the per-page Flask route handlers and `serve_ui_page`/redirect helpers (or reduce to the
+  LR-002 shims).
+- Acceptance: repo contains no legacy page/module; `npm run build:publish` + app boot + v2 e2e
+  still green.
+
+### LR-005 — Migrate/retire legacy + mode-matrix tests
+- Delete legacy-only page suites: `test_login_page` (re-point if login kept), `test_containers_page`,
+  `test_mounts`, `test_network_page`, `test_plugins_page`, `test_shares`, `test_stacks_page`,
+  `test_tailscale_page`, `test_system_metrics`, `test_ui_workflows`, `test_tools_page`,
+  `test_pools`, `test_disks`, `test_phase0_release_signoff`, `test_mobile_viewport_smoke`
+  (port any still-relevant mobile/overflow assertions to the v2 parity suites).
+- Simplify mode-matrix suites to v2-only: `test_v2_foundation`, `test_v2_phase3_rollout`,
+  `test_v2_hybrid_rollout` (the `legacy|hybrid` parametrization and rollback assertions go away).
+- Trim shared `conftest` fixtures (`ui_mode`, `mode_server`, `v2_server_factory` mode args).
+- Acceptance: `tox -e all` green with no references to removed pages/modes; coverage for every v2
+  route preserved.
+
+### LR-006 — Remove legacy theme system (conditional)
+- If nothing shared still needs it after LR-003, remove `themes/`, `/api/theme`,
+  `THEME*`/`load_theme_config` in `app.py`, `static/js/theme.js`, and `test_theme.py`.
+- If `login.html` (or anything kept) still consumes a theme asset, keep the minimum and document why.
+- Acceptance: app boots without the theme system; no dead `/api/theme` references.
+
+### LR-007 — Docs, config, signoff
+- Update README/USER_GUIDE/setup.sh and `/etc/pi-health.env` guidance to drop `PIHEALTH_UI_MODE`/
+  `PIHEALTH_UI_V2_PAGES`; note v2-only.
+- Write `Docs/UI_V2_LEGACY_REMOVAL_SIGNOFF.md` with the validation matrix and the rollback note.
+- Satisfies the automation-sprint entry gate "Flask/v1 legacy UI removed."
+
+## Rollback
+Removing legacy **deletes the instant `PIHEALTH_UI_MODE=legacy` rollback**. After this work the
+only rollback is git revert / redeploy a prior tag. Therefore:
+- Tag the pre-removal commit (e.g. `pre-legacy-removal`) and keep the Pi backup tarball.
+- Do LR-001..LR-007 on a `feature/legacy-removal` branch; merge only after the entry gate + a full
+  green `tox -e all` + a manual v2 smoke on the Pi.
+
+## Risks
+1. **Login coupling** — biggest trap; `login.html` must keep working after module deletion (LR-003).
+2. **`/api/theme` readiness probe** — silently breaks e2e startup if removed before LR-003 repoints it.
+3. **Lost mobile/overflow coverage** — the Phase 0 mobile-smoke + legacy page suites contain
+   assertions not all duplicated in v2 parity suites; port before deleting (LR-005).
+4. **`/v2/*` vs `/*`** — decide early (LR-002) whether to promote v2 to root; affects every redirect
+   and the SPA base path/asset URls.
+5. **Bookmarks/integrations** hitting `*.html` — mitigated by LR-002 shims.
+
+## Open decisions (for kickoff)
+1. Promote v2 to root `/` or keep it under `/v2/*` with `/` serving the SPA?
+2. Keep `login.html` as-is, or build an in-SPA `/login` route (larger, lets us delete login.html too)?
+3. Keep legacy-URL redirect shims permanently, or drop them after a deprecation window?
