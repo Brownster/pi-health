@@ -1246,9 +1246,10 @@ class TestAppsPage:
     """Test apps page accessibility."""
 
     def test_apps_page_loads(self, authenticated_client):
-        """Test apps page loads successfully."""
-        response = authenticated_client.get('/apps.html')
-        assert response.status_code == 200
+        """Test the legacy apps URL redirects to v2."""
+        response = authenticated_client.get('/apps.html', follow_redirects=False)
+        assert response.status_code == 302
+        assert response.headers['Location'] == '/v2/apps'
 
 
 if __name__ == '__main__':

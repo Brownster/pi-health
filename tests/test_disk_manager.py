@@ -700,9 +700,10 @@ class TestDisksPage:
     """Test disks page accessibility."""
 
     def test_disks_page_loads(self, authenticated_client):
-        """Test disks page loads successfully."""
-        response = authenticated_client.get('/disks.html')
-        assert response.status_code == 200
+        """Test the legacy disks URL redirects to v2."""
+        response = authenticated_client.get('/disks.html', follow_redirects=False)
+        assert response.status_code == 302
+        assert response.headers['Location'] == '/v2/disks'
 
 
 class TestCatalogMediaPathsIntegration:

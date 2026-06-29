@@ -1,9 +1,26 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Activity, FileText, Loader2, RefreshCw, TriangleAlert, Wifi } from "lucide-react";
+import {
+  Activity,
+  Loader2,
+  RefreshCw,
+  TriangleAlert,
+  Wifi,
+} from "lucide-react";
 
-import { StatusBadge, type BadgeProps } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/ui/badge";
+import {
+  ACTION_META,
+  ContainerList,
+  type NetworkRateMap,
+} from "@/components/containers/container-list";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { ModalOverlay } from "@/components/ui/modal-overlay";
 import { PageHeader } from "@/components/ui/page-header";
 import {
@@ -17,12 +34,11 @@ import {
   fetchContainerStats,
   fetchContainers,
   filterContainers,
-  getContainerWebUrl,
   runContainerAction,
   runContainerNetworkTest,
   runHostNetworkTest,
 } from "@/lib/containers";
-import { formatBytes, formatClockTime, formatPercent } from "@/lib/format";
+import { formatClockTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 const POLL_INTERVAL_MS = 10_000;
@@ -31,62 +47,12 @@ const FILTER_ITEMS: Array<{ key: ContainerFilter; label: string }> = [
   { key: "running", label: "Running" },
   { key: "stopped", label: "Stopped" },
 ];
-const ACTION_ORDER: ContainerAction[] = [
-  "start",
-  "stop",
-  "restart",
-  "check_update",
-  "update",
-];
-
-const ACTION_META: Record<
-  ContainerAction,
-  {
-    label: string;
-    pendingLabel: string;
-    className: string;
-  }
-> = {
-  start: {
-    label: "Start",
-    pendingLabel: "Starting...",
-    className: "border-success/30 bg-success/10 text-success hover:bg-success/15",
-  },
-  stop: {
-    label: "Stop",
-    pendingLabel: "Stopping...",
-    className: "border-danger/30 bg-danger/10 text-danger hover:bg-danger/15",
-  },
-  restart: {
-    label: "Restart",
-    pendingLabel: "Restarting...",
-    className: "border-warning/30 bg-warning/10 text-warning hover:bg-warning/15",
-  },
-  check_update: {
-    label: "Check Update",
-    pendingLabel: "Checking...",
-    className: "border-border text-muted-foreground hover:bg-muted",
-  },
-  update: {
-    label: "Update",
-    pendingLabel: "Updating...",
-    className: "border-info/30 bg-info/10 text-info hover:bg-info/15",
-  },
-};
-
 type AsyncStatus = "idle" | "loading" | "ready" | "error";
 
 type ActionNotice = {
   message: string;
   tone: "info" | "success" | "error";
 };
-
-interface NetworkRate {
-  rxRate: number | null;
-  txRate: number | null;
-}
-
-type NetworkRateMap = Record<string, NetworkRate>;
 
 interface LogsModalState {
   open: boolean;
@@ -113,46 +79,6 @@ interface HostNetworkPanelState {
   error: string | null;
 }
 
-function getStatusTone(status: string): BadgeProps["tone"] {
-  switch (status) {
-    case "running":
-      return "success";
-    case "stopped":
-    case "exited":
-      return "danger";
-    case "unavailable":
-      return "warning";
-    default:
-      return "neutral";
-  }
-}
-
-function getMetricTone(percent: number | null): string {
-  if (percent === null) {
-    return "text-muted-foreground";
-  }
-  if (percent < 50) {
-    return "text-success";
-  }
-  if (percent < 80) {
-    return "text-warning";
-  }
-  return "text-danger";
-}
-
-function getMetricBarTone(percent: number | null): string {
-  if (percent === null) {
-    return "bg-dim";
-  }
-  if (percent < 50) {
-    return "bg-success";
-  }
-  if (percent < 80) {
-    return "bg-warning";
-  }
-  return "bg-danger";
-}
-
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message) {
     return error.message;
@@ -168,33 +94,6 @@ function getNoticeToneClass(tone: ActionNotice["tone"]): string {
     return "border-danger/30 text-danger";
   }
   return "border-info/30 text-info";
-}
-
-function isUnavailableStatus(status: string): boolean {
-  return status === "unavailable" || status === "error";
-}
-
-function isActionDisabled(
-  container: ContainerSummary,
-  action: ContainerAction,
-  rowBusy: boolean,
-): boolean {
-  if (rowBusy) {
-    return true;
-  }
-
-  if (isUnavailableStatus(container.status)) {
-    return true;
-  }
-
-  if (action === "start") {
-    return container.status === "running";
-  }
-  if (action === "stop") {
-    return container.status === "stopped" || container.status === "exited";
-  }
-
-  return false;
 }
 
 function getActionSuccessMessage(
@@ -215,19 +114,17 @@ function getActionSuccessMessage(
     return result.status || `${containerName}: update triggered`;
   }
 
-  const suffix = action === "start" ? "started" : action === "stop" ? "stopped" : "restarted";
+  const suffix =
+    action === "start"
+      ? "started"
+      : action === "stop"
+        ? "stopped"
+        : "restarted";
   return result.status || `${containerName} ${suffix} successfully`;
 }
 
 function formatNetworkValue(value: string | null): string {
   return value && value.trim().length > 0 ? value : "Unavailable";
-}
-
-function formatRatePerSecond(value: number | null): string {
-  if (value === null) {
-    return "—";
-  }
-  return `${formatBytes(value)}/s`;
 }
 
 function getNetworkStatus(
@@ -248,382 +145,6 @@ function getNetworkStatus(
     : { label: "Failed", className: "text-amber-300" };
 }
 
-function NetworkCell({ rate, rx, tx }: { rate?: NetworkRate; rx: number | null; tx: number | null }) {
-  const hasRate = Boolean(rate && (rate.rxRate !== null || rate.txRate !== null));
-
-  if (hasRate) {
-    return (
-      <div className="space-y-1 text-xs">
-        <p className="text-sky-300">
-          <span aria-hidden="true">↓ </span>
-          <span className="sr-only">Download rate </span>
-          {formatRatePerSecond(rate?.rxRate ?? null)}
-        </p>
-        <p className="text-emerald-300">
-          <span aria-hidden="true">↑ </span>
-          <span className="sr-only">Upload rate </span>
-          {formatRatePerSecond(rate?.txRate ?? null)}
-        </p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-1 text-xs">
-      <p className="text-sky-300">
-        <span aria-hidden="true">↓ </span>
-        <span className="sr-only">Received </span>
-        {formatBytes(rx)}
-      </p>
-      <p className="text-emerald-300">
-        <span aria-hidden="true">↑ </span>
-        <span className="sr-only">Sent </span>
-        {formatBytes(tx)}
-      </p>
-    </div>
-  );
-}
-
-function MetricCell({
-  percent,
-  detail,
-}: {
-  percent: number | null;
-  detail?: string;
-}) {
-  const clampedWidth = percent === null ? 0 : Math.max(0, Math.min(percent, 100));
-
-  return (
-    <div className="min-w-0 space-y-1">
-      <p className={cn("text-sm font-medium", getMetricTone(percent))}>{formatPercent(percent)}</p>
-      {detail ? <p className="text-xs text-muted-foreground">{detail}</p> : null}
-      <div className="h-1.5 rounded-full bg-muted">
-        <div
-          className={cn("h-1.5 rounded-full transition-[width] duration-300", getMetricBarTone(percent))}
-          style={{ width: `${clampedWidth}%` }}
-        />
-      </div>
-    </div>
-  );
-}
-
-function ContainerActionControls({
-  container,
-  pendingAction,
-  align,
-  onAction,
-}: {
-  container: ContainerSummary;
-  pendingAction?: ContainerAction;
-  align: "start" | "end";
-  onAction: (container: ContainerSummary, action: ContainerAction) => void;
-}) {
-  const rowBusy = Boolean(pendingAction);
-
-  return (
-    <div className={cn("flex flex-wrap gap-2", align === "end" ? "justify-end" : "justify-start")}>
-      {ACTION_ORDER.map((action) => {
-        const meta = ACTION_META[action];
-        const isCurrentAction = pendingAction === action;
-        const disabled = isActionDisabled(container, action, rowBusy);
-
-        return (
-          <Button
-            aria-label={`${meta.label} ${container.name}`}
-            className={cn("gap-1.5 px-2.5 text-xs sm:px-3 sm:text-sm", meta.className)}
-            data-action={action}
-            data-container-id={container.id}
-            disabled={disabled}
-            key={`${container.id}-${action}`}
-            onClick={() => onAction(container, action)}
-            size="sm"
-            variant="outline"
-          >
-            {isCurrentAction ? <Loader2 aria-hidden="true" className="h-3.5 w-3.5 animate-spin" /> : null}
-            {isCurrentAction ? meta.pendingLabel : meta.label}
-          </Button>
-        );
-      })}
-    </div>
-  );
-}
-
-function ContainerDiagnosticsControls({
-  container,
-  rowBusy,
-  align,
-  onOpenLogs,
-  onOpenNetworkTest,
-}: {
-  container: ContainerSummary;
-  rowBusy: boolean;
-  align: "start" | "end";
-  onOpenLogs: (container: ContainerSummary) => void;
-  onOpenNetworkTest: (container: ContainerSummary) => void;
-}) {
-  const disabled = rowBusy || isUnavailableStatus(container.status);
-
-  return (
-    <div className={cn("flex flex-wrap gap-2", align === "end" ? "justify-end" : "justify-start")}>
-      <Button
-        aria-label={`Logs ${container.name}`}
-        className="gap-1.5 text-xs sm:text-sm"
-        data-container-id={container.id}
-        data-diagnostic-action="logs"
-        disabled={disabled}
-        onClick={() => onOpenLogs(container)}
-        size="sm"
-        variant="outline"
-      >
-        <FileText aria-hidden="true" className="h-3.5 w-3.5" />
-        Logs
-      </Button>
-      <Button
-        aria-label={`Network Test ${container.name}`}
-        className="gap-1.5 text-xs sm:text-sm"
-        data-container-id={container.id}
-        data-diagnostic-action="network-test"
-        disabled={disabled}
-        onClick={() => onOpenNetworkTest(container)}
-        size="sm"
-        variant="outline"
-      >
-        <Wifi aria-hidden="true" className="h-3.5 w-3.5" />
-        Network Test
-      </Button>
-    </div>
-  );
-}
-
-function DesktopContainerTable({
-  containers,
-  networkRates,
-  pendingActions,
-  onAction,
-  onOpenLogs,
-  onOpenNetworkTest,
-}: {
-  containers: ContainerSummary[];
-  networkRates: NetworkRateMap;
-  pendingActions: Record<string, ContainerAction>;
-  onAction: (container: ContainerSummary, action: ContainerAction) => void;
-  onOpenLogs: (container: ContainerSummary) => void;
-  onOpenNetworkTest: (container: ContainerSummary) => void;
-}) {
-  return (
-    <div className="hidden xl:block">
-      <div className="overflow-x-auto rounded-lg border border-border bg-card">
-        <table className="min-w-full divide-y divide-divider text-sm">
-          <thead className="bg-[#0e131a]">
-            <tr>
-              <th className="px-4 py-3 text-left font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-dim">
-                Container
-              </th>
-              <th className="px-4 py-3 text-left font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-dim">
-                Image
-              </th>
-              <th className="px-4 py-3 text-left font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-dim">
-                Status
-              </th>
-              <th className="px-4 py-3 text-left font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-dim">
-                CPU
-              </th>
-              <th className="px-4 py-3 text-left font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-dim">
-                Memory
-              </th>
-              <th className="px-4 py-3 text-left font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-dim">
-                Network
-              </th>
-              <th className="px-4 py-3 text-left font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-dim">
-                Web UI
-              </th>
-              <th className="px-4 py-3 text-right font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-dim">
-                Actions
-              </th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-divider">
-            {containers.map((container) => {
-              const webUrl = getContainerWebUrl(container);
-              const rowBusy = Boolean(pendingActions[container.id]);
-
-              return (
-                <tr key={container.id}>
-                  <td className="px-4 py-3">
-                    <div className="flex min-w-0 items-center gap-2">
-                      <span className="truncate font-medium">{container.name}</span>
-                      {container.update_available ? (
-                        <span
-                          aria-label="Update available"
-                          className="text-amber-300"
-                          role="img"
-                          title="Update available"
-                        >
-                          ↻
-                        </span>
-                      ) : null}
-                    </div>
-                  </td>
-                  <td className="max-w-[20rem] px-4 py-3 text-muted-foreground">
-                    <span className="line-clamp-2 break-all">{container.image}</span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <StatusBadge label={container.status} tone={getStatusTone(container.status)} />
-                  </td>
-                  <td className="px-4 py-3">
-                    <MetricCell percent={container.cpu_percent} />
-                  </td>
-                  <td className="px-4 py-3">
-                    <MetricCell
-                      detail={`${formatBytes(container.memory_used)} / ${formatBytes(container.memory_limit)}`}
-                      percent={container.memory_percent}
-                    />
-                  </td>
-                  <td className="px-4 py-3">
-                    <NetworkCell
-                      rate={networkRates[container.id]}
-                      rx={container.net_rx}
-                      tx={container.net_tx}
-                    />
-                  </td>
-                  <td className="px-4 py-3">
-                    {webUrl ? (
-                      <a
-                        aria-label={`Open ${container.name} web UI in a new tab`}
-                        className="inline-flex min-h-11 items-center text-sm text-primary underline-offset-2 hover:underline"
-                        href={webUrl}
-                        rel="noopener noreferrer"
-                        target="_blank"
-                      >
-                        Open
-                      </a>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">N/A</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <div className="space-y-2">
-                      <ContainerActionControls
-                        align="end"
-                        container={container}
-                        onAction={onAction}
-                        pendingAction={pendingActions[container.id]}
-                      />
-                      <ContainerDiagnosticsControls
-                        align="end"
-                        container={container}
-                        onOpenLogs={onOpenLogs}
-                        onOpenNetworkTest={onOpenNetworkTest}
-                        rowBusy={rowBusy}
-                      />
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-function MobileContainerCards({
-  containers,
-  networkRates,
-  pendingActions,
-  onAction,
-  onOpenLogs,
-  onOpenNetworkTest,
-}: {
-  containers: ContainerSummary[];
-  networkRates: NetworkRateMap;
-  pendingActions: Record<string, ContainerAction>;
-  onAction: (container: ContainerSummary, action: ContainerAction) => void;
-  onOpenLogs: (container: ContainerSummary) => void;
-  onOpenNetworkTest: (container: ContainerSummary) => void;
-}) {
-  return (
-    <div className="grid gap-3 xl:hidden">
-      {containers.map((container) => {
-        const webUrl = getContainerWebUrl(container);
-        const rowBusy = Boolean(pendingActions[container.id]);
-
-        return (
-          <Card key={container.id} className="overflow-hidden">
-            <CardContent className="space-y-3 p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold">{container.name}</p>
-                  <p className="line-clamp-2 break-all text-xs text-muted-foreground">{container.image}</p>
-                </div>
-                <StatusBadge
-                  className="shrink-0"
-                  label={container.status}
-                  tone={getStatusTone(container.status)}
-                />
-              </div>
-
-              <div className="grid gap-2 text-xs sm:grid-cols-2">
-                <div className="space-y-1 rounded-md border border-border bg-muted/20 p-2">
-                  <p className="font-mono text-[10px] uppercase tracking-[0.1em] text-dim">CPU</p>
-                  <MetricCell percent={container.cpu_percent} />
-                </div>
-                <div className="space-y-1 rounded-md border border-border bg-muted/20 p-2">
-                  <p className="font-mono text-[10px] uppercase tracking-[0.1em] text-dim">Memory</p>
-                  <MetricCell
-                    detail={`${formatBytes(container.memory_used)} / ${formatBytes(container.memory_limit)}`}
-                    percent={container.memory_percent}
-                  />
-                </div>
-              </div>
-
-              <div className="grid gap-1 rounded-md border border-border bg-muted/20 p-2 text-xs">
-                <p className="font-mono text-[10px] uppercase tracking-[0.1em] text-dim">Network</p>
-                <NetworkCell
-                  rate={networkRates[container.id]}
-                  rx={container.net_rx}
-                  tx={container.net_tx}
-                />
-              </div>
-
-              <div className="grid gap-2 sm:flex sm:items-center sm:justify-between">
-                {webUrl ? (
-                  <a
-                    aria-label={`Open ${container.name} web UI in a new tab`}
-                    className="inline-flex min-h-11 items-center rounded-md border border-border px-3 text-sm text-primary underline-offset-2 hover:bg-muted hover:underline"
-                    href={webUrl}
-                    rel="noopener noreferrer"
-                    target="_blank"
-                  >
-                    Open Web UI
-                  </a>
-                ) : (
-                  <span className="text-xs text-muted-foreground">Web UI unavailable</span>
-                )}
-              </div>
-
-              <ContainerActionControls
-                align="start"
-                container={container}
-                onAction={onAction}
-                pendingAction={pendingActions[container.id]}
-              />
-              <ContainerDiagnosticsControls
-                align="start"
-                container={container}
-                onOpenLogs={onOpenLogs}
-                onOpenNetworkTest={onOpenNetworkTest}
-                rowBusy={rowBusy}
-              />
-            </CardContent>
-          </Card>
-        );
-      })}
-    </div>
-  );
-}
-
 export function ContainersPage() {
   const [containers, setContainers] = useState<ContainerSummary[]>([]);
   const [networkRates, setNetworkRates] = useState<NetworkRateMap>({});
@@ -633,7 +154,9 @@ export function ContainersPage() {
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState("Never");
   const [actionNotice, setActionNotice] = useState<ActionNotice | null>(null);
-  const [pendingActions, setPendingActions] = useState<Record<string, ContainerAction>>({});
+  const [pendingActions, setPendingActions] = useState<
+    Record<string, ContainerAction>
+  >({});
   const [logsModal, setLogsModal] = useState<LogsModalState>({
     open: false,
     status: "idle",
@@ -642,24 +165,28 @@ export function ContainersPage() {
     logs: "",
     error: null,
   });
-  const [containerNetworkModal, setContainerNetworkModal] = useState<ContainerNetworkModalState>({
-    open: false,
-    status: "idle",
-    containerId: null,
-    containerName: "",
-    result: null,
-    error: null,
-  });
-  const [hostNetworkPanel, setHostNetworkPanel] = useState<HostNetworkPanelState>({
-    visible: false,
-    status: "idle",
-    result: null,
-    error: null,
-  });
+  const [containerNetworkModal, setContainerNetworkModal] =
+    useState<ContainerNetworkModalState>({
+      open: false,
+      status: "idle",
+      containerId: null,
+      containerName: "",
+      result: null,
+      error: null,
+    });
+  const [hostNetworkPanel, setHostNetworkPanel] =
+    useState<HostNetworkPanelState>({
+      visible: false,
+      status: "idle",
+      result: null,
+      error: null,
+    });
   const isMountedRef = useRef(true);
   const pendingActionsRef = useRef<Record<string, ContainerAction>>({});
   const containersRef = useRef<ContainerSummary[]>([]);
-  const previousNetworkStatsRef = useRef<Map<string, { rx: number; tx: number }>>(new Map());
+  const previousNetworkStatsRef = useRef<
+    Map<string, { rx: number; tx: number }>
+  >(new Map());
   const lastStatsFetchRef = useRef<number | null>(null);
   const statsInFlightRef = useRef(false);
 
@@ -668,21 +195,26 @@ export function ContainersPage() {
     setContainers(next);
   }, []);
 
-  const setPendingAction = useCallback((containerId: string, action: ContainerAction | null) => {
-    setPendingActions((current) => {
-      const next = { ...current };
-      if (action) {
-        next[containerId] = action;
-      } else {
-        delete next[containerId];
-      }
-      pendingActionsRef.current = next;
-      return next;
-    });
-  }, []);
+  const setPendingAction = useCallback(
+    (containerId: string, action: ContainerAction | null) => {
+      setPendingActions((current) => {
+        const next = { ...current };
+        if (action) {
+          next[containerId] = action;
+        } else {
+          delete next[containerId];
+        }
+        pendingActionsRef.current = next;
+        return next;
+      });
+    },
+    [],
+  );
 
   const loadContainers = useCallback(
-    async (reason: "initial" | "manual" | "poll" | "action"): Promise<ContainerSummary[] | null> => {
+    async (
+      reason: "initial" | "manual" | "poll" | "action",
+    ): Promise<ContainerSummary[] | null> => {
       if (reason === "initial") {
         setIsLoading(true);
       }
@@ -697,7 +229,9 @@ export function ContainersPage() {
         if (!isMountedRef.current) {
           return null;
         }
-        const previousById = new Map(containersRef.current.map((item) => [item.id, item]));
+        const previousById = new Map(
+          containersRef.current.map((item) => [item.id, item]),
+        );
         const merged = nextContainers.map((container) => {
           const previous = previousById.get(container.id);
           // Only carry live metrics forward for containers that are still running. A
@@ -899,43 +433,46 @@ export function ContainersPage() {
     }
   }, []);
 
-  const onOpenContainerNetworkTest = useCallback(async (container: ContainerSummary) => {
-    setContainerNetworkModal({
-      open: true,
-      status: "loading",
-      containerId: container.id,
-      containerName: container.name,
-      result: null,
-      error: null,
-    });
-
-    try {
-      const result = await runContainerNetworkTest(container.id);
-      if (!isMountedRef.current) {
-        return;
-      }
+  const onOpenContainerNetworkTest = useCallback(
+    async (container: ContainerSummary) => {
       setContainerNetworkModal({
         open: true,
-        status: "ready",
-        containerId: container.id,
-        containerName: result.container_name || container.name,
-        result,
-        error: null,
-      });
-    } catch (caughtError) {
-      if (!isMountedRef.current) {
-        return;
-      }
-      setContainerNetworkModal({
-        open: true,
-        status: "error",
+        status: "loading",
         containerId: container.id,
         containerName: container.name,
         result: null,
-        error: getErrorMessage(caughtError),
+        error: null,
       });
-    }
-  }, []);
+
+      try {
+        const result = await runContainerNetworkTest(container.id);
+        if (!isMountedRef.current) {
+          return;
+        }
+        setContainerNetworkModal({
+          open: true,
+          status: "ready",
+          containerId: container.id,
+          containerName: result.container_name || container.name,
+          result,
+          error: null,
+        });
+      } catch (caughtError) {
+        if (!isMountedRef.current) {
+          return;
+        }
+        setContainerNetworkModal({
+          open: true,
+          status: "error",
+          containerId: container.id,
+          containerName: container.name,
+          result: null,
+          error: getErrorMessage(caughtError),
+        });
+      }
+    },
+    [],
+  );
 
   const runHostDiagnostics = useCallback(async () => {
     setHostNetworkPanel((current) => ({
@@ -1020,7 +557,9 @@ export function ContainersPage() {
   );
   const containerNetworkStatus = getNetworkStatus(
     containerNetworkModal.status,
-    containerNetworkModal.result ? containerNetworkModal.result.ping_success : null,
+    containerNetworkModal.result
+      ? containerNetworkModal.result.ping_success
+      : null,
   );
 
   return (
@@ -1065,7 +604,11 @@ export function ContainersPage() {
         title="docker_containers"
       />
 
-      <div aria-label="Container filters" className="flex flex-wrap items-center gap-2" role="group">
+      <div
+        aria-label="Container filters"
+        className="flex flex-wrap items-center gap-2"
+        role="group"
+      >
         {FILTER_ITEMS.map((item) => (
           <Button
             aria-pressed={filter === item.key}
@@ -1084,12 +627,21 @@ export function ContainersPage() {
           <CardHeader className="space-y-3">
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div>
-                <CardTitle className="text-base sm:text-lg">Host Network Diagnostics</CardTitle>
-                <CardDescription>Runs a direct host probe against public network endpoints.</CardDescription>
+                <CardTitle className="text-base sm:text-lg">
+                  Host Network Diagnostics
+                </CardTitle>
+                <CardDescription>
+                  Runs a direct host probe against public network endpoints.
+                </CardDescription>
               </div>
               <Button
                 id="v2-host-network-hide"
-                onClick={() => setHostNetworkPanel((current) => ({ ...current, visible: false }))}
+                onClick={() =>
+                  setHostNetworkPanel((current) => ({
+                    ...current,
+                    visible: false,
+                  }))
+                }
                 variant="outline"
               >
                 Hide
@@ -1099,32 +651,51 @@ export function ContainersPage() {
           <CardContent className="space-y-3">
             <div className="grid gap-2 rounded-lg border border-border/70 bg-muted/30 p-3 text-sm sm:grid-cols-3">
               <div>
-                <p className="text-xs uppercase tracking-wide text-muted-foreground">Status</p>
-                <p className={cn("font-medium", hostNetworkStatus.className)} id="v2-host-network-status">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Status
+                </p>
+                <p
+                  className={cn("font-medium", hostNetworkStatus.className)}
+                  id="v2-host-network-status"
+                >
                   {hostNetworkStatus.label}
                 </p>
               </div>
               <div>
-                <p className="text-xs uppercase tracking-wide text-muted-foreground">Local IP</p>
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Local IP
+                </p>
                 <p className="break-words font-mono text-xs sm:text-sm">
-                  {formatNetworkValue(hostNetworkPanel.result?.local_ip ?? null)}
+                  {formatNetworkValue(
+                    hostNetworkPanel.result?.local_ip ?? null,
+                  )}
                 </p>
               </div>
               <div>
-                <p className="text-xs uppercase tracking-wide text-muted-foreground">Public IP</p>
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Public IP
+                </p>
                 <p className="break-words font-mono text-xs sm:text-sm">
-                  {formatNetworkValue(hostNetworkPanel.result?.public_ip ?? null)}
+                  {formatNetworkValue(
+                    hostNetworkPanel.result?.public_ip ?? null,
+                  )}
                 </p>
               </div>
             </div>
             <div className="grid gap-2 rounded-lg border border-border/70 bg-muted/30 p-3 text-sm">
-              <p className="text-xs uppercase tracking-wide text-muted-foreground">Probe Method</p>
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                Probe Method
+              </p>
               <p className="font-mono text-xs sm:text-sm">
-                {formatNetworkValue(hostNetworkPanel.result?.probe_method ?? null)}
+                {formatNetworkValue(
+                  hostNetworkPanel.result?.probe_method ?? null,
+                )}
               </p>
             </div>
             <div className="rounded-lg border border-border/70 bg-muted/20 p-3">
-              <p className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">Output</p>
+              <p className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">
+                Output
+              </p>
               <pre
                 className="max-h-[16rem] overflow-auto whitespace-pre-wrap break-words text-xs sm:text-sm"
                 id="v2-host-network-output"
@@ -1133,7 +704,8 @@ export function ContainersPage() {
                   ? "Running test..."
                   : hostNetworkPanel.status === "error"
                     ? hostNetworkPanel.error || "Host diagnostics failed"
-                    : hostNetworkPanel.result?.ping_output || "No output provided."}
+                    : hostNetworkPanel.result?.ping_output ||
+                      "No output provided."}
               </pre>
             </div>
           </CardContent>
@@ -1186,7 +758,10 @@ export function ContainersPage() {
       {isLoading ? (
         <Card aria-live="polite" role="status">
           <CardContent className="flex min-h-[14rem] items-center justify-center gap-2 p-6 text-sm text-muted-foreground">
-            <Activity aria-hidden="true" className="h-4 w-4 animate-pulse text-primary" />
+            <Activity
+              aria-hidden="true"
+              className="h-4 w-4 animate-pulse text-primary"
+            />
             Loading containers...
           </CardContent>
         </Card>
@@ -1202,15 +777,7 @@ export function ContainersPage() {
 
       {!isLoading && filteredContainers.length ? (
         <>
-          <DesktopContainerTable
-            containers={filteredContainers}
-            networkRates={networkRates}
-            onAction={onContainerAction}
-            onOpenLogs={onOpenLogs}
-            onOpenNetworkTest={onOpenContainerNetworkTest}
-            pendingActions={pendingActions}
-          />
-          <MobileContainerCards
+          <ContainerList
             containers={filteredContainers}
             networkRates={networkRates}
             onAction={onContainerAction}
@@ -1232,14 +799,21 @@ export function ContainersPage() {
           >
             <CardHeader className="flex flex-row items-start justify-between gap-3 border-b border-border/70 p-4 sm:p-5">
               <div className="space-y-1">
-                <CardTitle id="v2-logs-modal-title" className="text-base sm:text-lg">
+                <CardTitle
+                  id="v2-logs-modal-title"
+                  className="text-base sm:text-lg"
+                >
                   Container Logs: {logsModal.containerName}
                 </CardTitle>
                 <CardDescription>
                   Tail output from `/api/containers/&lt;id&gt;/logs`.
                 </CardDescription>
               </div>
-              <Button id="v2-logs-modal-close" onClick={closeLogsModal} variant="outline">
+              <Button
+                id="v2-logs-modal-close"
+                onClick={closeLogsModal}
+                variant="outline"
+              >
                 Close
               </Button>
             </CardHeader>
@@ -1272,7 +846,10 @@ export function ContainersPage() {
           >
             <CardHeader className="flex flex-row items-start justify-between gap-3 border-b border-border/70 p-4 sm:p-5">
               <div className="space-y-1">
-                <CardTitle id="v2-container-network-modal-title" className="text-base sm:text-lg">
+                <CardTitle
+                  id="v2-container-network-modal-title"
+                  className="text-base sm:text-lg"
+                >
                   Container Network Test: {containerNetworkModal.containerName}
                 </CardTitle>
                 <CardDescription>
@@ -1290,32 +867,54 @@ export function ContainersPage() {
             <CardContent className="space-y-3 overflow-auto p-4">
               <div className="grid gap-2 rounded-lg border border-border/70 bg-muted/30 p-3 text-sm sm:grid-cols-3">
                 <div>
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Status</p>
-                  <p className={cn("font-medium", containerNetworkStatus.className)} id="v2-container-network-status">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                    Status
+                  </p>
+                  <p
+                    className={cn(
+                      "font-medium",
+                      containerNetworkStatus.className,
+                    )}
+                    id="v2-container-network-status"
+                  >
                     {containerNetworkStatus.label}
                   </p>
                 </div>
                 <div>
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Local IP</p>
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                    Local IP
+                  </p>
                   <p className="break-words font-mono text-xs sm:text-sm">
-                    {formatNetworkValue(containerNetworkModal.result?.local_ip ?? null)}
+                    {formatNetworkValue(
+                      containerNetworkModal.result?.local_ip ?? null,
+                    )}
                   </p>
                 </div>
                 <div>
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Public IP</p>
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                    Public IP
+                  </p>
                   <p className="break-words font-mono text-xs sm:text-sm">
-                    {formatNetworkValue(containerNetworkModal.result?.public_ip ?? null)}
+                    {formatNetworkValue(
+                      containerNetworkModal.result?.public_ip ?? null,
+                    )}
                   </p>
                 </div>
               </div>
               <div className="grid gap-2 rounded-lg border border-border/70 bg-muted/30 p-3 text-sm">
-                <p className="text-xs uppercase tracking-wide text-muted-foreground">Probe Method</p>
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Probe Method
+                </p>
                 <p className="font-mono text-xs sm:text-sm">
-                  {formatNetworkValue(containerNetworkModal.result?.probe_method ?? null)}
+                  {formatNetworkValue(
+                    containerNetworkModal.result?.probe_method ?? null,
+                  )}
                 </p>
               </div>
               <div className="rounded-lg border border-border/70 bg-muted/20 p-3">
-                <p className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">Output</p>
+                <p className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">
+                  Output
+                </p>
                 <pre
                   className="max-h-[16rem] overflow-auto whitespace-pre-wrap break-words text-xs sm:text-sm"
                   id="v2-container-network-output"
@@ -1323,8 +922,10 @@ export function ContainersPage() {
                   {containerNetworkModal.status === "loading"
                     ? "Collecting diagnostics..."
                     : containerNetworkModal.status === "error"
-                      ? containerNetworkModal.error || "Failed to run container network test"
-                      : containerNetworkModal.result?.ping_output || "No output provided."}
+                      ? containerNetworkModal.error ||
+                        "Failed to run container network test"
+                      : containerNetworkModal.result?.ping_output ||
+                        "No output provided."}
                 </pre>
               </div>
             </CardContent>

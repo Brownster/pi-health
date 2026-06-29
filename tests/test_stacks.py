@@ -215,9 +215,10 @@ class TestStacksPage:
     """Test the stacks page is accessible."""
 
     def test_stacks_page_loads(self, client):
-        """Test that stacks page loads."""
-        response = client.get('/stacks.html')
-        assert response.status_code == 200
+        """Test that the legacy stacks URL redirects to v2."""
+        response = client.get('/stacks.html', follow_redirects=False)
+        assert response.status_code == 302
+        assert response.headers['Location'] == '/v2/stacks'
 
 
 class TestStackListing:

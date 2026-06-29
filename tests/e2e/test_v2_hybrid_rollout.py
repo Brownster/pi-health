@@ -1,4 +1,4 @@
-"""PH2-007: containers hybrid rollout and rollback validation."""
+"""LR-001: v2-only routing and retired mode-flag validation."""
 
 import pytest
 from playwright.sync_api import Page, expect
@@ -20,7 +20,7 @@ def _route_response(page: Page, base_url: str, path: str):
     return page.request.get(f"{base_url}{path}", max_redirects=0)
 
 
-def test_hybrid_containers_rollout_redirects_only_selected_route(
+def test_retired_hybrid_flags_cannot_restore_legacy_routes(
     page: Page,
     v2_server_factory,
     v2_login,
@@ -34,7 +34,8 @@ def test_hybrid_containers_rollout_redirects_only_selected_route(
     assert containers_response.headers["location"] == "/v2/containers"
 
     system_response = _route_response(page, base_url, "/system.html")
-    assert system_response.status == 200
+    assert system_response.status == 302
+    assert system_response.headers["location"] == "/v2/system"
 
     home_response = _route_response(page, base_url, "/")
     assert home_response.status == 200
@@ -44,12 +45,12 @@ def test_hybrid_containers_rollout_redirects_only_selected_route(
     expect(page.get_by_role("heading", name="docker_containers")).to_be_visible()
 
     page.goto(f"{base_url}/system.html")
-    expect(page).to_have_url(f"{base_url}/system.html")
-    assert "/v2" not in page.url
+    expect(page).to_have_url(f"{base_url}/v2/system")
+    expect(page.get_by_role("heading", name="system_metrics")).to_be_visible()
 
     page.goto(f"{base_url}/")
     expect(page).to_have_url(f"{base_url}/")
-    assert "/v2" not in page.url
+    expect(page.get_by_role("heading", name="web_services")).to_be_visible()
 
 
 def test_v2_mode_redirects_containers_and_other_legacy_routes(
@@ -70,30 +71,24 @@ def test_v2_mode_redirects_containers_and_other_legacy_routes(
     assert system_response.headers["location"] == "/v2/system"
 
 
-def test_legacy_mode_rollback_restores_legacy_containers_without_rebuild(
+def test_retired_legacy_flag_cannot_restore_legacy_containers(
     page: Page,
     v2_server_factory,
     v2_login,
 ):
-    hybrid = v2_server_factory("hybrid", v2_pages="containers")
-    _login(page, hybrid["base_url"], v2_login)
-    page.goto(f"{hybrid['base_url']}/containers.html")
-    expect(page).to_have_url(f"{hybrid['base_url']}/v2/containers")
-
     legacy = v2_server_factory("legacy")
     _login(page, legacy["base_url"], v2_login)
     page.goto(f"{legacy['base_url']}/containers.html")
-    expect(page).to_have_url(f"{legacy['base_url']}/containers.html")
-    expect(page.get_by_role("heading", name="Docker Containers")).to_be_visible()
+    expect(page).to_have_url(f"{legacy['base_url']}/v2/containers")
+    expect(page.get_by_role("heading", name="docker_containers")).to_be_visible()
 
     response = page.goto(f"{legacy['base_url']}/v2/containers")
     assert response is not None
-    assert response.status == 404
-    assert "disabled in legacy mode" in page.text_content("body")
+    assert response.status == 200
 
 
 @pytest.mark.parametrize("path", ["/api/containers?stats=false", "/api/containers/stats?ids="])
-def test_container_api_contract_is_unchanged_across_ui_modes(
+def test_container_api_contract_is_unchanged_by_retired_mode_flags(
     page: Page,
     path: str,
     v2_server_factory,

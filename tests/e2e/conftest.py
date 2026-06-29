@@ -249,7 +249,7 @@ def _v2_teardown(process) -> None:
         process.wait(timeout=5)
 
 
-@pytest.fixture(params=["legacy", "hybrid", "v2"], ids=lambda mode: f"mode_{mode}")
+@pytest.fixture(params=["v2"], ids=lambda mode: f"mode_{mode}")
 def ui_mode(request):
     return request.param
 

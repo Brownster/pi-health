@@ -6,6 +6,9 @@ import App from "@/app/App";
 import "@/styles/globals.css";
 
 function getRouterBasename(): string {
+  if (!window.location.pathname.startsWith("/v2")) {
+    return "/";
+  }
   const baseUrl = import.meta.env.BASE_URL || "/";
   return baseUrl.endsWith("/") ? baseUrl.slice(0, -1) || "/" : baseUrl;
 }

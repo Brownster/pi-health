@@ -6,7 +6,7 @@ from playwright.sync_api import Page, expect
 pytestmark = pytest.mark.e2e
 
 # Server lifecycle, login, and deterministic /api mocks are shared via conftest.py
-# fixtures (mode_server, ui_mode, v2_login, install_v2_containers_api_mocks).
+# fixtures (mode_server, v2_login, install_v2_containers_api_mocks).
 
 
 def test_v2_shell_viewport_matrix(
@@ -18,16 +18,8 @@ def test_v2_shell_viewport_matrix(
 ):
     page = profiled_page
     base_url = mode_server["base_url"]
-    mode = mode_server["mode"]
-
     response = page.goto(f"{base_url}/v2")
     assert response is not None
-
-    if mode == "legacy":
-        assert response.status == 404
-        assert "disabled in legacy mode" in page.text_content("body")
-        return
-
     assert response.status == 200
     page.goto(f"{base_url}/login.html")
     v2_login(page, base_url)
@@ -36,7 +28,7 @@ def test_v2_shell_viewport_matrix(
     expect(page.get_by_role("heading", name="web_services")).to_be_visible()
 
     if viewport_profile_name in ("phone", "tablet"):
-        assert_no_horizontal_overflow(page, f"v2 shell ({mode}, {viewport_profile_name})")
+        assert_no_horizontal_overflow(page, f"v2 shell ({viewport_profile_name})")
 
 
 def test_v2_lime_dashboard(
@@ -138,7 +130,7 @@ def test_v2_mobile_drawer_keyboard_and_background_isolation(
     assert page.evaluate("document.body.style.overscrollBehavior") == ""
 
 
-def test_mode_switch_for_containers_route(
+def test_legacy_container_url_redirects_to_v2(
     profiled_page: Page,
     viewport_profile_name: str,
     assert_no_horizontal_overflow,
@@ -147,23 +139,15 @@ def test_mode_switch_for_containers_route(
 ):
     page = profiled_page
     base_url = mode_server["base_url"]
-    mode = mode_server["mode"]
-
     v2_login(page, base_url)
     page.goto(f"{base_url}/containers.html")
-
-    if mode == "legacy":
-        expect(page.get_by_role("heading", name="Docker Containers")).to_be_visible()
-        if viewport_profile_name in ("phone", "tablet"):
-            assert_no_horizontal_overflow(page, f"legacy containers ({viewport_profile_name})")
-        return
 
     expect(page).to_have_url(f"{base_url}/v2/containers")
     expect(page.get_by_role("heading", name="docker_containers")).to_be_visible()
     expect(page.get_by_role("button", name="Start").first).to_be_visible()
     expect(page.get_by_role("button", name="Restart").first).to_be_visible()
     if viewport_profile_name in ("phone", "tablet"):
-        assert_no_horizontal_overflow(page, f"v2 containers ({mode}, {viewport_profile_name})")
+        assert_no_horizontal_overflow(page, f"v2 containers ({viewport_profile_name})")
 
 
 def test_v2_containers_diagnostics_workflow(
@@ -176,11 +160,6 @@ def test_v2_containers_diagnostics_workflow(
 ):
     page = profiled_page
     base_url = mode_server["base_url"]
-    mode = mode_server["mode"]
-
-    if mode == "legacy":
-        pytest.skip("legacy mode does not expose v2 containers diagnostics")
-
     v2_login(page, base_url)
     install_v2_containers_api_mocks(page)
     page.goto(f"{base_url}/v2/containers")
@@ -227,17 +206,12 @@ def test_v2_containers_diagnostics_workflow(
     )
 
     if viewport_profile_name in ("phone", "tablet"):
-        assert_no_horizontal_overflow(page, f"v2 diagnostics workflow ({mode}, {viewport_profile_name})")
+        assert_no_horizontal_overflow(page, f"v2 diagnostics workflow ({viewport_profile_name})")
 
 
 def test_v2_containers_auth_guard(profiled_page: Page, mode_server, v2_login):
     page = profiled_page
     base_url = mode_server["base_url"]
-    mode = mode_server["mode"]
-
-    if mode == "legacy":
-        pytest.skip("legacy mode disables /v2 routes")
-
     page.goto(f"{base_url}/v2/containers")
     expect(page).to_have_url(f"{base_url}/login.html")
 

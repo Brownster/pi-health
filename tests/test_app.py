@@ -316,159 +316,48 @@ class TestPublicEndpoints:
 
 
 class TestStaticPages:
-    """Test static page serving."""
+    """Test v2-only UI routing and retained login page."""
 
-    def test_index_page(self, client):
-        """Test index page loads."""
-        response = client.get('/')
+    @pytest.mark.parametrize(
+        ("path", "target"),
+        [
+            ("/containers.html", "/v2/containers"),
+            ("/system.html", "/v2/system"),
+            ("/apps.html", "/v2/apps"),
+            ("/stacks.html", "/v2/stacks"),
+            ("/tools.html", "/v2/tools"),
+            ("/settings.html", "/v2/settings"),
+            ("/storage.html", "/v2/storage"),
+            ("/pools.html", "/v2/pools"),
+            ("/mounts.html", "/v2/mounts"),
+            ("/shares.html", "/v2/shares"),
+            ("/plugins.html", "/v2/plugins"),
+            ("/disks.html", "/v2/disks"),
+            ("/network.html", "/v2/network"),
+            ("/tailscale.html", "/v2/tailscale"),
+        ],
+    )
+    def test_legacy_page_redirects_to_v2(self, client, path, target):
+        response = client.get(path, follow_redirects=False)
+        assert response.status_code == 302
+        assert response.headers["Location"] == target
+
+    def test_edit_page_is_not_available(self, client):
+        assert client.get("/edit.html").status_code == 404
+
+    def test_login_page_is_retained(self, client):
+        response = client.get("/login.html")
         assert response.status_code == 200
-        body = response.data.decode('utf-8')
-        assert '/css/foundation.css' in body
-        assert '/css/index.css' in body
-        assert 'type="module" src="/js/pages/index.js"' in body
-        assert 'Docker Web Services' in body
-
-    def test_containers_page(self, client):
-        """Test containers page loads."""
-        response = client.get('/containers.html')
-        assert response.status_code == 200
-        body = response.data.decode('utf-8')
-        assert '/css/foundation.css' in body
-        assert '/css/containers.css' in body
-        assert 'type="module" src="/js/pages/containers.js"' in body
-        assert 'Docker Containers' in body
-
-    def test_system_page(self, client):
-        """Test system page loads."""
-        response = client.get('/system.html')
-        assert response.status_code == 200
-        body = response.data.decode('utf-8')
-        assert '/css/foundation.css' in body
-        assert '/css/system.css' in body
-        assert 'type="module" src="/js/pages/system.js"' in body
-        assert 'System Metrics' in body
-
-    def test_edit_page(self, client):
-        """Test edit page loads."""
-        response = client.get('/edit.html')
-        assert response.status_code == 404
-
-    def test_login_page(self, client):
-        """Test login page loads."""
-        response = client.get('/login.html')
-        assert response.status_code == 200
-        body = response.data.decode('utf-8')
-        assert '/css/foundation.css' in body
-        assert '/css/login.css' in body
+        body = response.data.decode("utf-8")
         assert 'type="module" src="/js/pages/login.js"' in body
-        assert 'onclick=' not in body
-        assert 'onkeydown=' not in body
+        assert "onclick=" not in body
+        assert "onkeydown=" not in body
 
-    def test_storage_page_redirects(self, client):
-        """Test storage page redirects to pools.html."""
-        response = client.get('/storage.html')
-        assert response.status_code == 200
-        body = response.data.decode('utf-8')
-        assert 'Redirecting' in body or 'pools.html' in body
-
-    def test_pools_page(self, client):
-        """Test pools page loads."""
-        response = client.get('/pools.html')
-        assert response.status_code == 200
-        body = response.data.decode('utf-8')
-        assert 'Storage Pools' in body
-        assert 'pool-plugins' in body
-
-    def test_mounts_page(self, client):
-        """Test mounts page loads."""
-        response = client.get('/mounts.html')
-        assert response.status_code == 200
-        body = response.data.decode('utf-8')
-        assert 'Mounts' in body
-        assert 'Media Paths' in body
-        assert 'mount-plugins' in body
-
-    def test_shares_page(self, client):
-        """Test shares page loads."""
-        response = client.get('/shares.html')
-        assert response.status_code == 200
-        body = response.data.decode('utf-8')
-        assert 'Shares' in body
-        assert 'shares-content' in body
-        assert 'share-modal' in body
-
-    def test_plugins_page(self, client):
-        """Test plugins page loads."""
-        response = client.get('/plugins.html')
-        assert response.status_code == 200
-        body = response.data.decode('utf-8')
-        assert 'Plugins' in body
-        assert 'plugins-list' in body
-
-    def test_tools_page(self, client):
-        """Test tools page loads."""
-        response = client.get('/tools.html')
-        assert response.status_code == 200
-        body = response.data.decode('utf-8')
-        assert 'Tools' in body
-        assert 'CopyParty' in body
-
-    def test_settings_page_setup_hooks(self, client):
-        """Test settings page has backup hooks (Tailscale moved to /tailscale.html)."""
-        response = client.get('/settings.html')
-        assert response.status_code == 200
-        body = response.data.decode('utf-8')
-        assert 'tailscale-authkey' not in body  # Moved to /tailscale.html
-        assert 'vpn-config-dir' not in body
-        assert 'backup-enabled' in body
-        assert 'backup-dest-dir' in body
-        assert 'backup-config-dir' in body
-        assert 'backup-stacks-path' in body
-        assert 'backup-retention' in body
-        assert 'backup-include-env' in body
-        assert 'backup-plugins-enabled' in body
-        assert 'backup-plugin-retention' in body
-        assert 'backup-run-now' in body
-        assert 'backup-list' in body
-        assert 'backup-plugins-list' in body
-        assert 'settings-pihealth-update' in body
-        assert 'pihealth-repo-path' in body
-        assert 'pihealth-service-name' in body
-        assert 'settings-updates-logs' in body
-
-    def test_network_page(self, client):
-        """Test host network page loads."""
-        response = client.get('/network.html')
-        assert response.status_code == 200
-        body = response.data.decode('utf-8')
-        assert 'Host Network' in body
-        assert 'network-content' in body
-
-    def test_tailscale_page(self, client):
-        """Test Tailscale page loads."""
-        response = client.get('/tailscale.html')
-        assert response.status_code == 200
-        body = response.data.decode('utf-8')
-        assert 'Tailscale' in body
-        assert 'tailscale-authkey' in body
-        assert 'setup-section' in body
-        assert 'status-section' in body
-
-    def test_apps_page_vpn_config_modal(self, client):
-        """Test apps page includes VPN config modal."""
-        response = client.get('/apps.html')
-        assert response.status_code == 200
-        body = response.data.decode('utf-8')
-        assert 'vpn-config-dir' in body
-        assert 'vpn-username' in body
-        assert 'vpn-password' in body
-        assert 'vpn-network-name' in body
 
 class TestV2Routes:
     """Test /v2 static serving and SPA fallback behavior."""
 
     def test_v2_root_serves_index_when_present(self, client, monkeypatch, tmp_path):
-        monkeypatch.setenv("PIHEALTH_UI_MODE", "hybrid")
         static_dir = tmp_path / "static"
         v2_dir = static_dir / "v2"
         v2_dir.mkdir(parents=True)
@@ -483,7 +372,6 @@ class TestV2Routes:
         assert "v2-shell" in response.data.decode("utf-8")
 
     def test_v2_missing_index_returns_404(self, client, monkeypatch, tmp_path):
-        monkeypatch.setenv("PIHEALTH_UI_MODE", "hybrid")
         static_dir = tmp_path / "static"
         static_dir.mkdir(parents=True)
         monkeypatch.setattr(app, "static_folder", str(static_dir))
@@ -494,7 +382,6 @@ class TestV2Routes:
         assert "missing" in data["error"]
 
     def test_v2_assets_served_directly(self, client, monkeypatch, tmp_path):
-        monkeypatch.setenv("PIHEALTH_UI_MODE", "hybrid")
         static_dir = tmp_path / "static"
         assets_dir = static_dir / "v2" / "assets"
         assets_dir.mkdir(parents=True)
@@ -514,7 +401,6 @@ class TestV2Routes:
         monkeypatch,
         tmp_path,
     ):
-        monkeypatch.setenv("PIHEALTH_UI_MODE", "hybrid")
         static_dir = tmp_path / "static"
         v2_dir = static_dir / "v2"
         v2_dir.mkdir(parents=True)
@@ -530,7 +416,6 @@ class TestV2Routes:
         assert "asset not found" in data["error"]
 
     def test_v2_spa_route_falls_back_to_index(self, client, monkeypatch, tmp_path):
-        monkeypatch.setenv("PIHEALTH_UI_MODE", "hybrid")
         static_dir = tmp_path / "static"
         v2_dir = static_dir / "v2"
         v2_dir.mkdir(parents=True)
@@ -545,97 +430,57 @@ class TestV2Routes:
         assert "v2-fallback" in response.data.decode("utf-8")
 
 
-class TestUiRuntimeModes:
-    """Test deterministic legacy/hybrid/v2 mode behavior."""
+class TestV2OnlyRouting:
+    """Test that removed runtime-mode flags cannot restore legacy pages."""
 
-    def _build_mode_test_static(self, tmp_path):
+    def _build_static(self, tmp_path):
         static_dir = tmp_path / "static"
         v2_dir = static_dir / "v2"
         v2_dir.mkdir(parents=True)
-
-        (static_dir / "index.html").write_text("<html><body>legacy-index</body></html>", encoding="utf-8")
         (static_dir / "containers.html").write_text(
             "<html><body>legacy-containers</body></html>",
             encoding="utf-8",
         )
-        (static_dir / "system.html").write_text("<html><body>legacy-system</body></html>", encoding="utf-8")
-        (static_dir / "login.html").write_text("<html><body>legacy-login</body></html>", encoding="utf-8")
-        (v2_dir / "index.html").write_text("<html><body>v2-shell</body></html>", encoding="utf-8")
-
+        (static_dir / "login.html").write_text(
+            "<html><body>retained-login</body></html>",
+            encoding="utf-8",
+        )
+        (v2_dir / "index.html").write_text(
+            "<html><body>v2-shell</body></html>",
+            encoding="utf-8",
+        )
         return static_dir
 
-    def test_legacy_mode_disables_v2_routes(self, client, monkeypatch, tmp_path):
+    @pytest.mark.parametrize("mode", [None, "legacy", "hybrid", "invalid-mode"])
+    def test_root_always_serves_v2(self, client, monkeypatch, tmp_path, mode):
+        if mode is None:
+            monkeypatch.delenv("PIHEALTH_UI_MODE", raising=False)
+        else:
+            monkeypatch.setenv("PIHEALTH_UI_MODE", mode)
+        monkeypatch.setenv("PIHEALTH_UI_V2_PAGES", "")
+        monkeypatch.setattr(app, "static_folder", str(self._build_static(tmp_path)))
+
+        response = client.get("/")
+        assert response.status_code == 200
+        assert "v2-shell" in response.data.decode("utf-8")
+
+    def test_legacy_flag_cannot_restore_legacy_page(self, client, monkeypatch, tmp_path):
         monkeypatch.setenv("PIHEALTH_UI_MODE", "legacy")
-        static_dir = self._build_mode_test_static(tmp_path)
-        monkeypatch.setattr(app, "static_folder", str(static_dir))
+        monkeypatch.setattr(app, "static_folder", str(self._build_static(tmp_path)))
 
-        v2_response = client.get('/v2')
-        assert v2_response.status_code == 404
-        v2_data = json.loads(v2_response.data)
-        assert "disabled" in v2_data["error"]
+        response = client.get("/containers.html", follow_redirects=False)
+        assert response.status_code == 302
+        assert response.headers["Location"] == "/v2/containers"
 
-        legacy_response = client.get('/containers.html')
-        assert legacy_response.status_code == 200
-        assert "legacy-containers" in legacy_response.data.decode("utf-8")
+        v2_response = client.get("/v2/containers")
+        assert v2_response.status_code == 200
+        assert "v2-shell" in v2_response.data.decode("utf-8")
 
-    def test_invalid_mode_defaults_to_legacy(self, client, monkeypatch, tmp_path):
-        monkeypatch.setenv("PIHEALTH_UI_MODE", "invalid-mode")
-        static_dir = self._build_mode_test_static(tmp_path)
-        monkeypatch.setattr(app, "static_folder", str(static_dir))
-
-        response = client.get('/v2')
-        assert response.status_code == 404
-        data = json.loads(response.data)
-        assert data["mode"] == "legacy"
-
-    def test_hybrid_mode_redirects_only_selected_pages(self, client, monkeypatch, tmp_path):
-        monkeypatch.setenv("PIHEALTH_UI_MODE", "hybrid")
-        monkeypatch.setenv("PIHEALTH_UI_V2_PAGES", "containers,unknown")
-        static_dir = self._build_mode_test_static(tmp_path)
-        monkeypatch.setattr(app, "static_folder", str(static_dir))
-
-        redirected = client.get('/containers.html', follow_redirects=False)
-        assert redirected.status_code == 302
-        assert redirected.headers["Location"] == "/v2/containers"
-
-        legacy = client.get('/system.html')
-        assert legacy.status_code == 200
-        assert "legacy-system" in legacy.data.decode("utf-8")
-
-    def test_v2_mode_prefers_v2_routes_for_legacy_pages(self, client, monkeypatch, tmp_path):
-        monkeypatch.setenv("PIHEALTH_UI_MODE", "v2")
-        static_dir = self._build_mode_test_static(tmp_path)
-        monkeypatch.setattr(app, "static_folder", str(static_dir))
-
-        index_response = client.get('/', follow_redirects=False)
-        assert index_response.status_code == 302
-        assert index_response.headers["Location"] == "/v2"
-
-        containers_response = client.get('/containers.html', follow_redirects=False)
-        assert containers_response.status_code == 302
-        assert containers_response.headers["Location"] == "/v2/containers"
-
-        login_response = client.get('/login.html')
-        assert login_response.status_code == 200
-        assert "legacy-login" in login_response.data.decode("utf-8")
-
-    def test_hybrid_selected_pages_support_home_alias(self, client, monkeypatch, tmp_path):
-        monkeypatch.setenv("PIHEALTH_UI_MODE", "hybrid")
-        monkeypatch.setenv("PIHEALTH_UI_V2_PAGES", " home , system ")
-        static_dir = self._build_mode_test_static(tmp_path)
-        monkeypatch.setattr(app, "static_folder", str(static_dir))
-
-        index_response = client.get('/', follow_redirects=False)
-        assert index_response.status_code == 302
-        assert index_response.headers["Location"] == "/v2"
-
-        system_response = client.get('/system.html', follow_redirects=False)
-        assert system_response.status_code == 302
-        assert system_response.headers["Location"] == "/v2/system"
-
-        containers_response = client.get('/containers.html')
-        assert containers_response.status_code == 200
-        assert "legacy-containers" in containers_response.data.decode("utf-8")
+    def test_login_remains_directly_served(self, client, monkeypatch, tmp_path):
+        monkeypatch.setattr(app, "static_folder", str(self._build_static(tmp_path)))
+        response = client.get("/login.html")
+        assert response.status_code == 200
+        assert "retained-login" in response.data.decode("utf-8")
 
 
 if __name__ == '__main__':

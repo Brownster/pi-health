@@ -1,7 +1,7 @@
 # Legacy v1 UI Removal — Plan
 
 Date: 2026-06-29
-Status: Draft — do not start until the entry gate passes
+Status: In progress — LR-001 complete
 Owner: Pi-Health / LimeOS maintainers
 Predecessors: Phase 3 signoff (`Docs/UI_PHASE3_RELEASE_SIGNOFF.md`), v2 hardening
 (`Docs/UI_V2_HARDENING_TICKETS.md`), v2 redesign (`Docs/UI_V2_NAS_OS_REDESIGN_PLAN.md`)
@@ -55,7 +55,7 @@ machinery — without breaking authentication, the backend API, or the test suit
 
 | ID | Title | Depends | Status |
 |---|---|---|---|
-| LR-001 | Make v2 the default + only UI mode | gate | Pending |
+| LR-001 | Make v2 the default + only UI mode | gate | Complete (2026-06-29) |
 | LR-002 | Redirect legacy URLs to v2 equivalents (compat shims) | LR-001 | Pending |
 | LR-003 | Decouple shared deps (login.html, /api/theme readiness probe) | LR-001 | Pending |
 | LR-004 | Delete legacy static pages + ES modules | LR-002, LR-003 | Pending |
@@ -69,6 +69,15 @@ machinery — without breaking authentication, the backend API, or the test suit
   `PIHEALTH_UI_V2_PAGES`).
 - `/` serves the v2 SPA; `/v2/*` continues to work (or fold `/v2` into root — decide in LR-002).
 - Acceptance: with no env vars set, the app serves v2 at `/`; no path serves a legacy page.
+
+Completed 2026-06-29. `/` and `/v2` now serve the same v2 SPA artifact, with a location-aware
+React Router basename so root rendering does not depend on a rebuild or duplicate assets. Every
+legacy page handler redirects unconditionally to its current `/v2/<page>` target; `login.html`
+remains directly served. The `legacy|hybrid|v2` parser, selective-page parser, environment-driven
+branches, and v2-disabled responses were removed. Tests prove that unset, invalid, `legacy`, and
+`hybrid` environment values cannot restore legacy pages. Validation: Ruff and TypeScript clean;
+production build `101.43 kB` initial JS gzip; unit `697 passed, 1 skipped`; focused v2-only routing
+E2E `26 passed`. The full E2E gate follows LR-005, when legacy-only suites are retired or migrated.
 
 ### LR-002 — Legacy URL → v2 redirect shims
 - Keep thin 301/302 redirects from `'/<page>.html'` to the v2 route (`/v2/<page>` or `/<page>`)

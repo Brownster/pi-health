@@ -1,10 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Activity, Loader2, Plus, RefreshCw, Terminal, TriangleAlert } from "lucide-react";
+import {
+  Activity,
+  Loader2,
+  Plus,
+  RefreshCw,
+  Terminal,
+  TriangleAlert,
+} from "lucide-react";
 
-import { Badge, StatusBadge, type BadgeProps } from "@/components/ui/badge";
+import { Badge, StatusBadge } from "@/components/ui/badge";
+import { PluginCard } from "@/components/storage/plugin-card";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { ModalOverlay } from "@/components/ui/modal-overlay";
 import { PageHeader } from "@/components/ui/page-header";
 import {
@@ -74,7 +88,12 @@ interface InstallModalState {
   error: string | null;
 }
 
-const EMPTY_CONFIG: ConfigEditor = { text: "", status: "idle", error: null, details: [] };
+const EMPTY_CONFIG: ConfigEditor = {
+  text: "",
+  status: "idle",
+  error: null,
+  details: [],
+};
 const EMPTY_INSTALL: InstallModalState = {
   open: false,
   type: "github",
@@ -86,20 +105,12 @@ const EMPTY_INSTALL: InstallModalState = {
   error: null,
 };
 
-const EMPTY_COMMAND: CommandConsole = { running: false, commandId: null, lines: [], error: null };
-
-function getStatusTone(plugin: StoragePlugin): BadgeProps["tone"] {
-  if (!plugin.enabled) {
-    return "neutral";
-  }
-  if (plugin.status === "active" || plugin.status === "ok") {
-    return "success";
-  }
-  if (plugin.status === "missing" || plugin.status === "error") {
-    return "danger";
-  }
-  return "warning";
-}
+const EMPTY_COMMAND: CommandConsole = {
+  running: false,
+  commandId: null,
+  lines: [],
+  error: null,
+};
 
 function getNoticeToneClass(tone: ActionNotice["tone"]): string {
   if (tone === "success") return "border-success/30 text-success";
@@ -114,122 +125,13 @@ function getErrorMessage(error: unknown): string {
   return "Unable to complete the request";
 }
 
-function PluginCard({
-  plugin,
-  pending,
-  confirmingRemove,
-  onToggle,
-  onDetails,
-  onRemoveRequest,
-  onRemoveConfirm,
-  onRemoveCancel,
-}: {
-  plugin: StoragePlugin;
-  pending: boolean;
-  confirmingRemove: boolean;
-  onToggle: (plugin: StoragePlugin) => void;
-  onDetails: (plugin: StoragePlugin) => void;
-  onRemoveRequest: (id: string) => void;
-  onRemoveConfirm: (plugin: StoragePlugin) => void;
-  onRemoveCancel: () => void;
-}) {
-  return (
-    <Card className="transition-colors duration-200 hover:border-primary/25">
-      <CardContent className="space-y-3 p-4">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="truncate text-sm font-semibold">{plugin.name}</p>
-            <p className="line-clamp-2 text-xs text-muted-foreground">{plugin.description || plugin.id}</p>
-          </div>
-          <StatusBadge
-            className="shrink-0"
-            label={plugin.enabled ? plugin.status : "disabled"}
-            tone={getStatusTone(plugin)}
-          />
-        </div>
-
-        <div className="flex flex-wrap gap-2 text-xs">
-          <Badge tone={plugin.installed ? "success" : "neutral"}>
-            {plugin.installed ? "installed" : "not installed"}
-          </Badge>
-          {plugin.status_message ? (
-            <span className="text-muted-foreground">{plugin.status_message}</span>
-          ) : null}
-        </div>
-
-        <div className="flex flex-wrap gap-2">
-          <Button
-            aria-label={`${plugin.enabled ? "Disable" : "Enable"} ${plugin.name}`}
-            className={cn(
-              "gap-1.5 text-xs sm:text-sm",
-              plugin.enabled
-                ? "border-warning/30 bg-warning/10 text-warning hover:bg-warning/15"
-                : "border-success/30 bg-success/10 text-success hover:bg-success/15",
-            )}
-            data-plugin={plugin.id}
-            data-plugin-action={plugin.enabled ? "disable" : "enable"}
-            disabled={pending}
-            onClick={() => onToggle(plugin)}
-            size="sm"
-            variant="outline"
-          >
-            {pending ? <Loader2 aria-hidden="true" className="h-3.5 w-3.5 animate-spin" /> : null}
-            {plugin.enabled ? "Disable" : "Enable"}
-          </Button>
-          <Button
-            aria-label={`Details ${plugin.name}`}
-            className="gap-1.5 text-xs sm:text-sm"
-            data-plugin={plugin.id}
-            data-plugin-action="details"
-            disabled={pending}
-            onClick={() => onDetails(plugin)}
-            size="sm"
-            variant="outline"
-          >
-            Details
-          </Button>
-          {plugin.type !== "builtin" ? (
-            confirmingRemove ? (
-              <span className="flex items-center gap-1.5">
-                <Button
-                  className="border-danger/30 bg-danger/10 text-danger hover:bg-danger/15 text-xs sm:text-sm"
-                  data-confirm-remove={plugin.id}
-                  onClick={() => onRemoveConfirm(plugin)}
-                  size="sm"
-                  variant="outline"
-                >
-                  Confirm remove
-                </Button>
-                <Button onClick={onRemoveCancel} size="sm" variant="outline">
-                  Cancel
-                </Button>
-              </span>
-            ) : (
-              <Button
-                aria-label={`Remove ${plugin.name}`}
-                className="text-xs sm:text-sm"
-                data-plugin={plugin.id}
-                data-plugin-action="remove"
-                disabled={pending}
-                onClick={() => onRemoveRequest(plugin.id)}
-                size="sm"
-                variant="outline"
-              >
-                Remove
-              </Button>
-            )
-          ) : null}
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
 export function StoragePage() {
   const location = useLocation();
   const navigate = useNavigate();
   const [plugins, setPlugins] = useState<StoragePlugin[]>([]);
-  const [tab, setTab] = useState<StorageTab>(location.pathname.includes("/pools") ? "pools" : "plugins");
+  const [tab, setTab] = useState<StorageTab>(
+    location.pathname.includes("/pools") ? "pools" : "plugins",
+  );
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -249,7 +151,8 @@ export function StoragePage() {
     command: EMPTY_COMMAND,
     config: EMPTY_CONFIG,
   });
-  const [installModal, setInstallModal] = useState<InstallModalState>(EMPTY_INSTALL);
+  const [installModal, setInstallModal] =
+    useState<InstallModalState>(EMPTY_INSTALL);
   const isMountedRef = useRef(true);
 
   const loadPlugins = useCallback(async (reason: "initial" | "manual") => {
@@ -298,7 +201,10 @@ export function StoragePage() {
         }
       } catch (caughtError) {
         if (isMountedRef.current) {
-          setActionNotice({ tone: "error", message: getErrorMessage(caughtError) });
+          setActionNotice({
+            tone: "error",
+            message: getErrorMessage(caughtError),
+          });
         }
       } finally {
         if (isMountedRef.current) {
@@ -316,12 +222,18 @@ export function StoragePage() {
       try {
         await removePlugin(plugin.id);
         if (isMountedRef.current) {
-          setActionNotice({ tone: "success", message: `Removed ${plugin.name}` });
+          setActionNotice({
+            tone: "success",
+            message: `Removed ${plugin.name}`,
+          });
           await loadPlugins("manual");
         }
       } catch (caughtError) {
         if (isMountedRef.current) {
-          setActionNotice({ tone: "error", message: getErrorMessage(caughtError) });
+          setActionNotice({
+            tone: "error",
+            message: getErrorMessage(caughtError),
+          });
         }
       } finally {
         if (isMountedRef.current) {
@@ -349,7 +261,9 @@ export function StoragePage() {
     try {
       const [detail, recovery, log] = await Promise.all([
         fetchPluginDetail(plugin.id),
-        fetchPluginRecovery(plugin.id).catch(() => ({ supported: false, data: null }) as PluginRecovery),
+        fetchPluginRecovery(plugin.id).catch(
+          () => ({ supported: false, data: null }) as PluginRecovery,
+        ),
         fetchPluginLatestLog(plugin.id).catch(() => null),
       ]);
       if (!isMountedRef.current) {
@@ -363,7 +277,10 @@ export function StoragePage() {
               detail,
               recovery,
               log,
-              config: { ...EMPTY_CONFIG, text: JSON.stringify(detail.config ?? {}, null, 2) },
+              config: {
+                ...EMPTY_CONFIG,
+                text: JSON.stringify(detail.config ?? {}, null, 2),
+              },
             }
           : current,
       );
@@ -383,42 +300,74 @@ export function StoragePage() {
     setDetailModal((current) => ({ ...current, open: false }));
   }, []);
 
-  const runCommand = useCallback(async (pluginId: string, command: PluginCommand) => {
-    setDetailModal((current) => ({
-      ...current,
-      command: { running: true, commandId: command.id, lines: [], error: null },
-    }));
+  const runCommand = useCallback(
+    async (pluginId: string, command: PluginCommand) => {
+      setDetailModal((current) => ({
+        ...current,
+        command: {
+          running: true,
+          commandId: command.id,
+          lines: [],
+          error: null,
+        },
+      }));
 
-    try {
-      await streamPluginCommand(pluginId, command.id, {}, (event) => {
-        if (!isMountedRef.current) {
-          return;
-        }
-        if (event.type === "output" && typeof event.line === "string") {
-          const line = event.line;
-          setDetailModal((current) => ({ ...current, command: { ...current.command, lines: [...current.command.lines, line] } }));
-        } else if (event.type === "complete") {
-          const summary = `— ${event.success ? "completed" : "failed"}${event.message ? `: ${event.message}` : ""}`;
+      try {
+        await streamPluginCommand(pluginId, command.id, {}, (event) => {
+          if (!isMountedRef.current) {
+            return;
+          }
+          if (event.type === "output" && typeof event.line === "string") {
+            const line = event.line;
+            setDetailModal((current) => ({
+              ...current,
+              command: {
+                ...current.command,
+                lines: [...current.command.lines, line],
+              },
+            }));
+          } else if (event.type === "complete") {
+            const summary = `— ${event.success ? "completed" : "failed"}${event.message ? `: ${event.message}` : ""}`;
+            setDetailModal((current) => ({
+              ...current,
+              command: {
+                ...current.command,
+                running: false,
+                lines: [...current.command.lines, summary],
+              },
+            }));
+          } else if (event.type === "error") {
+            setDetailModal((current) => ({
+              ...current,
+              command: {
+                ...current.command,
+                running: false,
+                error: event.error ?? "Command error",
+              },
+            }));
+          }
+        });
+        if (isMountedRef.current) {
           setDetailModal((current) => ({
             ...current,
-            command: { ...current.command, running: false, lines: [...current.command.lines, summary] },
+            command: { ...current.command, running: false },
           }));
-        } else if (event.type === "error") {
-          setDetailModal((current) => ({ ...current, command: { ...current.command, running: false, error: event.error ?? "Command error" } }));
         }
-      });
-      if (isMountedRef.current) {
-        setDetailModal((current) => ({ ...current, command: { ...current.command, running: false } }));
+      } catch (caughtError) {
+        if (isMountedRef.current) {
+          setDetailModal((current) => ({
+            ...current,
+            command: {
+              ...current.command,
+              running: false,
+              error: getErrorMessage(caughtError),
+            },
+          }));
+        }
       }
-    } catch (caughtError) {
-      if (isMountedRef.current) {
-        setDetailModal((current) => ({
-          ...current,
-          command: { ...current.command, running: false, error: getErrorMessage(caughtError) },
-        }));
-      }
-    }
-  }, []);
+    },
+    [],
+  );
 
   const saveConfig = useCallback(async (pluginId: string, text: string) => {
     let parsed: Record<string, unknown>;
@@ -427,29 +376,54 @@ export function StoragePage() {
     } catch {
       setDetailModal((current) => ({
         ...current,
-        config: { ...current.config, status: "error", error: "Config is not valid JSON", details: [] },
+        config: {
+          ...current.config,
+          status: "error",
+          error: "Config is not valid JSON",
+          details: [],
+        },
       }));
       return;
     }
 
-    setDetailModal((current) => ({ ...current, config: { ...current.config, status: "saving", error: null, details: [] } }));
+    setDetailModal((current) => ({
+      ...current,
+      config: { ...current.config, status: "saving", error: null, details: [] },
+    }));
     const result = await savePluginConfig(pluginId, parsed);
     if (!isMountedRef.current) {
       return;
     }
     if (result.ok) {
-      setDetailModal((current) => ({ ...current, config: { ...current.config, status: "saved", error: null, details: [] } }));
+      setDetailModal((current) => ({
+        ...current,
+        config: {
+          ...current.config,
+          status: "saved",
+          error: null,
+          details: [],
+        },
+      }));
       setActionNotice({ tone: "success", message: "Plugin config saved" });
     } else {
       setDetailModal((current) => ({
         ...current,
-        config: { ...current.config, status: "error", error: result.error, details: result.details },
+        config: {
+          ...current.config,
+          status: "error",
+          error: result.error,
+          details: result.details,
+        },
       }));
     }
   }, []);
 
   const installNewPlugin = useCallback(async () => {
-    setInstallModal((current) => ({ ...current, status: "saving", error: null }));
+    setInstallModal((current) => ({
+      ...current,
+      status: "saving",
+      error: null,
+    }));
     try {
       await installPlugin({
         type: installModal.type,
@@ -466,7 +440,11 @@ export function StoragePage() {
       await loadPlugins("manual");
     } catch (caughtError) {
       if (isMountedRef.current) {
-        setInstallModal((current) => ({ ...current, status: "error", error: getErrorMessage(caughtError) }));
+        setInstallModal((current) => ({
+          ...current,
+          status: "error",
+          error: getErrorMessage(caughtError),
+        }));
       }
     }
   }, [installModal, loadPlugins]);
@@ -493,7 +471,10 @@ export function StoragePage() {
     return () => window.clearTimeout(timeoutId);
   }, [actionNotice]);
 
-  const visiblePlugins = tab === "pools" ? plugins.filter((plugin) => isPoolPlugin(plugin)) : plugins;
+  const visiblePlugins =
+    tab === "pools"
+      ? plugins.filter((plugin) => isPoolPlugin(plugin))
+      : plugins;
 
   return (
     <section className="space-y-4 sm:space-y-6">
@@ -515,7 +496,10 @@ export function StoragePage() {
               onClick={() => void loadPlugins("manual")}
               variant="secondary"
             >
-              <RefreshCw aria-hidden="true" className={cn("h-4 w-4", isRefreshing ? "animate-spin" : "")} />
+              <RefreshCw
+                aria-hidden="true"
+                className={cn("h-4 w-4", isRefreshing ? "animate-spin" : "")}
+              />
               {isRefreshing ? "refreshing" : "refresh"}
             </Button>
           </>
@@ -530,7 +514,11 @@ export function StoragePage() {
         title={tab === "pools" ? "storage_pools" : "storage_plugins"}
       />
 
-      <div aria-label="Storage tabs" className="flex flex-wrap items-center gap-2" role="group">
+      <div
+        aria-label="Storage tabs"
+        className="flex flex-wrap items-center gap-2"
+        role="group"
+      >
         {(["plugins", "pools"] as StorageTab[]).map((item) => (
           <Button
             aria-pressed={tab === item}
@@ -570,7 +558,10 @@ export function StoragePage() {
               <p className="text-sm font-medium">Unable to load plugins</p>
             </div>
             <p className="text-sm text-muted-foreground">{error}</p>
-            <Button onClick={() => void loadPlugins("manual")} variant="outline">
+            <Button
+              onClick={() => void loadPlugins("manual")}
+              variant="outline"
+            >
               Retry
             </Button>
           </CardContent>
@@ -580,7 +571,10 @@ export function StoragePage() {
       {isLoading ? (
         <Card aria-live="polite" role="status">
           <CardContent className="flex min-h-[14rem] items-center justify-center gap-2 p-6 text-sm text-muted-foreground">
-            <Activity aria-hidden="true" className="h-4 w-4 animate-pulse text-primary" />
+            <Activity
+              aria-hidden="true"
+              className="h-4 w-4 animate-pulse text-primary"
+            />
             Loading plugins...
           </CardContent>
         </Card>
@@ -589,7 +583,9 @@ export function StoragePage() {
       {!isLoading && !error && !visiblePlugins.length ? (
         <Card>
           <CardContent className="flex min-h-[10rem] items-center justify-center p-6 text-sm text-muted-foreground">
-            {tab === "pools" ? "No pool plugins found." : "No storage plugins found."}
+            {tab === "pools"
+              ? "No pool plugins found."
+              : "No storage plugins found."}
           </CardContent>
         </Card>
       ) : null}
@@ -623,32 +619,56 @@ export function StoragePage() {
           >
             <CardHeader className="flex flex-row items-start justify-between gap-3 border-b border-border/70 p-4 sm:p-5">
               <div className="space-y-1">
-                <CardTitle className="text-base sm:text-lg" id="v2-plugin-detail-title">
+                <CardTitle
+                  className="text-base sm:text-lg"
+                  id="v2-plugin-detail-title"
+                >
                   {detailModal.name}
                 </CardTitle>
-                <CardDescription>Plugin status, recovery, logs, and commands.</CardDescription>
+                <CardDescription>
+                  Plugin status, recovery, logs, and commands.
+                </CardDescription>
               </div>
-              <Button id="v2-plugin-detail-close" onClick={closeDetails} variant="outline">
+              <Button
+                id="v2-plugin-detail-close"
+                onClick={closeDetails}
+                variant="outline"
+              >
                 Close
               </Button>
             </CardHeader>
-            <CardContent className="space-y-4 overflow-auto p-4" id="v2-plugin-detail-content">
+            <CardContent
+              className="space-y-4 overflow-auto p-4"
+              id="v2-plugin-detail-content"
+            >
               {detailModal.status === "loading" ? (
-                <p className="text-sm text-muted-foreground">Loading plugin details...</p>
+                <p className="text-sm text-muted-foreground">
+                  Loading plugin details...
+                </p>
               ) : detailModal.status === "error" ? (
-                <p className="text-sm text-danger">{detailModal.error || "Failed to load plugin details"}</p>
+                <p className="text-sm text-danger">
+                  {detailModal.error || "Failed to load plugin details"}
+                </p>
               ) : detailModal.detail ? (
                 <>
                   <div className="rounded-lg border border-border/70 bg-muted/25 p-3">
-                    <p className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">Status</p>
+                    <p className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">
+                      Status
+                    </p>
                     <p className="text-sm">
-                      {String(detailModal.detail.status?.message ?? detailModal.detail.status?.status ?? "—")}
+                      {String(
+                        detailModal.detail.status?.message ??
+                          detailModal.detail.status?.status ??
+                          "—",
+                      )}
                     </p>
                   </div>
 
                   {detailModal.detail.commands.length ? (
                     <div className="space-y-2">
-                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Commands</p>
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                        Commands
+                      </p>
                       <div className="flex flex-wrap gap-2">
                         {detailModal.detail.commands.map((command) => {
                           // Commands with required params need the schema-driven config form
@@ -658,9 +678,13 @@ export function StoragePage() {
                             <Button
                               className="gap-1.5 text-xs sm:text-sm"
                               data-plugin-command={command.id}
-                              disabled={detailModal.command.running || needsParams}
+                              disabled={
+                                detailModal.command.running || needsParams
+                              }
                               key={command.id}
-                              onClick={() => void runCommand(detailModal.detail!.id, command)}
+                              onClick={() =>
+                                void runCommand(detailModal.detail!.id, command)
+                              }
                               size="sm"
                               title={
                                 needsParams
@@ -669,7 +693,10 @@ export function StoragePage() {
                               }
                               variant="outline"
                             >
-                              <Terminal aria-hidden="true" className="h-3.5 w-3.5" />
+                              <Terminal
+                                aria-hidden="true"
+                                className="h-3.5 w-3.5"
+                              />
                               {command.label}
                               {needsParams ? " (needs params)" : ""}
                             </Button>
@@ -682,7 +709,8 @@ export function StoragePage() {
                   {detailModal.command.commandId ? (
                     <div className="rounded-lg border border-border/70 bg-muted/20 p-3">
                       <p className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">
-                        Command output {detailModal.command.running ? "(running...)" : ""}
+                        Command output{" "}
+                        {detailModal.command.running ? "(running...)" : ""}
                       </p>
                       <pre
                         className="max-h-[20vh] overflow-auto whitespace-pre-wrap break-words text-xs sm:text-sm"
@@ -690,14 +718,17 @@ export function StoragePage() {
                       >
                         {detailModal.command.error
                           ? detailModal.command.error
-                          : detailModal.command.lines.join("\n") || "Waiting for output..."}
+                          : detailModal.command.lines.join("\n") ||
+                            "Waiting for output..."}
                       </pre>
                     </div>
                   ) : null}
 
                   {detailModal.recovery?.supported ? (
                     <div className="rounded-lg border border-border/70 bg-muted/20 p-3">
-                      <p className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">Recovery</p>
+                      <p className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">
+                        Recovery
+                      </p>
                       <pre className="max-h-[20vh] overflow-auto whitespace-pre-wrap break-words text-xs sm:text-sm">
                         {JSON.stringify(detailModal.recovery.data, null, 2)}
                       </pre>
@@ -706,7 +737,9 @@ export function StoragePage() {
 
                   {detailModal.log ? (
                     <div className="rounded-lg border border-border/70 bg-muted/20 p-3">
-                      <p className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">Latest log</p>
+                      <p className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">
+                        Latest log
+                      </p>
                       <pre className="max-h-[20vh] overflow-auto whitespace-pre-wrap break-words text-xs sm:text-sm">
                         {detailModal.log}
                       </pre>
@@ -714,7 +747,9 @@ export function StoragePage() {
                   ) : null}
 
                   <div className="space-y-2" id="v2-plugin-config">
-                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Configuration (JSON)</p>
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                      Configuration (JSON)
+                    </p>
                     <textarea
                       aria-label="Plugin configuration JSON"
                       className="h-[24vh] w-full resize-y rounded-md border border-border bg-background p-3 font-mono text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:text-sm"
@@ -722,25 +757,43 @@ export function StoragePage() {
                       onChange={(event) =>
                         setDetailModal((current) => ({
                           ...current,
-                          config: { ...current.config, text: event.target.value, status: "idle", error: null, details: [] },
+                          config: {
+                            ...current.config,
+                            text: event.target.value,
+                            status: "idle",
+                            error: null,
+                            details: [],
+                          },
                         }))
                       }
                       spellCheck={false}
                       value={detailModal.config.text}
                     />
                     {detailModal.config.error ? (
-                      <p className="text-sm text-danger" id="v2-plugin-config-error">
+                      <p
+                        className="text-sm text-danger"
+                        id="v2-plugin-config-error"
+                      >
                         {detailModal.config.error}
-                        {detailModal.config.details.length ? `: ${detailModal.config.details.join("; ")}` : ""}
+                        {detailModal.config.details.length
+                          ? `: ${detailModal.config.details.join("; ")}`
+                          : ""}
                       </p>
                     ) : null}
                     <div className="flex items-center gap-3">
                       <Button
                         disabled={detailModal.config.status === "saving"}
                         id="v2-plugin-config-save"
-                        onClick={() => void saveConfig(detailModal.detail!.id, detailModal.config.text)}
+                        onClick={() =>
+                          void saveConfig(
+                            detailModal.detail!.id,
+                            detailModal.config.text,
+                          )
+                        }
                       >
-                        {detailModal.config.status === "saving" ? "Saving..." : "Save config"}
+                        {detailModal.config.status === "saving"
+                          ? "Saving..."
+                          : "Save config"}
                       </Button>
                       <span
                         aria-live="polite"
@@ -751,19 +804,31 @@ export function StoragePage() {
                         {detailModal.config.status === "saved" ? "Saved" : ""}
                       </span>
                     </div>
-                    {Object.keys((detailModal.detail.schema?.properties as Record<string, unknown>) ?? {}).length ? (
+                    {Object.keys(
+                      (detailModal.detail.schema?.properties as Record<
+                        string,
+                        unknown
+                      >) ?? {},
+                    ).length ? (
                       <details className="text-xs text-muted-foreground">
-                        <summary className="cursor-pointer">Schema fields</summary>
+                        <summary className="cursor-pointer">
+                          Schema fields
+                        </summary>
                         <ul className="mt-1 space-y-0.5">
-                          {Object.entries((detailModal.detail.schema.properties as Record<string, Record<string, unknown>>)).map(
-                            ([key, def]) => (
-                              <li className="font-mono" key={key}>
-                                {key}
-                                {def?.type ? `: ${String(def.type)}` : ""}
-                                {def?.description ? ` — ${String(def.description)}` : ""}
-                              </li>
-                            ),
-                          )}
+                          {Object.entries(
+                            detailModal.detail.schema.properties as Record<
+                              string,
+                              Record<string, unknown>
+                            >,
+                          ).map(([key, def]) => (
+                            <li className="font-mono" key={key}>
+                              {key}
+                              {def?.type ? `: ${String(def.type)}` : ""}
+                              {def?.description
+                                ? ` — ${String(def.description)}`
+                                : ""}
+                            </li>
+                          ))}
                         </ul>
                       </details>
                     ) : null}
@@ -786,22 +851,38 @@ export function StoragePage() {
           >
             <CardHeader className="flex flex-row items-start justify-between gap-3 border-b border-border/70 p-4 sm:p-5">
               <div className="space-y-1">
-                <CardTitle className="text-base sm:text-lg" id="v2-plugin-install-title">
+                <CardTitle
+                  className="text-base sm:text-lg"
+                  id="v2-plugin-install-title"
+                >
                   Install plugin
                 </CardTitle>
-                <CardDescription>Install a storage plugin from GitHub or pip.</CardDescription>
+                <CardDescription>
+                  Install a storage plugin from GitHub or pip.
+                </CardDescription>
               </div>
-              <Button id="v2-plugin-install-close" onClick={() => setInstallModal(EMPTY_INSTALL)} variant="outline">
+              <Button
+                id="v2-plugin-install-close"
+                onClick={() => setInstallModal(EMPTY_INSTALL)}
+                variant="outline"
+              >
                 Close
               </Button>
             </CardHeader>
             <CardContent className="space-y-3 overflow-auto p-4">
               <label className="block space-y-1">
-                <span className="text-xs uppercase tracking-wide text-muted-foreground">Type</span>
+                <span className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Type
+                </span>
                 <select
                   className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
                   data-install-field="type"
-                  onChange={(event) => setInstallModal((current) => ({ ...current, type: event.target.value }))}
+                  onChange={(event) =>
+                    setInstallModal((current) => ({
+                      ...current,
+                      type: event.target.value,
+                    }))
+                  }
                   value={installModal.type}
                 >
                   <option value="github">github</option>
@@ -817,12 +898,17 @@ export function StoragePage() {
                 ] as Array<[keyof InstallModalState, string]>
               ).map(([field, label]) => (
                 <label className="block space-y-1" key={field}>
-                  <span className="text-xs uppercase tracking-wide text-muted-foreground">{label}</span>
+                  <span className="text-xs uppercase tracking-wide text-muted-foreground">
+                    {label}
+                  </span>
                   <input
                     className="w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-xs sm:text-sm"
                     data-install-field={field}
                     onChange={(event) =>
-                      setInstallModal((current) => ({ ...current, [field]: event.target.value }))
+                      setInstallModal((current) => ({
+                        ...current,
+                        [field]: event.target.value,
+                      }))
                     }
                     spellCheck={false}
                     value={String(installModal[field])}
@@ -835,7 +921,10 @@ export function StoragePage() {
                 </p>
               ) : null}
               <Button
-                disabled={installModal.status === "saving" || !installModal.source.trim()}
+                disabled={
+                  installModal.status === "saving" ||
+                  !installModal.source.trim()
+                }
                 id="v2-plugin-install-submit"
                 onClick={() => void installNewPlugin()}
               >

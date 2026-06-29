@@ -9,7 +9,6 @@ import secrets
 import hashlib
 import getpass
 from urllib import request as urlrequest
-from urllib.parse import urlsplit
 from stack_manager import stack_manager
 from auth_utils import (
     LoginRateLimiter,
@@ -29,10 +28,34 @@ from backup_scheduler import backup_scheduler, init_backup_scheduler
 from disk_manager import disk_manager
 from setup_manager import setup_manager
 from helper_client import helper_call, HelperError
+from container_helpers import (
+    _compose_dependency_name,
+    _compose_label,
+    _network_target,
+    analyze_network_topology,
+    calculate_container_cpu_percent,
+    calculate_container_memory_stats,
+    calculate_container_network_stats,
+    get_container_ports,
+    get_container_ports_cached,
+    get_container_web_metadata,
+    parse_port_key,
+)
 from runtime_paths import (
     CONFIG_DIR as RUNTIME_CONFIG_DIR,
     SOURCE_ROOT,
     STORAGE_PLUGIN_CONFIG_DIR as RUNTIME_STORAGE_PLUGIN_CONFIG_DIR,
+)
+from system_stats import (
+    _collect_disk_usage as collect_disk_usage,
+    _cpu_percent_from_delta,
+    _read_proc_stat_cpu,
+    _safe_disk_usage,
+    calculate_cpu_usage,
+    get_cpu_usage_delta as read_cpu_usage_delta,
+    get_cpu_usage_per_core,
+    get_system_stats as collect_system_stats,
+    get_temperature_fallback,
 )
 from werkzeug.utils import safe_join
 
@@ -148,128 +171,6 @@ _container_stats_timestamps = {}
 CONTAINER_STATS_TTL = 5  # seconds
 
 
-def parse_port_key(port_key):
-    """Split Docker's port key (e.g. '8080/tcp') into structured parts."""
-    if not port_key:
-        return None, None
-    if isinstance(port_key, int):
-        return port_key, 'tcp'
-
-    try:
-        port_str, protocol = port_key.split('/')
-    except ValueError:
-        port_str, protocol = port_key, 'tcp'
-
-    try:
-        port_num = int(port_str)
-    except ValueError:
-        port_num = None
-
-    return port_num, protocol
-
-
-def get_container_ports(container):
-    """Return a structured list of ports exposed/published by a container."""
-    ports = []
-    seen_ports = set()
-
-    try:
-        network_settings = container.attrs.get('NetworkSettings', {})
-        port_bindings = network_settings.get('Ports') or {}
-        config = container.attrs.get('Config', {})
-        exposed_ports = config.get('ExposedPorts') or {}
-    except Exception as e:
-        print(f"Error inspecting ports for container {container.name}: {e}")
-        return ports
-
-    # Ports published to the host
-    for container_port, bindings in port_bindings.items():
-        port_num, protocol = parse_port_key(container_port)
-        seen_ports.add((port_num, protocol))
-
-        if not bindings:
-            ports.append(
-                {
-                    "container_port": port_num,
-                    "protocol": protocol,
-                    "host_port": None,
-                    "host_ip": None,
-                }
-            )
-            continue
-
-        for binding in bindings:
-            host_port = binding.get("HostPort")
-            host_ip = binding.get("HostIp") or None
-            ports.append(
-                {
-                    "container_port": port_num,
-                    "protocol": protocol,
-                    "host_port": int(host_port) if host_port else None,
-                    "host_ip": host_ip if host_ip not in ("0.0.0.0", "") else None,
-                }
-            )
-
-    # Any remaining exposed ports (useful for network_mode=host/service)
-    for container_port in exposed_ports.keys():
-        port_num, protocol = parse_port_key(container_port)
-        if (port_num, protocol) in seen_ports:
-            continue
-        ports.append(
-            {
-                "container_port": port_num,
-                "protocol": protocol,
-                "host_port": None,
-                "host_ip": None,
-            }
-        )
-
-    return ports
-
-
-def get_container_web_metadata(container):
-    """Return validated explicit service-link metadata for one container."""
-    try:
-        labels = (container.attrs.get('Config') or {}).get('Labels') or {}
-    except Exception:
-        labels = {}
-    if not isinstance(labels, dict):
-        labels = {}
-
-    explicit_url = str(labels.get('limeos.web.url') or '').strip()
-    if explicit_url and not any(ord(char) < 32 for char in explicit_url):
-        try:
-            parsed = urlsplit(explicit_url)
-            scheme = parsed.scheme.lower()
-            if (
-                scheme in {'http', 'https'}
-                and parsed.hostname
-                and parsed.username is None
-                and parsed.password is None
-            ):
-                return {'web_url': explicit_url, 'web_scheme': scheme}
-        except ValueError:
-            pass
-
-    candidates = [
-        labels.get('limeos.web.scheme'),
-        os.getenv('PIHEALTH_SERVICE_LINK_SCHEME'),
-    ]
-    for candidate in candidates:
-        scheme = str(candidate or '').strip().lower()
-        if scheme in {'http', 'https'}:
-            return {'web_url': None, 'web_scheme': scheme}
-
-    return {'web_url': None, 'web_scheme': None}
-
-
-def get_container_ports_cached(container, port_cache):
-    """Return cached port metadata for a container to avoid repeated inspections."""
-    if container.id not in port_cache:
-        port_cache[container.id] = get_container_ports(container)
-    return port_cache[container.id]
-
-
 def inherit_ports_from_network_service(container, containers_by_name, port_cache):
     """If a container shares another container's network stack, inherit its host bindings."""
     host_config = container.attrs.get('HostConfig', {})
@@ -341,266 +242,23 @@ def inherit_ports_from_network_service(container, containers_by_name, port_cache
     return inherited_ports
 
 
-def calculate_cpu_usage(cpu_line):
-    """Calculate CPU usage based on /proc/stat values."""
-    user, nice, system, idle, iowait, irq, softirq, steal = map(int, cpu_line[1:9])
-    total_time = user + nice + system + idle + iowait + irq + softirq + steal
-    idle_time = idle + iowait
-    usage_percent = 100 * (total_time - idle_time) / total_time
-    return usage_percent
-
-
-def get_cpu_usage_per_core(stat_lines):
-    """Calculate per-core usage percentages from /proc/stat lines."""
-    per_core = []
-    for line in stat_lines:
-        if not line.startswith('cpu') or line.startswith('cpu '):
-            continue
-        parts = line.split()
-        if len(parts) < 9:
-            continue
-        core_id = parts[0]
-        usage = calculate_cpu_usage(parts)
-        per_core.append({'core': core_id, 'usage_percent': usage})
-    return per_core
-
-
-def get_temperature_fallback():
-    """Try to get temperature using psutil sensors when vcgencmd is unavailable."""
-    try:
-        temps = psutil.sensors_temperatures(fahrenheit=False)
-    except Exception:
-        return None
-
-    if not temps:
-        return None
-
-    # Prefer the actual CPU package sensor; chipset/ambient sensors (e.g. acpitz)
-    # read much lower and would misreport CPU temperature on x86 hosts.
-    preferred = ('cpu_thermal', 'cpu-thermal', 'coretemp', 'k10temp',
-                 'soc_thermal', 'cpu')
-    for key in preferred:
-        for entry in temps.get(key, []):
-            current = getattr(entry, 'current', None)
-            if current is not None:
-                return current
-
-    # Fall back to the first sensor that reports a reading.
-    for entries in temps.values():
-        for entry in entries:
-            current = getattr(entry, 'current', None)
-            if current is not None:
-                return current
-    return None
-
-
-def _read_proc_stat_cpu(path):
-    """Read aggregate + per-core CPU jiffy counters from a /proc/stat-style file.
-
-    Returns {name: [user, nice, system, idle, iowait, irq, softirq, steal]}."""
-    counters = {}
-    with open(path, 'r') as f:
-        for line in f:
-            if line.startswith('cpu'):
-                parts = line.split()
-                try:
-                    counters[parts[0]] = list(map(int, parts[1:9]))
-                except (ValueError, IndexError):
-                    continue
-            elif counters:
-                break  # cpu lines are first/contiguous in /proc/stat
-    return counters
-
-
-def _cpu_percent_from_delta(start, end):
-    """Percent busy between two jiffy snapshots of one cpu line."""
-    total = sum(end) - sum(start)
-    idle = (end[3] + end[4]) - (start[3] + start[4])  # idle + iowait
-    if total <= 0:
-        return None
-    return round(100 * (total - idle) / total, 1)
-
-
 def get_cpu_usage_delta(interval=0.1):
-    """Current CPU usage via two /proc/stat snapshots (delta), aggregate + per-core.
-
-    Unlike a single snapshot (which yields the average since boot), this reflects
-    actual instantaneous load. Tries /host_proc/stat (Docker) then /proc/stat."""
-    for stat_path in ['/host_proc/stat', '/proc/stat']:
-        try:
-            start = _read_proc_stat_cpu(stat_path)
-            if not start:
-                continue
-            time.sleep(interval)
-            end = _read_proc_stat_cpu(stat_path)
-            aggregate = None
-            if 'cpu' in start and 'cpu' in end:
-                aggregate = _cpu_percent_from_delta(start['cpu'], end['cpu'])
-            per_core = [
-                {'core': name, 'usage_percent': _cpu_percent_from_delta(start[name], end[name])}
-                for name in sorted(start)
-                if name != 'cpu' and name in end
-            ]
-            return aggregate, per_core
-        except Exception:
-            continue
-    return None, []
-
-
-def _safe_disk_usage(path):
-    """psutil.disk_usage(path) as a dict, or None if the path isn't mounted."""
-    try:
-        usage = psutil.disk_usage(path)
-    except Exception:
-        return None
-    return {
-        "total": usage.total,
-        "used": usage.used,
-        "free": usage.free,
-        "percent": usage.percent,
-    }
+    """Read CPU deltas through the app's patchable stat reader."""
+    return read_cpu_usage_delta(interval, stat_reader=_read_proc_stat_cpu)
 
 
 def _collect_disk_usage(metric, path, warnings):
-    """Collect one disk metric and append a source-scoped warning on failure."""
-    usage = _safe_disk_usage(path)
-    if usage is None:
-        warnings.append({
-            'code': 'source_unavailable',
-            'metric': metric,
-            'source': path,
-            'message': f'Disk usage unavailable for {path}',
-        })
-    return usage
+    """Collect disk usage through the app's patchable disk reader."""
+    return collect_disk_usage(metric, path, warnings, disk_reader=_safe_disk_usage)
 
 
 def get_system_stats():
-    """Gather system statistics including CPU, memory, disk, and network."""
-    # CPU usage - instantaneous, via two /proc/stat snapshots (not since-boot avg)
-    cpu_usage, per_core = get_cpu_usage_delta()
-
-    # Memory usage
-    memory = psutil.virtual_memory()
-    memory_usage = {
-        "total": memory.total,
-        "used": memory.used,
-        "free": memory.available,
-        "percent": memory.percent,
-    }
-
-    # Disk usage (with configurable path); guarded so a missing mount returns
-    # None instead of raising and 500-ing the whole stats endpoint.
-    warnings = []
-    disk_usage = _collect_disk_usage(
-        'disk_usage',
-        os.getenv('DISK_PATH', '/'),
-        warnings,
+    """Gather system statistics using app-level patchable dependencies."""
+    return collect_system_stats(
+        cpu_reader=get_cpu_usage_delta,
+        disk_collector=_collect_disk_usage,
+        pi_metrics_reader=get_pi_metrics,
     )
-    disk_usage_2 = _collect_disk_usage(
-        'disk_usage_2',
-        os.getenv('DISK_PATH_2', '/mnt/backup'),
-        warnings,
-    )
-    
-    # Temperature (specific to Raspberry Pi)
-    if os.path.exists('/usr/bin/vcgencmd'):
-        try:
-            temp_output = os.popen("vcgencmd measure_temp").readline()
-            temperature = float(temp_output.replace("temp=", "").replace("'C\n", ""))
-        except Exception:
-            temperature = None
-    else:
-        temperature = None
-
-    if temperature is None:
-        temperature = get_temperature_fallback()
-
-    # Network I/O
-    net_io = psutil.net_io_counters()
-    network_usage = {
-        "bytes_sent": net_io.bytes_sent,
-        "bytes_recv": net_io.bytes_recv,
-    }
-
-    # Get Pi-specific metrics
-    pi_metrics = get_pi_metrics()
-
-    # Combine all stats
-    return {
-        "cpu_usage_percent": cpu_usage,
-        "cpu_usage_per_core": per_core,
-        "memory_usage": memory_usage,
-        "disk_usage": disk_usage,
-        "disk_usage_2": disk_usage_2,
-        "temperature_celsius": temperature,
-        "network_usage": network_usage,
-        "throttling": pi_metrics.get('throttling'),
-        "cpu_freq_mhz": pi_metrics.get('cpu_freq_mhz'),
-        "cpu_voltage": pi_metrics.get('cpu_voltage'),
-        "wifi_signal": pi_metrics.get('wifi_signal'),
-        "is_raspberry_pi": pi_metrics.get('is_raspberry_pi', False),
-        "warnings": warnings,
-    }
-
-
-def calculate_container_cpu_percent(stats):
-    """Calculate CPU percentage from Docker stats."""
-    try:
-        cpu_stats = stats.get('cpu_stats', {})
-        precpu_stats = stats.get('precpu_stats', {})
-
-        cpu_usage = cpu_stats.get('cpu_usage', {})
-        precpu_usage = precpu_stats.get('cpu_usage', {})
-
-        cpu_delta = cpu_usage.get('total_usage', 0) - precpu_usage.get('total_usage', 0)
-        system_delta = cpu_stats.get('system_cpu_usage', 0) - precpu_stats.get('system_cpu_usage', 0)
-
-        if system_delta > 0 and cpu_delta > 0:
-            num_cpus = cpu_stats.get('online_cpus', 1) or len(cpu_usage.get('percpu_usage', [1]))
-            cpu_percent = (cpu_delta / system_delta) * num_cpus * 100.0
-            return round(cpu_percent, 1)
-    except Exception:
-        pass
-    return None
-
-
-def calculate_container_memory_stats(stats):
-    """Extract memory usage stats from Docker stats."""
-    try:
-        memory_stats = stats.get('memory_stats', {})
-        usage = memory_stats.get('usage', 0)
-        limit = memory_stats.get('limit', 0)
-
-        # Subtract cache for more accurate "real" memory usage
-        cache = memory_stats.get('stats', {}).get('cache', 0)
-        actual_usage = usage - cache if cache else usage
-
-        if limit > 0:
-            percent = round((actual_usage / limit) * 100, 1)
-        else:
-            percent = None
-
-        return {
-            'used': actual_usage,
-            'limit': limit,
-            'percent': percent
-        }
-    except Exception:
-        return {'used': None, 'limit': None, 'percent': None}
-
-
-def calculate_container_network_stats(stats):
-    """Sum network rx/tx bytes across all interfaces."""
-    try:
-        networks = stats.get('networks', {})
-        rx_bytes = 0
-        tx_bytes = 0
-        for iface_stats in networks.values():
-            rx_bytes += iface_stats.get('rx_bytes', 0)
-            tx_bytes += iface_stats.get('tx_bytes', 0)
-        return {'rx': rx_bytes, 'tx': tx_bytes}
-    except Exception:
-        return {'rx': None, 'tx': None}
 
 
 def get_container_stats_cached(container_id):
@@ -1040,109 +698,6 @@ def get_container_health_detail(container):
     }
 
 
-def _network_target(host_config):
-    """Describe a container's shared-network target.
-
-    Returns ('container', <id>) when it joins another container's namespace,
-    ('service', <name>) for the compose service form, or (None, None) for
-    standalone/bridge/host networking."""
-    mode = (host_config or {}).get('NetworkMode') or ''
-    if mode.startswith('container:'):
-        return 'container', mode.split(':', 1)[1]
-    if mode.startswith('service:'):
-        return 'service', mode.split(':', 1)[1]
-    return None, None
-
-
-def _compose_label(container, key):
-    return ((container.attrs.get('Config') or {}).get('Labels') or {}).get(key)
-
-
-def _compose_dependency_name(container):
-    """Best-effort name of the service a container shares its network with, taken
-    from the compose depends_on label. Used to name the provider when the live
-    namespace target is already gone (the orphaned case)."""
-    dep = _compose_label(container, 'com.docker.compose.depends_on') or ''
-    first = dep.split(',')[0].strip()
-    if first:
-        name = first.split(':', 1)[0].strip()
-        if name:
-            return name
-    return None
-
-
-def analyze_network_topology(containers):
-    """Map containers that ride on another container's network namespace
-    (e.g. download clients behind a gluetun VPN) and flag *orphans* — members
-    pinned to a namespace whose container no longer exists.
-
-    Returns (info_by_id, groups_by_provider_name) where info entries carry
-    {mode, role, provider, status, [members]} and groups carry member/orphan sets."""
-    by_id = {c.id: c for c in containers}
-    by_name = {c.name: c for c in containers}
-
-    def _running(c):
-        return getattr(c, 'status', None) == 'running'
-
-    info = {}
-    groups = {}
-
-    for c in containers:
-        host_config = c.attrs.get('HostConfig') or {}
-        kind, value = _network_target(host_config)
-        entry = {
-            'mode': host_config.get('NetworkMode') or '',
-            'role': 'standalone',
-            'provider': None,
-            'status': 'ok',
-        }
-
-        if kind in ('container', 'service'):
-            entry['role'] = 'member'
-            orphaned = False
-            provider_name = None
-
-            if kind == 'container':
-                target = by_id.get(value)
-                if target is None:
-                    # Pinned to a namespace that no longer exists -> ORPHANED.
-                    orphaned = True
-                    provider_name = _compose_dependency_name(c)
-                else:
-                    provider_name = target.name
-            else:  # service:<name>
-                provider_name = value
-                if by_name.get(value) is None:
-                    orphaned = True
-
-            entry['provider'] = provider_name
-            if orphaned:
-                entry['status'] = 'orphaned'
-            else:
-                tgt = by_name.get(provider_name) if provider_name else None
-                entry['status'] = 'ok' if (tgt is not None and _running(tgt)) else 'provider_stopped'
-
-            if provider_name:
-                grp = groups.setdefault(provider_name, {'members': set(), 'orphaned': set()})
-                grp['members'].add(c.name)
-                if orphaned:
-                    grp['orphaned'].add(c.name)
-
-        info[c.id] = entry
-
-    # Mark the provider containers themselves.
-    for provider_name, grp in groups.items():
-        provider = by_name.get(provider_name)
-        if provider is not None:
-            pinfo = info.get(provider.id)
-            if pinfo is not None:
-                pinfo['role'] = 'provider'
-                pinfo['provider'] = provider_name
-                pinfo['members'] = sorted(grp['members'])
-
-    return info, groups
-
-
 def get_host_public_ip():
     """Return the host's public IP, or None if it can't be determined."""
     try:
@@ -1312,71 +867,6 @@ def system_action(action):
         return {"error": str(e)}
 
 
-UI_MODE_LEGACY = 'legacy'
-UI_MODE_HYBRID = 'hybrid'
-UI_MODE_V2 = 'v2'
-VALID_UI_MODES = {UI_MODE_LEGACY, UI_MODE_HYBRID, UI_MODE_V2}
-V2_PAGE_KEYS = {
-    'index',
-    'system',
-    'containers',
-    'apps',
-    'stacks',
-    'tools',
-    'settings',
-    'storage',
-    'pools',
-    'mounts',
-    'shares',
-    'plugins',
-    'disks',
-    'network',
-    'tailscale',
-}
-V2_PAGE_ALIASES = {
-    'home': 'index',
-}
-
-
-def normalize_ui_mode(mode_value):
-    """Normalize UI mode env values to supported values with legacy fallback."""
-    normalized = (mode_value or '').strip().lower()
-    if normalized in VALID_UI_MODES:
-        return normalized
-    return UI_MODE_LEGACY
-
-
-def get_ui_mode():
-    """Read current UI mode from environment."""
-    return normalize_ui_mode(os.getenv('PIHEALTH_UI_MODE', UI_MODE_LEGACY))
-
-
-def parse_v2_pages(raw_pages):
-    """Parse and normalize comma-separated v2 page keys."""
-    if not raw_pages:
-        return set()
-
-    parsed_pages = set()
-    for token in raw_pages.split(','):
-        normalized = token.strip().lower()
-        if not normalized:
-            continue
-
-        if normalized == '*':
-            return set(V2_PAGE_KEYS)
-
-        normalized = V2_PAGE_ALIASES.get(normalized, normalized)
-        if normalized in V2_PAGE_KEYS:
-            parsed_pages.add(normalized)
-
-    return parsed_pages
-
-
-def get_v2_enabled_pages():
-    """Return selected v2 page keys for hybrid mode."""
-    return parse_v2_pages(os.getenv('PIHEALTH_UI_V2_PAGES', ''))
-
-
 def get_v2_target_for_page(page_key):
     """Map a legacy page key to its v2 route target."""
     if page_key == 'index':
@@ -1386,92 +876,92 @@ def get_v2_target_for_page(page_key):
 
 @app.route('/')
 def serve_frontend():
-    """Serve the main landing page."""
-    return serve_ui_page('index', 'index.html')
+    """Serve the v2 SPA at the canonical root URL."""
+    return serve_v2_index()
 
 
 @app.route('/system.html')
 def serve_system():
     """Serve the system health page."""
-    return serve_ui_page('system', 'system.html')
+    return redirect(get_v2_target_for_page('system'))
 
 
 @app.route('/containers.html')
 def serve_containers():
     """Serve the containers management page."""
-    return serve_ui_page('containers', 'containers.html')
+    return redirect(get_v2_target_for_page('containers'))
 
 
 
 @app.route('/apps.html')
 def serve_apps():
     """Serve the app catalog page."""
-    return serve_ui_page('apps', 'apps.html')
+    return redirect(get_v2_target_for_page('apps'))
 
 
 @app.route('/stacks.html')
 def serve_stacks():
     """Serve the stacks management page."""
-    return serve_ui_page('stacks', 'stacks.html')
+    return redirect(get_v2_target_for_page('stacks'))
 
 
 @app.route('/tools.html')
 def serve_tools():
     """Serve the tools page."""
-    return serve_ui_page('tools', 'tools.html')
+    return redirect(get_v2_target_for_page('tools'))
 
 
 @app.route('/settings.html')
 def serve_settings():
     """Serve the settings page."""
-    return serve_ui_page('settings', 'settings.html')
+    return redirect(get_v2_target_for_page('settings'))
 
 @app.route('/storage.html')
 def serve_storage():
     """Serve the storage plugins page (redirects to pools)."""
-    return serve_ui_page('storage', 'storage.html')
+    return redirect(get_v2_target_for_page('storage'))
 
 
 @app.route('/pools.html')
 def serve_pools():
     """Serve the storage pools page."""
-    return serve_ui_page('pools', 'pools.html')
+    return redirect(get_v2_target_for_page('pools'))
 
 
 @app.route('/mounts.html')
 def serve_mounts():
     """Serve the mounts page."""
-    return serve_ui_page('mounts', 'mounts.html')
+    return redirect(get_v2_target_for_page('mounts'))
 
 
 @app.route('/shares.html')
 def serve_shares():
     """Serve the network shares page."""
-    return serve_ui_page('shares', 'shares.html')
+    return redirect(get_v2_target_for_page('shares'))
 
 
 @app.route('/plugins.html')
 def serve_plugins():
     """Serve the plugins page."""
-    return serve_ui_page('plugins', 'plugins.html')
+    return redirect(get_v2_target_for_page('plugins'))
 
 
 @app.route('/disks.html')
 def serve_disks():
     """Serve the disk management page."""
-    return serve_ui_page('disks', 'disks.html')
+    return redirect(get_v2_target_for_page('disks'))
 
 
 @app.route('/network.html')
 def serve_network():
     """Serve the host network page."""
-    return serve_ui_page('network', 'network.html')
+    return redirect(get_v2_target_for_page('network'))
 
 
 @app.route('/tailscale.html')
 def serve_tailscale():
     """Serve the Tailscale page."""
-    return serve_ui_page('tailscale', 'tailscale.html')
+    return redirect(get_v2_target_for_page('tailscale'))
 
 
 @app.route('/login.html')
@@ -1490,38 +980,10 @@ def v2_index_exists():
     return os.path.isfile(os.path.join(get_v2_static_dir(), 'index.html'))
 
 
-def should_redirect_legacy_page_to_v2(page_key):
-    """Return whether a legacy UI route should redirect to v2."""
-    mode = get_ui_mode()
-    if mode == UI_MODE_LEGACY:
-        return False
-
-    if not v2_index_exists():
-        return False
-
-    if mode == UI_MODE_V2:
-        return True
-
-    return page_key in get_v2_enabled_pages()
-
-
-def serve_ui_page(page_key, filename):
-    """Serve legacy page or redirect to v2 based on runtime mode and page selection."""
-    if should_redirect_legacy_page_to_v2(page_key):
-        return redirect(get_v2_target_for_page(page_key))
-    return send_from_directory(app.static_folder, filename)
-
-
 @app.route('/v2')
 @app.route('/v2/')
 def serve_v2_index():
     """Serve the v2 SPA entrypoint."""
-    if get_ui_mode() == UI_MODE_LEGACY:
-        return jsonify({
-            "error": "v2 UI is disabled in legacy mode",
-            "mode": UI_MODE_LEGACY,
-        }), 404
-
     if not v2_index_exists():
         return jsonify({
             "error": "v2 build artifacts are missing",
@@ -1533,12 +995,6 @@ def serve_v2_index():
 @app.route('/v2/<path:path>')
 def serve_v2_path(path):
     """Serve v2 assets directly and fallback route-like paths to SPA index."""
-    if get_ui_mode() == UI_MODE_LEGACY:
-        return jsonify({
-            "error": "v2 UI is disabled in legacy mode",
-            "mode": UI_MODE_LEGACY,
-        }), 404
-
     v2_static_dir = get_v2_static_dir()
     resolved_path = safe_join(v2_static_dir, path)
     if resolved_path and os.path.isfile(resolved_path):

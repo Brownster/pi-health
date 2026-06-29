@@ -1,22 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  Activity,
-  Archive,
-  Download,
-  FileText,
-  Loader2,
-  Pencil,
-  Play,
-  RefreshCw,
-  RotateCw,
-  Square,
-  TriangleAlert,
-} from "lucide-react";
+import { Activity, Loader2, RefreshCw, TriangleAlert } from "lucide-react";
 
-import { StatusBadge, type BadgeProps } from "@/components/ui/badge";
+import { STACK_ACTION_META, StackCard } from "@/components/stacks/stack-card";
+import { StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { MetricBar } from "@/components/ui/metric-bar";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { ModalOverlay } from "@/components/ui/modal-overlay";
 import { PageHeader } from "@/components/ui/page-header";
 import {
@@ -28,7 +22,6 @@ import {
   fetchStackEnv,
   fetchStackLogs,
   fetchStacks,
-  getStackServicesPercent,
   restoreStackBackup,
   saveStackCompose,
   saveStackEnv,
@@ -38,38 +31,6 @@ import { formatClockTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 const POLL_INTERVAL_MS = 10_000;
-
-const ACTION_ORDER: StackAction[] = ["up", "down", "restart", "pull"];
-
-const ACTION_META: Record<
-  StackAction,
-  { label: string; pendingLabel: string; className: string; Icon: typeof Play }
-> = {
-  up: {
-    label: "Start",
-    pendingLabel: "Starting...",
-    className: "border-success/30 bg-success/10 text-success hover:bg-success/15",
-    Icon: Play,
-  },
-  down: {
-    label: "Stop",
-    pendingLabel: "Stopping...",
-    className: "border-danger/30 bg-danger/10 text-danger hover:bg-danger/15",
-    Icon: Square,
-  },
-  restart: {
-    label: "Restart",
-    pendingLabel: "Restarting...",
-    className: "border-warning/30 bg-warning/10 text-warning hover:bg-warning/15",
-    Icon: RotateCw,
-  },
-  pull: {
-    label: "Pull",
-    pendingLabel: "Pulling...",
-    className: "border-info/30 bg-info/10 text-info hover:bg-info/15",
-    Icon: Download,
-  },
-};
 
 type AsyncStatus = "idle" | "loading" | "ready" | "error";
 type ConsoleStatus = "streaming" | "done" | "error";
@@ -124,20 +85,6 @@ interface BackupsModalState {
   notice: string | null;
 }
 
-function getStatusTone(status: string): BadgeProps["tone"] {
-  switch (status) {
-    case "running":
-      return "success";
-    case "stopped":
-    case "exited":
-      return "danger";
-    case "partial":
-      return "warning";
-    default:
-      return "neutral";
-  }
-}
-
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message) {
     return error.message;
@@ -155,118 +102,6 @@ function getNoticeToneClass(tone: ActionNotice["tone"]): string {
   return "border-info/30 text-info";
 }
 
-function StackCard({
-  stack,
-  pendingAction,
-  onAction,
-  onLogs,
-  onEdit,
-  onBackups,
-}: {
-  stack: StackSummary;
-  pendingAction?: StackAction;
-  onAction: (stack: StackSummary, action: StackAction) => void;
-  onLogs: (stack: StackSummary) => void;
-  onEdit: (stack: StackSummary) => void;
-  onBackups: (stack: StackSummary) => void;
-}) {
-  const percent = getStackServicesPercent(stack);
-  const barWidth = percent === null ? 0 : Math.max(0, Math.min(percent, 100));
-  const running = stack.running_count ?? "—";
-  const total = stack.container_count ?? "—";
-  const rowBusy = Boolean(pendingAction);
-
-  return (
-    <Card className="transition-colors duration-200 hover:border-primary/25">
-      <CardContent className="space-y-3 p-4">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="truncate text-sm font-semibold">{stack.name}</p>
-            {stack.compose_file ? (
-              <p className="truncate text-xs text-muted-foreground">{stack.compose_file}</p>
-            ) : null}
-          </div>
-          <StatusBadge className="shrink-0" label={stack.status} tone={getStatusTone(stack.status)} />
-        </div>
-
-        <div className="space-y-1">
-          <p className="text-xs text-muted-foreground">
-            {running} / {total} services up
-          </p>
-          <MetricBar label={`${stack.name} services ${barWidth}%`} tone="success" value={barWidth} />
-        </div>
-
-        <div className="flex flex-wrap gap-2">
-          {ACTION_ORDER.map((action) => {
-            const meta = ACTION_META[action];
-            const isCurrent = pendingAction === action;
-            const Icon = meta.Icon;
-            return (
-              <Button
-                aria-label={`${meta.label} ${stack.name}`}
-                className={cn("gap-1.5 px-2.5 text-xs sm:text-sm", meta.className)}
-                data-action={action}
-                data-stack={stack.name}
-                disabled={rowBusy}
-                key={action}
-                onClick={() => onAction(stack, action)}
-                size="sm"
-                variant="outline"
-              >
-                {isCurrent ? (
-                  <Loader2 aria-hidden="true" className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Icon aria-hidden="true" className="h-3.5 w-3.5" />
-                )}
-                {isCurrent ? meta.pendingLabel : meta.label}
-              </Button>
-            );
-          })}
-          <Button
-            aria-label={`Logs ${stack.name}`}
-            className="gap-1.5 text-xs sm:text-sm"
-            data-stack-action="logs"
-            data-stack={stack.name}
-            disabled={rowBusy}
-            onClick={() => onLogs(stack)}
-            size="sm"
-            variant="outline"
-          >
-            <FileText aria-hidden="true" className="h-3.5 w-3.5" />
-            Logs
-          </Button>
-          <Button
-            aria-label={`Edit ${stack.name}`}
-            className="gap-1.5 text-xs sm:text-sm"
-            data-stack-action="edit"
-            data-stack={stack.name}
-            disabled={rowBusy}
-            onClick={() => onEdit(stack)}
-            size="sm"
-            variant="outline"
-          >
-            <Pencil aria-hidden="true" className="h-3.5 w-3.5" />
-            Edit
-          </Button>
-          <Button
-            aria-label={`Backups ${stack.name}`}
-            className="gap-1.5 text-xs sm:text-sm"
-            data-stack-action="backups"
-            data-stack={stack.name}
-            disabled={rowBusy}
-            onClick={() => onBackups(stack)}
-            size="sm"
-            variant="outline"
-          >
-            <Archive aria-hidden="true" className="h-3.5 w-3.5" />
-            Backups
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
 export function StacksPage() {
   const [stacks, setStacks] = useState<StackSummary[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -274,7 +109,9 @@ export function StacksPage() {
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState("Never");
   const [actionNotice, setActionNotice] = useState<ActionNotice | null>(null);
-  const [pendingActions, setPendingActions] = useState<Record<string, StackAction>>({});
+  const [pendingActions, setPendingActions] = useState<
+    Record<string, StackAction>
+  >({});
   const [consoleModal, setConsoleModal] = useState<ConsoleModalState>({
     open: false,
     stackName: "",
@@ -317,59 +154,68 @@ export function StacksPage() {
   const isMountedRef = useRef(true);
   const stacksLoadInFlightRef = useRef(false);
   const pendingActionsRef = useRef<Record<string, StackAction>>({});
-  const stackStreamAbortRef = useRef<{ controller: AbortController; stackName: string } | null>(null);
+  const stackStreamAbortRef = useRef<{
+    controller: AbortController;
+    stackName: string;
+  } | null>(null);
 
-  const setPendingAction = useCallback((name: string, action: StackAction | null) => {
-    setPendingActions((current) => {
-      const next = { ...current };
-      if (action) {
-        next[name] = action;
-      } else {
-        delete next[name];
-      }
-      pendingActionsRef.current = next;
-      return next;
-    });
-  }, []);
+  const setPendingAction = useCallback(
+    (name: string, action: StackAction | null) => {
+      setPendingActions((current) => {
+        const next = { ...current };
+        if (action) {
+          next[name] = action;
+        } else {
+          delete next[name];
+        }
+        pendingActionsRef.current = next;
+        return next;
+      });
+    },
+    [],
+  );
 
-  const loadStacks = useCallback(async (reason: "initial" | "manual" | "poll" | "action") => {
-    if (stacksLoadInFlightRef.current) {
-      return;
-    }
-    stacksLoadInFlightRef.current = true;
-
-    if (reason === "initial") {
-      setIsLoading(true);
-    }
-    if (reason === "manual") {
-      setIsRefreshing(true);
-    }
-
-    try {
-      const next = await fetchStacks({ includeStatus: true });
-      if (!isMountedRef.current) {
+  const loadStacks = useCallback(
+    async (reason: "initial" | "manual" | "poll" | "action") => {
+      if (stacksLoadInFlightRef.current) {
         return;
       }
-      setStacks(next);
-      setError(null);
-      setLastUpdated(formatClockTime(new Date()));
-    } catch (caughtError) {
-      if (!isMountedRef.current) {
-        return;
+      stacksLoadInFlightRef.current = true;
+
+      if (reason === "initial") {
+        setIsLoading(true);
       }
-      setError(getErrorMessage(caughtError));
-    } finally {
-      stacksLoadInFlightRef.current = false;
-      if (isMountedRef.current) {
-        if (reason === "initial") {
-          setIsLoading(false);
+      if (reason === "manual") {
+        setIsRefreshing(true);
+      }
+
+      try {
+        const next = await fetchStacks({ includeStatus: true });
+        if (!isMountedRef.current) {
+          return;
         }
-        if (reason === "manual") {
-          setIsRefreshing(false);
+        setStacks(next);
+        setError(null);
+        setLastUpdated(formatClockTime(new Date()));
+      } catch (caughtError) {
+        if (!isMountedRef.current) {
+          return;
+        }
+        setError(getErrorMessage(caughtError));
+      } finally {
+        stacksLoadInFlightRef.current = false;
+        if (isMountedRef.current) {
+          if (reason === "initial") {
+            setIsLoading(false);
+          }
+          if (reason === "manual") {
+            setIsRefreshing(false);
+          }
         }
       }
-    }
-  }, []);
+    },
+    [],
+  );
 
   const closeStackStream = useCallback(() => {
     if (stackStreamAbortRef.current) {
@@ -384,9 +230,12 @@ export function StacksPage() {
         return;
       }
 
-      const meta = ACTION_META[action];
+      const meta = STACK_ACTION_META[action];
       setPendingAction(stack.name, action);
-      setActionNotice({ tone: "info", message: `${meta.pendingLabel.replace("...", "")} ${stack.name}...` });
+      setActionNotice({
+        tone: "info",
+        message: `${meta.pendingLabel.replace("...", "")} ${stack.name}...`,
+      });
       setConsoleModal({
         open: true,
         stackName: stack.name,
@@ -407,7 +256,11 @@ export function StacksPage() {
 
       const execute = async () => {
         try {
-          const operation = await createStackOperation(stack.name, action, controller.signal);
+          const operation = await createStackOperation(
+            stack.name,
+            action,
+            controller.signal,
+          );
           await streamStackOperation(
             operation.stream_url,
             (data) => {
@@ -416,18 +269,28 @@ export function StacksPage() {
               }
               if (data.error) {
                 terminalReceived = true;
-                setConsoleModal((current) => ({ ...current, status: "error", error: data.error ?? "Stream error" }));
-                setActionNotice({ tone: "error", message: `${meta.label} failed for ${stack.name}` });
+                setConsoleModal((current) => ({
+                  ...current,
+                  status: "error",
+                  error: data.error ?? "Stream error",
+                }));
+                setActionNotice({
+                  tone: "error",
+                  message: `${meta.label} failed for ${stack.name}`,
+                });
                 return;
               }
               if (data.done) {
                 terminalReceived = true;
-                const failed = typeof data.returncode === "number" && data.returncode !== 0;
+                const failed =
+                  typeof data.returncode === "number" && data.returncode !== 0;
                 setConsoleModal((current) => ({
                   ...current,
                   status: failed ? "error" : "done",
                   returncode: data.returncode ?? null,
-                  error: failed ? `Command exited with code ${data.returncode}` : null,
+                  error: failed
+                    ? `Command exited with code ${data.returncode}`
+                    : null,
                 }));
                 setActionNotice({
                   tone: failed ? "error" : "success",
@@ -438,7 +301,10 @@ export function StacksPage() {
                 return;
               }
               if (typeof data.line === "string") {
-                setConsoleModal((current) => ({ ...current, lines: [...current.lines, data.line as string] }));
+                setConsoleModal((current) => ({
+                  ...current,
+                  lines: [...current.lines, data.line as string],
+                }));
               }
             },
             controller.signal,
@@ -453,8 +319,15 @@ export function StacksPage() {
           if (!isMountedRef.current) {
             return;
           }
-          setConsoleModal((current) => ({ ...current, status: "error", error: getErrorMessage(caughtError) }));
-          setActionNotice({ tone: "error", message: `${meta.label} failed for ${stack.name}: ${getErrorMessage(caughtError)}` });
+          setConsoleModal((current) => ({
+            ...current,
+            status: "error",
+            error: getErrorMessage(caughtError),
+          }));
+          setActionNotice({
+            tone: "error",
+            message: `${meta.label} failed for ${stack.name}: ${getErrorMessage(caughtError)}`,
+          });
         } finally {
           if (stackStreamAbortRef.current?.controller === controller) {
             stackStreamAbortRef.current = null;
@@ -484,7 +357,13 @@ export function StacksPage() {
   }, [closeStackStream, setPendingAction]);
 
   const onLogs = useCallback(async (stack: StackSummary) => {
-    setLogsModal({ open: true, status: "loading", stackName: stack.name, logs: "", error: null });
+    setLogsModal({
+      open: true,
+      status: "loading",
+      stackName: stack.name,
+      logs: "",
+      error: null,
+    });
     try {
       const result = await fetchStackLogs(stack.name);
       if (!isMountedRef.current) {
@@ -554,7 +433,11 @@ export function StacksPage() {
       }
       setEditorModal((current) =>
         current.stackName === stack.name && current.open
-          ? { ...current, status: "error", loadError: getErrorMessage(caughtError) }
+          ? {
+              ...current,
+              status: "error",
+              loadError: getErrorMessage(caughtError),
+            }
           : current,
       );
     }
@@ -568,7 +451,11 @@ export function StacksPage() {
     const name = editorModal.stackName;
     const tab = editorModal.tab;
     const content = tab === "compose" ? editorModal.compose : editorModal.env;
-    setEditorModal((current) => ({ ...current, saveStatus: "saving", saveError: null }));
+    setEditorModal((current) => ({
+      ...current,
+      saveStatus: "saving",
+      saveError: null,
+    }));
 
     try {
       if (tab === "compose") {
@@ -579,13 +466,21 @@ export function StacksPage() {
       if (!isMountedRef.current) {
         return;
       }
-      setEditorModal((current) => ({ ...current, saveStatus: "saved", saveError: null }));
+      setEditorModal((current) => ({
+        ...current,
+        saveStatus: "saved",
+        saveError: null,
+      }));
       setActionNotice({ tone: "success", message: `Saved ${tab} for ${name}` });
     } catch (caughtError) {
       if (!isMountedRef.current) {
         return;
       }
-      setEditorModal((current) => ({ ...current, saveStatus: "error", saveError: getErrorMessage(caughtError) }));
+      setEditorModal((current) => ({
+        ...current,
+        saveStatus: "error",
+        saveError: getErrorMessage(caughtError),
+      }));
     }
   }, [editorModal]);
 
@@ -629,21 +524,40 @@ export function StacksPage() {
 
   const restoreBackup = useCallback(
     async (stackName: string, backup: string) => {
-      setBackupsModal((current) => ({ ...current, confirming: null, restoring: backup, notice: null }));
+      setBackupsModal((current) => ({
+        ...current,
+        confirming: null,
+        restoring: backup,
+        notice: null,
+      }));
       try {
         await restoreStackBackup(stackName, backup);
         if (!isMountedRef.current) {
           return;
         }
-        setBackupsModal((current) => ({ ...current, restoring: null, notice: `Restored ${backup}` }));
-        setActionNotice({ tone: "success", message: `Restored ${stackName} from ${backup}` });
+        setBackupsModal((current) => ({
+          ...current,
+          restoring: null,
+          notice: `Restored ${backup}`,
+        }));
+        setActionNotice({
+          tone: "success",
+          message: `Restored ${stackName} from ${backup}`,
+        });
         void loadStacks("action");
       } catch (caughtError) {
         if (!isMountedRef.current) {
           return;
         }
-        setBackupsModal((current) => ({ ...current, restoring: null, error: getErrorMessage(caughtError) }));
-        setActionNotice({ tone: "error", message: `Restore failed for ${stackName}: ${getErrorMessage(caughtError)}` });
+        setBackupsModal((current) => ({
+          ...current,
+          restoring: null,
+          error: getErrorMessage(caughtError),
+        }));
+        setActionNotice({
+          tone: "error",
+          message: `Restore failed for ${stackName}: ${getErrorMessage(caughtError)}`,
+        });
       }
     },
     [loadStacks],
@@ -673,7 +587,7 @@ export function StacksPage() {
   }, [actionNotice]);
 
   const consoleTitle = consoleModal.action
-    ? `${ACTION_META[consoleModal.action].label} ${consoleModal.stackName}`
+    ? `${STACK_ACTION_META[consoleModal.action].label} ${consoleModal.stackName}`
     : consoleModal.stackName;
 
   return (
@@ -686,7 +600,10 @@ export function StacksPage() {
             onClick={() => void loadStacks("manual")}
             variant="secondary"
           >
-            <RefreshCw aria-hidden="true" className={cn("h-4 w-4", isRefreshing ? "animate-spin" : "")} />
+            <RefreshCw
+              aria-hidden="true"
+              className={cn("h-4 w-4", isRefreshing ? "animate-spin" : "")}
+            />
             {isRefreshing ? "refreshing" : "refresh"}
           </Button>
         }
@@ -746,7 +663,10 @@ export function StacksPage() {
       {isLoading ? (
         <Card aria-live="polite" role="status">
           <CardContent className="flex min-h-[14rem] items-center justify-center gap-2 p-6 text-sm text-muted-foreground">
-            <Activity aria-hidden="true" className="h-4 w-4 animate-pulse text-primary" />
+            <Activity
+              aria-hidden="true"
+              className="h-4 w-4 animate-pulse text-primary"
+            />
             Loading stacks...
           </CardContent>
         </Card>
@@ -787,7 +707,10 @@ export function StacksPage() {
           >
             <CardHeader className="flex flex-row items-start justify-between gap-3 border-b border-border/70 p-4 sm:p-5">
               <div className="space-y-1">
-                <CardTitle className="text-base sm:text-lg" id="v2-stack-console-title">
+                <CardTitle
+                  className="text-base sm:text-lg"
+                  id="v2-stack-console-title"
+                >
                   {consoleTitle}
                 </CardTitle>
                 <CardDescription>
@@ -798,7 +721,11 @@ export function StacksPage() {
                       : `Completed${consoleModal.returncode !== null ? ` (exit ${consoleModal.returncode})` : ""}`}
                 </CardDescription>
               </div>
-              <Button id="v2-stack-console-close" onClick={closeConsole} variant="outline">
+              <Button
+                id="v2-stack-console-close"
+                onClick={closeConsole}
+                variant="outline"
+              >
                 Close
               </Button>
             </CardHeader>
@@ -831,12 +758,21 @@ export function StacksPage() {
           >
             <CardHeader className="flex flex-row items-start justify-between gap-3 border-b border-border/70 p-4 sm:p-5">
               <div className="space-y-1">
-                <CardTitle className="text-base sm:text-lg" id="v2-stack-logs-title">
+                <CardTitle
+                  className="text-base sm:text-lg"
+                  id="v2-stack-logs-title"
+                >
                   Stack Logs: {logsModal.stackName}
                 </CardTitle>
-                <CardDescription>Tail output from `/api/stacks/&lt;name&gt;/logs`.</CardDescription>
+                <CardDescription>
+                  Tail output from `/api/stacks/&lt;name&gt;/logs`.
+                </CardDescription>
               </div>
-              <Button id="v2-stack-logs-close" onClick={closeLogs} variant="outline">
+              <Button
+                id="v2-stack-logs-close"
+                onClick={closeLogs}
+                variant="outline"
+              >
                 Close
               </Button>
             </CardHeader>
@@ -869,7 +805,10 @@ export function StacksPage() {
           >
             <CardHeader className="flex flex-row items-start justify-between gap-3 border-b border-border/70 p-4 sm:p-5">
               <div className="space-y-1">
-                <CardTitle className="text-base sm:text-lg" id="v2-stack-editor-title">
+                <CardTitle
+                  className="text-base sm:text-lg"
+                  id="v2-stack-editor-title"
+                >
                   Edit {editorModal.stackName}
                 </CardTitle>
                 <CardDescription>
@@ -878,19 +817,32 @@ export function StacksPage() {
                     : ".env"}
                 </CardDescription>
               </div>
-              <Button id="v2-stack-editor-close" onClick={closeEditor} variant="outline">
+              <Button
+                id="v2-stack-editor-close"
+                onClick={closeEditor}
+                variant="outline"
+              >
                 Close
               </Button>
             </CardHeader>
             <CardContent className="space-y-3 overflow-auto p-4">
-              <div aria-label="Editor file" className="flex flex-wrap gap-2" role="group">
+              <div
+                aria-label="Editor file"
+                className="flex flex-wrap gap-2"
+                role="group"
+              >
                 {(["compose", "env"] as EditorTab[]).map((tab) => (
                   <Button
                     aria-pressed={editorModal.tab === tab}
                     data-editor-tab={tab}
                     key={tab}
                     onClick={() =>
-                      setEditorModal((current) => ({ ...current, tab, saveStatus: "idle", saveError: null }))
+                      setEditorModal((current) => ({
+                        ...current,
+                        tab,
+                        saveStatus: "idle",
+                        saveError: null,
+                      }))
                     }
                     size="sm"
                     variant={editorModal.tab === tab ? "default" : "outline"}
@@ -903,13 +855,18 @@ export function StacksPage() {
               {editorModal.status === "loading" ? (
                 <p className="text-sm text-muted-foreground">Loading...</p>
               ) : editorModal.status === "error" ? (
-                <p className="text-sm text-danger">{editorModal.loadError || "Failed to load files"}</p>
+                <p className="text-sm text-danger">
+                  {editorModal.loadError || "Failed to load files"}
+                </p>
               ) : (
                 <>
                   <textarea
-                    aria-label={editorModal.tab === "compose" ? "Compose file content" : "Env file content"
+                    aria-label={
+                      editorModal.tab === "compose"
+                        ? "Compose file content"
+                        : "Env file content"
                     }
-                  className="h-[40vh] w-full resize-y rounded-md border border-border bg-background p-3 font-mono text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:text-sm"
+                    className="h-[40vh] w-full resize-y rounded-md border border-border bg-background p-3 font-mono text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:text-sm"
                     id="v2-stack-editor-textarea"
                     onChange={(event) =>
                       setEditorModal((current) => ({
@@ -922,7 +879,11 @@ export function StacksPage() {
                       }))
                     }
                     spellCheck={false}
-                    value={editorModal.tab === "compose" ? editorModal.compose : editorModal.env}
+                    value={
+                      editorModal.tab === "compose"
+                        ? editorModal.compose
+                        : editorModal.env
+                    }
                   />
                   <div className="flex flex-wrap items-center gap-3">
                     <Button
@@ -930,13 +891,17 @@ export function StacksPage() {
                       id="v2-stack-editor-save"
                       onClick={() => void saveEditor()}
                     >
-                      {editorModal.saveStatus === "saving" ? "Saving..." : "Save"}
+                      {editorModal.saveStatus === "saving"
+                        ? "Saving..."
+                        : "Save"}
                     </Button>
                     <span
                       aria-live="polite"
                       className={cn(
                         "text-sm",
-                        editorModal.saveStatus === "error" ? "text-danger" : "text-success",
+                        editorModal.saveStatus === "error"
+                          ? "text-danger"
+                          : "text-success",
                       )}
                       id="v2-stack-editor-status"
                       role="status"
@@ -966,31 +931,52 @@ export function StacksPage() {
           >
             <CardHeader className="flex flex-row items-start justify-between gap-3 border-b border-border/70 p-4 sm:p-5">
               <div className="space-y-1">
-                <CardTitle className="text-base sm:text-lg" id="v2-stack-backups-title">
+                <CardTitle
+                  className="text-base sm:text-lg"
+                  id="v2-stack-backups-title"
+                >
                   Backups: {backupsModal.stackName}
                 </CardTitle>
-                <CardDescription>Restore the compose file from a previous backup.</CardDescription>
+                <CardDescription>
+                  Restore the compose file from a previous backup.
+                </CardDescription>
               </div>
-              <Button id="v2-stack-backups-close" onClick={closeBackups} variant="outline">
+              <Button
+                id="v2-stack-backups-close"
+                onClick={closeBackups}
+                variant="outline"
+              >
                 Close
               </Button>
             </CardHeader>
             <CardContent className="space-y-3 overflow-auto p-4">
               {backupsModal.notice ? (
-                <p aria-live="polite" className="text-sm text-success" role="status">
+                <p
+                  aria-live="polite"
+                  className="text-sm text-success"
+                  role="status"
+                >
                   {backupsModal.notice}
                 </p>
               ) : null}
               {backupsModal.error ? (
-                <p aria-live="assertive" className="text-sm text-danger" role="status">
+                <p
+                  aria-live="assertive"
+                  className="text-sm text-danger"
+                  role="status"
+                >
                   {backupsModal.error}
                 </p>
               ) : null}
 
               {backupsModal.status === "loading" ? (
-                <p className="text-sm text-muted-foreground">Loading backups...</p>
+                <p className="text-sm text-muted-foreground">
+                  Loading backups...
+                </p>
               ) : !backupsModal.backups.length ? (
-                <p className="text-sm text-muted-foreground">No backups available.</p>
+                <p className="text-sm text-muted-foreground">
+                  No backups available.
+                </p>
               ) : (
                 <ul className="space-y-2">
                   {backupsModal.backups.map((backup) => (
@@ -998,21 +984,32 @@ export function StacksPage() {
                       className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/20 p-3"
                       key={backup}
                     >
-                      <span className="break-all font-mono text-xs sm:text-sm">{backup}</span>
+                      <span className="break-all font-mono text-xs sm:text-sm">
+                        {backup}
+                      </span>
                       {backupsModal.confirming === backup ? (
                         <span className="flex items-center gap-2">
                           <Button
                             className="border-danger/30 bg-danger/10 text-danger hover:bg-danger/15"
                             data-confirm-restore={backup}
                             disabled={backupsModal.restoring === backup}
-                            onClick={() => void restoreBackup(backupsModal.stackName, backup)}
+                            onClick={() =>
+                              void restoreBackup(backupsModal.stackName, backup)
+                            }
                             size="sm"
                             variant="outline"
                           >
-                            {backupsModal.restoring === backup ? "Restoring..." : "Confirm"}
+                            {backupsModal.restoring === backup
+                              ? "Restoring..."
+                              : "Confirm"}
                           </Button>
                           <Button
-                            onClick={() => setBackupsModal((current) => ({ ...current, confirming: null }))}
+                            onClick={() =>
+                              setBackupsModal((current) => ({
+                                ...current,
+                                confirming: null,
+                              }))
+                            }
                             size="sm"
                             variant="outline"
                           >
@@ -1023,7 +1020,14 @@ export function StacksPage() {
                         <Button
                           data-restore={backup}
                           disabled={Boolean(backupsModal.restoring)}
-                          onClick={() => setBackupsModal((current) => ({ ...current, confirming: backup, notice: null, error: null }))}
+                          onClick={() =>
+                            setBackupsModal((current) => ({
+                              ...current,
+                              confirming: backup,
+                              notice: null,
+                              error: null,
+                            }))
+                          }
                           size="sm"
                           variant="outline"
                         >

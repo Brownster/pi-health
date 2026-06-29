@@ -391,9 +391,10 @@ class TestSettingsPage:
     """Test settings page accessibility."""
 
     def test_settings_page_loads(self, authenticated_client):
-        """Test settings page loads successfully."""
-        response = authenticated_client.get('/settings.html')
-        assert response.status_code == 200
+        """Test the legacy settings URL redirects to v2."""
+        response = authenticated_client.get('/settings.html', follow_redirects=False)
+        assert response.status_code == 302
+        assert response.headers['Location'] == '/v2/settings'
 
 
 if __name__ == '__main__':
