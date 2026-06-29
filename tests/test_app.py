@@ -325,16 +325,17 @@ class TestStaticPages:
             ("/system.html", "/v2/system"),
             ("/apps.html", "/v2/apps"),
             ("/stacks.html", "/v2/stacks"),
-            ("/tools.html", "/v2/tools"),
+            # tools/storage/tailscale have no 1:1 v2 route -> closest v2 destination.
+            ("/tools.html", "/v2/apps"),
             ("/settings.html", "/v2/settings"),
-            ("/storage.html", "/v2/storage"),
+            ("/storage.html", "/v2/plugins"),
             ("/pools.html", "/v2/pools"),
             ("/mounts.html", "/v2/mounts"),
             ("/shares.html", "/v2/shares"),
             ("/plugins.html", "/v2/plugins"),
             ("/disks.html", "/v2/disks"),
             ("/network.html", "/v2/network"),
-            ("/tailscale.html", "/v2/tailscale"),
+            ("/tailscale.html", "/v2/network"),
         ],
     )
     def test_legacy_page_redirects_to_v2(self, client, path, target):

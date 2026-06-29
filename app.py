@@ -867,11 +867,21 @@ def system_action(action):
         return {"error": str(e)}
 
 
+# Legacy pages without a 1:1 v2 route map to their closest v2 destination:
+# - tools (CopyParty) was retired; file management is now the Filebrowser catalog app.
+# - storage was split into the plugins/pools storage surface.
+# - tailscale was folded into the network page.
+_V2_PAGE_ALIASES = {
+    'index': '/v2',
+    'tools': '/v2/apps',
+    'storage': '/v2/plugins',
+    'tailscale': '/v2/network',
+}
+
+
 def get_v2_target_for_page(page_key):
     """Map a legacy page key to its v2 route target."""
-    if page_key == 'index':
-        return '/v2'
-    return f'/v2/{page_key}'
+    return _V2_PAGE_ALIASES.get(page_key, f'/v2/{page_key}')
 
 
 @app.route('/')

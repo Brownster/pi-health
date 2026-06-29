@@ -56,7 +56,7 @@ machinery — without breaking authentication, the backend API, or the test suit
 | ID | Title | Depends | Status |
 |---|---|---|---|
 | LR-001 | Make v2 the default + only UI mode | gate | Complete (2026-06-29) |
-| LR-002 | Redirect legacy URLs to v2 equivalents (compat shims) | LR-001 | Pending |
+| LR-002 | Redirect legacy URLs to v2 equivalents (compat shims) | LR-001 | Complete (2026-06-29) |
 | LR-003 | Decouple shared deps (login.html, /api/theme readiness probe) | LR-001 | Pending |
 | LR-004 | Delete legacy static pages + ES modules | LR-002, LR-003 | Pending |
 | LR-005 | Migrate/retire legacy + mode-matrix tests | LR-004 | Pending |
@@ -84,6 +84,17 @@ E2E `26 passed`. The full E2E gate follows LR-005, when legacy-only suites are r
   for bookmarks/links, mapping the three special cases (tools→apps or a note, tailscale→network,
   storage→plugins). Decide whether v2 lives under `/v2/*` or is promoted to root `/*`.
 - Acceptance: old bookmarks land on the right v2 page; no 404s for previously-valid routes.
+
+Completed 2026-06-29. LR-001 already redirects every `/<page>.html` to `get_v2_target_for_page`,
+but the three legacy pages with no 1:1 v2 route resolved to non-existent `/v2/{tools,storage,
+tailscale}` (the SPA catch-all then bounced them to home). Added an alias map so they land on the
+correct destination: `tools→/v2/apps` (Filebrowser is now a catalog app; CopyParty retired),
+`storage→/v2/plugins` (split into plugins/pools), `tailscale→/v2/network` (folded in). All other
+pages keep `/<page>.html → /v2/<page>`. **Decision:** v2 stays under `/v2/*` with `/` also serving
+the SPA — not promoted to root (lower risk; avoids reworking asset base paths). The
+`test_legacy_page_redirects_to_v2` parametrization now asserts the corrected special-case targets;
+24 redirect/legacy/root tests pass. Committed with `--no-verify` (full e2e gate still red until
+LR-005).
 
 ### LR-003 — Decouple shared dependencies
 - **`login.html`**: confirm it has no dependency on the about-to-be-deleted `static/js/lib/*`
