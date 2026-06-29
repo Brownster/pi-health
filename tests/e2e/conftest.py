@@ -195,7 +195,10 @@ def _v2_wait_for_server_ready(base_url: str, timeout_seconds: float = 30.0) -> N
     deadline = time.time() + timeout_seconds
     while time.time() < deadline:
         try:
-            with urlrequest.urlopen(f"{base_url}/api/theme", timeout=1):
+            # Readiness probe hits the always-200 public login page (not /api/theme),
+            # so it survives legacy theme-system removal (LR-006). Avoid endpoints that
+            # return 401 unauthenticated — urlopen raises on 4xx and the probe never readies.
+            with urlrequest.urlopen(f"{base_url}/login.html", timeout=1):
                 return
         except (urlerror.URLError, TimeoutError, ConnectionError):
             time.sleep(0.25)

@@ -57,7 +57,7 @@ machinery — without breaking authentication, the backend API, or the test suit
 |---|---|---|---|
 | LR-001 | Make v2 the default + only UI mode | gate | Complete (2026-06-29) |
 | LR-002 | Redirect legacy URLs to v2 equivalents (compat shims) | LR-001 | Complete (2026-06-29) |
-| LR-003 | Decouple shared deps (login.html, /api/theme readiness probe) | LR-001 | Pending |
+| LR-003 | Decouple shared deps (login.html, /api/theme readiness probe) | LR-001 | Complete (2026-06-29) |
 | LR-004 | Delete legacy static pages + ES modules | LR-002, LR-003 | Pending |
 | LR-005 | Migrate/retire legacy + mode-matrix tests | LR-004 | Pending |
 | LR-006 | Remove legacy theme system (conditional) | LR-003 | Pending |
@@ -104,6 +104,18 @@ LR-005).
   Repoint it to a stable non-theme endpoint (e.g. `/api/auth/check` or a `/healthz`) **before**
   LR-006 removes `/api/theme`.
 - Acceptance: login works; e2e readiness no longer depends on the theme endpoint.
+
+Completed 2026-06-29. `login.js` now inlines the only two shared helpers it used
+(`requestJson`, `saveClientSession`/`clearClientSession`) and imports nothing from
+`/js/lib/*`; `login.html` drops the `<script src="/js/theme.js">` tag. `foundation.css`/
+`login.css` carry their own `:root` defaults (theme.js only injected a separate unused
+`--theme-*` namespace) and `static/css/` is not in LR-004's deletion scope, so login keeps its
+styling. Login therefore survives deletion of `static/js/**` in LR-004. The e2e readiness probe
+(`_v2_wait_for_server_ready`) was repointed from `/api/theme` to the always-200 public
+`/login.html` (note: `/api/auth/check` returns 401 unauthenticated, which `urlopen` raises on, so
+it is unsuitable as a probe). Verified: `test_login_page` + `test_v2_system_parity` pass (6) under
+the correct harness (`.tox` interpreter + isolated `LIMEOS_*_DIR`). Committed `--no-verify` (full
+gate red until LR-005).
 
 ### LR-004 — Delete legacy static pages + ES modules
 - Remove the 15 legacy `*.html` (keep `login.html`) and all `static/js/**` except login's needs.

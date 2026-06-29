@@ -1,5 +1,25 @@
-import { requestJson } from '/js/lib/http.js';
-import { saveClientSession, clearClientSession } from '/js/lib/session.js';
+// Self-contained: login must survive deletion of the shared /js/lib modules
+// during legacy v1 removal (LR-004). These were the only helpers login used.
+async function requestJson(url, options = {}) {
+    const response = await fetch(url, options);
+    let payload = null;
+    try {
+        payload = await response.json();
+    } catch (_err) {
+        payload = null;
+    }
+    return { response, payload };
+}
+
+function saveClientSession(username) {
+    sessionStorage.setItem('loggedIn', 'true');
+    sessionStorage.setItem('username', username);
+}
+
+function clearClientSession() {
+    sessionStorage.removeItem('loggedIn');
+    sessionStorage.removeItem('username');
+}
 
 const form = document.getElementById('login-form');
 const usernameInput = document.getElementById('username');
