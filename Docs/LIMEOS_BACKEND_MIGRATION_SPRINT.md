@@ -81,7 +81,7 @@ Start implementation only when:
 |---|---|---|---|
 | BF-001 | Introduce an application factory | Entry gate | Complete (2026-06-30) |
 | BF-002 | Define service ports and shared adapters | BF-001 | Complete (2026-06-30) |
-| BF-003 | Extract domain services in bounded slices | BF-002 | In progress (container operations complete) |
+| BF-003 | Extract domain services in bounded slices | BF-002 | In progress (network diagnostics complete) |
 | BF-004 | Characterize security and stateful behavior | BF-001 | Pending |
 | BF-005 | Sign off the core boundary and agent handoff | BF-003, BF-004 | Pending |
 
@@ -195,6 +195,15 @@ and logs routes now parse transport input and call the injected service directly
 cover lifecycle dispatch, invalid actions, Docker failures, image comparison, update-state writes,
 Compose invocation, untagged images, log decoding, and route delegation. Full `tox -e all`: Ruff
 clean; unit `732 passed, 1 skipped`; E2E `97 passed`.
+
+Container health and network diagnostics completed 2026-06-30. `NetworkDiagnosticsService` owns
+host connectivity tests, container probes, and health-detail lookup through injected Docker,
+subprocess, socket, and HTTP adapters. Framework-neutral exceptions distinguish Docker
+unavailability from missing containers so Flask can preserve the existing `503` and `404`
+responses. Probe parsing and fallback helpers moved out of `app.py`; compatibility exports retain
+their focused test surface. Tests cover host ping and socket fallback, container lookup and probe
+results, bounded health output, error classification, and route delegation. Full `tox -e all`:
+Ruff clean; unit `741 passed, 1 skipped`; E2E `97 passed`.
 
 ## BF-004 - Characterize security and stateful behavior
 
