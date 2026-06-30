@@ -25,25 +25,7 @@ from stack_manager import (
     stream_compose_command,
     STACK_FILENAMES
 )
-from app import app
 
-
-@pytest.fixture
-def client():
-    """Create a test client for the Flask application."""
-    app.config['TESTING'] = True
-    app.config['SECRET_KEY'] = 'test-secret-key'
-    with app.test_client() as client:
-        yield client
-
-
-@pytest.fixture
-def authenticated_client(client):
-    """Create an authenticated test client."""
-    with client.session_transaction() as sess:
-        sess['authenticated'] = True
-        sess['username'] = 'testuser'
-    return client
 
 
 @pytest.fixture
@@ -1358,7 +1340,7 @@ class TestStackConcurrencyAndAtomicWrites:
         assert "current" in open(compose_path).read()
 
     def test_compose_action_serializes_with_save(
-        self, temp_stacks_dir, monkeypatch
+        self, app, temp_stacks_dir, monkeypatch
     ):
         import stack_manager
 
@@ -1469,6 +1451,7 @@ class TestStackOperationApi:
             session["csrf_token"] = "test-csrf-token"
 
     def test_operation_create_requires_csrf(self, authenticated_client):
+        authenticated_client.environ_base.pop("HTTP_X_CSRF_TOKEN", None)
         missing = authenticated_client.post(
             "/api/stacks/alpha/operations",
             json={"action": "up"},

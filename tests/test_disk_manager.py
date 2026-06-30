@@ -13,25 +13,7 @@ from unittest.mock import patch, Mock, MagicMock
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app import app
 
-
-@pytest.fixture
-def client():
-    """Create a test client for the Flask application."""
-    app.config['TESTING'] = True
-    app.config['SECRET_KEY'] = 'test-secret-key'
-    with app.test_client() as client:
-        yield client
-
-
-@pytest.fixture
-def authenticated_client(client):
-    """Create an authenticated test client."""
-    with client.session_transaction() as sess:
-        sess['authenticated'] = True
-        sess['username'] = 'testuser'
-    return client
 
 
 @pytest.fixture

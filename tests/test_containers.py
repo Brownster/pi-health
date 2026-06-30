@@ -11,25 +11,7 @@ from unittest.mock import Mock, patch, MagicMock
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app import app
 
-
-@pytest.fixture
-def client():
-    """Create a test client for the Flask application."""
-    app.config['TESTING'] = True
-    app.config['SECRET_KEY'] = 'test-secret-key'
-    with app.test_client() as client:
-        yield client
-
-
-@pytest.fixture
-def authenticated_client(client):
-    """Create an authenticated test client."""
-    with client.session_transaction() as sess:
-        sess['authenticated'] = True
-        sess['username'] = 'testuser'
-    return client
 
 
 def _mock_container(name, cid, status='running', network_mode='',
@@ -172,7 +154,6 @@ class TestContainerLogs:
 
     def test_logs_success(self, authenticated_client):
         """Test logs endpoint returns decoded logs."""
-        import app as app_module
         fake_container = Mock()
         fake_container.logs.return_value = b"hello\n"
         fake_container.name = "test"
@@ -180,9 +161,8 @@ class TestContainerLogs:
         fake_client = Mock()
         fake_client.containers.get.return_value = fake_container
 
-        with patch.object(app_module, "docker_client", fake_client):
-            with patch.object(app_module, "docker_available", True):
-                response = authenticated_client.get('/api/containers/test-container/logs')
+        authenticated_client.application.extensions["docker_client"] = fake_client
+        response = authenticated_client.get('/api/containers/test-container/logs')
 
         assert response.status_code == 200
         data = json.loads(response.data)
@@ -263,7 +243,7 @@ class TestContainerNetworkTest:
 
     def test_container_network_test_with_auth_calls_runner(self, authenticated_client, monkeypatch):
         """Test container network endpoint delegates to run_container_network_test when available."""
-        monkeypatch.setattr('app.docker_available', True)
+        authenticated_client.application.extensions["docker_client"] = Mock()
         monkeypatch.setattr(
             'app.run_container_network_test',
             lambda container_id: {'container_name': container_id, 'ping_success': True},
@@ -730,7 +710,7 @@ class TestNetworkGroupsAPI:
         assert response.status_code == 503
 
     def test_recreate_delegates(self, authenticated_client, monkeypatch):
-        monkeypatch.setattr('app.docker_available', True)
+        authenticated_client.application.extensions["docker_client"] = Mock()
         monkeypatch.setattr(
             'app.recreate_network_group',
             lambda provider: {'status': 'recreated', 'provider': provider},

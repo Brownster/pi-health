@@ -1,6 +1,9 @@
 import os
+import sys
 import tempfile
+from pathlib import Path
 
+import pytest
 from werkzeug.security import generate_password_hash
 
 
@@ -25,10 +28,47 @@ TEST_PASSWORD_HASH = generate_password_hash(
     method="pbkdf2:sha256:600000",
 )
 
-# app.py validates credentials during import, so the test process must have an
-# explicit hash before pytest imports application-backed test modules.
 os.environ.pop("PIHEALTH_USERS", None)
 os.environ.pop("PIHEALTH_PASSWORD", None)
 os.environ["PIHEALTH_USER"] = TEST_USERNAME
 os.environ["PIHEALTH_PASSWORD_HASH"] = TEST_PASSWORD_HASH
 os.environ["PIHEALTH_TEST_PASSWORD"] = TEST_PASSWORD
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from app import AppDependencies, create_app  # noqa: E402
+from auth_utils import LoginRateLimiter  # noqa: E402
+
+
+@pytest.fixture
+def app():
+    dependencies = AppDependencies(
+        users={TEST_USERNAME: TEST_PASSWORD_HASH},
+        login_rate_limiter=LoginRateLimiter(),
+        docker_client=None,
+    )
+    return create_app(
+        {
+            "TESTING": True,
+            "SECRET_KEY": "test-secret-key",
+            "INIT_PLUGINS": False,
+            "START_SCHEDULERS": False,
+        },
+        dependencies,
+    )
+
+
+@pytest.fixture
+def client(app):
+    with app.test_client() as test_client:
+        yield test_client
+
+
+@pytest.fixture
+def authenticated_client(client):
+    with client.session_transaction() as session:
+        session["authenticated"] = True
+        session["username"] = "testuser"
+        session["csrf_token"] = "test-csrf-token"
+    client.environ_base["HTTP_X_CSRF_TOKEN"] = "test-csrf-token"
+    return client

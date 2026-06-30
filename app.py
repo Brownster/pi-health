@@ -1,4 +1,16 @@
-from flask import Flask, jsonify, redirect, send_from_directory, request, session
+from dataclasses import dataclass
+
+from flask import (
+    Blueprint,
+    Flask,
+    current_app,
+    has_app_context,
+    jsonify,
+    redirect,
+    request,
+    send_from_directory,
+    session,
+)
 import psutil
 import os
 import docker
@@ -58,14 +70,10 @@ from system_stats import (
 )
 from werkzeug.utils import safe_join
 
-# Initialize Flask
-app = Flask(__name__, static_folder='static')
+core_api = Blueprint("core_api", __name__)
 
 # Storage plugin configuration directory
 STORAGE_PLUGIN_CONFIG_DIR = str(RUNTIME_STORAGE_PLUGIN_CONFIG_DIR)
-
-# Configure session
-app.secret_key = os.getenv('SECRET_KEY', secrets.token_hex(32))
 
 PIHEALTH_UPDATE_CONFIG = str(RUNTIME_CONFIG_DIR / "pihealth_update.json")
 DEFAULT_PIHEALTH_UPDATE_CONFIG = {
@@ -90,43 +98,58 @@ def _save_pihealth_update_config(config):
     with open(PIHEALTH_UPDATE_CONFIG, "w") as handle:
         json.dump(config, handle, indent=2)
 
-AUTH_USERS = load_users()
-LOGIN_RATE_LIMITER = LoginRateLimiter()
-print(f"Loaded {len(AUTH_USERS)} user(s) for authentication")
+@dataclass(frozen=True)
+class AppDependencies:
+    users: dict[str, str]
+    login_rate_limiter: LoginRateLimiter
+    docker_client: object | None
 
 
-def verify_credentials(username, password):
+def _default_dependencies():
+    users = load_users()
+    try:
+        client = docker.from_env()
+    except Exception as exc:
+        print(f"Warning: Could not connect to Docker: {exc}")
+        print("Docker functionality will be disabled")
+        client = None
+    return AppDependencies(
+        users=users,
+        login_rate_limiter=LoginRateLimiter(),
+        docker_client=client,
+    )
+
+
+def _extension(name, fallback=None):
+    if has_app_context():
+        return current_app.extensions.get(name, fallback)
+    return fallback
+
+
+def _docker_client():
+    return _extension("docker_client", docker_client)
+
+
+def _docker_is_available():
+    return _docker_client() is not None
+
+
+def _login_rate_limiter():
+    return _extension("login_rate_limiter", LOGIN_RATE_LIMITER)
+
+
+def verify_credentials(username, password, users=None):
     """Verify username and password against configured users."""
-    return verify_password(AUTH_USERS, username, password)
+    configured_users = users or _extension("auth_users", AUTH_USERS)
+    if not configured_users:
+        return False
+    return verify_password(configured_users, username, password)
 
-# Initialize Docker client with graceful fallback
-try:
-    docker_client = docker.from_env()
-    docker_available = True
-except Exception as e:
-    print(f"Warning: Could not connect to Docker: {e}")
-    print("Docker functionality will be disabled")
-    docker_client = None
-    docker_available = False
-
-app.extensions['docker_client'] = docker_client
-
-app.register_blueprint(stack_manager)
-app.register_blueprint(catalog_manager)
-app.register_blueprint(tools_manager)
-app.register_blueprint(storage_bp)
-app.register_blueprint(update_scheduler)
-app.register_blueprint(backup_scheduler)
-app.register_blueprint(disk_manager)
-app.register_blueprint(setup_manager)
-
-# Initialize storage plugins
-init_plugins(STORAGE_PLUGIN_CONFIG_DIR)
-
-# Initialize the auto-update scheduler
-init_scheduler(app)
-# Initialize the backup scheduler
-init_backup_scheduler(app)
+# Compatibility fallbacks for helper functions called outside an app context.
+AUTH_USERS = None
+LOGIN_RATE_LIMITER = None
+docker_client = None
+docker_available = False
 
 # Track update status for containers
 container_updates = {}
@@ -153,7 +176,7 @@ def inherit_ports_from_network_service(container, containers_by_name, port_cache
     service_container = containers_by_name.get(service_name)
     if not service_container:
         try:
-            service_container = docker_client.containers.get(service_name)
+            service_container = _docker_client().containers.get(service_name)
         except Exception:
             return []
 
@@ -240,7 +263,7 @@ def get_container_stats_cached(container_id):
 
     # Fetch fresh stats
     try:
-        container = docker_client.containers.get(container_id)
+        container = _docker_client().containers.get(container_id)
         if container.status != 'running':
             return None
 
@@ -262,7 +285,7 @@ def get_container_stats_cached(container_id):
 
 def list_containers(include_stats=True):
     """List all Docker containers with their status."""
-    if not docker_available:
+    if not _docker_is_available():
         return [
             {
                 "id": "docker-not-available",
@@ -274,7 +297,7 @@ def list_containers(include_stats=True):
         ]
     
     try:
-        containers = docker_client.containers.list(all=True)
+        containers = _docker_client().containers.list(all=True)
         containers_by_name = {container.name: container for container in containers}
         net_topology, _net_groups = analyze_network_topology(containers)
         port_cache = {}
@@ -350,7 +373,7 @@ def check_container_update(container):
             return {"error": "Container image has no tag"}
         tag = container.image.tags[0]
         current_id = container.image.id
-        pulled = docker_client.images.pull(tag)
+        pulled = _docker_client().images.pull(tag)
         update = pulled.id != current_id
         container_updates[container.id[:12]] = update
         return {"update_available": update}
@@ -364,7 +387,7 @@ def update_container(container):
         if not container.image.tags:
             return {"error": "Container image has no tag"}
         tag = container.image.tags[0]
-        docker_client.images.pull(tag)
+        _docker_client().images.pull(tag)
         subprocess.run(["docker", "compose", "up", "-d", container.name], check=False)
         container_updates[container.id[:12]] = False
         return {"status": "Container updated"}
@@ -374,11 +397,11 @@ def update_container(container):
 
 def get_container_logs(container_id, tail=200):
     """Return the recent logs for a container."""
-    if not docker_available:
+    if not _docker_is_available():
         return {"error": "Docker is not available"}
 
     try:
-        container = docker_client.containers.get(container_id)
+        container = _docker_client().containers.get(container_id)
         logs = container.logs(tail=tail)
         if isinstance(logs, bytes):
             logs = logs.decode("utf-8", errors="replace")
@@ -587,7 +610,7 @@ def get_container_public_ip(container):
 def run_container_network_test(container_id):
     """Run a network diagnostic from inside a specific container."""
     try:
-        container = docker_client.containers.get(container_id)
+        container = _docker_client().containers.get(container_id)
     except Exception as exc:
         return {"error": str(exc)}
 
@@ -678,11 +701,11 @@ def list_network_groups(probe=False):
     """Return VPN-style network groups: a provider container plus the containers
     sharing its namespace, with health and orphan status. When probe=True, also
     compare the provider's public IP against the host's to detect a VPN leak."""
-    if not docker_available:
+    if not _docker_is_available():
         return {"docker_available": False, "groups": [], "orphans": []}
 
     try:
-        containers = docker_client.containers.list(all=True)
+        containers = _docker_client().containers.list(all=True)
     except Exception as exc:
         return {"docker_available": True, "error": str(exc), "groups": [], "orphans": []}
 
@@ -740,11 +763,11 @@ def recreate_network_group(provider_name):
 
     This is the one-click remedy for the orphaned-namespace failure: doing the
     services individually (or `docker start`) re-pins them to the dead namespace."""
-    if not docker_available:
+    if not _docker_is_available():
         return {"error": "Docker is not available"}
 
     try:
-        provider = docker_client.containers.get(provider_name)
+        provider = _docker_client().containers.get(provider_name)
     except Exception as exc:
         return {"error": f"Provider container '{provider_name}' not found: {exc}"}
 
@@ -754,7 +777,7 @@ def recreate_network_group(provider_name):
         return {"error": "Provider is not managed by docker compose; cannot safely recreate the group."}
 
     try:
-        containers = docker_client.containers.list(all=True)
+        containers = _docker_client().containers.list(all=True)
     except Exception as exc:
         return {"error": str(exc)}
     by_name = {c.name: c for c in containers}
@@ -797,11 +820,11 @@ def recreate_network_group(provider_name):
 
 def control_container(container_id, action):
     """Start, stop, or restart a container by ID."""
-    if not docker_available:
+    if not _docker_is_available():
         return {"error": "Docker is not available"}
     
     try:
-        container = docker_client.containers.get(container_id)
+        container = _docker_client().containers.get(container_id)
         if action == "start":
             container.start()
         elif action == "stop":
@@ -852,13 +875,13 @@ _LEGACY_PAGE_REDIRECTS = {
 }
 
 
-@app.route('/')
+@core_api.route('/')
 def serve_frontend():
     """Serve the v2 SPA at the canonical root URL."""
     return serve_v2_index()
 
 
-@app.route('/<page>.html')
+@core_api.route('/<page>.html')
 def redirect_legacy_page(page):
     """Redirect allowlisted legacy bookmarks to their v2 destination."""
     target = _LEGACY_PAGE_REDIRECTS.get(page)
@@ -867,15 +890,15 @@ def redirect_legacy_page(page):
     return redirect(target)
 
 
-@app.route('/login.html')
+@core_api.route('/login.html')
 def serve_login():
     """Serve the login page."""
-    return send_from_directory(app.static_folder, 'login.html')
+    return send_from_directory(current_app.static_folder, 'login.html')
 
 
 def get_v2_static_dir():
     """Return the absolute static directory used for v2 build artifacts."""
-    return os.path.join(app.static_folder, 'v2')
+    return os.path.join(current_app.static_folder, 'v2')
 
 
 def v2_index_exists():
@@ -883,8 +906,8 @@ def v2_index_exists():
     return os.path.isfile(os.path.join(get_v2_static_dir(), 'index.html'))
 
 
-@app.route('/v2')
-@app.route('/v2/')
+@core_api.route('/v2')
+@core_api.route('/v2/')
 def serve_v2_index():
     """Serve the v2 SPA entrypoint."""
     if not v2_index_exists():
@@ -895,7 +918,7 @@ def serve_v2_index():
     return send_from_directory(get_v2_static_dir(), 'index.html')
 
 
-@app.route('/v2/<path:path>')
+@core_api.route('/v2/<path:path>')
 def serve_v2_path(path):
     """Serve v2 assets directly and fallback route-like paths to SPA index."""
     v2_static_dir = get_v2_static_dir()
@@ -920,11 +943,11 @@ def serve_v2_path(path):
     return send_from_directory(v2_static_dir, 'index.html')
 
 
-@app.route('/api/login', methods=['POST'])
+@core_api.route('/api/login', methods=['POST'])
 def api_login():
     """API endpoint for user authentication."""
     client_key = request.remote_addr or "unknown"
-    retry_after = LOGIN_RATE_LIMITER.retry_after(client_key)
+    retry_after = _login_rate_limiter().retry_after(client_key)
     if retry_after:
         response = jsonify({'error': 'Too many login attempts. Try again later.'})
         response.headers['Retry-After'] = str(retry_after)
@@ -938,7 +961,7 @@ def api_login():
     password = data.get('password', '')
 
     if verify_credentials(username, password):
-        LOGIN_RATE_LIMITER.reset(client_key)
+        _login_rate_limiter().reset(client_key)
         session['authenticated'] = True
         session['username'] = username
         return jsonify({
@@ -947,7 +970,7 @@ def api_login():
             'csrf_token': rotate_csrf_token(),
         })
     else:
-        retry_after = LOGIN_RATE_LIMITER.record_failure(client_key)
+        retry_after = _login_rate_limiter().record_failure(client_key)
         if retry_after:
             response = jsonify({'error': 'Too many login attempts. Try again later.'})
             response.headers['Retry-After'] = str(retry_after)
@@ -955,14 +978,14 @@ def api_login():
         return jsonify({'error': 'Invalid credentials'}), 401
 
 
-@app.route('/api/logout', methods=['POST'])
+@core_api.route('/api/logout', methods=['POST'])
 def api_logout():
     """API endpoint for user logout."""
     session.clear()
     return jsonify({'status': 'logged out'})
 
 
-@app.route('/api/auth/check', methods=['GET'])
+@core_api.route('/api/auth/check', methods=['GET'])
 def api_auth_check():
     """API endpoint to check authentication status."""
     if session.get('authenticated'):
@@ -974,26 +997,26 @@ def api_auth_check():
     return jsonify({'authenticated': False}), 401
 
 
-@app.route('/js/<path:path>')
+@core_api.route('/js/<path:path>')
 def serve_js(path):
-    return send_from_directory(os.path.join(app.static_folder, 'js'), path)
+    return send_from_directory(os.path.join(current_app.static_folder, 'js'), path)
 
-@app.route('/css/<path:path>')
+@core_api.route('/css/<path:path>')
 def serve_css(path):
-    return send_from_directory(os.path.join(app.static_folder, 'css'), path)
+    return send_from_directory(os.path.join(current_app.static_folder, 'css'), path)
 
-@app.route('/favicon.svg')
+@core_api.route('/favicon.svg')
 def serve_favicon():
-    return send_from_directory(app.static_folder, 'favicon.svg')
+    return send_from_directory(current_app.static_folder, 'favicon.svg')
 
-@app.route('/api/stats', methods=['GET'])
+@core_api.route('/api/stats', methods=['GET'])
 @login_required
 def api_stats():
     """API endpoint to return system stats as JSON."""
     return jsonify(get_system_stats())
 
 
-@app.route('/api/containers', methods=['GET'])
+@core_api.route('/api/containers', methods=['GET'])
 @login_required
 def api_list_containers():
     """API endpoint to list all Docker containers."""
@@ -1001,11 +1024,11 @@ def api_list_containers():
     return jsonify(list_containers(include_stats=include_stats))
 
 
-@app.route('/api/containers/stats', methods=['GET'])
+@core_api.route('/api/containers/stats', methods=['GET'])
 @login_required
 def api_container_stats_batch():
     """API endpoint to fetch stats for multiple containers at once."""
-    if not docker_available:
+    if not _docker_is_available():
         return jsonify({})
 
     ids = request.args.get('ids', '')
@@ -1029,14 +1052,14 @@ def api_container_stats_batch():
     return jsonify(result)
 
 
-@app.route('/api/containers/<container_id>/<action>', methods=['POST'])
+@core_api.route('/api/containers/<container_id>/<action>', methods=['POST'])
 @login_required
 def api_control_container(container_id, action):
     """API endpoint to control a Docker container."""
     return jsonify(control_container(container_id, action))
 
 
-@app.route('/api/containers/<container_id>/logs', methods=['GET'])
+@core_api.route('/api/containers/<container_id>/logs', methods=['GET'])
 @login_required
 def api_container_logs(container_id):
     """API endpoint to fetch container logs."""
@@ -1044,50 +1067,50 @@ def api_container_logs(container_id):
     return jsonify(get_container_logs(container_id, tail=tail))
 
 
-@app.route('/api/shutdown', methods=['POST'])
+@core_api.route('/api/shutdown', methods=['POST'])
 @login_required
 def api_shutdown():
     """API endpoint to shutdown the system."""
     return jsonify(system_action("shutdown"))
 
 
-@app.route('/api/reboot', methods=['POST'])
+@core_api.route('/api/reboot', methods=['POST'])
 @login_required
 def api_reboot():
     """API endpoint to reboot the system."""
     return jsonify(system_action("reboot"))
 
 
-@app.route('/api/network-test', methods=['POST'])
+@core_api.route('/api/network-test', methods=['POST'])
 @login_required
 def api_network_test():
     """API endpoint to run a network connectivity test."""
     return jsonify(run_network_test())
 
 
-@app.route('/api/containers/<container_id>/network-test', methods=['POST'])
+@core_api.route('/api/containers/<container_id>/network-test', methods=['POST'])
 @login_required
 def api_container_network_test(container_id):
     """API endpoint to run a network test from inside a specific container."""
-    if not docker_available:
+    if not _docker_is_available():
         return jsonify({"error": "Docker is not available"}), 503
     return jsonify(run_container_network_test(container_id))
 
 
-@app.route('/api/containers/<container_id>/health', methods=['GET'])
+@core_api.route('/api/containers/<container_id>/health', methods=['GET'])
 @login_required
 def api_container_health(container_id):
     """API endpoint to fetch a container's healthcheck status and latest output."""
-    if not docker_available:
+    if not _docker_is_available():
         return jsonify({"error": "Docker is not available"}), 503
     try:
-        container = docker_client.containers.get(container_id)
+        container = _docker_client().containers.get(container_id)
     except Exception as exc:
         return jsonify({"error": str(exc)}), 404
     return jsonify(get_container_health_detail(container))
 
 
-@app.route('/api/network-groups', methods=['GET'])
+@core_api.route('/api/network-groups', methods=['GET'])
 @login_required
 def api_network_groups():
     """API endpoint listing shared-network (VPN) groups, their members, and orphans.
@@ -1097,22 +1120,22 @@ def api_network_groups():
     return jsonify(list_network_groups(probe=probe))
 
 
-@app.route('/api/network-groups/<provider>/recreate', methods=['POST'])
+@core_api.route('/api/network-groups/<provider>/recreate', methods=['POST'])
 @login_required
 def api_recreate_network_group(provider):
     """API endpoint to recreate a provider and its namespace-sharing members together."""
-    if not docker_available:
+    if not _docker_is_available():
         return jsonify({"error": "Docker is not available"}), 503
     return jsonify(recreate_network_group(provider))
 
 
-@app.route('/api/pihealth/update/config', methods=['GET'])
+@core_api.route('/api/pihealth/update/config', methods=['GET'])
 @login_required
 def api_pihealth_update_config():
     return jsonify(_load_pihealth_update_config())
 
 
-@app.route('/api/pihealth/update/config', methods=['POST'])
+@core_api.route('/api/pihealth/update/config', methods=['POST'])
 @login_required
 def api_pihealth_update_config_save():
     data = request.get_json() or {}
@@ -1129,7 +1152,7 @@ def api_pihealth_update_config_save():
     return jsonify({"status": "saved", "config": config})
 
 
-@app.route('/api/pihealth/update', methods=['POST'])
+@core_api.route('/api/pihealth/update', methods=['POST'])
 @login_required
 def api_pihealth_update():
     config = _load_pihealth_update_config()
@@ -1144,6 +1167,43 @@ def api_pihealth_update():
 
     return jsonify({"status": "updating"})
 
+
+def create_app(config=None, dependencies=None):
+    """Build an isolated LimeOS web application."""
+    config = dict(config or {})
+    static_folder = config.pop("STATIC_FOLDER", "static")
+    application = Flask(__name__, static_folder=static_folder)
+    application.config.from_mapping(
+        INIT_PLUGINS=True,
+        START_SCHEDULERS=True,
+        SECRET_KEY=os.getenv("SECRET_KEY") or secrets.token_hex(32),
+    )
+    application.config.update(config)
+
+    resolved = dependencies or _default_dependencies()
+    application.extensions["auth_users"] = dict(resolved.users)
+    application.extensions["login_rate_limiter"] = resolved.login_rate_limiter
+    application.extensions["docker_client"] = resolved.docker_client
+
+    application.register_blueprint(core_api)
+    application.register_blueprint(stack_manager)
+    application.register_blueprint(catalog_manager)
+    application.register_blueprint(tools_manager)
+    application.register_blueprint(storage_bp)
+    application.register_blueprint(update_scheduler)
+    application.register_blueprint(backup_scheduler)
+    application.register_blueprint(disk_manager)
+    application.register_blueprint(setup_manager)
+
+    if application.config["INIT_PLUGINS"]:
+        init_plugins(STORAGE_PLUGIN_CONFIG_DIR)
+    if application.config["START_SCHEDULERS"]:
+        init_scheduler(application)
+        init_backup_scheduler(application)
+
+    print(f"Loaded {len(resolved.users)} user(s) for authentication")
+    return application
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8002))
-    app.run(host="0.0.0.0", port=port)
+    create_app().run(host="0.0.0.0", port=port)

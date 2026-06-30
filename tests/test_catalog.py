@@ -15,27 +15,7 @@ from unittest.mock import patch, MagicMock, Mock
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app import app
 
-
-@pytest.fixture
-def client():
-    """Create a test client for the Flask application."""
-    app.config['TESTING'] = True
-    app.config['SECRET_KEY'] = 'test-secret-key'
-    with app.test_client() as client:
-        yield client
-
-
-@pytest.fixture
-def authenticated_client(client):
-    """Create an authenticated test client."""
-    with client.session_transaction() as sess:
-        sess['authenticated'] = True
-        sess['username'] = 'testuser'
-        sess['csrf_token'] = 'test-csrf-token'
-    client.environ_base['HTTP_X_CSRF_TOKEN'] = 'test-csrf-token'
-    return client
 
 
 @pytest.fixture
@@ -799,7 +779,7 @@ class TestCheckDependenciesEndpoint:
 
 class TestCatalogConcurrency:
     def test_parallel_installs_preserve_both_services(
-        self, temp_catalog_dir, temp_stacks_dir, monkeypatch
+        self, app, temp_catalog_dir, temp_stacks_dir, monkeypatch
     ):
         import catalog_manager
         import stack_manager

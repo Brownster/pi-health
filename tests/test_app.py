@@ -11,31 +11,13 @@ import subprocess
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app import LOGIN_RATE_LIMITER, app, load_users, verify_credentials
-from auth_utils import CredentialConfigurationError
+from app import AppDependencies, create_app, load_users, verify_credentials
+from auth_utils import CredentialConfigurationError, LoginRateLimiter
 
 TEST_USERNAME = os.environ["PIHEALTH_USER"]
 TEST_PASSWORD = os.environ["PIHEALTH_TEST_PASSWORD"]
 TEST_PASSWORD_HASH = os.environ["PIHEALTH_PASSWORD_HASH"]
 
-
-@pytest.fixture
-def client():
-    """Create a test client for the Flask application."""
-    app.config['TESTING'] = True
-    app.config['SECRET_KEY'] = 'test-secret-key'
-    LOGIN_RATE_LIMITER.reset()
-    with app.test_client() as client:
-        yield client
-
-
-@pytest.fixture
-def authenticated_client(client):
-    """Create an authenticated test client."""
-    with client.session_transaction() as sess:
-        sess['authenticated'] = True
-        sess['username'] = 'testuser'
-    return client
 
 
 class TestAuthentication:
@@ -43,15 +25,27 @@ class TestAuthentication:
 
     def test_verify_credentials_valid(self):
         """Test that valid credentials are accepted."""
-        assert verify_credentials(TEST_USERNAME, TEST_PASSWORD) is True
+        assert verify_credentials(
+            TEST_USERNAME,
+            TEST_PASSWORD,
+            {TEST_USERNAME: TEST_PASSWORD_HASH},
+        ) is True
 
     def test_verify_credentials_invalid(self):
         """Test that invalid credentials are rejected."""
-        assert verify_credentials('nonexistent', 'wrongpass') is False
+        assert verify_credentials(
+            'nonexistent',
+            'wrongpass',
+            {TEST_USERNAME: TEST_PASSWORD_HASH},
+        ) is False
 
     def test_verify_credentials_wrong_password(self):
         """Test that wrong password is rejected."""
-        assert verify_credentials(TEST_USERNAME, 'wrongpassword') is False
+        assert verify_credentials(
+            TEST_USERNAME,
+            'wrongpassword',
+            {TEST_USERNAME: TEST_PASSWORD_HASH},
+        ) is False
 
     def test_login_endpoint_success(self, client):
         """Test successful login."""
@@ -69,9 +63,26 @@ class TestAuthentication:
         with pytest.raises(CredentialConfigurationError, match="not configured"):
             load_users({})
 
-    def test_app_startup_fails_without_credentials(self):
+    def test_app_module_import_has_no_startup_side_effects(self):
         result = subprocess.run(
-            [sys.executable, "-c", "import app"],
+            [
+                sys.executable,
+                "-c",
+                "import app; assert not hasattr(app, 'app')",
+            ],
+            cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            env={},
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+
+        assert result.returncode == 0, result.stderr
+
+    def test_factory_startup_fails_without_credentials(self):
+        result = subprocess.run(
+            [sys.executable, "-c", "import app; app.create_app()"],
             cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             env={},
             capture_output=True,
@@ -82,6 +93,33 @@ class TestAuthentication:
 
         assert result.returncode != 0
         assert "Authentication is not configured" in result.stderr
+
+    def test_factory_dependencies_are_isolated(self):
+        first_limiter = LoginRateLimiter()
+        second_limiter = LoginRateLimiter()
+        first = create_app(
+            {"TESTING": True, "INIT_PLUGINS": False, "START_SCHEDULERS": False},
+            AppDependencies(
+                users={"first": TEST_PASSWORD_HASH},
+                login_rate_limiter=first_limiter,
+                docker_client=None,
+            ),
+        )
+        second = create_app(
+            {"TESTING": True, "INIT_PLUGINS": False, "START_SCHEDULERS": False},
+            AppDependencies(
+                users={"second": TEST_PASSWORD_HASH},
+                login_rate_limiter=second_limiter,
+                docker_client=object(),
+            ),
+        )
+
+        assert first.extensions["auth_users"] == {"first": TEST_PASSWORD_HASH}
+        assert second.extensions["auth_users"] == {"second": TEST_PASSWORD_HASH}
+        assert first.extensions["login_rate_limiter"] is first_limiter
+        assert second.extensions["login_rate_limiter"] is second_limiter
+        assert first.extensions["docker_client"] is None
+        assert second.extensions["docker_client"] is not None
 
     def test_plaintext_password_configuration_is_rejected(self):
         with pytest.raises(CredentialConfigurationError, match="plaintext"):
@@ -125,7 +163,7 @@ class TestAuthentication:
         )
         assert blocked_valid_login.status_code == 429
 
-        LOGIN_RATE_LIMITER.reset('127.0.0.1')
+        client.application.extensions["login_rate_limiter"].reset('127.0.0.1')
         recovered = client.post(
             '/api/login',
             json={'username': TEST_USERNAME, 'password': TEST_PASSWORD},
@@ -380,7 +418,7 @@ class TestV2Routes:
             "<html><body>v2-shell</body></html>",
             encoding="utf-8",
         )
-        monkeypatch.setattr(app, "static_folder", str(static_dir))
+        monkeypatch.setattr(client.application, "static_folder", str(static_dir))
 
         response = client.get('/v2')
         assert response.status_code == 200
@@ -389,7 +427,7 @@ class TestV2Routes:
     def test_v2_missing_index_returns_404(self, client, monkeypatch, tmp_path):
         static_dir = tmp_path / "static"
         static_dir.mkdir(parents=True)
-        monkeypatch.setattr(app, "static_folder", str(static_dir))
+        monkeypatch.setattr(client.application, "static_folder", str(static_dir))
 
         response = client.get('/v2')
         assert response.status_code == 404
@@ -404,7 +442,7 @@ class TestV2Routes:
             "console.log('v2-asset');",
             encoding="utf-8",
         )
-        monkeypatch.setattr(app, "static_folder", str(static_dir))
+        monkeypatch.setattr(client.application, "static_folder", str(static_dir))
 
         response = client.get('/v2/assets/app.js')
         assert response.status_code == 200
@@ -423,7 +461,7 @@ class TestV2Routes:
             "<html><body>v2-shell</body></html>",
             encoding="utf-8",
         )
-        monkeypatch.setattr(app, "static_folder", str(static_dir))
+        monkeypatch.setattr(client.application, "static_folder", str(static_dir))
 
         response = client.get('/v2/assets/missing.js')
         assert response.status_code == 404
@@ -438,7 +476,7 @@ class TestV2Routes:
             "<html><body>v2-fallback</body></html>",
             encoding="utf-8",
         )
-        monkeypatch.setattr(app, "static_folder", str(static_dir))
+        monkeypatch.setattr(client.application, "static_folder", str(static_dir))
 
         response = client.get('/v2/containers')
         assert response.status_code == 200
@@ -467,7 +505,7 @@ class TestV2OnlyRouting:
         return static_dir
 
     def test_root_always_serves_v2(self, client, monkeypatch, tmp_path):
-        monkeypatch.setattr(app, "static_folder", str(self._build_static(tmp_path)))
+        monkeypatch.setattr(client.application, "static_folder", str(self._build_static(tmp_path)))
 
         response = client.get("/")
         assert response.status_code == 200
@@ -476,7 +514,7 @@ class TestV2OnlyRouting:
     def test_legacy_page_redirects_when_static_file_exists(
         self, client, monkeypatch, tmp_path
     ):
-        monkeypatch.setattr(app, "static_folder", str(self._build_static(tmp_path)))
+        monkeypatch.setattr(client.application, "static_folder", str(self._build_static(tmp_path)))
 
         response = client.get("/containers.html", follow_redirects=False)
         assert response.status_code == 302
@@ -487,7 +525,7 @@ class TestV2OnlyRouting:
         assert "v2-shell" in v2_response.data.decode("utf-8")
 
     def test_login_remains_directly_served(self, client, monkeypatch, tmp_path):
-        monkeypatch.setattr(app, "static_folder", str(self._build_static(tmp_path)))
+        monkeypatch.setattr(client.application, "static_folder", str(self._build_static(tmp_path)))
         response = client.get("/login.html")
         assert response.status_code == 200
         assert "retained-login" in response.data.decode("utf-8")
