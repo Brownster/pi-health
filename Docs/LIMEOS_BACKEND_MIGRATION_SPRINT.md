@@ -129,6 +129,14 @@ application process, and the class documents that injection does not provide mul
 Deterministic tests cover ownership, expiry, capacity, trim IDs, producer failures, and missing
 terminal events. Full `tox -e all`: Ruff clean; unit `706 passed, 1 skipped`; E2E `97 passed`.
 
+Reviewed 2026-06-30: confirmed the registry has zero `flask`/`session`/`request` imports;
+`operation_sse.py` is the sole Flask-aware transport (session→opaque-owner mapping, `Last-Event-ID`
+parsing, SSE framing); ownership is an opaque string compared with `hmac.compare_digest`; and
+`expected_kind` isolation, exactly-once producer execution, and the `first_event_id` trim/replay
+math are preserved. The neutral registry now runs as a standalone unit test (no Flask, no server),
+which is the decoupling proof. Retention bounds are injectable, so the BF-002B `clock` port should
+be wired into the registry next to make expiry/pruning deterministic without `sleep`.
+
 ## BF-003 - Extract domain services in bounded slices
 
 Move behavior from route handlers into services one domain at a time. Route handlers should parse
