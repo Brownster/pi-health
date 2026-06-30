@@ -11,9 +11,10 @@ import json
 import yaml
 from compose_yaml import ComposeYamlError, dump_compose_yaml, load_compose_yaml
 from datetime import datetime
-from flask import Blueprint, jsonify, request, session
+from flask import Blueprint, current_app, jsonify, request, session
 from auth_utils import csrf_protect, login_required
-from operation_manager import parse_sse_payload, start_operation, stream_operation_response
+from operation_manager import parse_sse_payload
+from operation_sse import stream_operation_response
 from runtime_paths import CONFIG_DIR as RUNTIME_CONFIG_DIR, STATIC_CATALOG_DIR
 from stack_manager import (
     ComposeFileConflictError,
@@ -542,8 +543,8 @@ def _catalog_install_locked(data, item):
                     yield payload
 
         try:
-            operation = start_operation(
-                owner_token=session['csrf_token'],
+            operation = current_app.extensions["operation_registry"].create(
+                owner=session['csrf_token'],
                 username=session.get('username', 'unknown'),
                 kind='catalog-install',
                 target=active_stack,
@@ -568,7 +569,11 @@ def _catalog_install_locked(data, item):
 @login_required
 def api_stream_catalog_operation(operation_id):
     """Replay and follow one previously created catalog install operation."""
-    return stream_operation_response(operation_id, expected_kind='catalog-install')
+    return stream_operation_response(
+        current_app.extensions["operation_registry"],
+        operation_id,
+        expected_kind='catalog-install',
+    )
 
 
 @catalog_manager.route('/api/catalog/remove', methods=['POST'])

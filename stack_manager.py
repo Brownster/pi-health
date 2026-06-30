@@ -14,15 +14,14 @@ import tempfile
 import threading
 from contextlib import contextmanager
 from datetime import datetime
-from flask import Blueprint, jsonify, request, session
+from flask import Blueprint, current_app, jsonify, request, session
 import yaml
 from auth_utils import csrf_protect, login_required
 from operation_manager import (
     OperationCapacityError,
     parse_sse_payload,
-    start_operation,
-    stream_operation_response,
 )
+from operation_sse import stream_operation_response
 
 # Create Blueprint
 stack_manager = Blueprint('stack_manager', __name__)
@@ -1061,8 +1060,8 @@ def api_create_stack_operation(name):
                 yield payload
 
     try:
-        operation = start_operation(
-            owner_token=session['csrf_token'],
+        operation = current_app.extensions["operation_registry"].create(
+            owner=session['csrf_token'],
             username=session.get('username', 'unknown'),
             kind='stack',
             target=name,
@@ -1083,4 +1082,8 @@ def api_create_stack_operation(name):
 @login_required
 def api_stream_stack_operation(operation_id):
     """Replay and follow one previously created stack operation."""
-    return stream_operation_response(operation_id, expected_kind='stack')
+    return stream_operation_response(
+        current_app.extensions["operation_registry"],
+        operation_id,
+        expected_kind='stack',
+    )

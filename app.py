@@ -40,6 +40,7 @@ from backup_scheduler import backup_scheduler, init_backup_scheduler
 from disk_manager import disk_manager
 from setup_manager import setup_manager
 from helper_client import helper_call, HelperError
+from operation_manager import OperationRegistry
 from container_helpers import (
     _compose_dependency_name,
     _compose_label,
@@ -103,6 +104,7 @@ class AppDependencies:
     users: dict[str, str]
     login_rate_limiter: LoginRateLimiter
     docker_client: object | None
+    operation_registry: OperationRegistry | None = None
 
 
 def _default_dependencies():
@@ -117,6 +119,7 @@ def _default_dependencies():
         users=users,
         login_rate_limiter=LoginRateLimiter(),
         docker_client=client,
+        operation_registry=OperationRegistry(),
     )
 
 
@@ -1184,6 +1187,9 @@ def create_app(config=None, dependencies=None):
     application.extensions["auth_users"] = dict(resolved.users)
     application.extensions["login_rate_limiter"] = resolved.login_rate_limiter
     application.extensions["docker_client"] = resolved.docker_client
+    application.extensions["operation_registry"] = (
+        resolved.operation_registry or OperationRegistry()
+    )
 
     application.register_blueprint(core_api)
     application.register_blueprint(stack_manager)

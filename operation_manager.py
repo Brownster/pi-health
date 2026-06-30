@@ -1,47 +1,63 @@
-"""Bounded, session-owned background operations with replayable SSE output."""
+"""Process-scoped background operations with bounded replayable output."""
+
+from __future__ import annotations
 
 import hmac
 import json
 import threading
 import time
 import uuid
-
-from flask import Response, jsonify, request, session
+from dataclasses import dataclass
+from typing import Callable, Iterable
 
 
 OPERATION_TTL_SECONDS = 15 * 60
 OPERATION_LIMIT = 100
 OPERATION_EVENT_LIMIT = 5000
-_operations = {}
-_operations_lock = threading.Lock()
+
+OperationProducer = Callable[[], Iterable[dict]]
+ThreadFactory = Callable[..., threading.Thread]
 
 
 class OperationCapacityError(RuntimeError):
     """Raised when all retained operation slots are active."""
 
 
+@dataclass(frozen=True)
+class OperationEvent:
+    event_id: int
+    payload: dict
+
+
+@dataclass(frozen=True)
+class OperationEventBatch:
+    events: tuple[OperationEvent, ...]
+    next_cursor: int
+    complete: bool
+
+
 class BackgroundOperation:
     """In-memory output buffer for one exactly-once background operation."""
 
-    def __init__(self, operation_id, owner_token, username, kind, target):
+    def __init__(self, operation_id, owner, username, kind, target, created_at):
         self.operation_id = operation_id
-        self.owner_token = owner_token
+        self.owner = owner
         self.username = username
         self.kind = kind
         self.target = target
-        self.created_at = time.monotonic()
+        self.created_at = created_at
         self.events = []
         self.first_event_id = 0
         self.complete = False
         self.condition = threading.Condition()
 
-    def append(self, payload):
+    def append(self, payload, event_limit):
         with self.condition:
             self.events.append(payload)
-            if len(self.events) > OPERATION_EVENT_LIMIT:
+            if len(self.events) > event_limit:
                 self.events.pop(0)
                 self.first_event_id += 1
-            if payload.get('done') or payload.get('error'):
+            if payload.get("done") or payload.get("error"):
                 self.complete = True
             self.condition.notify_all()
 
@@ -51,86 +67,165 @@ class BackgroundOperation:
             self.condition.notify_all()
 
 
-def _prune_operations():
-    cutoff = time.monotonic() - OPERATION_TTL_SECONDS
-    expired = [
-        operation_id
-        for operation_id, operation in _operations.items()
-        if operation.complete and operation.created_at < cutoff
-    ]
-    for operation_id in expired:
-        _operations.pop(operation_id, None)
-    if len(_operations) > OPERATION_LIMIT:
-        oldest = sorted(
-            (operation for operation in _operations.values() if operation.complete),
-            key=lambda operation: operation.created_at,
+class OperationRegistry:
+    """Own one process's operation threads, retention, ownership, and replay state.
+
+    Injection makes lifecycle ownership explicit; it does not make this registry safe to share
+    across worker processes. Deploy one application worker until operation state has a shared-store
+    design.
+    """
+
+    def __init__(
+        self,
+        *,
+        clock=time.monotonic,
+        thread_factory: ThreadFactory = threading.Thread,
+        ttl_seconds=OPERATION_TTL_SECONDS,
+        operation_limit=OPERATION_LIMIT,
+        event_limit=OPERATION_EVENT_LIMIT,
+    ):
+        self._clock = clock
+        self._thread_factory = thread_factory
+        self._ttl_seconds = ttl_seconds
+        self._operation_limit = operation_limit
+        self._event_limit = event_limit
+        self._operations = {}
+        self._lock = threading.Lock()
+
+    def create(self, *, owner, username, kind, target, producer):
+        """Register and start one operation, or raise when capacity or startup fails."""
+        operation_id = uuid.uuid4().hex
+        operation = BackgroundOperation(
+            operation_id=operation_id,
+            owner=owner,
+            username=username,
+            kind=kind,
+            target=target,
+            created_at=self._clock(),
         )
-        excess = len(_operations) - OPERATION_LIMIT
-        for operation in oldest[:excess]:
-            _operations.pop(operation.operation_id, None)
+        with self._lock:
+            self._prune_locked()
+            if len(self._operations) >= self._operation_limit:
+                oldest_complete = min(
+                    (item for item in self._operations.values() if item.complete),
+                    key=lambda item: item.created_at,
+                    default=None,
+                )
+                if oldest_complete is None:
+                    raise OperationCapacityError("Too many background operations")
+                self._operations.pop(oldest_complete.operation_id, None)
+            self._operations[operation_id] = operation
 
+        thread = self._thread_factory(
+            target=self._run,
+            args=(operation, producer),
+            name=f"{kind}-operation-{operation_id[:8]}",
+            daemon=True,
+        )
+        try:
+            thread.start()
+        except RuntimeError:
+            with self._lock:
+                self._operations.pop(operation_id, None)
+            raise
+        return operation
 
-def _run_operation(operation, producer):
-    terminal_event = False
-    try:
-        for payload in producer():
-            if not isinstance(payload, dict):
-                continue
-            operation.append(payload)
-            terminal_event = terminal_event or bool(
-                payload.get('done') or payload.get('error')
+    def is_owner(self, operation_id, *, expected_kind, owner):
+        with self._lock:
+            self._prune_locked()
+            operation = self._operations.get(operation_id)
+        return bool(
+            operation
+            and operation.kind == expected_kind
+            and isinstance(owner, str)
+            and hmac.compare_digest(operation.owner, owner)
+        )
+
+    def events_since(
+        self,
+        operation_id,
+        *,
+        expected_kind,
+        owner,
+        cursor=0,
+        wait_timeout=0,
+    ):
+        """Return retained events at or after the next-event cursor for an owner."""
+        with self._lock:
+            self._prune_locked()
+            operation = self._operations.get(operation_id)
+        if not (
+            operation
+            and operation.kind == expected_kind
+            and isinstance(owner, str)
+            and hmac.compare_digest(operation.owner, owner)
+        ):
+            return None
+
+        with operation.condition:
+            cursor = max(cursor, operation.first_event_id)
+            end_cursor = operation.first_event_id + len(operation.events)
+            if cursor >= end_cursor and not operation.complete and wait_timeout:
+                operation.condition.wait(timeout=wait_timeout)
+                cursor = max(cursor, operation.first_event_id)
+                end_cursor = operation.first_event_id + len(operation.events)
+
+            offset = cursor - operation.first_event_id
+            payloads = tuple(operation.events[offset:])
+            events = tuple(
+                OperationEvent(event_id=cursor + index, payload=payload)
+                for index, payload in enumerate(payloads)
             )
-    except Exception as exc:
-        operation.append({'error': str(exc)})
-        terminal_event = True
-    finally:
-        if not terminal_event:
-            operation.append({'error': 'Operation ended without a result'})
-        operation.finish()
-
-
-def start_operation(owner_token, username, kind, target, producer):
-    """Register and start one operation, or raise when capacity/startup fails."""
-    operation_id = uuid.uuid4().hex
-    operation = BackgroundOperation(
-        operation_id=operation_id,
-        owner_token=owner_token,
-        username=username,
-        kind=kind,
-        target=target,
-    )
-    with _operations_lock:
-        _prune_operations()
-        if len(_operations) >= OPERATION_LIMIT:
-            oldest_complete = min(
-                (item for item in _operations.values() if item.complete),
-                key=lambda item: item.created_at,
-                default=None,
+            return OperationEventBatch(
+                events=events,
+                next_cursor=cursor + len(events),
+                complete=operation.complete,
             )
-            if oldest_complete is None:
-                raise OperationCapacityError('Too many background operations')
-            _operations.pop(oldest_complete.operation_id, None)
-        _operations[operation_id] = operation
 
-    thread = threading.Thread(
-        target=_run_operation,
-        args=(operation, producer),
-        name=f'{kind}-operation-{operation_id[:8]}',
-        daemon=True,
-    )
-    try:
-        thread.start()
-    except RuntimeError:
-        with _operations_lock:
-            _operations.pop(operation_id, None)
-        raise
-    return operation
+    def _run(self, operation, producer):
+        terminal_event = False
+        try:
+            for payload in producer():
+                if not isinstance(payload, dict):
+                    continue
+                operation.append(payload, self._event_limit)
+                terminal_event = terminal_event or bool(
+                    payload.get("done") or payload.get("error")
+                )
+        except Exception as exc:
+            operation.append({"error": str(exc)}, self._event_limit)
+            terminal_event = True
+        finally:
+            if not terminal_event:
+                operation.append(
+                    {"error": "Operation ended without a result"},
+                    self._event_limit,
+                )
+            operation.finish()
+
+    def _prune_locked(self):
+        cutoff = self._clock() - self._ttl_seconds
+        expired = [
+            operation_id
+            for operation_id, operation in self._operations.items()
+            if operation.complete and operation.created_at < cutoff
+        ]
+        for operation_id in expired:
+            self._operations.pop(operation_id, None)
+        if len(self._operations) > self._operation_limit:
+            oldest = sorted(
+                (operation for operation in self._operations.values() if operation.complete),
+                key=lambda operation: operation.created_at,
+            )
+            excess = len(self._operations) - self._operation_limit
+            for operation in oldest[:excess]:
+                self._operations.pop(operation.operation_id, None)
 
 
 def parse_sse_payload(frame):
     """Return the first JSON object from an SSE frame."""
     for line in frame.splitlines():
-        if not line.startswith('data:'):
+        if not line.startswith("data:"):
             continue
         try:
             payload = json.loads(line[5:].strip())
@@ -138,57 +233,3 @@ def parse_sse_payload(frame):
             return None
         return payload if isinstance(payload, dict) else None
     return None
-
-
-def stream_operation_response(operation_id, expected_kind):
-    """Return a replay/follow SSE response for an operation owned by this session."""
-    with _operations_lock:
-        _prune_operations()
-        operation = _operations.get(operation_id)
-    owner_token = session.get('csrf_token')
-    if (
-        not operation
-        or operation.kind != expected_kind
-        or not isinstance(owner_token, str)
-        or not hmac.compare_digest(operation.owner_token, owner_token)
-    ):
-        return jsonify({'error': 'Operation not found'}), 404
-
-    try:
-        last_event_id = int(request.headers.get('Last-Event-ID', '-1'))
-    except ValueError:
-        last_event_id = -1
-    start_index = max(0, last_event_id + 1)
-
-    def generate():
-        index = start_index
-        while True:
-            with operation.condition:
-                index = max(index, operation.first_event_id)
-                end_index = operation.first_event_id + len(operation.events)
-                if index >= end_index and not operation.complete:
-                    operation.condition.wait(timeout=15)
-                    index = max(index, operation.first_event_id)
-                    end_index = operation.first_event_id + len(operation.events)
-                offset = index - operation.first_event_id
-                events = operation.events[offset:]
-                complete = operation.complete
-
-            if not events and not complete:
-                yield ': keep-alive\n\n'
-                continue
-            for payload in events:
-                yield f'id: {index}\ndata: {json.dumps(payload)}\n\n'
-                index += 1
-            if complete and index >= end_index:
-                break
-
-    return Response(
-        generate(),
-        mimetype='text/event-stream',
-        headers={
-            'Cache-Control': 'no-cache',
-            'Connection': 'keep-alive',
-            'X-Accel-Buffering': 'no',
-        },
-    )

@@ -38,6 +38,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app import AppDependencies, create_app  # noqa: E402
 from auth_utils import LoginRateLimiter  # noqa: E402
+from operation_manager import OperationRegistry  # noqa: E402
 
 
 @pytest.fixture
@@ -46,6 +47,7 @@ def app():
         users={TEST_USERNAME: TEST_PASSWORD_HASH},
         login_rate_limiter=LoginRateLimiter(),
         docker_client=None,
+        operation_registry=OperationRegistry(),
     )
     return create_app(
         {
