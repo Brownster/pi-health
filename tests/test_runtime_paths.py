@@ -20,7 +20,12 @@ def test_migration_routes_config_state_logs_and_credentials(tmp_path):
     (legacy_plugins / "snapraid_state.json").write_text('{"running": false}\n')
     (legacy_logs / "sync.log").write_text("sync complete\n")
     legacy_credentials = tmp_path / "pi-health.env"
-    legacy_credentials.write_text("PIHEALTH_PASSWORD_HASH=hash\n")
+    legacy_credentials.write_text(
+        "PIHEALTH_PASSWORD_HASH=hash\n"
+        "PIHEALTH_UI_MODE=legacy\n"
+        "export PIHEALTH_UI_V2_PAGES=containers\n"
+        "THEME=coraline\n"
+    )
 
     config_dir = tmp_path / "etc" / "limeos"
     state_dir = tmp_path / "var" / "lib" / "limeos"

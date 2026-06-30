@@ -71,7 +71,7 @@ for i in {1..30}; do
         cat "$APP_LOG"
         exit 1
     fi
-    if python -c "import urllib.request; urllib.request.urlopen('http://localhost:$PORT/api/theme', timeout=1)" 2>/dev/null; then
+    if python -c "import urllib.request; urllib.request.urlopen('http://localhost:$PORT/login.html', timeout=1)" 2>/dev/null; then
         echo "App is ready!"
         break
     fi

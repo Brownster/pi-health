@@ -23,6 +23,7 @@ CREDENTIALS_FILE = Path(
 STORAGE_PLUGIN_CONFIG_DIR = CONFIG_DIR / "storage_plugins"
 STORAGE_PLUGIN_STATE_DIR = STATE_DIR / "storage_plugins"
 SNAPRAID_LOG_DIR = LOG_DIR / "snapraid"
+RETIRED_ENV_KEYS = frozenset({"PIHEALTH_UI_MODE", "PIHEALTH_UI_V2_PAGES", "THEME"})
 
 
 def ensure_runtime_directories(
@@ -49,6 +50,40 @@ def _copy_file_if_missing(source: Path, destination: Path, mode: int) -> bool:
     try:
         with os.fdopen(fd, "wb") as target, source.open("rb") as current:
             shutil.copyfileobj(current, target)
+            target.flush()
+            os.fsync(target.fileno())
+        temporary_path.chmod(mode)
+        os.replace(temporary_path, destination)
+    except Exception:
+        temporary_path.unlink(missing_ok=True)
+        raise
+    return True
+
+
+def _copy_credentials_if_missing(source: Path, destination: Path, mode: int) -> bool:
+    """Copy credentials while dropping retired UI configuration."""
+    if not source.is_file() or destination.exists():
+        return False
+
+    retained_lines = []
+    for line in source.read_text().splitlines(keepends=True):
+        assignment = line.strip()
+        if assignment.startswith("export "):
+            assignment = assignment.removeprefix("export ").lstrip()
+        key = assignment.partition("=")[0].strip() if "=" in assignment else None
+        if key not in RETIRED_ENV_KEYS:
+            retained_lines.append(line)
+
+    destination.parent.mkdir(parents=True, exist_ok=True, mode=0o750)
+    fd, temporary_name = tempfile.mkstemp(
+        dir=destination.parent,
+        prefix=f".{destination.name}.",
+        suffix=".tmp",
+    )
+    temporary_path = Path(temporary_name)
+    try:
+        with os.fdopen(fd, "w") as target:
+            target.writelines(retained_lines)
             target.flush()
             os.fsync(target.fileno())
         temporary_path.chmod(mode)
@@ -102,11 +137,12 @@ def migrate_legacy_runtime_data(
         (legacy_config / "pihealth_update.json", config_dir / "pihealth_update.json", 0o640),
         (legacy_config / "auto_update.json", state_dir / "auto_update.json", 0o640),
         (legacy_config / "backup_config.json", state_dir / "backup_config.json", 0o640),
-        (Path(legacy_credentials), credentials_file, 0o640),
     )
     for source, destination, mode in file_migrations:
         if _copy_file_if_missing(source, destination, mode):
             copied.append(destination)
+    if _copy_credentials_if_missing(Path(legacy_credentials), credentials_file, 0o640):
+        copied.append(credentials_file)
 
     legacy_plugins = legacy_config / "storage_plugins"
     if legacy_plugins.is_dir():

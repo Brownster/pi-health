@@ -70,14 +70,14 @@ jobs:
       env:
         PORT: 8002
         PIHEALTH_USER: admin
-        PIHEALTH_PASSWORD: password
+        PIHEALTH_PASSWORD_HASH: 'pbkdf2:sha256:600000$WY9hNhygYgkvb3aQ$1d1076dc15e3201c5aaac3272ab5d7410097da87d8844ab9d5aa9e27e53ff465'
       run: |
         # Start app in background
         python app.py &
         APP_PID=$!
         # Wait for it to be ready (max 30 seconds)
         for i in {1..30}; do
-          if python -c "import urllib.request; urllib.request.urlopen('http://localhost:8002/api/theme', timeout=1)" 2>/dev/null; then
+          if python -c "import urllib.request; urllib.request.urlopen('http://localhost:8002/login.html', timeout=1)" 2>/dev/null; then
             echo "App is ready!"
             break
           fi
@@ -88,7 +88,8 @@ jobs:
       env:
         BASE_URL: http://localhost:8002
         PIHEALTH_USER: admin
-        PIHEALTH_PASSWORD: password
+        PIHEALTH_TEST_PASSWORD: pihealth
+        PIHEALTH_PASSWORD_HASH: 'pbkdf2:sha256:600000$WY9hNhygYgkvb3aQ$1d1076dc15e3201c5aaac3272ab5d7410097da87d8844ab9d5aa9e27e53ff465'
       run: pytest -m e2e tests/e2e -v
 
     - name: Upload Test Artifacts
