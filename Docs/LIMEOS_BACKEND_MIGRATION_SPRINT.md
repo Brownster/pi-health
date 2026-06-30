@@ -81,7 +81,7 @@ Start implementation only when:
 |---|---|---|---|
 | BF-001 | Introduce an application factory | Entry gate | Complete (2026-06-30) |
 | BF-002 | Define service ports and shared adapters | BF-001 | Complete (2026-06-30) |
-| BF-003 | Extract domain services in bounded slices | BF-002 | In progress (read-only inventory complete) |
+| BF-003 | Extract domain services in bounded slices | BF-002 | In progress (container operations complete) |
 | BF-004 | Characterize security and stateful behavior | BF-001 | Pending |
 | BF-005 | Sign off the core boundary and agent handoff | BF-003, BF-004 | Pending |
 
@@ -186,6 +186,15 @@ an explicit callback. The `/api/containers` route now parses the `stats` query, 
 operation, and maps the result to JSON. Focused tests cover metadata and telemetry composition,
 stats suppression, Docker unavailability, list failures, and route delegation. Full `tox -e all`:
 Ruff clean; unit `722 passed, 1 skipped`; E2E `97 passed`.
+
+Container operations completed 2026-06-30. `ContainerOperationsService` owns lifecycle actions,
+image update checks, Compose recreation, and log retrieval through the injected `DockerPort`,
+process runner, and update-state writer. `DockerPort` now includes image pulling, and the existing
+adapter delegates that call to Docker without exposing the SDK client to the service. The control
+and logs routes now parse transport input and call the injected service directly. Focused tests
+cover lifecycle dispatch, invalid actions, Docker failures, image comparison, update-state writes,
+Compose invocation, untagged images, log decoding, and route delegation. Full `tox -e all`: Ruff
+clean; unit `732 passed, 1 skipped`; E2E `97 passed`.
 
 ## BF-004 - Characterize security and stateful behavior
 
