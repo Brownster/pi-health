@@ -308,6 +308,24 @@ class TestProtectedEndpoints:
         response = authenticated_client.get('/api/containers')
         assert response.status_code == 200
 
+    def test_containers_delegates_query_to_injected_service(self, authenticated_client):
+        class StubContainerInventoryService:
+            def __init__(self):
+                self.calls = []
+
+            def list_containers(self, *, include_stats=True):
+                self.calls.append(include_stats)
+                return [{"source": "injected-service"}]
+
+        service = StubContainerInventoryService()
+        authenticated_client.application.extensions["container_inventory_service"] = service
+
+        response = authenticated_client.get('/api/containers?stats=false')
+
+        assert response.status_code == 200
+        assert response.get_json() == [{"source": "injected-service"}]
+        assert service.calls == [False]
+
     def test_shutdown_requires_auth(self, client):
         """Test that /api/shutdown requires authentication."""
         response = client.post('/api/shutdown')

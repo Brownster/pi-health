@@ -55,17 +55,16 @@ from ports import (
     monotonic_clock,
 )
 from system_service import SystemService
+from container_inventory_service import ContainerInventoryService
 from container_helpers import (
-    _compose_dependency_name,
     _compose_label,
-    _network_target,
     analyze_network_topology,
     calculate_container_cpu_percent,
     calculate_container_memory_stats,
     calculate_container_network_stats,
     get_container_ports,
-    get_container_ports_cached,
     get_container_web_metadata,
+    inherit_ports_from_network_service,
     parse_port_key,
 )
 from runtime_paths import (
@@ -126,6 +125,7 @@ class AppDependencies:
     audit: AuditPort | None = None
     config_repo: ConfigRepository | None = None
     system_service: SystemService | None = None
+    container_inventory_service: ContainerInventoryService | None = None
 
 
 def _default_system_service():
@@ -133,6 +133,14 @@ def _default_system_service():
         cpu_reader=get_cpu_usage_delta,
         disk_collector=_collect_disk_usage,
         pi_metrics_reader=get_pi_metrics,
+    )
+
+
+def _default_container_inventory_service(docker_port):
+    return ContainerInventoryService(
+        docker=docker_port,
+        stats_reader=get_container_stats_cached,
+        update_reader=lambda container_id: container_updates.get(container_id, False),
     )
 
 
@@ -202,77 +210,6 @@ _container_stats_timestamps = {}
 CONTAINER_STATS_TTL = 5  # seconds
 
 
-def inherit_ports_from_network_service(container, containers_by_name, port_cache):
-    """If a container shares another container's network stack, inherit its host bindings."""
-    host_config = container.attrs.get('HostConfig', {})
-    network_mode = host_config.get('NetworkMode') or ''
-
-    if not network_mode.startswith('service:'):
-        return []
-
-    service_name = network_mode.split(':', 1)[1]
-    if not service_name:
-        return []
-
-    service_container = containers_by_name.get(service_name)
-    if not service_container:
-        try:
-            service_container = _docker_client().containers.get(service_name)
-        except Exception:
-            return []
-
-    service_ports = get_container_ports_cached(service_container, port_cache)
-    if not service_ports:
-        return []
-
-    exposed_ports = container.attrs.get('Config', {}).get('ExposedPorts') or {}
-    if not exposed_ports:
-        return []
-
-    # Group the service's host bindings by (container_port, protocol)
-    service_port_map = {}
-    for port in service_ports:
-        key = (port.get('container_port'), port.get('protocol'))
-        service_port_map.setdefault(key, []).append(port)
-
-    inherited_ports = []
-    for exposed_port in exposed_ports.keys():
-        port_num, protocol = parse_port_key(exposed_port)
-        if port_num is None:
-            continue
-
-        matches = service_port_map.get((port_num, protocol))
-        if not matches and protocol != 'tcp':
-            matches = service_port_map.get((port_num, 'tcp'))
-        if not matches:
-            matches = service_port_map.get((port_num, None))
-
-        if matches:
-            for match in matches:
-                inherited_ports.append(
-                    {
-                        "container_port": port_num,
-                        "protocol": protocol or match.get('protocol') or 'tcp',
-                        "host_port": match.get('host_port'),
-                        "host_ip": match.get('host_ip'),
-                        "via_service": service_name,
-                    }
-                )
-        else:
-            # No host binding available on the service container, but expose the port metadata
-            inherited_ports.append(
-                {
-                    "container_port": port_num,
-                    "protocol": protocol or 'tcp',
-                    "host_port": None,
-                    "host_ip": None,
-                    "via_service": service_name,
-                }
-            )
-
-    return inherited_ports
-
-
 def get_cpu_usage_delta(interval=0.1):
     """Read CPU deltas through the app's patchable stat reader."""
     return read_cpu_usage_delta(interval, stat_reader=_read_proc_stat_cpu)
@@ -326,85 +263,10 @@ def get_container_stats_cached(container_id):
 
 def list_containers(include_stats=True):
     """List all Docker containers with their status."""
-    if not _docker_is_available():
-        return [
-            {
-                "id": "docker-not-available",
-                "name": "Docker Not Available",
-                "status": "unavailable",
-                "image": "N/A",
-                "ports": [],
-            }
-        ]
-    
-    try:
-        containers = _docker_client().containers.list(all=True)
-        containers_by_name = {container.name: container for container in containers}
-        net_topology, _net_groups = analyze_network_topology(containers)
-        port_cache = {}
-        container_list = []
-        for container in containers:
-            try:
-                ports = [dict(port) for port in get_container_ports_cached(container, port_cache)]
-                if not ports:
-                    inherited = inherit_ports_from_network_service(container, containers_by_name, port_cache)
-                    if inherited:
-                        ports = inherited
-            except Exception:
-                ports = []
-
-            # Fetch resource stats for running containers (if requested)
-            stats = None
-            if include_stats and container.status == 'running':
-                stats = get_container_stats_cached(container.id)
-
-            container_data = {
-                "id": container.id[:12],
-                "name": container.name,
-                "status": container.status,
-                "image": container.image.tags[0] if container.image.tags else "unknown",
-                "update_available": container_updates.get(container.id[:12], False),
-                "ports": ports,
-                "health": get_container_health(container),
-                "exit_code": (container.attrs.get('State') or {}).get('ExitCode')
-                if container.status in ('exited', 'dead') else None,
-                "network": net_topology.get(
-                    container.id,
-                    {"mode": "", "role": "standalone", "provider": None, "status": "ok"},
-                ),
-                "cpu_percent": None,
-                "memory_percent": None,
-                "memory_used": None,
-                "memory_limit": None,
-                "net_rx": None,
-                "net_tx": None,
-                **get_container_web_metadata(container),
-            }
-
-            if stats:
-                container_data["cpu_percent"] = stats.get('cpu_percent')
-                memory = stats.get('memory', {})
-                container_data["memory_percent"] = memory.get('percent')
-                container_data["memory_used"] = memory.get('used')
-                container_data["memory_limit"] = memory.get('limit')
-                network = stats.get('network', {})
-                container_data["net_rx"] = network.get('rx')
-                container_data["net_tx"] = network.get('tx')
-
-            container_list.append(container_data)
-
-        return container_list
-    except Exception as e:
-        print(f"Error listing containers: {e}")
-        return [
-            {
-                "id": "error-listing",
-                "name": "Error Listing Containers",
-                "status": "error",
-                "image": str(e)[:30] + "..." if len(str(e)) > 30 else str(e),
-                "ports": [],
-            }
-        ]
+    service = _extension("container_inventory_service")
+    if service is None:
+        service = _default_container_inventory_service(DockerClientAdapter(docker_client))
+    return service.list_containers(include_stats=include_stats)
 
 
 def check_container_update(container):
@@ -1062,7 +924,8 @@ def api_stats():
 def api_list_containers():
     """API endpoint to list all Docker containers."""
     include_stats = request.args.get('stats', 'true').lower() != 'false'
-    return jsonify(list_containers(include_stats=include_stats))
+    service = current_app.extensions["container_inventory_service"]
+    return jsonify(service.list_containers(include_stats=include_stats))
 
 
 @core_api.route('/api/containers/stats', methods=['GET'])
@@ -1236,6 +1099,10 @@ def create_app(config=None, dependencies=None):
     application.extensions["config_repo"] = resolved.config_repo or JsonFileRepository()
     application.extensions["system_service"] = (
         resolved.system_service or _default_system_service()
+    )
+    application.extensions["container_inventory_service"] = (
+        resolved.container_inventory_service
+        or _default_container_inventory_service(application.extensions["docker"])
     )
 
     application.register_blueprint(core_api)

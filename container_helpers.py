@@ -117,6 +117,74 @@ def get_container_ports_cached(container, port_cache):
     return port_cache[container.id]
 
 
+def inherit_ports_from_network_service(
+    container,
+    containers_by_name,
+    port_cache,
+    *,
+    container_lookup=None,
+):
+    """Inherit host bindings when a container shares a Compose service network."""
+    network_mode = (container.attrs.get("HostConfig") or {}).get("NetworkMode") or ""
+    if not network_mode.startswith("service:"):
+        return []
+
+    service_name = network_mode.split(":", 1)[1]
+    if not service_name:
+        return []
+    service_container = containers_by_name.get(service_name)
+    if service_container is None and container_lookup is not None:
+        try:
+            service_container = container_lookup(service_name)
+        except Exception:
+            return []
+    if service_container is None:
+        return []
+
+    service_ports = get_container_ports_cached(service_container, port_cache)
+    exposed_ports = (container.attrs.get("Config") or {}).get("ExposedPorts") or {}
+    if not service_ports or not exposed_ports:
+        return []
+
+    service_port_map = {}
+    for port in service_ports:
+        key = (port.get("container_port"), port.get("protocol"))
+        service_port_map.setdefault(key, []).append(port)
+
+    inherited = []
+    for exposed_port in exposed_ports:
+        port_num, protocol = parse_port_key(exposed_port)
+        if port_num is None:
+            continue
+        matches = service_port_map.get((port_num, protocol))
+        if not matches and protocol != "tcp":
+            matches = service_port_map.get((port_num, "tcp"))
+        if not matches:
+            matches = service_port_map.get((port_num, None))
+        if matches:
+            for match in matches:
+                inherited.append(
+                    {
+                        "container_port": port_num,
+                        "protocol": protocol or match.get("protocol") or "tcp",
+                        "host_port": match.get("host_port"),
+                        "host_ip": match.get("host_ip"),
+                        "via_service": service_name,
+                    }
+                )
+        else:
+            inherited.append(
+                {
+                    "container_port": port_num,
+                    "protocol": protocol or "tcp",
+                    "host_port": None,
+                    "host_ip": None,
+                    "via_service": service_name,
+                }
+            )
+    return inherited
+
+
 def calculate_container_cpu_percent(stats):
     """Calculate CPU percentage from Docker stats."""
     try:
