@@ -80,7 +80,7 @@ Start implementation only when:
 | ID | Title | Depends | Status |
 |---|---|---|---|
 | BF-001 | Introduce an application factory | Entry gate | Complete (2026-06-30) |
-| BF-002 | Define service ports and shared adapters | BF-001 | In progress (BF-002A complete) |
+| BF-002 | Define service ports and shared adapters | BF-001 | Complete (2026-06-30) |
 | BF-003 | Extract domain services in bounded slices | BF-002 | Pending |
 | BF-004 | Characterize security and stateful behavior | BF-001 | Pending |
 | BF-005 | Sign off the core boundary and agent handoff | BF-003, BF-004 | Pending |
@@ -136,6 +136,17 @@ parsing, SSE framing); ownership is an opaque string compared with `hmac.compare
 math are preserved. The neutral registry now runs as a standalone unit test (no Flask, no server),
 which is the decoupling proof. Retention bounds are injectable, so the BF-002B `clock` port should
 be wired into the registry next to make expiry/pruning deterministic without `sleep`.
+
+BF-002B completed 2026-06-30. `ports.py` defines framework-neutral Protocols and thin adapters for
+the privileged helper (`HelperClientAdapter` → `helper_call`, preserving `HelperError`), Docker
+(`DockerClientAdapter`, None-safe when unavailable), scheduler (`ApschedulerAdapter`), audit
+(`FileAuditWriter`, append-only timestamped JSON groundwork), config repository (`JsonFileRepository`,
+read-with-default + durable atomic write preserving mode), and the clock (callable convention from
+BF-002A). All six are wired through `AppDependencies`/`create_app` and exposed on `app.extensions`;
+one shared `clock` now drives both `OperationRegistry` and `LoginRateLimiter`. Call-site migration is
+deferred to BF-003 (service extraction); only the clock has a real consumer migration here. New unit
+tests inject fakes without Flask globals or sockets. Validation: gate ruff clean; unit
+`715 passed, 1 skipped`.
 
 ## BF-003 - Extract domain services in bounded slices
 

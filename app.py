@@ -41,6 +41,19 @@ from disk_manager import disk_manager
 from setup_manager import setup_manager
 from helper_client import helper_call, HelperError
 from operation_manager import OperationRegistry
+from ports import (
+    AuditPort,
+    Clock,
+    ConfigRepository,
+    DockerClientAdapter,
+    DockerPort,
+    FileAuditWriter,
+    HelperClientAdapter,
+    HelperPort,
+    JsonFileRepository,
+    SchedulerPort,
+    monotonic_clock,
+)
 from container_helpers import (
     _compose_dependency_name,
     _compose_label,
@@ -105,6 +118,12 @@ class AppDependencies:
     login_rate_limiter: LoginRateLimiter
     docker_client: object | None
     operation_registry: OperationRegistry | None = None
+    clock: Clock = monotonic_clock
+    helper: HelperPort | None = None
+    docker: DockerPort | None = None
+    scheduler: SchedulerPort | None = None
+    audit: AuditPort | None = None
+    config_repo: ConfigRepository | None = None
 
 
 def _default_dependencies():
@@ -115,11 +134,19 @@ def _default_dependencies():
         print(f"Warning: Could not connect to Docker: {exc}")
         print("Docker functionality will be disabled")
         client = None
+    # One shared clock drives both the rate limiter and the operation registry so
+    # time can be controlled from a single seam in tests.
+    clock = monotonic_clock
     return AppDependencies(
         users=users,
-        login_rate_limiter=LoginRateLimiter(),
+        login_rate_limiter=LoginRateLimiter(clock=clock),
         docker_client=client,
-        operation_registry=OperationRegistry(),
+        operation_registry=OperationRegistry(clock=clock),
+        clock=clock,
+        helper=HelperClientAdapter(),
+        docker=DockerClientAdapter(client),
+        audit=FileAuditWriter(),
+        config_repo=JsonFileRepository(),
     )
 
 
@@ -1188,8 +1215,14 @@ def create_app(config=None, dependencies=None):
     application.extensions["login_rate_limiter"] = resolved.login_rate_limiter
     application.extensions["docker_client"] = resolved.docker_client
     application.extensions["operation_registry"] = (
-        resolved.operation_registry or OperationRegistry()
+        resolved.operation_registry or OperationRegistry(clock=resolved.clock)
     )
+    application.extensions["clock"] = resolved.clock
+    application.extensions["helper"] = resolved.helper or HelperClientAdapter()
+    application.extensions["docker"] = resolved.docker or DockerClientAdapter(resolved.docker_client)
+    application.extensions["scheduler"] = resolved.scheduler
+    application.extensions["audit"] = resolved.audit or FileAuditWriter()
+    application.extensions["config_repo"] = resolved.config_repo or JsonFileRepository()
 
     application.register_blueprint(core_api)
     application.register_blueprint(stack_manager)
