@@ -237,18 +237,21 @@ class TestContainerNetworkTest:
         data = json.loads(response.data)
         assert data['error'] == 'Docker is not available'
 
-    def test_container_network_test_with_auth_calls_runner(self, authenticated_client, monkeypatch):
-        """Test container network endpoint delegates to run_container_network_test when available."""
-        authenticated_client.application.extensions["docker_client"] = Mock()
-        monkeypatch.setattr(
-            'app.run_container_network_test',
-            lambda container_id: {'container_name': container_id, 'ping_success': True},
-        )
+    def test_container_network_test_with_auth_calls_service(self, authenticated_client):
+        service = Mock()
+        service.container_test.return_value = {
+            'container_name': 'test-container',
+            'ping_success': True,
+        }
+        authenticated_client.application.extensions["network_diagnostics_service"] = service
+
         response = authenticated_client.post('/api/containers/test-container/network-test')
+
         assert response.status_code == 200
         data = json.loads(response.data)
         assert data['container_name'] == 'test-container'
         assert data['ping_success'] is True
+        service.container_test.assert_called_once_with('test-container')
 
 
 class TestHostNetworkTest:
@@ -719,6 +722,29 @@ class TestNetworkGroupsAPI:
         monkeypatch.setattr('app.docker_available', False)
         response = authenticated_client.get('/api/containers/x/health')
         assert response.status_code == 503
+
+    def test_health_route_delegates_to_service(self, authenticated_client):
+        service = Mock()
+        service.health.return_value = {"status": "healthy"}
+        authenticated_client.application.extensions["network_diagnostics_service"] = service
+
+        response = authenticated_client.get('/api/containers/x/health')
+
+        assert response.status_code == 200
+        assert response.get_json() == {"status": "healthy"}
+        service.health.assert_called_once_with("x")
+
+    def test_health_route_maps_missing_container(self, authenticated_client):
+        from network_diagnostics_service import ContainerNotFoundError
+
+        service = Mock()
+        service.health.side_effect = ContainerNotFoundError("not found")
+        authenticated_client.application.extensions["network_diagnostics_service"] = service
+
+        response = authenticated_client.get('/api/containers/missing/health')
+
+        assert response.status_code == 404
+        assert response.get_json() == {"error": "not found"}
 
 
 if __name__ == '__main__':

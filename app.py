@@ -57,6 +57,20 @@ from ports import (
 from system_service import SystemService
 from container_inventory_service import ContainerInventoryService
 from container_operations_service import ContainerOperationsService
+from network_diagnostics_service import (
+    ContainerNotFoundError,
+    DockerUnavailableError,
+    NetworkDiagnosticsService,
+    command_missing,
+    container_http_probe_script,
+    exec_in_container,
+    get_container_health,
+    get_container_health_detail,
+    get_container_local_ip as read_container_local_ip,
+    get_container_public_ip as read_container_public_ip,
+    run_container_fallback_probe as execute_container_fallback_probe,
+    socket_probe as execute_socket_probe,
+)
 from container_helpers import (
     _compose_label,
     analyze_network_topology,
@@ -128,6 +142,7 @@ class AppDependencies:
     system_service: SystemService | None = None
     container_inventory_service: ContainerInventoryService | None = None
     container_operations_service: ContainerOperationsService | None = None
+    network_diagnostics_service: NetworkDiagnosticsService | None = None
 
 
 def _default_system_service():
@@ -163,6 +178,22 @@ def _container_operations():
     if service is not None:
         return service
     return _default_container_operations_service(DockerClientAdapter(docker_client))
+
+
+def _default_network_diagnostics_service(docker_port):
+    return NetworkDiagnosticsService(
+        docker=docker_port,
+        command_runner=subprocess.run,
+        socket_connector=socket.create_connection,
+        urlopen=urlrequest.urlopen,
+    )
+
+
+def _network_diagnostics():
+    service = _extension("network_diagnostics_service")
+    if service is not None:
+        return service
+    return _default_network_diagnostics_service(DockerClientAdapter(docker_client))
 
 
 def _default_dependencies():
@@ -307,280 +338,35 @@ def get_container_logs(container_id, tail=200):
 
 def socket_probe(host="8.8.8.8", port=53, timeout=5):
     """Attempt a TCP socket connection as a fallback network check."""
-    try:
-        with socket.create_connection((host, port), timeout=timeout):
-            return True, f"Socket connection to {host}:{port} succeeded."
-    except OSError as exc:
-        return False, f"Socket connection to {host}:{port} failed: {exc}"
+    return execute_socket_probe(socket.create_connection, host, port, timeout)
 
 
 def run_network_test():
     """Ping 8.8.8.8 and report local/public IP details."""
-    ping_output = ""
-    ping_success = False
-    probe_method = "ping"
-
-    try:
-        ping_result = subprocess.run(
-            ["ping", "-c", "4", "8.8.8.8"],
-            capture_output=True,
-            text=True,
-            timeout=20,
-        )
-        ping_output = ping_result.stdout or ping_result.stderr or ""
-        ping_success = ping_result.returncode == 0
-    except FileNotFoundError:
-        probe_method = "socket"
-        socket_success, socket_message = socket_probe()
-        ping_success = socket_success
-        ping_output = (
-            "Ping command not available in this container.\n" + socket_message
-        )
-    except subprocess.TimeoutExpired as exc:
-        ping_output = exc.stdout or exc.stderr or "Ping timed out."
-    except Exception as exc:
-        ping_output = str(exc)
-
-    local_ip = None
-    try:
-        hostname_result = subprocess.run(
-            ["hostname", "-I"], capture_output=True, text=True, timeout=5
-        )
-        local_ip = hostname_result.stdout.strip() or hostname_result.stderr.strip()
-    except Exception:
-        local_ip = None
-
-    public_ip = None
-    try:
-        with urlrequest.urlopen("https://api.ipify.org", timeout=10) as response:
-            public_ip = response.read().decode("utf-8").strip()
-    except Exception:
-        public_ip = None
-
-    return {
-        "ping_success": ping_success,
-        "ping_output": ping_output,
-        "local_ip": local_ip,
-        "public_ip": public_ip,
-        "probe_method": probe_method,
-    }
-
-
-def command_missing(exit_code, output):
-    """Determine if a command failure was due to a missing binary."""
-    output = (output or "").lower()
-    return exit_code in (126, 127) or "not found" in output or "no such file" in output
-
-
-def exec_in_container(container, script):
-    """Execute a shell script inside a container and capture its output."""
-    try:
-        result = container.exec_run([
-            "/bin/sh",
-            "-c",
-            script,
-        ], stdout=True, stderr=True)
-    except FileNotFoundError:
-        # Some minimal containers might only have /bin/busybox
-        result = container.exec_run([
-            "sh",
-            "-c",
-            script,
-        ], stdout=True, stderr=True)
-
-    output = result.output
-    if isinstance(output, tuple):
-        stdout, stderr = output
-        decoded = ""
-        if stdout:
-            decoded += stdout.decode("utf-8", errors="replace")
-        if stderr:
-            decoded += stderr.decode("utf-8", errors="replace")
-        output_text = decoded
-    elif isinstance(output, (bytes, bytearray)):
-        output_text = output.decode("utf-8", errors="replace")
-    else:
-        output_text = str(output)
-
-    return result.exit_code, output_text.strip()
-
-
-def container_http_probe_script(tool_name):
-    """Return a shell snippet that ensures a tool exists before running it."""
-    commands = {
-        "curl": "curl -s --max-time 10 https://api.ipify.org",
-        "wget": "wget -qO- --timeout=10 https://api.ipify.org",
-        "busybox": "busybox wget -qO- https://api.ipify.org",
-    }
-    if tool_name == "python3":
-        python_script = (
-            "python3 - <<'PY'\n"
-            "import socket\n"
-            "sock = socket.create_connection(('8.8.8.8', 53), timeout=5)\n"
-            "print('Socket connection to 8.8.8.8:53 succeeded')\n"
-            "sock.close()\n"
-            "PY"
-        )
-        return (
-            "if command -v python3 >/dev/null 2>&1; then\n"
-            f"{python_script}\n"
-            "else\n"
-            "  exit 127\n"
-            "fi"
-        )
-
-    tool_command = commands.get(tool_name, "")
-    if not tool_command:
-        return "exit 127"
-
-    return (
-        f"if command -v {tool_name} >/dev/null 2>&1; then\n"
-        f"  {tool_command}\n"
-        "else\n"
-        "  exit 127\n"
-        "fi"
-    )
+    return _network_diagnostics().host_test()
 
 
 def run_container_fallback_probe(container):
     """Try alternative connectivity checks inside a container."""
-    probes = [
-        ("curl", True),
-        ("wget", True),
-        ("busybox", True),
-        ("python3", False),
-    ]
-
-    for tool, provides_public_ip in probes:
-        script = container_http_probe_script(tool)
-        exit_code, output = exec_in_container(container, script)
-        if exit_code == 0:
-            message = f"{tool} connectivity test succeeded."
-            if output:
-                message += f"\n{output}"
-            public_ip = output.strip() if provides_public_ip and output else None
-            return True, message, tool, public_ip
-
-        if command_missing(exit_code, output):
-            continue
-
-        message = output or f"{tool} connectivity test failed"
-        return False, message, tool, None
-
-    return (
-        False,
-        "No available networking tools (ping/curl/wget/python3) inside the container.",
-        "unavailable",
-        None,
-    )
+    return execute_container_fallback_probe(container, executor=exec_in_container)
 
 
 def get_container_local_ip(container):
     """Retrieve the container's local IP address if possible."""
-    exit_code, output = exec_in_container(container, "hostname -I 2>/dev/null")
-    if exit_code == 0 and output:
-        return output.strip()
-    return None
+    return read_container_local_ip(container, executor=exec_in_container)
 
 
 def get_container_public_ip(container):
     """Try to fetch the container's public IP using available tools."""
-    script = (
-        "if command -v curl >/dev/null 2>&1; then\n"
-        "  curl -s --max-time 10 https://api.ipify.org\n"
-        "elif command -v wget >/dev/null 2>&1; then\n"
-        "  wget -qO- --timeout=10 https://api.ipify.org\n"
-        "elif command -v busybox >/dev/null 2>&1; then\n"
-        "  busybox wget -qO- https://api.ipify.org\n"
-        "else\n"
-        "  exit 127\n"
-        "fi"
-    )
-    exit_code, output = exec_in_container(container, script)
-    if exit_code == 0 and output:
-        return output.strip()
-    return None
+    return read_container_public_ip(container, executor=exec_in_container)
 
 
 def run_container_network_test(container_id):
     """Run a network diagnostic from inside a specific container."""
     try:
-        container = _docker_client().containers.get(container_id)
-    except Exception as exc:
+        return _network_diagnostics().container_test(container_id)
+    except DockerUnavailableError as exc:
         return {"error": str(exc)}
-
-    ping_success = False
-    ping_output = ""
-    probe_method = "ping"
-
-    try:
-        exit_code, output = exec_in_container(container, "ping -c 4 8.8.8.8")
-        ping_output = output
-        if exit_code == 0:
-            ping_success = True
-        elif command_missing(exit_code, output):
-            probe_method = "fallback"
-            (
-                ping_success,
-                fallback_message,
-                fallback_tool,
-                public_ip_from_fallback,
-            ) = run_container_fallback_probe(container)
-            ping_output = ((ping_output + "\n\n") if ping_output else "") + fallback_message
-            if ping_success:
-                probe_method = fallback_tool
-            else:
-                probe_method = f"{fallback_tool}-failed"
-        else:
-            ping_success = False
-    except Exception as exc:
-        ping_output = str(exc)
-
-    local_ip = get_container_local_ip(container)
-    public_ip = get_container_public_ip(container)
-
-    # If fallback already determined public IP, prefer it
-    if 'public_ip_from_fallback' in locals() and public_ip_from_fallback:
-        public_ip = public_ip_from_fallback
-
-    return {
-        "container_id": container.id,
-        "container_name": container.name,
-        "ping_success": ping_success,
-        "ping_output": ping_output,
-        "local_ip": local_ip,
-        "public_ip": public_ip,
-        "probe_method": probe_method,
-    }
-
-def get_container_health(container):
-    """Return the container's healthcheck status, or None if it defines no healthcheck.
-
-    Values: 'healthy', 'unhealthy', 'starting'."""
-    try:
-        health = (container.attrs.get('State') or {}).get('Health') or {}
-    except Exception:
-        return None
-    return health.get('Status')
-
-
-def get_container_health_detail(container):
-    """Return health status plus the most recent healthcheck output.
-
-    Surfacing the output is what distinguishes a genuinely failing service from a
-    broken check (e.g. gluetun reporting 'unhealthy' only because `curl` is missing)."""
-    state = container.attrs.get('State') or {}
-    health = state.get('Health') or {}
-    last_output = None
-    log = health.get('Log') or []
-    if log:
-        out = (log[-1].get('Output') or '').strip()
-        last_output = out[-500:] if out else None
-    return {
-        'status': health.get('Status'),
-        'failing_streak': health.get('FailingStreak'),
-        'last_output': last_output,
-    }
 
 
 def get_host_public_ip():
@@ -964,29 +750,32 @@ def api_reboot():
 @login_required
 def api_network_test():
     """API endpoint to run a network connectivity test."""
-    return jsonify(run_network_test())
+    service = current_app.extensions["network_diagnostics_service"]
+    return jsonify(service.host_test())
 
 
 @core_api.route('/api/containers/<container_id>/network-test', methods=['POST'])
 @login_required
 def api_container_network_test(container_id):
     """API endpoint to run a network test from inside a specific container."""
-    if not _docker_is_available():
-        return jsonify({"error": "Docker is not available"}), 503
-    return jsonify(run_container_network_test(container_id))
+    service = current_app.extensions["network_diagnostics_service"]
+    try:
+        return jsonify(service.container_test(container_id))
+    except DockerUnavailableError as exc:
+        return jsonify({"error": str(exc)}), 503
 
 
 @core_api.route('/api/containers/<container_id>/health', methods=['GET'])
 @login_required
 def api_container_health(container_id):
     """API endpoint to fetch a container's healthcheck status and latest output."""
-    if not _docker_is_available():
-        return jsonify({"error": "Docker is not available"}), 503
+    service = current_app.extensions["network_diagnostics_service"]
     try:
-        container = _docker_client().containers.get(container_id)
-    except Exception as exc:
+        return jsonify(service.health(container_id))
+    except DockerUnavailableError as exc:
+        return jsonify({"error": str(exc)}), 503
+    except ContainerNotFoundError as exc:
         return jsonify({"error": str(exc)}), 404
-    return jsonify(get_container_health_detail(container))
 
 
 @core_api.route('/api/network-groups', methods=['GET'])
@@ -1082,6 +871,10 @@ def create_app(config=None, dependencies=None):
     application.extensions["container_operations_service"] = (
         resolved.container_operations_service
         or _default_container_operations_service(application.extensions["docker"])
+    )
+    application.extensions["network_diagnostics_service"] = (
+        resolved.network_diagnostics_service
+        or _default_network_diagnostics_service(application.extensions["docker"])
     )
 
     application.register_blueprint(core_api)

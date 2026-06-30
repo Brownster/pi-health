@@ -326,11 +326,11 @@ class TestNetworkDiagnostics:
         assert tool == "unavailable"
 
     def test_run_network_test_socket_fallback(self):
-        socket_probe_result = (True, "Socket connection to 8.8.8.8:53 succeeded.")
         hostname_result = MagicMock(stdout="192.168.1.2\n", stderr="", returncode=0)
+        connection = MagicMock()
 
         with patch("app.subprocess.run", side_effect=[FileNotFoundError(), hostname_result]):
-            with patch("app.socket_probe", return_value=socket_probe_result):
+            with patch("app.socket.create_connection", return_value=connection):
                 with patch("app.urlrequest.urlopen") as mock_urlopen:
                     mock_urlopen.return_value.__enter__.return_value.read.return_value = b"1.2.3.4"
                     result = run_network_test()

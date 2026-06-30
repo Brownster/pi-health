@@ -386,17 +386,18 @@ class TestProtectedEndpoints:
         data = json.loads(response.data)
         assert data['status'] == 'reboot-ok'
 
-    def test_network_test_with_auth_calls_runner(self, authenticated_client, monkeypatch):
-        """Test authenticated network test delegates to run_network_test."""
-        monkeypatch.setattr(
-            'app.run_network_test',
-            lambda: {'ping_success': True, 'probe_method': 'socket'},
-        )
+    def test_network_test_with_auth_calls_service(self, authenticated_client):
+        service = Mock()
+        service.host_test.return_value = {'ping_success': True, 'probe_method': 'socket'}
+        authenticated_client.application.extensions["network_diagnostics_service"] = service
+
         response = authenticated_client.post('/api/network-test')
+
         assert response.status_code == 200
         data = json.loads(response.data)
         assert data['ping_success'] is True
         assert data['probe_method'] == 'socket'
+        service.host_test.assert_called_once_with()
 
 
 class TestPublicEndpoints:
