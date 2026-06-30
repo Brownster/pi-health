@@ -11,7 +11,7 @@ from playwright.sync_api import Page, expect
 pytestmark = pytest.mark.e2e
 
 
-def test_v2_phase3_route_requires_auth(page: Page, v2_mode_server):
-    base_url = v2_mode_server["base_url"]
+def test_v2_phase3_route_requires_auth(page: Page, v2_server):
+    base_url = v2_server["base_url"]
     page.goto(f"{base_url}/v2/disks")
     expect(page).to_have_url(f"{base_url}/login.html")

@@ -21,12 +21,12 @@ def test_v2_stacks_list_renders(
     profiled_page: Page,
     viewport_profile_name: str,
     assert_no_horizontal_overflow,
-    v2_mode_server,
+    v2_server,
     v2_login,
     install_v2_stacks_api_mocks,
 ):
     page = profiled_page
-    base_url = v2_mode_server["base_url"]
+    base_url = v2_server["base_url"]
     _open_v2_stacks(page, base_url, v2_login, install_v2_stacks_api_mocks)
 
     expect(page.get_by_text("media").first).to_be_visible()
@@ -36,11 +36,11 @@ def test_v2_stacks_list_renders(
 
 def test_v2_stacks_logs_modal(
     page: Page,
-    v2_mode_server,
+    v2_server,
     v2_login,
     install_v2_stacks_api_mocks,
 ):
-    base_url = v2_mode_server["base_url"]
+    base_url = v2_server["base_url"]
     _open_v2_stacks(page, base_url, v2_login, install_v2_stacks_api_mocks)
 
     page.locator("button[data-stack-action='logs']:visible").first.click()
@@ -53,11 +53,11 @@ def test_v2_stacks_logs_modal(
 
 def test_v2_stacks_lifecycle_streaming_console(
     page: Page,
-    v2_mode_server,
+    v2_server,
     v2_login,
     install_v2_stacks_api_mocks,
 ):
-    base_url = v2_mode_server["base_url"]
+    base_url = v2_server["base_url"]
     _open_v2_stacks(page, base_url, v2_login, install_v2_stacks_api_mocks)
     lifecycle_requests = []
     page.on(
@@ -86,11 +86,11 @@ def test_v2_stacks_lifecycle_streaming_console(
 
 def test_v2_stacks_compose_env_editor(
     page: Page,
-    v2_mode_server,
+    v2_server,
     v2_login,
     install_v2_stacks_api_mocks,
 ):
-    base_url = v2_mode_server["base_url"]
+    base_url = v2_server["base_url"]
     _open_v2_stacks(page, base_url, v2_login, install_v2_stacks_api_mocks)
 
     page.locator("button[data-stack-action='edit']:visible").first.click()
@@ -114,11 +114,11 @@ def test_v2_stacks_compose_env_editor(
 
 def test_v2_stacks_backups_restore_with_confirm(
     page: Page,
-    v2_mode_server,
+    v2_server,
     v2_login,
     install_v2_stacks_api_mocks,
 ):
-    base_url = v2_mode_server["base_url"]
+    base_url = v2_server["base_url"]
     _open_v2_stacks(page, base_url, v2_login, install_v2_stacks_api_mocks)
 
     page.locator("button[data-stack-action='backups']:visible").first.click()

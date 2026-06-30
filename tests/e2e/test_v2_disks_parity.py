@@ -25,12 +25,12 @@ def test_v2_disks_inventory_renders(
     profiled_page: Page,
     viewport_profile_name: str,
     assert_no_horizontal_overflow,
-    v2_mode_server,
+    v2_server,
     v2_login,
     install_v2_disks_api_mocks,
 ):
     page = profiled_page
-    base_url = v2_mode_server["base_url"]
+    base_url = v2_server["base_url"]
     _open_v2_disks(page, base_url, v2_login, install_v2_disks_api_mocks)
 
     expect(page.get_by_text("/dev/sda").first).to_be_visible()
@@ -42,11 +42,11 @@ def test_v2_disks_inventory_renders(
 
 def test_v2_disks_smart_modal(
     page: Page,
-    v2_mode_server,
+    v2_server,
     v2_login,
     install_v2_disks_api_mocks,
 ):
-    base_url = v2_mode_server["base_url"]
+    base_url = v2_server["base_url"]
     _open_v2_disks(page, base_url, v2_login, install_v2_disks_api_mocks)
 
     page.locator("button[data-disk-action='smart'][data-disk='sda']:visible").first.click()
@@ -58,8 +58,8 @@ def test_v2_disks_smart_modal(
     expect(page.locator("#v2-disk-smart-modal")).to_have_count(0)
 
 
-def test_v2_disks_helper_unavailable_state(page: Page, v2_mode_server, v2_login):
-    base_url = v2_mode_server["base_url"]
+def test_v2_disks_helper_unavailable_state(page: Page, v2_server, v2_login):
+    base_url = v2_server["base_url"]
     v2_login(page, base_url)
 
     def _handler(route):
@@ -86,11 +86,11 @@ def test_v2_disks_helper_unavailable_state(page: Page, v2_mode_server, v2_login)
 
 def test_v2_disks_suggested_mount_with_confirm(
     page: Page,
-    v2_mode_server,
+    v2_server,
     v2_login,
     install_v2_disks_api_mocks,
 ):
-    base_url = v2_mode_server["base_url"]
+    base_url = v2_server["base_url"]
     requests = []
     page.on("request", lambda request: requests.append(request))
     _open_v2_disks(page, base_url, v2_login, install_v2_disks_api_mocks)
@@ -113,11 +113,11 @@ def test_v2_disks_suggested_mount_with_confirm(
 
 def test_v2_disks_unmount_with_confirm(
     page: Page,
-    v2_mode_server,
+    v2_server,
     v2_login,
     install_v2_disks_api_mocks,
 ):
-    base_url = v2_mode_server["base_url"]
+    base_url = v2_server["base_url"]
     _open_v2_disks(page, base_url, v2_login, install_v2_disks_api_mocks)
 
     page.click("button[data-unmount='/mnt/storage']")
@@ -127,11 +127,11 @@ def test_v2_disks_unmount_with_confirm(
 
 def test_v2_disks_preserves_json_error_guidance(
     page: Page,
-    v2_mode_server,
+    v2_server,
     v2_login,
     install_v2_disks_api_mocks,
 ):
-    base_url = v2_mode_server["base_url"]
+    base_url = v2_server["base_url"]
     v2_login(page, base_url)
     install_v2_disks_api_mocks(
         page,
@@ -162,11 +162,11 @@ def test_v2_disks_preserves_json_error_guidance(
 
 def test_v2_disks_preserves_text_error(
     page: Page,
-    v2_mode_server,
+    v2_server,
     v2_login,
     install_v2_disks_api_mocks,
 ):
-    base_url = v2_mode_server["base_url"]
+    base_url = v2_server["base_url"]
     v2_login(page, base_url)
     install_v2_disks_api_mocks(
         page,
@@ -190,11 +190,11 @@ def test_v2_disks_preserves_text_error(
 
 def test_v2_disks_smart_self_test_with_confirm(
     page: Page,
-    v2_mode_server,
+    v2_server,
     v2_login,
     install_v2_disks_api_mocks,
 ):
-    base_url = v2_mode_server["base_url"]
+    base_url = v2_server["base_url"]
     _open_v2_disks(page, base_url, v2_login, install_v2_disks_api_mocks)
 
     page.locator("button[data-disk-action='smart'][data-disk='sda']:visible").first.click()

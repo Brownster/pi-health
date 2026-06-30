@@ -17,12 +17,12 @@ def test_v2_network_render(
     profiled_page: Page,
     viewport_profile_name: str,
     assert_no_horizontal_overflow,
-    v2_mode_server,
+    v2_server,
     v2_login,
     install_v2_network_api_mocks,
 ):
     page = profiled_page
-    base_url = v2_mode_server["base_url"]
+    base_url = v2_server["base_url"]
     _open_v2_network(page, base_url, v2_login, install_v2_network_api_mocks)
 
     expect(page.get_by_text("gluetun").first).to_be_visible()
@@ -32,11 +32,11 @@ def test_v2_network_render(
 
 def test_v2_network_host_test_and_recreate(
     page: Page,
-    v2_mode_server,
+    v2_server,
     v2_login,
     install_v2_network_api_mocks,
 ):
-    base_url = v2_mode_server["base_url"]
+    base_url = v2_server["base_url"]
     _open_v2_network(page, base_url, v2_login, install_v2_network_api_mocks)
 
     page.click("#v2-host-network-run")
@@ -50,11 +50,11 @@ def test_v2_network_host_test_and_recreate(
 
 def test_v2_network_tailscale_logout(
     page: Page,
-    v2_mode_server,
+    v2_server,
     v2_login,
     install_v2_network_api_mocks,
 ):
-    base_url = v2_mode_server["base_url"]
+    base_url = v2_server["base_url"]
     _open_v2_network(page, base_url, v2_login, install_v2_network_api_mocks)
 
     page.click("#v2-tailscale-logout")

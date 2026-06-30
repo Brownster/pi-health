@@ -17,12 +17,12 @@ def test_v2_catalog_render(
     profiled_page: Page,
     viewport_profile_name: str,
     assert_no_horizontal_overflow,
-    v2_mode_server,
+    v2_server,
     v2_login,
     install_v2_catalog_api_mocks,
 ):
     page = profiled_page
-    base_url = v2_mode_server["base_url"]
+    base_url = v2_server["base_url"]
     _open_v2_catalog(page, base_url, v2_login, install_v2_catalog_api_mocks)
 
     expect(page.get_by_text("Jellyfin").first).to_be_visible()
@@ -40,11 +40,11 @@ def test_v2_catalog_render(
 
 def test_v2_catalog_install_with_fields(
     page: Page,
-    v2_mode_server,
+    v2_server,
     v2_login,
     install_v2_catalog_api_mocks,
 ):
-    base_url = v2_mode_server["base_url"]
+    base_url = v2_server["base_url"]
     requests = []
     page.on("request", lambda request: requests.append(request))
     _open_v2_catalog(page, base_url, v2_login, install_v2_catalog_api_mocks)
@@ -69,11 +69,11 @@ def test_v2_catalog_install_with_fields(
 
 def test_v2_catalog_install_into_named_new_stack(
     page: Page,
-    v2_mode_server,
+    v2_server,
     v2_login,
     install_v2_catalog_api_mocks,
 ):
-    base_url = v2_mode_server["base_url"]
+    base_url = v2_server["base_url"]
     requests = []
     page.on("request", lambda request: requests.append(request))
     _open_v2_catalog(page, base_url, v2_login, install_v2_catalog_api_mocks)
@@ -96,11 +96,11 @@ def test_v2_catalog_install_into_named_new_stack(
 
 def test_v2_catalog_install_keeps_focus_while_typing(
     page: Page,
-    v2_mode_server,
+    v2_server,
     v2_login,
     install_v2_catalog_api_mocks,
 ):
-    base_url = v2_mode_server["base_url"]
+    base_url = v2_server["base_url"]
     _open_v2_catalog(page, base_url, v2_login, install_v2_catalog_api_mocks)
 
     page.click("button[data-catalog-action='install'][data-item='sonarr']")
@@ -115,11 +115,11 @@ def test_v2_catalog_install_keeps_focus_while_typing(
 
 def test_v2_catalog_remove_with_confirm(
     page: Page,
-    v2_mode_server,
+    v2_server,
     v2_login,
     install_v2_catalog_api_mocks,
 ):
-    base_url = v2_mode_server["base_url"]
+    base_url = v2_server["base_url"]
     requests = []
     page.on("request", lambda request: requests.append(request))
     _open_v2_catalog(page, base_url, v2_login, install_v2_catalog_api_mocks)

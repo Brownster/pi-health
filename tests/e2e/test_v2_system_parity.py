@@ -17,12 +17,12 @@ def test_v2_system_metrics_render(
     profiled_page: Page,
     viewport_profile_name: str,
     assert_no_horizontal_overflow,
-    v2_mode_server,
+    v2_server,
     v2_login,
     install_v2_system_api_mocks,
 ):
     page = profiled_page
-    base_url = v2_mode_server["base_url"]
+    base_url = v2_server["base_url"]
     _open_v2_system(page, base_url, v2_login, install_v2_system_api_mocks)
 
     expect(page.get_by_text("48.0 °C")).to_be_visible()
@@ -33,11 +33,11 @@ def test_v2_system_metrics_render(
 
 def test_v2_system_surfaces_optional_metric_warning(
     page: Page,
-    v2_mode_server,
+    v2_server,
     v2_login,
     install_v2_system_api_mocks,
 ):
-    base_url = v2_mode_server["base_url"]
+    base_url = v2_server["base_url"]
     v2_login(page, base_url)
     install_v2_system_api_mocks(
         page,

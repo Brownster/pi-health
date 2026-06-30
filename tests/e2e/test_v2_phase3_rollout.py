@@ -20,39 +20,16 @@ PHASE3_PAGE_HEADINGS = {
 }
 
 
-def test_v2_mode_redirects_all_phase3_legacy_routes(page: Page, v2_server_factory):
-    server = v2_server_factory("v2")
-    base_url = server["base_url"]
+def test_legacy_urls_redirect_to_v2(page: Page, v2_server):
+    base_url = v2_server["base_url"]
     for key in PHASE3_ROUTE_KEYS:
         response = page.request.get(f"{base_url}/{key}.html", max_redirects=0)
-        assert response.status == 302, f"{key}.html should redirect in v2 mode"
+        assert response.status == 302, f"{key}.html should redirect to v2"
         assert response.headers["location"] == f"/v2/{key}"
 
 
-def test_retired_legacy_flag_still_serves_v2(page: Page, v2_server_factory):
-    server = v2_server_factory("legacy")
-    base_url = server["base_url"]
-    for key in PHASE3_ROUTE_KEYS:
-        legacy = page.request.get(f"{base_url}/{key}.html", max_redirects=0)
-        assert legacy.status == 302, f"{key}.html should redirect to v2"
-        assert legacy.headers["location"] == f"/v2/{key}"
-        v2 = page.request.get(f"{base_url}/v2/{key}", max_redirects=0)
-        assert v2.status == 200, f"/v2/{key} should remain enabled"
-
-
-def test_retired_hybrid_selection_cannot_leave_routes_on_legacy(page: Page, v2_server_factory):
-    server = v2_server_factory("hybrid", v2_pages="stacks,disks")
-    base_url = server["base_url"]
-
-    for key in PHASE3_ROUTE_KEYS:
-        response = page.request.get(f"{base_url}/{key}.html", max_redirects=0)
-        assert response.status == 302
-        assert response.headers["location"] == f"/v2/{key}"
-
-
-def test_all_phase3_pages_render_in_v2(page: Page, v2_server_factory, v2_login):
-    server = v2_server_factory("v2")
-    base_url = server["base_url"]
+def test_all_phase3_pages_render_in_v2(page: Page, v2_server, v2_login):
+    base_url = v2_server["base_url"]
     v2_login(page, base_url)
 
     for key, heading in PHASE3_PAGE_HEADINGS.items():
@@ -61,11 +38,9 @@ def test_all_phase3_pages_render_in_v2(page: Page, v2_server_factory, v2_login):
         expect(page.get_by_role("heading", name=heading, exact=True)).to_be_visible()
 
 
-def test_stacks_api_contract_ignores_retired_mode_flags(page: Page, v2_server_factory, v2_login):
-    for mode in ["legacy", "v2"]:
-        server = v2_server_factory(mode)
-        base_url = server["base_url"]
-        v2_login(page, base_url)
-        response = page.request.get(f"{base_url}/api/stacks?status=true")
-        assert response.status == 200
-        assert "stacks" in response.json()
+def test_stacks_api_contract(page: Page, v2_server, v2_login):
+    base_url = v2_server["base_url"]
+    v2_login(page, base_url)
+    response = page.request.get(f"{base_url}/api/stacks?status=true")
+    assert response.status == 200
+    assert "stacks" in response.json()

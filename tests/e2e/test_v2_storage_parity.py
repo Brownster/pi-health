@@ -23,12 +23,12 @@ def test_v2_storage_plugins_list_and_pools_tab(
     profiled_page: Page,
     viewport_profile_name: str,
     assert_no_horizontal_overflow,
-    v2_mode_server,
+    v2_server,
     v2_login,
     install_v2_storage_api_mocks,
 ):
     page = profiled_page
-    base_url = v2_mode_server["base_url"]
+    base_url = v2_server["base_url"]
     _open_v2_storage(page, base_url, "plugins", v2_login, install_v2_storage_api_mocks)
 
     # Plugins tab shows both plugins.
@@ -47,11 +47,11 @@ def test_v2_storage_plugins_list_and_pools_tab(
 
 def test_v2_storage_pools_route_defaults_to_pools_tab(
     page: Page,
-    v2_mode_server,
+    v2_server,
     v2_login,
     install_v2_storage_api_mocks,
 ):
-    base_url = v2_mode_server["base_url"]
+    base_url = v2_server["base_url"]
     _open_v2_storage(page, base_url, "pools", v2_login, install_v2_storage_api_mocks)
     # /v2/pools opens with the Pools tab active -> only mergerfs.
     expect(page.locator("button[data-storage-tab='pools'][aria-pressed='true']")).to_be_visible()
@@ -60,11 +60,11 @@ def test_v2_storage_pools_route_defaults_to_pools_tab(
 
 def test_v2_storage_tab_syncs_with_shell_nav(
     page: Page,
-    v2_mode_server,
+    v2_server,
     v2_login,
     install_v2_storage_api_mocks,
 ):
-    base_url = v2_mode_server["base_url"]
+    base_url = v2_server["base_url"]
     _open_v2_storage(page, base_url, "plugins", v2_login, install_v2_storage_api_mocks)
     expect(page.locator("button[data-storage-tab='plugins'][aria-pressed='true']")).to_be_visible()
 
@@ -77,11 +77,11 @@ def test_v2_storage_tab_syncs_with_shell_nav(
 
 def test_v2_storage_remove_only_for_non_builtin(
     page: Page,
-    v2_mode_server,
+    v2_server,
     v2_login,
     install_v2_storage_api_mocks,
 ):
-    base_url = v2_mode_server["base_url"]
+    base_url = v2_server["base_url"]
     _open_v2_storage(page, base_url, "plugins", v2_login, install_v2_storage_api_mocks)
 
     # Builtin plugins cannot be removed (backend rejects it) -> no Remove control.
@@ -96,11 +96,11 @@ def test_v2_storage_remove_only_for_non_builtin(
 
 def test_v2_storage_toggle_plugin(
     page: Page,
-    v2_mode_server,
+    v2_server,
     v2_login,
     install_v2_storage_api_mocks,
 ):
-    base_url = v2_mode_server["base_url"]
+    base_url = v2_server["base_url"]
     _open_v2_storage(page, base_url, "plugins", v2_login, install_v2_storage_api_mocks)
 
     page.click("button[data-plugin-action='enable'][data-plugin='mergerfs']")
@@ -109,11 +109,11 @@ def test_v2_storage_toggle_plugin(
 
 def test_v2_storage_details_and_command(
     page: Page,
-    v2_mode_server,
+    v2_server,
     v2_login,
     install_v2_storage_api_mocks,
 ):
-    base_url = v2_mode_server["base_url"]
+    base_url = v2_server["base_url"]
     _open_v2_storage(page, base_url, "plugins", v2_login, install_v2_storage_api_mocks)
 
     page.click("button[data-plugin-action='details'][data-plugin='mergerfs']")
@@ -132,11 +132,11 @@ def test_v2_storage_details_and_command(
 
 def test_v2_storage_config_editor(
     page: Page,
-    v2_mode_server,
+    v2_server,
     v2_login,
     install_v2_storage_api_mocks,
 ):
-    base_url = v2_mode_server["base_url"]
+    base_url = v2_server["base_url"]
     _open_v2_storage(page, base_url, "plugins", v2_login, install_v2_storage_api_mocks)
 
     page.click("button[data-plugin-action='details'][data-plugin='mergerfs']")
@@ -152,11 +152,11 @@ def test_v2_storage_config_editor(
 
 def test_v2_storage_install_plugin(
     page: Page,
-    v2_mode_server,
+    v2_server,
     v2_login,
     install_v2_storage_api_mocks,
 ):
-    base_url = v2_mode_server["base_url"]
+    base_url = v2_server["base_url"]
     _open_v2_storage(page, base_url, "plugins", v2_login, install_v2_storage_api_mocks)
 
     page.click("#v2-plugin-install-open")

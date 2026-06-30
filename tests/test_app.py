@@ -299,10 +299,19 @@ class TestProtectedEndpoints:
 class TestPublicEndpoints:
     """Test that public endpoints don't require authentication."""
 
-    def test_theme_endpoint(self, client):
-        """Test that /api/theme is publicly accessible."""
-        response = client.get('/api/theme')
-        assert response.status_code == 200
+    @pytest.mark.parametrize(
+        'path',
+        [
+            '/api/theme',
+            '/theme-banner',
+            '/themes/modern/theme.json',
+            '/coraline-banner.jpg',
+        ],
+    )
+    def test_removed_theme_endpoints(self, client, path):
+        """Legacy theme assets are no longer exposed by the v2-only app."""
+        response = client.get(path)
+        assert response.status_code == 404
 
     def test_login_page(self, client):
         """Test that login page is accessible."""
@@ -353,6 +362,11 @@ class TestStaticPages:
         assert 'type="module" src="/js/pages/login.js"' in body
         assert "onclick=" not in body
         assert "onkeydown=" not in body
+
+    def test_only_login_javascript_is_retained(self, client):
+        assert client.get("/js/pages/login.js").status_code == 200
+        assert client.get("/js/lib/http.js").status_code == 404
+        assert client.get("/js/pages/containers.js").status_code == 404
 
 
 class TestV2Routes:
@@ -452,21 +466,16 @@ class TestV2OnlyRouting:
         )
         return static_dir
 
-    @pytest.mark.parametrize("mode", [None, "legacy", "hybrid", "invalid-mode"])
-    def test_root_always_serves_v2(self, client, monkeypatch, tmp_path, mode):
-        if mode is None:
-            monkeypatch.delenv("PIHEALTH_UI_MODE", raising=False)
-        else:
-            monkeypatch.setenv("PIHEALTH_UI_MODE", mode)
-        monkeypatch.setenv("PIHEALTH_UI_V2_PAGES", "")
+    def test_root_always_serves_v2(self, client, monkeypatch, tmp_path):
         monkeypatch.setattr(app, "static_folder", str(self._build_static(tmp_path)))
 
         response = client.get("/")
         assert response.status_code == 200
         assert "v2-shell" in response.data.decode("utf-8")
 
-    def test_legacy_flag_cannot_restore_legacy_page(self, client, monkeypatch, tmp_path):
-        monkeypatch.setenv("PIHEALTH_UI_MODE", "legacy")
+    def test_legacy_page_redirects_when_static_file_exists(
+        self, client, monkeypatch, tmp_path
+    ):
         monkeypatch.setattr(app, "static_folder", str(self._build_static(tmp_path)))
 
         response = client.get("/containers.html", follow_redirects=False)

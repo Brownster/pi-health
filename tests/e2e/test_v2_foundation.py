@@ -6,18 +6,18 @@ from playwright.sync_api import Page, expect
 pytestmark = pytest.mark.e2e
 
 # Server lifecycle, login, and deterministic /api mocks are shared via conftest.py
-# fixtures (mode_server, v2_login, install_v2_containers_api_mocks).
+# fixtures (v2_server, v2_login, install_v2_containers_api_mocks).
 
 
 def test_v2_shell_viewport_matrix(
     profiled_page: Page,
     viewport_profile_name: str,
     assert_no_horizontal_overflow,
-    mode_server,
+    v2_server,
     v2_login,
 ):
     page = profiled_page
-    base_url = mode_server["base_url"]
+    base_url = v2_server["base_url"]
     response = page.goto(f"{base_url}/v2")
     assert response is not None
     assert response.status == 200
@@ -35,11 +35,11 @@ def test_v2_lime_dashboard(
     profiled_page: Page,
     viewport_profile_name: str,
     assert_no_horizontal_overflow,
-    v2_mode_server,
+    v2_server,
     v2_login,
 ):
     page = profiled_page
-    base_url = v2_mode_server["base_url"]
+    base_url = v2_server["base_url"]
 
     containers = [
         {
@@ -91,10 +91,10 @@ def test_v2_lime_dashboard(
 
 def test_v2_mobile_drawer_keyboard_and_background_isolation(
     page: Page,
-    v2_mode_server,
+    v2_server,
     v2_login,
 ):
-    base_url = v2_mode_server["base_url"]
+    base_url = v2_server["base_url"]
     page.set_viewport_size({"width": 390, "height": 844})
     v2_login(page, base_url)
     page.goto(f"{base_url}/v2")
@@ -134,11 +134,11 @@ def test_legacy_container_url_redirects_to_v2(
     profiled_page: Page,
     viewport_profile_name: str,
     assert_no_horizontal_overflow,
-    mode_server,
+    v2_server,
     v2_login,
 ):
     page = profiled_page
-    base_url = mode_server["base_url"]
+    base_url = v2_server["base_url"]
     v2_login(page, base_url)
     page.goto(f"{base_url}/containers.html")
 
@@ -154,12 +154,12 @@ def test_v2_containers_diagnostics_workflow(
     profiled_page: Page,
     viewport_profile_name: str,
     assert_no_horizontal_overflow,
-    mode_server,
+    v2_server,
     v2_login,
     install_v2_containers_api_mocks,
 ):
     page = profiled_page
-    base_url = mode_server["base_url"]
+    base_url = v2_server["base_url"]
     v2_login(page, base_url)
     install_v2_containers_api_mocks(page)
     page.goto(f"{base_url}/v2/containers")
@@ -209,9 +209,9 @@ def test_v2_containers_diagnostics_workflow(
         assert_no_horizontal_overflow(page, f"v2 diagnostics workflow ({viewport_profile_name})")
 
 
-def test_v2_containers_auth_guard(profiled_page: Page, mode_server, v2_login):
+def test_v2_containers_auth_guard(profiled_page: Page, v2_server, v2_login):
     page = profiled_page
-    base_url = mode_server["base_url"]
+    base_url = v2_server["base_url"]
     page.goto(f"{base_url}/v2/containers")
     expect(page).to_have_url(f"{base_url}/login.html")
 

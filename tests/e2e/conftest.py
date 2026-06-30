@@ -1,10 +1,11 @@
 import pytest
-import docker
 import json
 import re
+import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import os
 from pathlib import Path
@@ -49,25 +50,6 @@ def browser_context_args(browser_context_args):
         "viewport": VIEWPORT_PROFILES['desktop'],
     }
 
-@pytest.fixture(scope="function")
-def authenticated_page(page: Page):
-    """
-    Returns a Page object that is already logged in.
-    """
-    # Go to the login page
-    page.goto(f"{BASE_URL}/login.html")
-    
-    # Check if we are already redirected to home (if session persisted, though scope is function/new context usually)
-    if "login.html" in page.url:
-        page.fill("#username", USERNAME)
-        page.fill("#password", PASSWORD)
-        page.click("#login-button")
-        
-        # Expect to be redirected to the home page
-        expect(page).to_have_url(f"{BASE_URL}/")
-    
-    return page
-
 @pytest.fixture(params=['desktop', 'phone', 'tablet'], ids=lambda name: f'viewport_{name}')
 def viewport_profile_name(request):
     return request.param
@@ -83,19 +65,6 @@ def profiled_page(browser, viewport_profile_name):
         yield page
     finally:
         context.close()
-
-@pytest.fixture(scope='function')
-def authenticated_profiled_page(profiled_page: Page):
-    page = profiled_page
-    page.goto(f"{BASE_URL}/login.html")
-
-    if "login.html" in page.url:
-        page.fill("#username", USERNAME)
-        page.fill("#password", PASSWORD)
-        page.click("#login-button")
-        expect(page).to_have_url(f"{BASE_URL}/")
-
-    return page
 
 @pytest.fixture(scope='session')
 def assert_no_horizontal_overflow():
@@ -118,70 +87,16 @@ def assert_no_horizontal_overflow():
 
     return _assert
 
-@pytest.fixture(scope="session")
-def docker_client():
-    """Returns a docker client."""
-    try:
-        client = docker.from_env()
-        client.ping()
-        return client
-    except Exception as e:
-        pytest.skip(f"Docker not available: {e}")
-
-@pytest.fixture(scope="function")
-def test_container(docker_client):
-    """
-    Creates a temporary container for testing purposes.
-    Returns the container object.
-    Teardown removes the container.
-    """
-    container_name = "pihealth-e2e-test-container"
-    
-    # Cleanup if it already exists
-    try:
-        old = docker_client.containers.get(container_name)
-        old.remove(force=True)
-    except docker.errors.NotFound:
-        pass
-
-    # Run a simple container that stays alive (alpine sleep)
-    print(f"Starting test container: {container_name}")
-    container = docker_client.containers.run(
-        "alpine:latest",
-        "sleep 300",
-        name=container_name,
-        detach=True
-    )
-    
-    # Wait a moment for it to be fully registered/up
-    time.sleep(2)
-    
-    yield container
-    
-    # Teardown
-    print(f"Removing test container: {container_name}")
-    try:
-        container.remove(force=True)
-    except Exception:
-        pass
-
-
 # ---------------------------------------------------------------------------
 # Shared v2 (React) UI e2e scaffolding
 #
-# Reusable across the v2 foundation suite and the containers parity suite:
-# per-mode app server lifecycle, login helper, and deterministic /api mocks.
+# Reusable app server lifecycle, login helper, and deterministic /api mocks.
 # ---------------------------------------------------------------------------
 
 V2_REPO_ROOT = Path(__file__).resolve().parents[2]
 V2_APP_PATH = V2_REPO_ROOT / "app.py"
 V2_INDEX_PATH = V2_REPO_ROOT / "static" / "v2" / "index.html"
 
-V2_MODE_CONFIG = {
-    "legacy": {},
-    "hybrid": {"PIHEALTH_UI_V2_PAGES": "index,containers"},
-    "v2": {},
-}
 V2_MOCK_CONTAINER_ID = "v2-mock-container-1"
 
 
@@ -191,22 +106,40 @@ def _v2_find_open_port() -> int:
         return int(sock.getsockname()[1])
 
 
-def _v2_wait_for_server_ready(base_url: str, timeout_seconds: float = 30.0) -> None:
+def _v2_wait_for_server_ready(process, base_url: str, timeout_seconds: float = 30.0) -> None:
     deadline = time.time() + timeout_seconds
     while time.time() < deadline:
+        # Fail fast with diagnostics if the server process died on startup — e.g. launched
+        # under an interpreter missing app deps (ruamel.yaml etc.) — instead of silently
+        # waiting out the full timeout.
+        if process.poll() is not None:
+            raise RuntimeError(
+                f"App at {base_url} exited early (code {process.returncode}).\n"
+                f"{_v2_server_log_tail(process)}"
+            )
         try:
-            # Readiness probe hits the always-200 public login page (not /api/theme),
+            # Readiness probes the always-200 public login page.
             # so it survives legacy theme-system removal (LR-006). Avoid endpoints that
             # return 401 unauthenticated — urlopen raises on 4xx and the probe never readies.
             with urlrequest.urlopen(f"{base_url}/login.html", timeout=1):
                 return
         except (urlerror.URLError, TimeoutError, ConnectionError):
             time.sleep(0.25)
-    raise RuntimeError(f"Timed out waiting for app at {base_url}")
+    raise RuntimeError(
+        f"Timed out waiting for app at {base_url}\n{_v2_server_log_tail(process)}"
+    )
 
 
-def _v2_spawn(mode: str, v2_pages: str | None = None):
-    """Spawn app.py in the given UI mode. Returns (process, base_url)."""
+def _v2_server_log_tail(process, limit: int = 2000) -> str:
+    log_path = getattr(process, "_limeos_log_path", None)
+    if not log_path or not os.path.exists(log_path):
+        return ""
+    with open(log_path, errors="replace") as handle:
+        return handle.read()[-limit:]
+
+
+def _v2_spawn():
+    """Spawn the v2-only app. Returns (process, base_url)."""
     if not V2_APP_PATH.exists():
         pytest.skip(f"App entrypoint not found at {V2_APP_PATH}")
     if not V2_INDEX_PATH.exists():
@@ -221,25 +154,35 @@ def _v2_spawn(mode: str, v2_pages: str | None = None):
             "PORT": str(port),
             "PIHEALTH_USER": USERNAME,
             "PIHEALTH_PASSWORD_HASH": PASSWORD_HASH,
-            "PIHEALTH_UI_MODE": mode,
         }
     )
     env.pop("PIHEALTH_PASSWORD", None)
-    env.pop("PIHEALTH_UI_V2_PAGES", None)
-    env.update(V2_MODE_CONFIG.get(mode, {}))
-    if v2_pages is not None:
-        if v2_pages:
-            env["PIHEALTH_UI_V2_PAGES"] = v2_pages
-        else:
-            env.pop("PIHEALTH_UI_V2_PAGES", None)
 
+    # Provision isolated runtime roots when not already supplied (e.g. running the suite
+    # directly rather than via scripts/run-e2e.sh), so the spawned server never touches the
+    # system /etc/limeos, /var/lib/limeos, /var/log/limeos paths.
+    runtime_root = None
+    if not env.get("LIMEOS_CONFIG_DIR"):
+        runtime_root = tempfile.mkdtemp(prefix="limeos-e2e-")
+        env["LIMEOS_CONFIG_DIR"] = os.path.join(runtime_root, "config")
+        env["LIMEOS_STATE_DIR"] = os.path.join(runtime_root, "state")
+        env["LIMEOS_LOG_DIR"] = os.path.join(runtime_root, "log")
+        env["LIMEOS_CREDENTIALS_FILE"] = os.path.join(env["LIMEOS_CONFIG_DIR"], "credentials.env")
+        for key in ("LIMEOS_CONFIG_DIR", "LIMEOS_STATE_DIR", "LIMEOS_LOG_DIR"):
+            os.makedirs(env[key], exist_ok=True)
+
+    # Capture server output so a failed startup surfaces its error (see readiness check).
+    log_fd, log_path = tempfile.mkstemp(prefix="limeos-e2e-", suffix=".log")
     process = subprocess.Popen(
         [sys.executable, str(V2_APP_PATH)],
         cwd=str(V2_REPO_ROOT),
         env=env,
-        stdout=subprocess.DEVNULL,
+        stdout=log_fd,
         stderr=subprocess.STDOUT,
     )
+    os.close(log_fd)
+    process._limeos_log_path = log_path
+    process._limeos_runtime_root = runtime_root
     return process, base_url
 
 
@@ -250,51 +193,23 @@ def _v2_teardown(process) -> None:
     except subprocess.TimeoutExpired:
         process.kill()
         process.wait(timeout=5)
-
-
-@pytest.fixture(params=["v2"], ids=lambda mode: f"mode_{mode}")
-def ui_mode(request):
-    return request.param
+    log_path = getattr(process, "_limeos_log_path", None)
+    if log_path and os.path.exists(log_path):
+        os.remove(log_path)
+    runtime_root = getattr(process, "_limeos_runtime_root", None)
+    if runtime_root and os.path.isdir(runtime_root):
+        shutil.rmtree(runtime_root, ignore_errors=True)
 
 
 @pytest.fixture(scope="function")
-def mode_server(ui_mode):
-    """App server parametrized across legacy/hybrid/v2 UI modes."""
-    process, base_url = _v2_spawn(ui_mode)
+def v2_server():
+    """Isolated app server for v2 parity coverage."""
+    process, base_url = _v2_spawn()
     try:
-        _v2_wait_for_server_ready(base_url)
-        yield {"base_url": base_url, "mode": ui_mode}
+        _v2_wait_for_server_ready(process, base_url)
+        yield {"base_url": base_url}
     finally:
         _v2_teardown(process)
-
-
-@pytest.fixture(scope="function")
-def v2_mode_server():
-    """App server pinned to v2 UI mode (for v2-only parity coverage)."""
-    process, base_url = _v2_spawn("v2")
-    try:
-        _v2_wait_for_server_ready(base_url)
-        yield {"base_url": base_url, "mode": "v2"}
-    finally:
-        _v2_teardown(process)
-
-
-@pytest.fixture(scope="function")
-def v2_server_factory():
-    """Start one or more app.py instances with explicit v2 rollout settings."""
-    processes = []
-
-    def _start(mode: str, v2_pages: str | None = None):
-        process, base_url = _v2_spawn(mode, v2_pages=v2_pages)
-        processes.append(process)
-        _v2_wait_for_server_ready(base_url)
-        return {"base_url": base_url, "mode": mode, "v2_pages": v2_pages}
-
-    try:
-        yield _start
-    finally:
-        for process in reversed(processes):
-            _v2_teardown(process)
 
 
 @pytest.fixture(scope="function")

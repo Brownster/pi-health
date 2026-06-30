@@ -43,7 +43,6 @@ from container_helpers import (
 )
 from runtime_paths import (
     CONFIG_DIR as RUNTIME_CONFIG_DIR,
-    SOURCE_ROOT,
     STORAGE_PLUGIN_CONFIG_DIR as RUNTIME_STORAGE_PLUGIN_CONFIG_DIR,
 )
 from system_stats import (
@@ -99,38 +98,6 @@ print(f"Loaded {len(AUTH_USERS)} user(s) for authentication")
 def verify_credentials(username, password):
     """Verify username and password against configured users."""
     return verify_password(AUTH_USERS, username, password)
-
-# Load theme configuration
-THEME_NAME = os.getenv('THEME', 'modern')
-THEME_PATH = os.path.join(SOURCE_ROOT, 'themes', THEME_NAME)
-THEME_CONFIG_PATH = os.path.join(THEME_PATH, 'theme.json')
-
-def load_theme_config():
-    """Load the theme configuration from JSON file."""
-    try:
-        with open(THEME_CONFIG_PATH, 'r') as f:
-            return json.load(f)
-    except FileNotFoundError:
-        print(f"Warning: Theme '{THEME_NAME}' not found at {THEME_CONFIG_PATH}")
-        print("Falling back to default 'professional' theme")
-        fallback_path = os.path.join(SOURCE_ROOT, 'themes', 'professional', 'theme.json')
-        with open(fallback_path, 'r') as f:
-            return json.load(f)
-    except Exception as e:
-        print(f"Error loading theme config: {e}")
-        # Return minimal default theme
-        return {
-            "name": "default",
-            "display_name": "Default",
-            "title": "Pi-Health Dashboard",
-            "colors": {
-                "primary": "#5f4b8b",
-                "background": "#111827"
-            }
-        }
-
-theme_config = load_theme_config()
-print(f"Loaded theme: {theme_config.get('display_name', 'Unknown')} ({THEME_NAME})")
 
 # Initialize Docker client with graceful fallback
 try:
@@ -867,21 +834,22 @@ def system_action(action):
         return {"error": str(e)}
 
 
-# Legacy pages without a 1:1 v2 route map to their closest v2 destination:
-# - tools (CopyParty) was retired; file management is now the Filebrowser catalog app.
-# - storage was split into the plugins/pools storage surface.
-# - tailscale was folded into the network page.
-_V2_PAGE_ALIASES = {
-    'index': '/v2',
+_LEGACY_PAGE_REDIRECTS = {
+    'system': '/v2/system',
+    'containers': '/v2/containers',
+    'apps': '/v2/apps',
+    'stacks': '/v2/stacks',
     'tools': '/v2/apps',
+    'settings': '/v2/settings',
     'storage': '/v2/plugins',
+    'pools': '/v2/pools',
+    'mounts': '/v2/mounts',
+    'shares': '/v2/shares',
+    'plugins': '/v2/plugins',
+    'disks': '/v2/disks',
+    'network': '/v2/network',
     'tailscale': '/v2/network',
 }
-
-
-def get_v2_target_for_page(page_key):
-    """Map a legacy page key to its v2 route target."""
-    return _V2_PAGE_ALIASES.get(page_key, f'/v2/{page_key}')
 
 
 @app.route('/')
@@ -890,88 +858,13 @@ def serve_frontend():
     return serve_v2_index()
 
 
-@app.route('/system.html')
-def serve_system():
-    """Serve the system health page."""
-    return redirect(get_v2_target_for_page('system'))
-
-
-@app.route('/containers.html')
-def serve_containers():
-    """Serve the containers management page."""
-    return redirect(get_v2_target_for_page('containers'))
-
-
-
-@app.route('/apps.html')
-def serve_apps():
-    """Serve the app catalog page."""
-    return redirect(get_v2_target_for_page('apps'))
-
-
-@app.route('/stacks.html')
-def serve_stacks():
-    """Serve the stacks management page."""
-    return redirect(get_v2_target_for_page('stacks'))
-
-
-@app.route('/tools.html')
-def serve_tools():
-    """Serve the tools page."""
-    return redirect(get_v2_target_for_page('tools'))
-
-
-@app.route('/settings.html')
-def serve_settings():
-    """Serve the settings page."""
-    return redirect(get_v2_target_for_page('settings'))
-
-@app.route('/storage.html')
-def serve_storage():
-    """Serve the storage plugins page (redirects to pools)."""
-    return redirect(get_v2_target_for_page('storage'))
-
-
-@app.route('/pools.html')
-def serve_pools():
-    """Serve the storage pools page."""
-    return redirect(get_v2_target_for_page('pools'))
-
-
-@app.route('/mounts.html')
-def serve_mounts():
-    """Serve the mounts page."""
-    return redirect(get_v2_target_for_page('mounts'))
-
-
-@app.route('/shares.html')
-def serve_shares():
-    """Serve the network shares page."""
-    return redirect(get_v2_target_for_page('shares'))
-
-
-@app.route('/plugins.html')
-def serve_plugins():
-    """Serve the plugins page."""
-    return redirect(get_v2_target_for_page('plugins'))
-
-
-@app.route('/disks.html')
-def serve_disks():
-    """Serve the disk management page."""
-    return redirect(get_v2_target_for_page('disks'))
-
-
-@app.route('/network.html')
-def serve_network():
-    """Serve the host network page."""
-    return redirect(get_v2_target_for_page('network'))
-
-
-@app.route('/tailscale.html')
-def serve_tailscale():
-    """Serve the Tailscale page."""
-    return redirect(get_v2_target_for_page('tailscale'))
+@app.route('/<page>.html')
+def redirect_legacy_page(page):
+    """Redirect allowlisted legacy bookmarks to their v2 destination."""
+    target = _LEGACY_PAGE_REDIRECTS.get(page)
+    if target is None:
+        return jsonify({'error': f'legacy page not found: {page}'}), 404
+    return redirect(target)
 
 
 @app.route('/login.html')
@@ -1079,37 +972,6 @@ def api_auth_check():
             'csrf_token': get_csrf_token(),
         })
     return jsonify({'authenticated': False}), 401
-
-
-@app.route('/coraline-banner.jpg')
-def serve_banner():
-    """Serve the Coraline banner image (legacy route for backwards compatibility)."""
-    return send_from_directory(app.static_folder, 'coraline-banner.jpg')
-
-
-@app.route('/api/theme', methods=['GET'])
-def api_theme():
-    """API endpoint to return current theme configuration."""
-    return jsonify(theme_config)
-
-
-@app.route('/theme-banner')
-def serve_theme_banner():
-    """Serve the current theme's banner image."""
-    banner_filename = theme_config.get('banner', {}).get('filename', 'banner.jpg')
-    return send_from_directory(THEME_PATH, banner_filename)
-
-
-@app.route('/themes/<theme_name>/<filename>')
-def serve_theme_file(theme_name, filename):
-    """Serve theme-specific files (icons.js, etc.)."""
-    theme_path = os.path.join('themes', theme_name)
-    # Security: only allow specific file extensions
-    allowed_extensions = ['.js', '.json', '.css']
-    if any(filename.endswith(ext) for ext in allowed_extensions):
-        return send_from_directory(theme_path, filename)
-    else:
-        return jsonify({"error": "File type not allowed"}), 403
 
 
 @app.route('/js/<path:path>')

@@ -17,12 +17,12 @@ def test_v2_shares_list(
     profiled_page: Page,
     viewport_profile_name: str,
     assert_no_horizontal_overflow,
-    v2_mode_server,
+    v2_server,
     v2_login,
     install_v2_shares_api_mocks,
 ):
     page = profiled_page
-    base_url = v2_mode_server["base_url"]
+    base_url = v2_server["base_url"]
     _open_v2_shares(page, base_url, v2_login, install_v2_shares_api_mocks)
 
     # Samba is share-capable; mergerfs (storage) is filtered out.
@@ -34,11 +34,11 @@ def test_v2_shares_list(
 
 def test_v2_shares_surfaces_partial_provider_failure(
     page: Page,
-    v2_mode_server,
+    v2_server,
     v2_login,
     install_v2_shares_api_mocks,
 ):
-    base_url = v2_mode_server["base_url"]
+    base_url = v2_server["base_url"]
     v2_login(page, base_url)
     install_v2_shares_api_mocks(page, include_failed_provider=True)
     page.goto(f"{base_url}/v2/shares")
@@ -56,11 +56,11 @@ def test_v2_shares_surfaces_partial_provider_failure(
 
 def test_v2_shares_toggle_and_delete(
     page: Page,
-    v2_mode_server,
+    v2_server,
     v2_login,
     install_v2_shares_api_mocks,
 ):
-    base_url = v2_mode_server["base_url"]
+    base_url = v2_server["base_url"]
     _open_v2_shares(page, base_url, v2_login, install_v2_shares_api_mocks)
 
     page.click("button[data-share-action='toggle'][data-share='media']")
@@ -73,11 +73,11 @@ def test_v2_shares_toggle_and_delete(
 
 def test_v2_shares_add_and_edit_share(
     page: Page,
-    v2_mode_server,
+    v2_server,
     v2_login,
     install_v2_shares_api_mocks,
 ):
-    base_url = v2_mode_server["base_url"]
+    base_url = v2_server["base_url"]
     _open_v2_shares(page, base_url, v2_login, install_v2_shares_api_mocks)
 
     page.click("button[data-add-share='samba']")

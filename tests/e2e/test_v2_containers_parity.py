@@ -1,6 +1,6 @@
 """PH2-006: v2 containers parity suite.
 
-Pinned to v2 UI mode (via the v2_mode_server fixture) so the matrix is the three
+Pinned to v2 UI mode (via the v2_server fixture) so the matrix is the three
 viewport profiles only. Validates, with deterministic /api mocks:
 - no horizontal overflow on load and through modal/action workflows
 - lifecycle actions are reachable on phone/tablet with user feedback
@@ -34,12 +34,12 @@ def test_v2_containers_overflow_through_workflows(
     profiled_page: Page,
     viewport_profile_name: str,
     assert_no_horizontal_overflow,
-    v2_mode_server,
+    v2_server,
     v2_login,
     install_v2_containers_api_mocks,
 ):
     page = profiled_page
-    base_url = v2_mode_server["base_url"]
+    base_url = v2_server["base_url"]
 
     _open_v2_containers(page, base_url, v2_login, install_v2_containers_api_mocks)
     service_link = page.locator(
@@ -90,12 +90,12 @@ def test_v2_containers_lifecycle_action_feedback(
     profiled_page: Page,
     viewport_profile_name: str,
     assert_no_horizontal_overflow,
-    v2_mode_server,
+    v2_server,
     v2_login,
     install_v2_containers_api_mocks,
 ):
     page = profiled_page
-    base_url = v2_mode_server["base_url"]
+    base_url = v2_server["base_url"]
 
     _open_v2_containers(page, base_url, v2_login, install_v2_containers_api_mocks)
 
@@ -112,12 +112,12 @@ def test_v2_containers_lifecycle_action_feedback(
 def test_v2_containers_stopped_filter_includes_exited(
     profiled_page: Page,
     viewport_profile_name: str,
-    v2_mode_server,
+    v2_server,
     v2_login,
     install_v2_containers_api_mocks,
 ):
     page = profiled_page
-    base_url = v2_mode_server["base_url"]
+    base_url = v2_server["base_url"]
 
     # Docker reports stopped containers as "exited"; the Stopped filter must include them.
     exited_container = {
@@ -153,12 +153,12 @@ def test_v2_containers_stopped_filter_includes_exited(
 def test_v2_containers_dialog_focus_trap_and_restore(
     profiled_page: Page,
     viewport_profile_name: str,
-    v2_mode_server,
+    v2_server,
     v2_login,
     install_v2_containers_api_mocks,
 ):
     page = profiled_page
-    base_url = v2_mode_server["base_url"]
+    base_url = v2_server["base_url"]
 
     _open_v2_containers(page, base_url, v2_login, install_v2_containers_api_mocks)
 
