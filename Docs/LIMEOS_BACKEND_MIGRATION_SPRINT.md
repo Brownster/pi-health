@@ -81,7 +81,7 @@ Start implementation only when:
 |---|---|---|---|
 | BF-001 | Introduce an application factory | Entry gate | Complete (2026-06-30) |
 | BF-002 | Define service ports and shared adapters | BF-001 | Complete (2026-06-30) |
-| BF-003 | Extract domain services in bounded slices | BF-002 | Pending |
+| BF-003 | Extract domain services in bounded slices | BF-002 | In progress (system metrics complete) |
 | BF-004 | Characterize security and stateful behavior | BF-001 | Pending |
 | BF-005 | Sign off the core boundary and agent handoff | BF-003, BF-004 | Pending |
 
@@ -170,6 +170,14 @@ Acceptance:
   records.
 - Focused tests cover success, rejection, dependency failure, and partial-data behavior.
 - The full frontend and E2E suites pass after every domain slice.
+
+System metrics completed 2026-06-30. `SystemService` composes the existing neutral telemetry
+collectors through injected CPU, disk, and Pi metric readers. The app factory owns service
+construction, while `/api/stats` performs only authentication, one service call, and JSON mapping.
+Existing resilience behavior and response fields remain unchanged. Service-level fake-reader tests
+and a route delegation test cover the new boundary. Full `tox -e all`: Ruff clean; unit `717
+passed, 1 skipped`; E2E `97 passed`. One initial Playwright login navigation timed out; an unchanged
+full rerun passed, while all system parity tests passed in both runs.
 
 ## BF-004 - Characterize security and stateful behavior
 
