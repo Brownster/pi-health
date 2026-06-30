@@ -54,6 +54,7 @@ from ports import (
     SchedulerPort,
     monotonic_clock,
 )
+from system_service import SystemService
 from container_helpers import (
     _compose_dependency_name,
     _compose_label,
@@ -124,6 +125,15 @@ class AppDependencies:
     scheduler: SchedulerPort | None = None
     audit: AuditPort | None = None
     config_repo: ConfigRepository | None = None
+    system_service: SystemService | None = None
+
+
+def _default_system_service():
+    return SystemService(
+        cpu_reader=get_cpu_usage_delta,
+        disk_collector=_collect_disk_usage,
+        pi_metrics_reader=get_pi_metrics,
+    )
 
 
 def _default_dependencies():
@@ -147,6 +157,7 @@ def _default_dependencies():
         docker=DockerClientAdapter(client),
         audit=FileAuditWriter(),
         config_repo=JsonFileRepository(),
+        system_service=_default_system_service(),
     )
 
 
@@ -1043,7 +1054,7 @@ def serve_favicon():
 @login_required
 def api_stats():
     """API endpoint to return system stats as JSON."""
-    return jsonify(get_system_stats())
+    return jsonify(current_app.extensions["system_service"].stats())
 
 
 @core_api.route('/api/containers', methods=['GET'])
@@ -1223,6 +1234,9 @@ def create_app(config=None, dependencies=None):
     application.extensions["scheduler"] = resolved.scheduler
     application.extensions["audit"] = resolved.audit or FileAuditWriter()
     application.extensions["config_repo"] = resolved.config_repo or JsonFileRepository()
+    application.extensions["system_service"] = (
+        resolved.system_service or _default_system_service()
+    )
 
     application.register_blueprint(core_api)
     application.register_blueprint(stack_manager)

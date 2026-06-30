@@ -280,6 +280,24 @@ class TestProtectedEndpoints:
             'source': missing_path,
         }]
 
+    def test_stats_delegates_to_injected_service(self, authenticated_client):
+        class StubSystemService:
+            def __init__(self):
+                self.calls = 0
+
+            def stats(self):
+                self.calls += 1
+                return {"source": "injected-service"}
+
+        service = StubSystemService()
+        authenticated_client.application.extensions["system_service"] = service
+
+        response = authenticated_client.get('/api/stats')
+
+        assert response.status_code == 200
+        assert response.get_json() == {"source": "injected-service"}
+        assert service.calls == 1
+
     def test_containers_requires_auth(self, client):
         """Test that /api/containers requires authentication."""
         response = client.get('/api/containers')
