@@ -81,7 +81,7 @@ Start implementation only when:
 |---|---|---|---|
 | BF-001 | Introduce an application factory | Entry gate | Complete (2026-06-30) |
 | BF-002 | Define service ports and shared adapters | BF-001 | Complete (2026-06-30) |
-| BF-003 | Extract domain services in bounded slices | BF-002 | In progress (system metrics complete) |
+| BF-003 | Extract domain services in bounded slices | BF-002 | In progress (read-only inventory complete) |
 | BF-004 | Characterize security and stateful behavior | BF-001 | Pending |
 | BF-005 | Sign off the core boundary and agent handoff | BF-003, BF-004 | Pending |
 
@@ -178,6 +178,14 @@ Existing resilience behavior and response fields remain unchanged. Service-level
 and a route delegation test cover the new boundary. Full `tox -e all`: Ruff clean; unit `717
 passed, 1 skipped`; E2E `97 passed`. One initial Playwright login navigation timed out; an unchanged
 full rerun passed, while all system parity tests passed in both runs.
+
+Read-only container inventory completed 2026-06-30. `ContainerInventoryService` builds the
+container read model through the injected `DockerPort`, stats reader, and update-status reader.
+Port inheritance moved into the framework-neutral container helpers and accepts Docker lookup as
+an explicit callback. The `/api/containers` route now parses the `stats` query, calls one service
+operation, and maps the result to JSON. Focused tests cover metadata and telemetry composition,
+stats suppression, Docker unavailability, list failures, and route delegation. Full `tox -e all`:
+Ruff clean; unit `722 passed, 1 skipped`; E2E `97 passed`.
 
 ## BF-004 - Characterize security and stateful behavior
 
