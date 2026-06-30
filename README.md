@@ -25,7 +25,7 @@ Pi-Health is a full home lab management interface for Raspberry Pi and small ser
 - **Backups**: Scheduled config backups
 - **Tools**: CopyParty deployment and configuration
 - **Multi-user Authentication**: Support for multiple users
-- **Theming**: Multiple visual themes (Coraline, Professional, Minimal)
+- **Appearance**: Light, dark, and system color modes
 
 ## Supported Hardware
 
@@ -141,9 +141,6 @@ sudo cp examples/stacks/.env.example /opt/stacks/media-stack/.env
 Create `/etc/limeos/credentials.env` for credentials and environment overrides:
 
 ```bash
-# Theme selection (coraline, professional, minimal)
-THEME=coraline
-
 # Paths to monitor for disk usage
 DISK_PATH=/mnt/storage
 DISK_PATH_2=/mnt/downloads
@@ -162,6 +159,11 @@ PIHEALTH_USERS='admin:scrypt:32768:8:1$salt1$hash1,user2:scrypt:32768:8:1$salt2$
 Generate each hash with the command in Quick Start. Quote values containing `$` when setting them
 in an interactive shell. Remove the deprecated `PIHEALTH_PASSWORD` variable; startup rejects it
 even when a hash is also configured. Five failed logins from one client trigger a 60-second lockout.
+
+LimeOS serves the React v2 interface exclusively. Remove the retired `PIHEALTH_UI_MODE`,
+`PIHEALTH_UI_V2_PAGES`, and `THEME` entries from existing environment files. These variables no
+longer change runtime behavior. Roll back the UI by redeploying a pre-removal release, not by
+changing an environment variable.
 
 Runtime data is stored outside the source checkout:
 

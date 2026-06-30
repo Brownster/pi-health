@@ -35,6 +35,10 @@ This guide will walk you through setting up and using all the features of your P
 
 Pi-Health now recommends a **bare-metal install** on Raspberry Pi for the best access to disk and system features. Docker is still supported, but the bare-metal flow is the default.
 
+The React v2 interface is the only supported UI. Existing installations should remove
+`PIHEALTH_UI_MODE`, `PIHEALTH_UI_V2_PAGES`, and `THEME` from `/etc/pi-health.env` and
+`/etc/limeos/credentials.env`; these retired variables no longer select a UI or theme.
+
 **Prerequisites:**
 *   Raspberry Pi OS (or compatible Debian-based OS).
 *   For Raspberry Pi specific features, the `vcgencmd` utility must be available.

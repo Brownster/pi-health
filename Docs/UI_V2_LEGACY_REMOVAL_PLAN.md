@@ -1,7 +1,7 @@
 # Legacy v1 UI Removal — Plan
 
 Date: 2026-06-29
-Status: In progress — LR-001 complete
+Status: Complete — LR-001 through LR-007 complete
 Owner: Pi-Health / LimeOS maintainers
 Predecessors: Phase 3 signoff (`Docs/UI_PHASE3_RELEASE_SIGNOFF.md`), v2 hardening
 (`Docs/UI_V2_HARDENING_TICKETS.md`), v2 redesign (`Docs/UI_V2_NAS_OS_REDESIGN_PLAN.md`)
@@ -58,10 +58,10 @@ machinery — without breaking authentication, the backend API, or the test suit
 | LR-001 | Make v2 the default + only UI mode | gate | Complete (2026-06-29) |
 | LR-002 | Redirect legacy URLs to v2 equivalents (compat shims) | LR-001 | Complete (2026-06-29) |
 | LR-003 | Decouple shared deps (login.html, /api/theme readiness probe) | LR-001 | Complete (2026-06-29) |
-| LR-004 | Delete legacy static pages + ES modules | LR-002, LR-003 | Pending |
-| LR-005 | Migrate/retire legacy + mode-matrix tests | LR-004 | Pending |
-| LR-006 | Remove legacy theme system (conditional) | LR-003 | Pending |
-| LR-007 | Docs + config cleanup, signoff | LR-001..LR-006 | Pending |
+| LR-004 | Delete legacy static pages + ES modules | LR-002, LR-003 | Complete (2026-06-29) |
+| LR-005 | Migrate/retire legacy + mode-matrix tests | LR-004 | Complete (2026-06-30) |
+| LR-006 | Remove legacy theme system (conditional) | LR-003 | Complete (2026-06-30) |
+| LR-007 | Docs + config cleanup, signoff | LR-001..LR-006 | Complete (2026-06-30) |
 
 ### LR-001 — Make v2 the default and only UI mode
 - Flip `get_ui_mode` default from `UI_MODE_LEGACY` to v2; then collapse the mode concept so the
@@ -124,6 +124,18 @@ gate red until LR-005).
 - Acceptance: repo contains no legacy page/module; `npm run build:publish` + app boot + v2 e2e
   still green.
 
+Completed 2026-06-29. Removed all 15 legacy HTML pages and all 25 legacy JavaScript modules;
+the static UI source now contains only the explicitly retained `login.html` and its self-contained
+`pages/login.js`. Fourteen repetitive Flask page handlers were replaced by one allowlisted
+`/<page>.html` compatibility route using the LR-002 mappings; unknown names remain 404 and the
+explicit login route remains directly served. Review found no blocking defects in LR-002 or
+LR-003. The additional E2E harness hardening preserves isolated `LIMEOS_*` runtime roots, captures
+startup logs, fails fast when a child server exits, and removes its temporary files on teardown.
+Validation: retained login JavaScript syntax passed; focused backend `278 passed, 1 skipped`; full
+unit `698 passed, 1 skipped`; TypeScript and production publish passed (`101.43 kB` initial JS
+gzip); retained login plus all v2 Playwright suites `104 passed`. The full mixed E2E gate follows
+LR-005, which retires the now-invalid legacy-only suites.
+
 ### LR-005 — Migrate/retire legacy + mode-matrix tests
 - Delete legacy-only page suites: `test_login_page` (re-point if login kept), `test_containers_page`,
   `test_mounts`, `test_network_page`, `test_plugins_page`, `test_shares`, `test_stacks_page`,
@@ -136,17 +148,45 @@ gate red until LR-005).
 - Acceptance: `tox -e all` green with no references to removed pages/modes; coverage for every v2
   route preserved.
 
+Completed 2026-06-30. Removed fourteen legacy-only browser suites and the obsolete hybrid rollout
+suite. The retained `test_login_page.py` continues covering the explicitly supported standalone
+login. Existing v2 parity suites already cover lifecycle actions, dialogs, focus handling,
+settings, storage, network, disks, responsive rendering, and horizontal overflow across desktop,
+phone, and tablet, so no behavior coverage was replaced with skips. The E2E harness now has one
+v2-only server fixture; mode parameters, selective-page environment variables, multi-mode server
+factory, legacy authenticated-page helpers, and Docker test-container fixtures were removed.
+Phase 3 rollout coverage now asserts compatibility redirects, all-page rendering, and the stacks
+API contract directly. TypeScript and production publish passed (`101.43 kB` initial JS gzip).
+Full `tox -e all`: Ruff clean; unit `698 passed, 1 skipped`; E2E `97 passed` with no skips.
+
 ### LR-006 — Remove legacy theme system (conditional)
 - If nothing shared still needs it after LR-003, remove `themes/`, `/api/theme`,
   `THEME*`/`load_theme_config` in `app.py`, `static/js/theme.js`, and `test_theme.py`.
 - If `login.html` (or anything kept) still consumes a theme asset, keep the minimum and document why.
 - Acceptance: app boots without the theme system; no dead `/api/theme` references.
 
+Completed 2026-06-30. Confirmed the retained login page and v2 application do not consume the
+legacy server-side theme package. Removed the theme loader and environment configuration, all
+theme and banner routes, the `themes/` asset tree, the standalone Coraline banner, and the
+obsolete theme test module. The v2 light/dark/system theme provider remains unchanged. Unit
+coverage now asserts that each retired theme URL returns `404`. Full `tox -e all`: Ruff clean;
+unit `701 passed, 1 skipped`; E2E `97 passed` across desktop, phone, and tablet viewports.
+
 ### LR-007 — Docs, config, signoff
 - Update README/USER_GUIDE/setup.sh and `/etc/pi-health.env` guidance to drop `PIHEALTH_UI_MODE`/
   `PIHEALTH_UI_V2_PAGES`; note v2-only.
 - Write `Docs/UI_V2_LEGACY_REMOVAL_SIGNOFF.md` with the validation matrix and the rollback note.
 - Satisfies the automation-sprint entry gate "Flask/v1 legacy UI removed."
+
+Completed 2026-06-30. Updated current operator documentation for the v2-only runtime, removed the
+obsolete custom-theme guides and Docker theme configuration, and made legacy credential migration
+drop `PIHEALTH_UI_MODE`, `PIHEALTH_UI_V2_PAGES`, and `THEME`. Both local and CI readiness probes now
+use the retained public login page; CI also uses the required hashed credential contract. The
+removal signoff records the runtime contract, validation matrix, deployment checks, and git-based
+rollback procedure. It also clarifies that Flask remains the API backend, so only the v1 UI portion
+of the automation sprint's combined Flask/v1 gate is complete. Frontend checks, production publish,
+bundle budget, Docker Compose validation, Ruff, unit (`698 passed, 1 skipped`), and E2E (`97 passed`)
+all passed.
 
 ## Rollback
 Removing legacy **deletes the instant `PIHEALTH_UI_MODE=legacy` rollback**. After this work the

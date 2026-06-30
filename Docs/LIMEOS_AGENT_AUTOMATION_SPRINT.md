@@ -21,7 +21,8 @@ All gates require recorded evidence before `LA-001` starts.
 
 1. Security hardening is complete and signed off, including the remaining configuration/state
    relocation and privileged-helper boundary work.
-2. Flask and v1/legacy UI code are removed from production and tests.
+2. The Flask-rendered v1 UI is removed from production and tests. Replacing the Flask API backend
+   remains a separate prerequisite because this sprint must not depend on Flask.
 3. The replacement LimeOS backend and v2 API contracts are stable and documented.
 4. Authentication, CSRF, operation ownership, audit identity, and secret storage have production
    contracts that the agent gateway can reuse.
