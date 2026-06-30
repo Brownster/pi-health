@@ -48,6 +48,7 @@ class DockerPort(Protocol):
     def available(self) -> bool: ...
     def list_containers(self, all: bool = True) -> list: ...
     def get_container(self, container_id: str): ...
+    def pull_image(self, tag: str): ...
     def ping(self) -> bool: ...
 
 
@@ -70,6 +71,11 @@ class DockerClientAdapter:
         if self._client is None:
             return None
         return self._client.containers.get(container_id)
+
+    def pull_image(self, tag: str):
+        if self._client is None:
+            return None
+        return self._client.images.pull(tag)
 
     def ping(self) -> bool:
         if self._client is None:

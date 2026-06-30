@@ -56,6 +56,7 @@ from ports import (
 )
 from system_service import SystemService
 from container_inventory_service import ContainerInventoryService
+from container_operations_service import ContainerOperationsService
 from container_helpers import (
     _compose_label,
     analyze_network_topology,
@@ -126,6 +127,7 @@ class AppDependencies:
     config_repo: ConfigRepository | None = None
     system_service: SystemService | None = None
     container_inventory_service: ContainerInventoryService | None = None
+    container_operations_service: ContainerOperationsService | None = None
 
 
 def _default_system_service():
@@ -142,6 +144,25 @@ def _default_container_inventory_service(docker_port):
         stats_reader=get_container_stats_cached,
         update_reader=lambda container_id: container_updates.get(container_id, False),
     )
+
+
+def _write_container_update(container_id, update_available):
+    container_updates[container_id] = update_available
+
+
+def _default_container_operations_service(docker_port):
+    return ContainerOperationsService(
+        docker=docker_port,
+        compose_runner=subprocess.run,
+        update_writer=_write_container_update,
+    )
+
+
+def _container_operations():
+    service = _extension("container_operations_service")
+    if service is not None:
+        return service
+    return _default_container_operations_service(DockerClientAdapter(docker_client))
 
 
 def _default_dependencies():
@@ -271,46 +292,17 @@ def list_containers(include_stats=True):
 
 def check_container_update(container):
     """Check if an update is available for the container's image."""
-    try:
-        if not container.image.tags:
-            return {"error": "Container image has no tag"}
-        tag = container.image.tags[0]
-        current_id = container.image.id
-        pulled = _docker_client().images.pull(tag)
-        update = pulled.id != current_id
-        container_updates[container.id[:12]] = update
-        return {"update_available": update}
-    except Exception as e:
-        return {"error": str(e)}
+    return _container_operations().check_update(container)
 
 
 def update_container(container):
     """Pull the latest image and recreate the service using docker compose."""
-    try:
-        if not container.image.tags:
-            return {"error": "Container image has no tag"}
-        tag = container.image.tags[0]
-        _docker_client().images.pull(tag)
-        subprocess.run(["docker", "compose", "up", "-d", container.name], check=False)
-        container_updates[container.id[:12]] = False
-        return {"status": "Container updated"}
-    except Exception as e:
-        return {"error": str(e)}
+    return _container_operations().update(container)
 
 
 def get_container_logs(container_id, tail=200):
     """Return the recent logs for a container."""
-    if not _docker_is_available():
-        return {"error": "Docker is not available"}
-
-    try:
-        container = _docker_client().containers.get(container_id)
-        logs = container.logs(tail=tail)
-        if isinstance(logs, bytes):
-            logs = logs.decode("utf-8", errors="replace")
-        return {"logs": logs, "container": container.name}
-    except Exception as e:
-        return {"error": str(e)}
+    return _container_operations().logs(container_id, tail=tail)
 
 
 def socket_probe(host="8.8.8.8", port=53, timeout=5):
@@ -723,26 +715,7 @@ def recreate_network_group(provider_name):
 
 def control_container(container_id, action):
     """Start, stop, or restart a container by ID."""
-    if not _docker_is_available():
-        return {"error": "Docker is not available"}
-    
-    try:
-        container = _docker_client().containers.get(container_id)
-        if action == "start":
-            container.start()
-        elif action == "stop":
-            container.stop()
-        elif action == "restart":
-            container.restart()
-        elif action == "check_update":
-            return check_container_update(container)
-        elif action == "update":
-            return update_container(container)
-        else:
-            return {"error": "Invalid action"}
-        return {"status": f"Container {action}ed successfully"}
-    except Exception as e:
-        return {"error": str(e)}
+    return _container_operations().control(container_id, action)
 
 
 def system_action(action):
@@ -960,7 +933,8 @@ def api_container_stats_batch():
 @login_required
 def api_control_container(container_id, action):
     """API endpoint to control a Docker container."""
-    return jsonify(control_container(container_id, action))
+    service = current_app.extensions["container_operations_service"]
+    return jsonify(service.control(container_id, action))
 
 
 @core_api.route('/api/containers/<container_id>/logs', methods=['GET'])
@@ -968,7 +942,8 @@ def api_control_container(container_id, action):
 def api_container_logs(container_id):
     """API endpoint to fetch container logs."""
     tail = request.args.get('tail', default=200, type=int)
-    return jsonify(get_container_logs(container_id, tail=tail))
+    service = current_app.extensions["container_operations_service"]
+    return jsonify(service.logs(container_id, tail=tail))
 
 
 @core_api.route('/api/shutdown', methods=['POST'])
@@ -1103,6 +1078,10 @@ def create_app(config=None, dependencies=None):
     application.extensions["container_inventory_service"] = (
         resolved.container_inventory_service
         or _default_container_inventory_service(application.extensions["docker"])
+    )
+    application.extensions["container_operations_service"] = (
+        resolved.container_operations_service
+        or _default_container_operations_service(application.extensions["docker"])
     )
 
     application.register_blueprint(core_api)

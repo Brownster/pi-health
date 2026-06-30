@@ -42,6 +42,7 @@ def test_docker_adapter_unavailable_when_no_client():
     assert adapter.available is False
     assert adapter.list_containers() == []
     assert adapter.get_container("x") is None
+    assert adapter.pull_image("example:latest") is None
     assert adapter.ping() is False
 
 
@@ -55,6 +56,11 @@ def test_docker_adapter_delegates_to_client():
 
     class FakeClient:
         containers = FakeContainers()
+        images = type(
+            "FakeImages",
+            (),
+            {"pull": staticmethod(lambda tag: f"pulled:{tag}")},
+        )()
 
         def ping(self):
             return True
@@ -63,6 +69,7 @@ def test_docker_adapter_delegates_to_client():
     assert adapter.available is True
     assert adapter.list_containers(all=True) == ["c1", "c2"]
     assert adapter.get_container("abc") == "got:abc"
+    assert adapter.pull_image("example:latest") == "pulled:example:latest"
     assert adapter.ping() is True
 
 

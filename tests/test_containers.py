@@ -154,19 +154,15 @@ class TestContainerLogs:
 
     def test_logs_success(self, authenticated_client):
         """Test logs endpoint returns decoded logs."""
-        fake_container = Mock()
-        fake_container.logs.return_value = b"hello\n"
-        fake_container.name = "test"
-
-        fake_client = Mock()
-        fake_client.containers.get.return_value = fake_container
-
-        authenticated_client.application.extensions["docker_client"] = fake_client
+        service = Mock()
+        service.logs.return_value = {"logs": "hello\n", "container": "test"}
+        authenticated_client.application.extensions["container_operations_service"] = service
         response = authenticated_client.get('/api/containers/test-container/logs')
 
         assert response.status_code == 200
         data = json.loads(response.data)
         assert data["logs"].strip() == "hello"
+        service.logs.assert_called_once_with("test-container", tail=200)
 
 
 class TestContainerUpdate:

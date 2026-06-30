@@ -7,6 +7,7 @@ import json
 import sys
 import os
 import subprocess
+from unittest.mock import Mock
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -325,6 +326,34 @@ class TestProtectedEndpoints:
         assert response.status_code == 200
         assert response.get_json() == [{"source": "injected-service"}]
         assert service.calls == [False]
+
+    def test_container_control_delegates_to_injected_service(self, authenticated_client):
+        service = type(
+            "StubContainerOperationsService",
+            (),
+            {"control": Mock(return_value={"status": "delegated"})},
+        )()
+        authenticated_client.application.extensions["container_operations_service"] = service
+
+        response = authenticated_client.post('/api/containers/container-id/restart')
+
+        assert response.status_code == 200
+        assert response.get_json() == {"status": "delegated"}
+        service.control.assert_called_once_with("container-id", "restart")
+
+    def test_container_logs_delegates_tail_to_injected_service(self, authenticated_client):
+        service = type(
+            "StubContainerOperationsService",
+            (),
+            {"logs": Mock(return_value={"logs": "delegated"})},
+        )()
+        authenticated_client.application.extensions["container_operations_service"] = service
+
+        response = authenticated_client.get('/api/containers/container-id/logs?tail=50')
+
+        assert response.status_code == 200
+        assert response.get_json() == {"logs": "delegated"}
+        service.logs.assert_called_once_with("container-id", tail=50)
 
     def test_shutdown_requires_auth(self, client):
         """Test that /api/shutdown requires authentication."""
