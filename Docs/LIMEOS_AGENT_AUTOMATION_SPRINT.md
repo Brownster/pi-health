@@ -21,8 +21,8 @@ All gates require recorded evidence before `LA-001` starts.
 
 1. Security hardening is complete and signed off, including the remaining configuration/state
    relocation and privileged-helper boundary work.
-2. The Flask-rendered v1 UI is removed from production and tests. Replacing the Flask API backend
-   remains a separate prerequisite because this sprint must not depend on Flask.
+2. The v1 UI is removed, and the framework-neutral service boundary is signed off. Flask may
+   remain as the human UI transport, but agent and CLI paths must not depend on Flask state.
 3. The replacement LimeOS backend and v2 API contracts are stable and documented.
 4. Authentication, CSRF, operation ownership, audit identity, and secret storage have production
    contracts that the agent gateway can reuse.
@@ -266,6 +266,9 @@ limeops container restart <allowlisted-name> --approval <token>
 
 ### Tasks
 
+> Mattermost webhook/incident posting may follow the transport patterns referenced in
+> Prior Art and References.
+
 1. Run alert evaluation outside the main API process so an API crash can still produce a service
    failure notification.
 2. Require consecutive failures, deduplicate active incidents, apply cooldowns, and emit recovery
@@ -304,6 +307,10 @@ limeops container restart <allowlisted-name> --approval <token>
 ## LA-008 - Mattermost Threaded Bot and Approvals
 
 ### Tasks
+
+> Base the Mattermost transport (thread mapping, event dedup, reconnect, bot-account setup,
+> reaction approve/reject UX) on the patterns in Prior Art and References. Approval semantics and
+> tool restriction are enforced in the gateway/`limeops`, never in the client.
 
 1. Use a least-privileged bot account restricted to approved teams and channels.
 2. Map each Mattermost root post to one gateway conversation.
@@ -374,6 +381,33 @@ Release decision: `GO` only when every item has evidence.
    explain them but cannot expand its capabilities.
 7. Restart the gateway during a conversation and the host during an active alert. Thread mapping,
    alert state, and completed-operation idempotency survive.
+
+## Prior Art and References
+
+`claude-threads` (https://github.com/anneschuth/claude-threads) is a proven Mattermost/Slack bot
+that streams chat threads to a model. Use it as a **reference for the Mattermost transport mechanics
+only** (LA-006 posting and LA-008 bot), not as an execution model.
+
+Lift (transport patterns):
+
+1. Mattermost root-post ↔ conversation/thread mapping.
+2. Event/post-ID deduplication and websocket reconnect that survives restarts.
+3. Least-privileged bot-account setup and mention-only triggering (ignore the bot's own posts).
+4. Webhook posting of structured incidents (LA-006) and reaction/button approve-reject controls (UX).
+
+Reject (does not fit our threat model):
+
+1. Its trust model — `default`/`auto`/`bypass` permission modes put authority in the model client.
+   LimeOS keeps authority server-side at `limeops` + the gateway (LA-002/LA-007); client-side
+   prompts are defence-in-depth only.
+2. Its general execution surface — Claude Code CLI with shell, repo writes, worktrees, and file
+   attachments. The production assistant is restricted to `limeops`; general coding/shell is
+   deferred and denied.
+3. Provider lock — it is Claude-Code-CLI-specific; LA-007 requires a provider-neutral gateway
+   (Claude and Codex). Borrow only its reaction-approval UX, not its approval semantics, which are
+   weaker than the single-use, payload-bound, actor-bound, replay-proof model in this sprint.
+
+It is also TypeScript/Node; any reused transport service is a separately hardened runtime on the Pi.
 
 ## Deferred Scope
 
