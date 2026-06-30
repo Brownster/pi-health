@@ -80,7 +80,7 @@ Start implementation only when:
 | ID | Title | Depends | Status |
 |---|---|---|---|
 | BF-001 | Introduce an application factory | Entry gate | Complete (2026-06-30) |
-| BF-002 | Define service ports and shared adapters | BF-001 | Pending |
+| BF-002 | Define service ports and shared adapters | BF-001 | In progress (BF-002A complete) |
 | BF-003 | Extract domain services in bounded slices | BF-002 | Pending |
 | BF-004 | Characterize security and stateful behavior | BF-001 | Pending |
 | BF-005 | Sign off the core boundary and agent handoff | BF-003, BF-004 | Pending |
@@ -120,6 +120,14 @@ Acceptance:
 - Adapters preserve current timeouts, error classification, locking, and audit behavior.
 - Tests can inject fakes without patching Flask globals or opening system sockets.
 - The operation registry remains single-process and its ownership is explicit.
+
+BF-002A completed 2026-06-30. `OperationRegistry` now owns process-scoped operation creation,
+worker execution, opaque ownership, bounded retention, event trimming, and cursor-based replay
+without importing Flask. `operation_sse.py` is the transport adapter for session ownership,
+`Last-Event-ID`, keep-alives, and SSE response formatting. The app factory injects one registry per
+application process, and the class documents that injection does not provide multi-process safety.
+Deterministic tests cover ownership, expiry, capacity, trim IDs, producer failures, and missing
+terminal events. Full `tox -e all`: Ruff clean; unit `706 passed, 1 skipped`; E2E `97 passed`.
 
 ## BF-003 - Extract domain services in bounded slices
 
