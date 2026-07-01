@@ -81,7 +81,7 @@ Start implementation only when:
 |---|---|---|---|
 | BF-001 | Introduce an application factory | Entry gate | Complete (2026-06-30) |
 | BF-002 | Define service ports and shared adapters | BF-001 | Complete (2026-06-30) |
-| BF-003 | Extract domain services in bounded slices | BF-002 | In progress (stack operations complete) |
+| BF-003 | Extract domain services in bounded slices | BF-002 | In progress (stack streaming complete) |
 | BF-004 | Characterize security and stateful behavior | BF-001 | Pending |
 | BF-005 | Sign off the core boundary and agent handoff | BF-003, BF-004 | Pending |
 
@@ -256,6 +256,15 @@ callers. Streaming operation producers remain a separate bounded slice. Focused 
 use, detached and attached `up` arguments, targeted stops, missing and unknown operations, process
 errors, log output, and route delegation. Full `tox -e all`: Ruff clean; unit `778 passed, 1
 skipped`; E2E `97 passed`.
+
+Streaming stack operations completed 2026-07-01. `StackOperationsService` now owns Compose process
+startup, line collection, terminal result mapping, and per-stack locking through an injected
+process factory. It yields framework-neutral event dictionaries directly to the process-scoped
+`OperationRegistry`; the Flask compatibility generator only formats those events as SSE. Registry
+thread startup, capacity, ownership, retention, replay, and reconnect behavior remain unchanged.
+Focused tests cover all four supported actions, exact Compose arguments, lock lifetime, neutral
+line and terminal events, preflight failures, process failures, service delegation, replay, and
+owner isolation. Full `tox -e all`: Ruff clean; unit `783 passed, 1 skipped`; E2E `97 passed`.
 
 ## BF-004 - Characterize security and stateful behavior
 
