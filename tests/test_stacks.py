@@ -1237,6 +1237,40 @@ class TestStackAdditionalRoutes:
         finally:
             stack_manager.STACKS_PATH = original_path
 
+    def test_create_and_delete_delegate_to_mutation_service(
+        self, authenticated_client
+    ):
+        service = MagicMock()
+        service.create.return_value = {
+            "status": "created",
+            "name": "alpha",
+            "path": "/stacks/alpha",
+        }
+        service.delete.return_value = {
+            "status": "deleted",
+            "name": "alpha",
+            "forced": True,
+        }
+        authenticated_client.application.extensions["stack_mutation_service"] = service
+
+        created = authenticated_client.post(
+            "/api/stacks/alpha",
+            json={"compose_content": "services: {}\n", "env_content": "KEY=value\n"},
+        )
+        deleted = authenticated_client.delete(
+            "/api/stacks/alpha",
+            json={"force": True, "confirm_name": "alpha"},
+        )
+
+        assert created.status_code == 200
+        assert deleted.status_code == 200
+        service.create.assert_called_once_with(
+            "alpha", "services: {}\n", "KEY=value\n"
+        )
+        service.delete.assert_called_once_with(
+            "alpha", force=True, confirm_name="alpha"
+        )
+
     def test_stack_status_endpoint(self, authenticated_client):
         service = MagicMock()
         service.status.return_value = (

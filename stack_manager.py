@@ -33,6 +33,9 @@ from stack_read_service import (
 )
 from stack_mutation_service import (
     StackComposeValidationError,
+    StackDeleteConflictError,
+    StackForceConfirmationError,
+    StackMutationConflictError,
     StackMutationError,
     StackMutationNotFoundError,
     StackMutationService,
@@ -200,6 +203,9 @@ def default_stack_mutation_service():
         ),
         backup_writer=lambda name: backup_stack(name),
         compose_validator=lambda content: validate_compose_yaml(content),
+        directory_maker=lambda path: os.makedirs(path),
+        directory_remover=lambda path, **kwargs: shutil.rmtree(path, **kwargs),
+        compose_runner=lambda name, command: run_compose_command(name, command),
     )
 
 
@@ -331,45 +337,15 @@ def api_create_stack(name):
     compose_content = data.get('compose_content', '')
     env_content = data.get('env_content', '')
 
-    if not compose_content:
-        # Provide a minimal template
-        compose_content = f"""# {name} stack
-services:
-  # Add your services here
-  # example:
-  #   image: nginx:latest
-  #   ports:
-  #     - "8080:80"
-"""
-    else:
-        error = validate_compose_yaml(compose_content)
-        if error:
-            return jsonify({'error': f'Compose YAML invalid: {error}'}), 400
-
-    stack_dir = get_stack_path(name)
-    with stack_lock(name):
-        if os.path.exists(stack_dir):
-            return jsonify({'error': 'Stack already exists'}), 409
-
-        try:
-            os.makedirs(stack_dir)
-            atomic_write_text(
-                os.path.join(stack_dir, 'compose.yaml'),
-                compose_content,
-            )
-            if env_content:
-                atomic_write_text(
-                    os.path.join(stack_dir, '.env'),
-                    env_content,
-                    mode=0o600,
-                )
-
-            return jsonify({'status': 'created', 'name': name, 'path': stack_dir})
-
-        except Exception as e:
-            if os.path.exists(stack_dir):
-                shutil.rmtree(stack_dir, ignore_errors=True)
-            return jsonify({'error': str(e)}), 500
+    service = current_app.extensions["stack_mutation_service"]
+    try:
+        return jsonify(service.create(name, compose_content, env_content))
+    except StackComposeValidationError as exc:
+        return jsonify({'error': str(exc)}), 400
+    except StackMutationConflictError as exc:
+        return jsonify({'error': str(exc)}), 409
+    except StackMutationError as exc:
+        return jsonify({'error': str(exc)}), 500
 
 
 @stack_manager.route('/api/stacks/<name>', methods=['DELETE'])
@@ -381,40 +357,25 @@ def api_delete_stack(name):
         return jsonify({'error': error}), 400
 
     data = request.get_json(silent=True) or {}
-    force_requested = data.get('force') is True
-    if force_requested and data.get('confirm_name') != name:
-        return jsonify({'error': 'Force delete requires exact stack name confirmation'}), 400
-
-    stack_dir = get_stack_path(name)
-    with stack_lock(name):
-        if not os.path.exists(stack_dir):
-            return jsonify({'error': 'Stack not found'}), 404
-
-        down_result, down_error = run_compose_command(name, 'down')
-        down_succeeded = bool(
-            not down_error
-            and down_result
-            and down_result.get('success')
-        )
-        if not down_succeeded and not force_requested:
-            detail = down_error or (down_result or {}).get('stderr') or 'Compose down failed'
-            return jsonify({
-                'error': f'Cannot delete stack: {detail}',
-                'down_result': down_result,
-                'force_delete_available': True,
-            }), 409
-
-        backup_stack(name)
-
-        try:
-            shutil.rmtree(stack_dir)
-            return jsonify({
-                'status': 'deleted',
-                'name': name,
-                'forced': force_requested and not down_succeeded,
-            })
-        except Exception as e:
-            return jsonify({'error': str(e)}), 500
+    service = current_app.extensions["stack_mutation_service"]
+    try:
+        return jsonify(service.delete(
+            name,
+            force=data.get('force') is True,
+            confirm_name=data.get('confirm_name'),
+        ))
+    except StackForceConfirmationError as exc:
+        return jsonify({'error': str(exc)}), 400
+    except StackMutationNotFoundError as exc:
+        return jsonify({'error': str(exc)}), 404
+    except StackDeleteConflictError as exc:
+        return jsonify({
+            'error': str(exc),
+            'down_result': exc.down_result,
+            'force_delete_available': True,
+        }), 409
+    except StackMutationError as exc:
+        return jsonify({'error': str(exc)}), 500
 
 
 @stack_manager.route('/api/stacks/<name>/compose', methods=['GET'])

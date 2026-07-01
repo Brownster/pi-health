@@ -19,6 +19,20 @@ class StackComposeValidationError(ValueError):
     pass
 
 
+class StackMutationConflictError(RuntimeError):
+    pass
+
+
+class StackForceConfirmationError(ValueError):
+    pass
+
+
+class StackDeleteConflictError(StackMutationConflictError):
+    def __init__(self, detail: str, down_result: dict | None):
+        super().__init__(f"Cannot delete stack: {detail}")
+        self.down_result = down_result
+
+
 class StackMutationService:
     def __init__(
         self,
@@ -30,6 +44,9 @@ class StackMutationService:
         atomic_writer,
         backup_writer,
         compose_validator,
+        directory_maker,
+        directory_remover,
+        compose_runner,
     ):
         self._stacks_path_provider = stacks_path_provider
         self._backup_path_provider = backup_path_provider
@@ -38,6 +55,82 @@ class StackMutationService:
         self._atomic_writer = atomic_writer
         self._backup_writer = backup_writer
         self._compose_validator = compose_validator
+        self._directory_maker = directory_maker
+        self._directory_remover = directory_remover
+        self._compose_runner = compose_runner
+
+    def create(self, name: str, compose_content: str, env_content: str) -> dict:
+        if not compose_content:
+            compose_content = self._default_compose(name)
+        else:
+            validation_error = self._compose_validator(compose_content)
+            if validation_error:
+                raise StackComposeValidationError(
+                    f"Compose YAML invalid: {validation_error}"
+                )
+
+        stack_dir = os.path.join(self._stacks_path_provider(), name)
+        with self._lock_provider(name):
+            if os.path.exists(stack_dir):
+                raise StackMutationConflictError("Stack already exists")
+            try:
+                self._directory_maker(stack_dir)
+                self._atomic_writer(
+                    os.path.join(stack_dir, "compose.yaml"),
+                    compose_content,
+                )
+                if env_content:
+                    self._atomic_writer(
+                        os.path.join(stack_dir, ".env"),
+                        env_content,
+                        mode=0o600,
+                    )
+            except Exception as exc:
+                if os.path.exists(stack_dir):
+                    self._directory_remover(stack_dir, ignore_errors=True)
+                raise StackMutationError(str(exc)) from exc
+        return {"status": "created", "name": name, "path": stack_dir}
+
+    def delete(
+        self,
+        name: str,
+        *,
+        force: bool = False,
+        confirm_name: str | None = None,
+    ) -> dict:
+        if force and confirm_name != name:
+            raise StackForceConfirmationError(
+                "Force delete requires exact stack name confirmation"
+            )
+
+        stack_dir = os.path.join(self._stacks_path_provider(), name)
+        with self._lock_provider(name):
+            if not os.path.exists(stack_dir):
+                raise StackMutationNotFoundError("Stack not found")
+
+            down_result, down_error = self._compose_runner(name, "down")
+            down_succeeded = bool(
+                not down_error and down_result and down_result.get("success")
+            )
+            if not down_succeeded and not force:
+                detail = (
+                    down_error
+                    or (down_result or {}).get("stderr")
+                    or "Compose down failed"
+                )
+                raise StackDeleteConflictError(detail, down_result)
+
+            try:
+                self._backup_writer(name)
+                self._directory_remover(stack_dir)
+            except Exception as exc:
+                raise StackMutationError(str(exc)) from exc
+
+        return {
+            "status": "deleted",
+            "name": name,
+            "forced": force and not down_succeeded,
+        }
 
     def save_compose(self, name: str, content: str) -> dict:
         validation_error = self._compose_validator(content)
@@ -123,3 +216,14 @@ class StackMutationService:
             except Exception as exc:
                 raise StackMutationError(str(exc)) from exc
         return {"status": "restored", "backup": backup_name}
+
+    @staticmethod
+    def _default_compose(name: str) -> str:
+        return f"""# {name} stack
+services:
+  # Add your services here
+  # example:
+  #   image: nginx:latest
+  #   ports:
+  #     - "8080:80"
+"""
