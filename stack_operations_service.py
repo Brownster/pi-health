@@ -37,12 +37,19 @@ class StackOperationsService:
         stacks_path_provider: Callable[[], str],
         lock_provider: Callable[[str], AbstractContextManager[Any]],
         command_runner: Callable[..., Any],
+        process_factory: Callable[..., Any],
         service_name_validator: Callable[[str], tuple[bool, str | None]],
     ) -> None:
         self._stacks_path_provider = stacks_path_provider
         self._lock_provider = lock_provider
         self._command_runner = command_runner
+        self._process_factory = process_factory
         self._service_name_validator = service_name_validator
+
+    def has_stack(self, stack_name: str) -> bool:
+        """Return whether the stack has one supported Compose file."""
+        stack_dir = os.path.join(self._stacks_path_provider(), stack_name)
+        return find_compose_file(stack_dir) is not None
 
     def run(
         self,
@@ -137,10 +144,56 @@ class StackOperationsService:
             "returncode": result.returncode,
         }
 
+    def stream(self, stack_name: str, command: str):
+        """Yield neutral output events for one streaming lifecycle command."""
+        with self._lock_provider(stack_name):
+            stack_dir = os.path.join(self._stacks_path_provider(), stack_name)
+            compose_file = find_compose_file(stack_dir)
+            if not compose_file:
+                yield {"error": "Stack not found"}
+                return
+
+            command_args = self._stream_command_args(command)
+            if command_args is None:
+                yield {"error": "Unknown command"}
+                return
+
+            cmd = [
+                "docker",
+                "compose",
+                "-f",
+                os.path.basename(compose_file),
+                *command_args,
+            ]
+            try:
+                process = self._process_factory(
+                    cmd,
+                    cwd=stack_dir,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                )
+                for line in iter(process.stdout.readline, ""):
+                    if line:
+                        yield {"line": line.rstrip()}
+                process.wait()
+                yield {"done": True, "returncode": process.returncode}
+            except Exception as exc:
+                yield {"error": str(exc)}
+
     @staticmethod
     def _command_args(command: str, detach: bool) -> list[str] | None:
         if command == "up":
             return compose_up_args(detach)
         if command in {"down", "restart", "pull", "stop", "start"}:
+            return [command]
+        return None
+
+    @staticmethod
+    def _stream_command_args(command: str) -> list[str] | None:
+        if command == "up":
+            return compose_up_args()
+        if command in {"down", "pull", "restart"}:
             return [command]
         return None

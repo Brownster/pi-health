@@ -1,5 +1,6 @@
 from contextlib import contextmanager
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -18,7 +19,7 @@ def stack_dir(tmp_path):
     return path
 
 
-def make_service(tmp_path, runner, lock_events=None):
+def make_service(tmp_path, runner, lock_events=None, process_factory=None):
     lock_events = lock_events if lock_events is not None else []
 
     @contextmanager
@@ -33,6 +34,7 @@ def make_service(tmp_path, runner, lock_events=None):
         stacks_path_provider=lambda: str(tmp_path),
         lock_provider=lock,
         command_runner=runner,
+        process_factory=process_factory or (lambda *_args, **_kwargs: None),
         service_name_validator=lambda name: (name.isidentifier(), "invalid name"),
     )
 
@@ -130,3 +132,65 @@ def test_logs_maps_missing_stack_and_runner_error(tmp_path, stack_dir):
 
     with pytest.raises(StackOperationError, match="compose unavailable"):
         make_service(tmp_path, fail).logs("alpha")
+
+
+@pytest.mark.parametrize(
+    ("command", "expected_tail"),
+    [
+        ("up", ["up", "-d", "--remove-orphans"]),
+        ("down", ["down"]),
+        ("pull", ["pull"]),
+        ("restart", ["restart"]),
+    ],
+)
+def test_stream_yields_neutral_events_under_lock(
+    tmp_path, stack_dir, command, expected_tail
+):
+    lock_events = []
+    calls = []
+    process = SimpleNamespace(
+        stdout=SimpleNamespace(readline=MagicMock(side_effect=["one\n", "two\n", ""])),
+        wait=MagicMock(),
+        returncode=0,
+    )
+
+    def process_factory(command_args, **kwargs):
+        calls.append((command_args, kwargs))
+        return process
+
+    service = make_service(
+        tmp_path,
+        lambda *_args, **_kwargs: None,
+        lock_events,
+        process_factory,
+    )
+
+    assert list(service.stream("alpha", command)) == [
+        {"line": "one"},
+        {"line": "two"},
+        {"done": True, "returncode": 0},
+    ]
+    assert calls[0][0] == [
+        "docker", "compose", "-f", "compose.yaml", *expected_tail
+    ]
+    assert calls[0][1]["cwd"] == str(stack_dir)
+    assert lock_events == [("enter", "alpha"), ("exit", "alpha")]
+    process.wait.assert_called_once_with()
+
+
+def test_stream_maps_preflight_and_process_failures(tmp_path, stack_dir):
+    service = make_service(tmp_path, lambda *_args, **_kwargs: None)
+    assert list(service.stream("missing", "up")) == [{"error": "Stack not found"}]
+    assert list(service.stream("alpha", "unknown")) == [{"error": "Unknown command"}]
+
+    def fail(*_args, **_kwargs):
+        raise RuntimeError("process unavailable")
+
+    service = make_service(
+        tmp_path,
+        lambda *_args, **_kwargs: None,
+        process_factory=fail,
+    )
+    assert list(service.stream("alpha", "up")) == [
+        {"error": "process unavailable"}
+    ]

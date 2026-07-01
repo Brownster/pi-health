@@ -19,7 +19,6 @@ import yaml
 from auth_utils import csrf_protect, login_required
 from operation_manager import (
     OperationCapacityError,
-    parse_sse_payload,
 )
 from operation_sse import stream_operation_response
 from stack_read_service import (
@@ -217,6 +216,7 @@ def default_stack_operations_service():
         stacks_path_provider=lambda: STACKS_PATH,
         lock_provider=lambda name: stack_lock(name),
         command_runner=lambda command, **kwargs: subprocess.run(command, **kwargs),
+        process_factory=lambda command, **kwargs: subprocess.Popen(command, **kwargs),
         service_name_validator=lambda name: validate_stack_name(name),
     )
 
@@ -654,48 +654,9 @@ def api_stack_logs(name):
 # ============================================================================
 
 def stream_compose_command(stack_name, command):
-    """Generator that streams compose command output via SSE."""
-    with stack_lock(stack_name):
-        stack_dir = get_stack_path(stack_name)
-        compose_file = find_compose_file(stack_dir)
-
-        if not compose_file:
-            yield f"data: {json.dumps({'error': 'Stack not found'})}\n\n"
-            return
-
-        cmd = ['docker', 'compose', '-f', os.path.basename(compose_file)]
-
-        if command == 'up':
-            cmd.extend(_compose_up_args())
-        elif command == 'down':
-            cmd.append('down')
-        elif command == 'pull':
-            cmd.append('pull')
-        elif command == 'restart':
-            cmd.append('restart')
-        else:
-            yield f"data: {json.dumps({'error': 'Unknown command'})}\n\n"
-            return
-
-        try:
-            proc = subprocess.Popen(
-                cmd,
-                cwd=stack_dir,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1
-            )
-
-            for line in iter(proc.stdout.readline, ''):
-                if line:
-                    yield f"data: {json.dumps({'line': line.rstrip()})}\n\n"
-
-            proc.wait()
-            yield f"data: {json.dumps({'done': True, 'returncode': proc.returncode})}\n\n"
-
-        except Exception as e:
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+    """Format neutral stack-operation events as legacy SSE frames."""
+    for payload in _stack_operations().stream(stack_name, command):
+        yield f"data: {json.dumps(payload)}\n\n"
 
 
 @stack_manager.route('/api/stacks/<name>/operations', methods=['POST'])
@@ -712,14 +673,12 @@ def api_create_stack_operation(name):
     if action not in {'up', 'down', 'pull', 'restart'}:
         return jsonify({'error': 'Unknown stack action'}), 400
 
-    if not find_compose_file(get_stack_path(name)):
+    operations = current_app.extensions["stack_operations_service"]
+    if not operations.has_stack(name):
         return jsonify({'error': 'Stack not found'}), 404
 
     def produce_events():
-        for frame in stream_compose_command(name, action):
-            payload = parse_sse_payload(frame)
-            if payload is not None:
-                yield payload
+        yield from operations.stream(name, action)
 
     try:
         operation = current_app.extensions["operation_registry"].create(

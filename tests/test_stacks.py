@@ -1574,13 +1574,13 @@ class TestStackOperationApi:
         with open(os.path.join(stack_dir, "compose.yaml"), "w") as handle:
             handle.write("services: {}\n")
         self._authenticate_with_csrf(client)
-        runner = MagicMock(
-            return_value=iter([
-                'data: {"line":"starting"}\n\n',
-                'data: {"done":true,"returncode":0}\n\n',
-            ])
-        )
-        monkeypatch.setattr(stack_manager, "stream_compose_command", runner)
+        operations = MagicMock()
+        operations.has_stack.return_value = True
+        operations.stream.return_value = iter([
+            {"line": "starting"},
+            {"done": True, "returncode": 0},
+        ])
+        client.application.extensions["stack_operations_service"] = operations
 
         created = client.post(
             "/api/stacks/alpha/operations",
@@ -1606,7 +1606,8 @@ class TestStackOperationApi:
         assert first.get_data() == second.get_data()
         assert '"starting"' not in resumed.get_data(as_text=True)
         assert '"done"' in resumed.get_data(as_text=True)
-        runner.assert_called_once_with("alpha", "up")
+        operations.has_stack.assert_called_once_with("alpha")
+        operations.stream.assert_called_once_with("alpha", "up")
 
     def test_operation_stream_is_owned_by_creating_user(
         self, client, temp_stacks_dir, monkeypatch
@@ -1619,11 +1620,10 @@ class TestStackOperationApi:
         with open(os.path.join(stack_dir, "compose.yaml"), "w") as handle:
             handle.write("services: {}\n")
         self._authenticate_with_csrf(client, username="alice")
-        monkeypatch.setattr(
-            stack_manager,
-            "stream_compose_command",
-            lambda _name, _action: iter(['data: {"done":true,"returncode":0}\n\n']),
-        )
+        operations = MagicMock()
+        operations.has_stack.return_value = True
+        operations.stream.return_value = iter([{"done": True, "returncode": 0}])
+        client.application.extensions["stack_operations_service"] = operations
         created = client.post(
             "/api/stacks/alpha/operations",
             json={"action": "up"},
