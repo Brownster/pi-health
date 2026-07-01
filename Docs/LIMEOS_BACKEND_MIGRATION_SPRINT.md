@@ -81,7 +81,7 @@ Start implementation only when:
 |---|---|---|---|
 | BF-001 | Introduce an application factory | Entry gate | Complete (2026-06-30) |
 | BF-002 | Define service ports and shared adapters | BF-001 | Complete (2026-06-30) |
-| BF-003 | Extract domain services in bounded slices | BF-002 | In progress (network diagnostics complete) |
+| BF-003 | Extract domain services in bounded slices | BF-002 | In progress (network groups complete) |
 | BF-004 | Characterize security and stateful behavior | BF-001 | Pending |
 | BF-005 | Sign off the core boundary and agent handoff | BF-003, BF-004 | Pending |
 
@@ -204,6 +204,14 @@ responses. Probe parsing and fallback helpers moved out of `app.py`; compatibili
 their focused test surface. Tests cover host ping and socket fallback, container lookup and probe
 results, bounded health output, error classification, and route delegation. Full `tox -e all`:
 Ruff clean; unit `741 passed, 1 skipped`; E2E `97 passed`.
+
+VPN network groups completed 2026-07-01. `NetworkGroupService` owns topology discovery, optional
+public-IP leak probing, and coordinated Compose recreation through injected Docker, IP readers,
+and process execution. Discovery preserves degraded, unhealthy, and orphan classification;
+recreation validates Compose metadata and keeps the provider first in the service order. Flask
+maps the framework-neutral Docker-unavailable error to the existing `503` response. Focused tests
+cover orphan and leak detection, Docker failures, Compose metadata rejection, command construction,
+and route delegation. Full `tox -e all`: Ruff clean; unit `747 passed, 1 skipped`; E2E `97 passed`.
 
 ## BF-004 - Characterize security and stateful behavior
 
