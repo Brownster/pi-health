@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 
 
@@ -13,6 +14,7 @@ STACK_FILENAMES = [
     "docker-compose.yaml",
     "docker-compose.yml",
 ]
+BACKUP_NAME_RE = re.compile(r"^compose-\d{14}\.ya?ml$")
 DOCKER_PS_STACK_FORMAT = "\t".join(
     [
         "{{.ID}}",
@@ -42,6 +44,14 @@ class ComposeFileConflictError(RuntimeError):
         }
 
 
+class StackNotFoundError(RuntimeError):
+    pass
+
+
+class StackArtifactReadError(RuntimeError):
+    pass
+
+
 def find_compose_file(stack_dir):
     matches = [
         filename
@@ -54,8 +64,9 @@ def find_compose_file(stack_dir):
 
 
 class StackReadService:
-    def __init__(self, *, stacks_path_provider, command_runner):
+    def __init__(self, *, stacks_path_provider, backup_path_provider, command_runner):
         self._stacks_path_provider = stacks_path_provider
+        self._backup_path_provider = backup_path_provider
         self._command_runner = command_runner
 
     def list_stacks(self) -> tuple[list[dict], str | None]:
@@ -260,3 +271,84 @@ class StackReadService:
             )
             snapshot[name] = {"status": status, **stack_counts}
         return snapshot, None
+
+    def stack_details(self, name: str) -> dict:
+        stack_dir = os.path.join(self._stacks_path_provider(), name)
+        compose_file = find_compose_file(stack_dir)
+        if not compose_file:
+            raise StackNotFoundError("Stack not found")
+        try:
+            with open(compose_file) as handle:
+                compose_content = handle.read()
+        except Exception as exc:
+            raise StackArtifactReadError(
+                f"Error reading compose file: {exc}"
+            ) from exc
+
+        status, _ = self.status(name)
+        env_file = os.path.join(stack_dir, ".env")
+        has_env = os.path.exists(env_file)
+        env_content = None
+        if has_env:
+            try:
+                with open(env_file) as handle:
+                    env_content = handle.read()
+            except Exception:
+                pass
+        return {
+            "name": name,
+            "path": stack_dir,
+            "compose_file": os.path.basename(compose_file),
+            "compose_content": compose_content,
+            "has_env": has_env,
+            "env_content": env_content,
+            "status": status,
+        }
+
+    def compose(self, name: str) -> dict:
+        stack_dir = os.path.join(self._stacks_path_provider(), name)
+        compose_file = find_compose_file(stack_dir)
+        if not compose_file:
+            raise StackNotFoundError("Stack not found")
+        try:
+            with open(compose_file) as handle:
+                return {
+                    "content": handle.read(),
+                    "filename": os.path.basename(compose_file),
+                }
+        except Exception as exc:
+            raise StackArtifactReadError(str(exc)) from exc
+
+    def env(self, name: str) -> dict:
+        env_file = os.path.join(self._stacks_path_provider(), name, ".env")
+        if not os.path.exists(env_file):
+            return {"content": "", "exists": False}
+        try:
+            with open(env_file) as handle:
+                return {"content": handle.read(), "exists": True}
+        except Exception as exc:
+            raise StackArtifactReadError(str(exc)) from exc
+
+    def list_backups(self, name: str) -> list[str]:
+        backup_root = self._backup_path_provider()
+        os.makedirs(backup_root, exist_ok=True)
+        backup_dir = os.path.join(backup_root, name)
+        if not os.path.isdir(backup_dir):
+            return []
+        backups = [
+            filename
+            for filename in os.listdir(backup_dir)
+            if BACKUP_NAME_RE.match(filename)
+        ]
+        backups.sort(reverse=True)
+        return backups
+
+    def backup(self, name: str, backup_name: str) -> dict:
+        backup_path = os.path.join(self._backup_path_provider(), name, backup_name)
+        if not os.path.exists(backup_path):
+            raise StackNotFoundError("Backup not found")
+        try:
+            with open(backup_path) as handle:
+                return {"content": handle.read(), "filename": backup_name}
+        except Exception as exc:
+            raise StackArtifactReadError(str(exc)) from exc

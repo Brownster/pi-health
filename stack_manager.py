@@ -23,9 +23,12 @@ from operation_manager import (
 )
 from operation_sse import stream_operation_response
 from stack_read_service import (
+    BACKUP_NAME_RE,
     DOCKER_PS_STACK_FORMAT,
     STACK_FILENAMES,
     ComposeFileConflictError,
+    StackArtifactReadError,
+    StackNotFoundError,
     StackReadService,
     find_compose_file,
 )
@@ -37,7 +40,6 @@ stack_manager = Blueprint('stack_manager', __name__)
 STACKS_PATH = os.getenv('STACKS_PATH', '/opt/stacks')
 STACK_NAME_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9._-]*$')
 BACKUP_DIR = os.getenv('STACK_BACKUP_DIR', os.path.join(STACKS_PATH, '.backups'))
-BACKUP_NAME_RE = re.compile(r'^compose-\d{14}\.ya?ml$')
 _stack_lock_state = threading.local()
 
 
@@ -163,6 +165,7 @@ def ensure_backup_directory():
 def default_stack_read_service():
     return StackReadService(
         stacks_path_provider=lambda: STACKS_PATH,
+        backup_path_provider=lambda: BACKUP_DIR,
         command_runner=lambda command, **kwargs: subprocess.run(command, **kwargs),
     )
 
@@ -219,17 +222,7 @@ def backup_stack(stack_name):
 
 def list_backups(stack_name):
     """List backups for a stack, newest first."""
-    ensure_backup_directory()
-    backup_subdir = os.path.join(BACKUP_DIR, stack_name)
-    if not os.path.isdir(backup_subdir):
-        return []
-
-    backups = [
-        name for name in os.listdir(backup_subdir)
-        if BACKUP_NAME_RE.match(name)
-    ]
-    backups.sort(reverse=True)
-    return backups
+    return _stack_reads().list_backups(stack_name)
 
 
 def validate_compose_yaml(content):
@@ -342,42 +335,13 @@ def api_get_stack(name):
     if not valid:
         return jsonify({'error': error}), 400
 
-    stack_dir = get_stack_path(name)
-    compose_file = find_compose_file(stack_dir)
-
-    if not compose_file:
-        return jsonify({'error': 'Stack not found'}), 404
-
-    # Get compose content
+    service = current_app.extensions["stack_read_service"]
     try:
-        with open(compose_file, 'r') as f:
-            content = f.read()
-    except Exception as e:
-        return jsonify({'error': f'Error reading compose file: {e}'}), 500
-
-    # Get status
-    status_info, _ = get_stack_status(name)
-
-    # Check for .env file
-    env_file = os.path.join(stack_dir, '.env')
-    has_env = os.path.exists(env_file)
-    env_content = None
-    if has_env:
-        try:
-            with open(env_file, 'r') as f:
-                env_content = f.read()
-        except:
-            pass
-
-    return jsonify({
-        'name': name,
-        'path': stack_dir,
-        'compose_file': os.path.basename(compose_file),
-        'compose_content': content,
-        'has_env': has_env,
-        'env_content': env_content,
-        'status': status_info
-    })
+        return jsonify(service.stack_details(name))
+    except StackNotFoundError as exc:
+        return jsonify({'error': str(exc)}), 404
+    except StackArtifactReadError as exc:
+        return jsonify({'error': str(exc)}), 500
 
 
 @stack_manager.route('/api/stacks/<name>', methods=['POST'])
@@ -486,18 +450,13 @@ def api_get_compose(name):
     if not valid:
         return jsonify({'error': error}), 400
 
-    stack_dir = get_stack_path(name)
-    compose_file = find_compose_file(stack_dir)
-
-    if not compose_file:
-        return jsonify({'error': 'Stack not found'}), 404
-
+    service = current_app.extensions["stack_read_service"]
     try:
-        with open(compose_file, 'r') as f:
-            content = f.read()
-        return jsonify({'content': content, 'filename': os.path.basename(compose_file)})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify(service.compose(name))
+    except StackNotFoundError as exc:
+        return jsonify({'error': str(exc)}), 404
+    except StackArtifactReadError as exc:
+        return jsonify({'error': str(exc)}), 500
 
 
 @stack_manager.route('/api/stacks/<name>/compose', methods=['POST'])
@@ -537,18 +496,11 @@ def api_get_env(name):
     if not valid:
         return jsonify({'error': error}), 400
 
-    stack_dir = get_stack_path(name)
-    env_file = os.path.join(stack_dir, '.env')
-
-    if not os.path.exists(env_file):
-        return jsonify({'content': '', 'exists': False})
-
+    service = current_app.extensions["stack_read_service"]
     try:
-        with open(env_file, 'r') as f:
-            content = f.read()
-        return jsonify({'content': content, 'exists': True})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify(service.env(name))
+    except StackArtifactReadError as exc:
+        return jsonify({'error': str(exc)}), 500
 
 
 @stack_manager.route('/api/stacks/<name>/env', methods=['POST'])
@@ -583,8 +535,8 @@ def api_list_backups(name):
     if not valid:
         return jsonify({'error': error}), 400
 
-    backups = list_backups(name)
-    return jsonify({'backups': backups})
+    service = current_app.extensions["stack_read_service"]
+    return jsonify({'backups': service.list_backups(name)})
 
 
 @stack_manager.route('/api/stacks/<name>/backups/<backup_name>', methods=['GET'])
@@ -598,16 +550,13 @@ def api_get_backup(name, backup_name):
     if not BACKUP_NAME_RE.match(backup_name):
         return jsonify({'error': 'Invalid backup name'}), 400
 
-    backup_path = os.path.join(BACKUP_DIR, name, backup_name)
-    if not os.path.exists(backup_path):
-        return jsonify({'error': 'Backup not found'}), 404
-
+    service = current_app.extensions["stack_read_service"]
     try:
-        with open(backup_path, 'r') as f:
-            content = f.read()
-        return jsonify({'content': content, 'filename': backup_name})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify(service.backup(name, backup_name))
+    except StackNotFoundError as exc:
+        return jsonify({'error': str(exc)}), 404
+    except StackArtifactReadError as exc:
+        return jsonify({'error': str(exc)}), 500
 
 
 @stack_manager.route('/api/stacks/<name>/restore', methods=['POST'])

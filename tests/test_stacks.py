@@ -1151,6 +1151,32 @@ class TestStackAdditionalRoutes:
         assert response.get_json() == {"status": "running"}
         service.status.assert_called_once_with("alpha")
 
+    def test_compose_route_delegates_to_service(self, authenticated_client):
+        service = MagicMock()
+        service.compose.return_value = {"content": "services: {}", "filename": "compose.yaml"}
+        authenticated_client.application.extensions["stack_read_service"] = service
+
+        response = authenticated_client.get("/api/stacks/alpha/compose")
+
+        assert response.status_code == 200
+        assert response.get_json()["filename"] == "compose.yaml"
+        service.compose.assert_called_once_with("alpha")
+
+    def test_backup_routes_delegate_to_service(self, authenticated_client):
+        backup_name = "compose-20240101010101.yaml"
+        service = MagicMock()
+        service.list_backups.return_value = [backup_name]
+        service.backup.return_value = {"content": "services: {}", "filename": backup_name}
+        authenticated_client.application.extensions["stack_read_service"] = service
+
+        list_response = authenticated_client.get("/api/stacks/alpha/backups")
+        get_response = authenticated_client.get(f"/api/stacks/alpha/backups/{backup_name}")
+
+        assert list_response.get_json() == {"backups": [backup_name]}
+        assert get_response.get_json()["filename"] == backup_name
+        service.list_backups.assert_called_once_with("alpha")
+        service.backup.assert_called_once_with("alpha", backup_name)
+
     def test_get_compose(self, authenticated_client, temp_stacks_dir):
         import stack_manager
         original_path = stack_manager.STACKS_PATH

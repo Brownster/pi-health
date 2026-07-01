@@ -5,9 +5,10 @@ from unittest.mock import Mock
 from stack_read_service import StackReadService
 
 
-def make_service(stacks_path, command_runner=None):
+def make_service(stacks_path, command_runner=None, backup_path=None):
     return StackReadService(
         stacks_path_provider=lambda: str(stacks_path),
+        backup_path_provider=lambda: str(backup_path or stacks_path / ".backups"),
         command_runner=command_runner or Mock(),
     )
 
@@ -105,3 +106,46 @@ def test_list_with_status_marks_snapshot_failure_unknown(tmp_path):
     assert error is None
     assert stacks[0]["status"] == "unknown"
     assert stacks[0]["status_error"] == "Docker unavailable"
+
+
+def test_stack_details_reads_compose_env_and_status(tmp_path):
+    stack_dir = write_compose(tmp_path, "alpha")
+    (stack_dir / ".env").write_text("KEY=value\n")
+    command_runner = Mock(
+        return_value=SimpleNamespace(returncode=0, stdout="", stderr="")
+    )
+    service = make_service(tmp_path, command_runner)
+
+    result = service.stack_details("alpha")
+
+    assert result["compose_content"] == "services: {}\n"
+    assert result["env_content"] == "KEY=value\n"
+    assert result["has_env"] is True
+    assert result["status"]["status"] == "stopped"
+
+
+def test_compose_and_missing_env_reads(tmp_path):
+    write_compose(tmp_path, "alpha", "docker-compose.yml")
+    service = make_service(tmp_path)
+
+    assert service.compose("alpha") == {
+        "content": "services: {}\n",
+        "filename": "docker-compose.yml",
+    }
+    assert service.env("alpha") == {"content": "", "exists": False}
+
+
+def test_backup_reads_filter_and_sort_names(tmp_path):
+    backup_root = tmp_path / "backups"
+    stack_backups = backup_root / "alpha"
+    stack_backups.mkdir(parents=True)
+    valid_names = ["compose-20240101010101.yaml", "compose-20240202020202.yml"]
+    for name in [*valid_names, "compose-latest.yaml", "notes.txt"]:
+        (stack_backups / name).write_text(name)
+    service = make_service(tmp_path, backup_path=backup_root)
+
+    backups = service.list_backups("alpha")
+    content = service.backup("alpha", valid_names[0])
+
+    assert backups == list(reversed(valid_names))
+    assert content == {"content": valid_names[0], "filename": valid_names[0]}
