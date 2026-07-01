@@ -32,6 +32,12 @@ from stack_read_service import (
     StackReadService,
     find_compose_file,
 )
+from stack_mutation_service import (
+    StackComposeValidationError,
+    StackMutationError,
+    StackMutationNotFoundError,
+    StackMutationService,
+)
 
 # Create Blueprint
 stack_manager = Blueprint('stack_manager', __name__)
@@ -176,6 +182,18 @@ def _stack_reads():
         if service is not None:
             return service
     return default_stack_read_service()
+
+
+def default_stack_mutation_service():
+    return StackMutationService(
+        stacks_path_provider=lambda: STACKS_PATH,
+        lock_provider=lambda name: stack_lock(name),
+        atomic_writer=lambda path, content, **kwargs: atomic_write_text(
+            path, content, **kwargs
+        ),
+        backup_writer=lambda name: backup_stack(name),
+        compose_validator=lambda content: validate_compose_yaml(content),
+    )
 
 
 def list_stacks():
@@ -471,21 +489,15 @@ def api_save_compose(name):
     if not data or 'content' not in data:
         return jsonify({'error': 'No content provided'}), 400
 
-    error = validate_compose_yaml(data['content'])
-    if error:
-        return jsonify({'error': f'Compose YAML invalid: {error}'}), 400
-
-    stack_dir = get_stack_path(name)
-    with stack_lock(name):
-        compose_file = find_compose_file(stack_dir)
-        if not compose_file:
-            return jsonify({'error': 'Stack not found'}), 404
-        try:
-            backup_stack(name)
-            atomic_write_text(compose_file, data['content'])
-            return jsonify({'status': 'saved'})
-        except Exception as e:
-            return jsonify({'error': str(e)}), 500
+    service = current_app.extensions["stack_mutation_service"]
+    try:
+        return jsonify(service.save_compose(name, data['content']))
+    except StackComposeValidationError as exc:
+        return jsonify({'error': str(exc)}), 400
+    except StackMutationNotFoundError as exc:
+        return jsonify({'error': str(exc)}), 404
+    except StackMutationError as exc:
+        return jsonify({'error': str(exc)}), 500
 
 
 @stack_manager.route('/api/stacks/<name>/env', methods=['GET'])
@@ -515,16 +527,13 @@ def api_save_env(name):
     if not data or 'content' not in data:
         return jsonify({'error': 'No content provided'}), 400
 
-    stack_dir = get_stack_path(name)
-    with stack_lock(name):
-        if not os.path.exists(stack_dir):
-            return jsonify({'error': 'Stack not found'}), 404
-        env_file = os.path.join(stack_dir, '.env')
-        try:
-            atomic_write_text(env_file, data['content'], mode=0o600)
-            return jsonify({'status': 'saved'})
-        except Exception as e:
-            return jsonify({'error': str(e)}), 500
+    service = current_app.extensions["stack_mutation_service"]
+    try:
+        return jsonify(service.save_env(name, data['content']))
+    except StackMutationNotFoundError as exc:
+        return jsonify({'error': str(exc)}), 404
+    except StackMutationError as exc:
+        return jsonify({'error': str(exc)}), 500
 
 
 @stack_manager.route('/api/stacks/<name>/backups', methods=['GET'])

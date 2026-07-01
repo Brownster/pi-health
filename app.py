@@ -21,7 +21,11 @@ import secrets
 import hashlib
 import getpass
 from urllib import request as urlrequest
-from stack_manager import default_stack_read_service, stack_manager
+from stack_manager import (
+    default_stack_mutation_service,
+    default_stack_read_service,
+    stack_manager,
+)
 from auth_utils import (
     LoginRateLimiter,
     get_csrf_token,
@@ -56,6 +60,7 @@ from ports import (
 )
 from system_service import SystemService
 from stack_read_service import StackReadService
+from stack_mutation_service import StackMutationService
 from container_inventory_service import ContainerInventoryService
 from container_operations_service import ContainerOperationsService
 from network_diagnostics_service import (
@@ -146,6 +151,7 @@ class AppDependencies:
     network_diagnostics_service: NetworkDiagnosticsService | None = None
     network_group_service: NetworkGroupService | None = None
     stack_read_service: StackReadService | None = None
+    stack_mutation_service: StackMutationService | None = None
 
 
 def _default_system_service():
@@ -802,6 +808,9 @@ def create_app(config=None, dependencies=None):
     )
     application.extensions["stack_read_service"] = (
         resolved.stack_read_service or default_stack_read_service()
+    )
+    application.extensions["stack_mutation_service"] = (
+        resolved.stack_mutation_service or default_stack_mutation_service()
     )
 
     application.register_blueprint(core_api)

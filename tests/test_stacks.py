@@ -1177,6 +1177,32 @@ class TestStackAdditionalRoutes:
         service.list_backups.assert_called_once_with("alpha")
         service.backup.assert_called_once_with("alpha", backup_name)
 
+    def test_compose_save_delegates_to_mutation_service(self, authenticated_client):
+        service = MagicMock()
+        service.save_compose.return_value = {"status": "saved"}
+        authenticated_client.application.extensions["stack_mutation_service"] = service
+
+        response = authenticated_client.post(
+            "/api/stacks/alpha/compose",
+            json={"content": "services: {}\n"},
+        )
+
+        assert response.status_code == 200
+        service.save_compose.assert_called_once_with("alpha", "services: {}\n")
+
+    def test_env_save_delegates_to_mutation_service(self, authenticated_client):
+        service = MagicMock()
+        service.save_env.return_value = {"status": "saved"}
+        authenticated_client.application.extensions["stack_mutation_service"] = service
+
+        response = authenticated_client.post(
+            "/api/stacks/alpha/env",
+            json={"content": "KEY=value\n"},
+        )
+
+        assert response.status_code == 200
+        service.save_env.assert_called_once_with("alpha", "KEY=value\n")
+
     def test_get_compose(self, authenticated_client, temp_stacks_dir):
         import stack_manager
         original_path = stack_manager.STACKS_PATH
