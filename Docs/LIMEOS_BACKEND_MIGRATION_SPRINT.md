@@ -81,7 +81,7 @@ Start implementation only when:
 |---|---|---|---|
 | BF-001 | Introduce an application factory | Entry gate | Complete (2026-06-30) |
 | BF-002 | Define service ports and shared adapters | BF-001 | Complete (2026-06-30) |
-| BF-003 | Extract domain services in bounded slices | BF-002 | In progress (stack file mutations complete) |
+| BF-003 | Extract domain services in bounded slices | BF-002 | In progress (stack backups complete) |
 | BF-004 | Characterize security and stateful behavior | BF-001 | Pending |
 | BF-005 | Sign off the core boundary and agent handoff | BF-003, BF-004 | Pending |
 
@@ -236,6 +236,15 @@ ordering. Environment files retain mode `0600`. Dynamic adapters keep the existi
 reentrancy, and replace-failure tests on the hardened implementations. Focused tests cover ordering,
 validation, missing stacks, backup failure, private env mode, and route delegation. Full
 `tox -e all`: Ruff clean; unit `766 passed, 1 skipped`; E2E `97 passed`.
+
+Stack backup and restore mutations completed 2026-07-01. `StackMutationService` now owns
+timestamped backup creation, ten-file retention, and restore. Restore checks backup existence,
+locks the stack, validates restored Compose content, creates a pre-restore backup through the
+reentrant lock path, and atomically replaces the live file. Compatibility callers resolve the
+same process-scoped service. Focused tests cover naming, retention, missing stacks and backups,
+validation-before-backup, restore ordering, and route delegation. Existing restore replacement
+failure tests remain green. Full `tox -e all`: Ruff clean; unit `772 passed, 1 skipped`; E2E `97
+passed`.
 
 ## BF-004 - Characterize security and stateful behavior
 
