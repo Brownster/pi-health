@@ -81,7 +81,7 @@ Start implementation only when:
 |---|---|---|---|
 | BF-001 | Introduce an application factory | Entry gate | Complete (2026-06-30) |
 | BF-002 | Define service ports and shared adapters | BF-001 | Complete (2026-06-30) |
-| BF-003 | Extract domain services in bounded slices | BF-002 | In progress (stack reads complete) |
+| BF-003 | Extract domain services in bounded slices | BF-002 | In progress (stack artifact reads complete) |
 | BF-004 | Characterize security and stateful behavior | BF-001 | Pending |
 | BF-005 | Sign off the core boundary and agent handoff | BF-003, BF-004 | Pending |
 
@@ -220,6 +220,14 @@ framework-neutral compose-file validator. The list, scan, and status routes now 
 factory-injected service. Focused tests cover sorting and conflicts, JSON and JSON-lines parsing,
 single-snapshot aggregation, snapshot failures, and route delegation. Full `tox -e all`: Ruff
 clean; unit `753 passed, 1 skipped`; E2E `97 passed`.
+
+Stack artifact reads completed 2026-07-01. `StackReadService` now also owns stack detail, Compose,
+environment, backup listing, and backup-content reads through dynamic stack and backup path
+providers. Framework-neutral exceptions distinguish missing artifacts from read failures, while
+Flask retains input validation and existing `404`/`500` mappings. Backup filtering still accepts
+only timestamped Compose filenames. Focused tests cover detail composition, missing environments,
+Compose filename selection, backup filtering and ordering, content reads, and route delegation.
+Full `tox -e all`: Ruff clean; unit `758 passed, 1 skipped`; E2E `97 passed`.
 
 ## BF-004 - Characterize security and stateful behavior
 
