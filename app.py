@@ -23,6 +23,7 @@ import getpass
 from urllib import request as urlrequest
 from stack_manager import (
     default_stack_mutation_service,
+    default_stack_operations_service,
     default_stack_read_service,
     stack_manager,
 )
@@ -61,6 +62,7 @@ from ports import (
 from system_service import SystemService
 from stack_read_service import StackReadService
 from stack_mutation_service import StackMutationService
+from stack_operations_service import StackOperationsService
 from container_inventory_service import ContainerInventoryService
 from container_operations_service import ContainerOperationsService
 from network_diagnostics_service import (
@@ -152,6 +154,7 @@ class AppDependencies:
     network_group_service: NetworkGroupService | None = None
     stack_read_service: StackReadService | None = None
     stack_mutation_service: StackMutationService | None = None
+    stack_operations_service: StackOperationsService | None = None
 
 
 def _default_system_service():
@@ -811,6 +814,9 @@ def create_app(config=None, dependencies=None):
     )
     application.extensions["stack_mutation_service"] = (
         resolved.stack_mutation_service or default_stack_mutation_service()
+    )
+    application.extensions["stack_operations_service"] = (
+        resolved.stack_operations_service or default_stack_operations_service()
     )
 
     application.register_blueprint(core_api)

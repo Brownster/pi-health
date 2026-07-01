@@ -11,7 +11,7 @@ import shutil
 import subprocess
 import threading
 import time
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, call, patch
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -1251,11 +1251,10 @@ class TestStackAdditionalRoutes:
         assert data["status"] == "running"
         assert data["container_count"] == 2
 
-    def test_stack_restart_and_pull(self, authenticated_client, monkeypatch):
-        monkeypatch.setattr(
-            "stack_manager.run_compose_command",
-            lambda _name, _command: ({"success": True, "returncode": 0}, None),
-        )
+    def test_stack_restart_and_pull(self, authenticated_client):
+        service = MagicMock()
+        service.run.return_value = ({"success": True, "returncode": 0}, None)
+        authenticated_client.application.extensions["stack_operations_service"] = service
 
         restart_response = authenticated_client.post("/api/stacks/alpha/restart")
         assert restart_response.status_code == 200
@@ -1264,28 +1263,20 @@ class TestStackAdditionalRoutes:
         pull_response = authenticated_client.post("/api/stacks/alpha/pull")
         assert pull_response.status_code == 200
         assert pull_response.get_json()["success"] is True
+        assert service.run.call_args_list == [
+            call("alpha", "restart"),
+            call("alpha", "pull"),
+        ]
 
-    def test_stack_logs(self, authenticated_client, temp_stacks_dir, monkeypatch):
-        import stack_manager
-        original_path = stack_manager.STACKS_PATH
-        stack_manager.STACKS_PATH = temp_stacks_dir
+    def test_stack_logs(self, authenticated_client):
+        service = MagicMock()
+        service.logs.return_value = {"logs": "log line\n", "returncode": 0}
+        authenticated_client.application.extensions["stack_operations_service"] = service
 
-        stack_dir = os.path.join(temp_stacks_dir, "alpha")
-        os.makedirs(stack_dir, exist_ok=True)
-        with open(os.path.join(stack_dir, "compose.yaml"), "w") as f:
-            f.write("services: {}\n")
-
-        mock_run = MagicMock(returncode=0, stdout="log line\n", stderr="")
-        monkeypatch.setattr("stack_manager.subprocess.run", lambda *args, **kwargs: mock_run)
-
-        try:
-            response = authenticated_client.get("/api/stacks/alpha/logs?tail=20&service=web")
-            assert response.status_code == 200
-            data = response.get_json()
-            assert "log line" in data["logs"]
-            assert data["returncode"] == 0
-        finally:
-            stack_manager.STACKS_PATH = original_path
+        response = authenticated_client.get("/api/stacks/alpha/logs?tail=20&service=web")
+        assert response.status_code == 200
+        assert response.get_json() == {"logs": "log line\n", "returncode": 0}
+        service.logs.assert_called_once_with("alpha", tail="20", service="web")
 
     def test_stack_backups_and_restore(self, authenticated_client, temp_stacks_dir, monkeypatch):
         import stack_manager

@@ -38,6 +38,12 @@ from stack_mutation_service import (
     StackMutationNotFoundError,
     StackMutationService,
 )
+from stack_operations_service import (
+    StackOperationError,
+    StackOperationNotFoundError,
+    StackOperationsService,
+    compose_up_args,
+)
 
 # Create Blueprint
 stack_manager = Blueprint('stack_manager', __name__)
@@ -206,6 +212,23 @@ def _stack_mutations():
     return default_stack_mutation_service()
 
 
+def default_stack_operations_service():
+    return StackOperationsService(
+        stacks_path_provider=lambda: STACKS_PATH,
+        lock_provider=lambda name: stack_lock(name),
+        command_runner=lambda command, **kwargs: subprocess.run(command, **kwargs),
+        service_name_validator=lambda name: validate_stack_name(name),
+    )
+
+
+def _stack_operations():
+    if has_app_context():
+        service = current_app.extensions.get("stack_operations_service")
+        if service is not None:
+            return service
+    return default_stack_operations_service()
+
+
 def list_stacks():
     """List all stacks in the stacks directory."""
     return _stack_reads().list_stacks()
@@ -242,68 +265,14 @@ def validate_compose_yaml(content):
 
 def _compose_up_args(detach=True):
     """Build project reconciliation args for the canonical stack file."""
-    args = ['up']
-    if detach:
-        args.append('-d')
-    args.append('--remove-orphans')
-    return args
+    return compose_up_args(detach)
 
 
 def run_compose_command(stack_name, command, detach=True, service=None):
     """Run a docker compose command for a stack."""
-    with stack_lock(stack_name):
-        stack_dir = get_stack_path(stack_name)
-        compose_file = find_compose_file(stack_dir)
-
-        if not compose_file:
-            return None, "Stack not found"
-
-        cmd = ['docker', 'compose', '-f', os.path.basename(compose_file)]
-
-        if service:
-            valid_service, service_error = validate_stack_name(service)
-            if not valid_service:
-                return None, f"Invalid service name: {service_error}"
-            if command != 'stop':
-                return None, "Service targeting is only supported for stop"
-
-        if command == 'up':
-            cmd.extend(_compose_up_args(detach))
-        elif command == 'down':
-            cmd.append('down')
-        elif command == 'restart':
-            cmd.append('restart')
-        elif command == 'pull':
-            cmd.append('pull')
-        elif command == 'stop':
-            cmd.append('stop')
-            if service:
-                cmd.append(service)
-        elif command == 'start':
-            cmd.append('start')
-        else:
-            return None, f"Unknown command: {command}"
-
-        try:
-            result = subprocess.run(
-                cmd,
-                cwd=stack_dir,
-                capture_output=True,
-                text=True,
-                timeout=300  # 5 minute timeout for pull operations
-            )
-
-            return {
-                'success': result.returncode == 0,
-                'stdout': result.stdout,
-                'stderr': result.stderr,
-                'returncode': result.returncode
-            }, None
-
-        except subprocess.TimeoutExpired:
-            return None, "Command timed out"
-        except Exception as e:
-            return None, str(e)
+    return _stack_operations().run(
+        stack_name, command, detach=detach, service=service
+    )
 
 
 # ============================================================================
@@ -607,7 +576,7 @@ def api_stack_up(name):
     if not valid:
         return jsonify({'error': error}), 400
 
-    result, error = run_compose_command(name, 'up')
+    result, error = current_app.extensions["stack_operations_service"].run(name, 'up')
     if error:
         return jsonify({'error': error}), 500
 
@@ -622,7 +591,7 @@ def api_stack_down(name):
     if not valid:
         return jsonify({'error': error}), 400
 
-    result, error = run_compose_command(name, 'down')
+    result, error = current_app.extensions["stack_operations_service"].run(name, 'down')
     if error:
         return jsonify({'error': error}), 500
 
@@ -637,7 +606,9 @@ def api_stack_restart(name):
     if not valid:
         return jsonify({'error': error}), 400
 
-    result, error = run_compose_command(name, 'restart')
+    result, error = current_app.extensions["stack_operations_service"].run(
+        name, 'restart'
+    )
     if error:
         return jsonify({'error': error}), 500
 
@@ -652,7 +623,7 @@ def api_stack_pull(name):
     if not valid:
         return jsonify({'error': error}), 400
 
-    result, error = run_compose_command(name, 'pull')
+    result, error = current_app.extensions["stack_operations_service"].run(name, 'pull')
     if error:
         return jsonify({'error': error}), 500
 
@@ -667,35 +638,15 @@ def api_stack_logs(name):
     if not valid:
         return jsonify({'error': error}), 400
 
-    stack_dir = get_stack_path(name)
-    compose_file = find_compose_file(stack_dir)
-
-    if not compose_file:
-        return jsonify({'error': 'Stack not found'}), 404
-
     tail = request.args.get('tail', '100')
     service = request.args.get('service', '')
-
-    cmd = ['docker', 'compose', '-f', os.path.basename(compose_file), 'logs', '--tail', tail]
-    if service:
-        cmd.append(service)
-
+    operations = current_app.extensions["stack_operations_service"]
     try:
-        result = subprocess.run(
-            cmd,
-            cwd=stack_dir,
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
-        return jsonify({
-            'logs': result.stdout + result.stderr,
-            'returncode': result.returncode
-        })
-    except subprocess.TimeoutExpired:
-        return jsonify({'error': 'Timeout getting logs'}), 500
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify(operations.logs(name, tail=tail, service=service))
+    except StackOperationNotFoundError as exc:
+        return jsonify({'error': str(exc)}), 404
+    except StackOperationError as exc:
+        return jsonify({'error': str(exc)}), 500
 
 
 # ============================================================================

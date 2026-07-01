@@ -1,0 +1,146 @@
+"""Framework-neutral synchronous stack operations."""
+
+from __future__ import annotations
+
+import os
+import subprocess
+from collections.abc import Callable
+from contextlib import AbstractContextManager
+from typing import Any
+
+from stack_read_service import find_compose_file
+
+
+class StackOperationNotFoundError(Exception):
+    """Raised when a stack has no compose file."""
+
+
+class StackOperationError(Exception):
+    """Raised when a stack operation cannot be completed."""
+
+
+def compose_up_args(detach: bool = True) -> list[str]:
+    """Build project reconciliation arguments for compose up."""
+    args = ["up"]
+    if detach:
+        args.append("-d")
+    args.append("--remove-orphans")
+    return args
+
+
+class StackOperationsService:
+    """Run synchronous compose commands with explicit infrastructure adapters."""
+
+    def __init__(
+        self,
+        *,
+        stacks_path_provider: Callable[[], str],
+        lock_provider: Callable[[str], AbstractContextManager[Any]],
+        command_runner: Callable[..., Any],
+        service_name_validator: Callable[[str], tuple[bool, str | None]],
+    ) -> None:
+        self._stacks_path_provider = stacks_path_provider
+        self._lock_provider = lock_provider
+        self._command_runner = command_runner
+        self._service_name_validator = service_name_validator
+
+    def run(
+        self,
+        stack_name: str,
+        command: str,
+        *,
+        detach: bool = True,
+        service: str | None = None,
+    ) -> tuple[dict[str, Any] | None, str | None]:
+        """Run a lifecycle command while holding the per-stack lock."""
+        with self._lock_provider(stack_name):
+            stack_dir = os.path.join(self._stacks_path_provider(), stack_name)
+            compose_file = find_compose_file(stack_dir)
+            if not compose_file:
+                return None, "Stack not found"
+
+            cmd = ["docker", "compose", "-f", os.path.basename(compose_file)]
+            if service:
+                valid, error = self._service_name_validator(service)
+                if not valid:
+                    return None, f"Invalid service name: {error}"
+                if command != "stop":
+                    return None, "Service targeting is only supported for stop"
+
+            command_args = self._command_args(command, detach)
+            if command_args is None:
+                return None, f"Unknown command: {command}"
+            cmd.extend(command_args)
+            if service:
+                cmd.append(service)
+
+            try:
+                result = self._command_runner(
+                    cmd,
+                    cwd=stack_dir,
+                    capture_output=True,
+                    text=True,
+                    timeout=300,
+                )
+            except subprocess.TimeoutExpired:
+                return None, "Command timed out"
+            except Exception as exc:
+                return None, str(exc)
+
+            return {
+                "success": result.returncode == 0,
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+                "returncode": result.returncode,
+            }, None
+
+    def logs(
+        self,
+        stack_name: str,
+        *,
+        tail: str = "100",
+        service: str = "",
+    ) -> dict[str, Any]:
+        """Read compose logs without taking the lifecycle mutation lock."""
+        stack_dir = os.path.join(self._stacks_path_provider(), stack_name)
+        compose_file = find_compose_file(stack_dir)
+        if not compose_file:
+            raise StackOperationNotFoundError("Stack not found")
+
+        cmd = [
+            "docker",
+            "compose",
+            "-f",
+            os.path.basename(compose_file),
+            "logs",
+            "--tail",
+            tail,
+        ]
+        if service:
+            cmd.append(service)
+
+        try:
+            result = self._command_runner(
+                cmd,
+                cwd=stack_dir,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise StackOperationError("Timeout getting logs") from exc
+        except Exception as exc:
+            raise StackOperationError(str(exc)) from exc
+
+        return {
+            "logs": result.stdout + result.stderr,
+            "returncode": result.returncode,
+        }
+
+    @staticmethod
+    def _command_args(command: str, detach: bool) -> list[str] | None:
+        if command == "up":
+            return compose_up_args(detach)
+        if command in {"down", "restart", "pull", "stop", "start"}:
+            return [command]
+        return None
