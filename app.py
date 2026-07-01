@@ -42,7 +42,8 @@ from storage_plugins.registry import init_plugins
 from pi_monitor import get_pi_metrics
 from update_scheduler import update_scheduler, init_scheduler
 from backup_scheduler import backup_scheduler, init_backup_scheduler
-from disk_manager import disk_manager
+from disk_manager import default_disk_inventory_service, disk_manager
+from disk_inventory_service import DiskInventoryService
 from setup_manager import setup_manager
 from helper_client import helper_call, HelperError
 from operation_manager import OperationRegistry
@@ -155,6 +156,7 @@ class AppDependencies:
     stack_read_service: StackReadService | None = None
     stack_mutation_service: StackMutationService | None = None
     stack_operations_service: StackOperationsService | None = None
+    disk_inventory_service: DiskInventoryService | None = None
 
 
 def _default_system_service():
@@ -817,6 +819,9 @@ def create_app(config=None, dependencies=None):
     )
     application.extensions["stack_operations_service"] = (
         resolved.stack_operations_service or default_stack_operations_service()
+    )
+    application.extensions["disk_inventory_service"] = (
+        resolved.disk_inventory_service or default_disk_inventory_service()
     )
 
     application.register_blueprint(core_api)

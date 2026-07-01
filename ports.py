@@ -29,15 +29,21 @@ monotonic_clock: Clock = time.monotonic
 @runtime_checkable
 class HelperPort(Protocol):
     def call(self, command: str, params: dict | None = None) -> dict: ...
+    def available(self) -> bool: ...
 
 
 class HelperClientAdapter:
-    """Wraps helper_client.helper_call; preserves its framing, timeouts, and HelperError."""
+    """Wraps helper_client; preserves its framing, timeouts, and HelperError."""
 
     def call(self, command: str, params: dict | None = None) -> dict:
         from helper_client import helper_call
 
         return helper_call(command, params)
+
+    def available(self) -> bool:
+        from helper_client import helper_available
+
+        return helper_available()
 
 
 # --- Docker ------------------------------------------------------------------

@@ -7,9 +7,11 @@ Communicates with the privileged helper service over Unix socket.
 
 import os
 import json
-from flask import Blueprint, current_app, jsonify, request
+from flask import Blueprint, current_app, has_app_context, jsonify, request
 from auth_utils import login_required
 from helper_client import helper_call, helper_available, HelperError, HELPER_SOCKET
+from disk_inventory_service import DiskInventoryService
+from ports import HelperClientAdapter
 from helper_templates import render_startup_files
 from fstab_presets import FSTAB_PRESETS, normalize_fstype
 from mount_dependencies import (
@@ -123,74 +125,21 @@ def update_startup_service(paths):
     return {'success': True}
 
 
+def default_disk_inventory_service():
+    return DiskInventoryService(helper=HelperClientAdapter())
+
+
+def _disk_inventory():
+    if has_app_context():
+        service = current_app.extensions.get("disk_inventory_service")
+        if service is not None:
+            return service
+    return default_disk_inventory_service()
+
+
 def get_disk_inventory():
-    """
-    Get complete disk inventory with mount status.
-
-    Returns a structured view of all block devices with:
-    - Device info (name, size, model, serial)
-    - Partition info (uuid, fstype)
-    - Mount status (mounted, mountpoint)
-    - Usage stats (for mounted partitions)
-    """
-    result = {
-        'disks': [],
-        'helper_available': helper_available()
-    }
-
-    if not result['helper_available']:
-        return result
-
-    # Get block devices
-    lsblk_result = helper_call('lsblk')
-    if not lsblk_result.get('success'):
-        result['error'] = lsblk_result.get('error', 'Failed to get block devices')
-        return result
-
-    # Get blkid info for UUIDs
-    blkid_result = helper_call('blkid')
-    blkid_map = {}
-    if blkid_result.get('success'):
-        for dev in blkid_result.get('data', []):
-            devname = dev.get('DEVNAME', '')
-            if devname:
-                blkid_map[devname] = dev
-
-    # Get current mounts
-    mounts_result = helper_call('mounts_read')
-    mounts_map = {}
-    if mounts_result.get('success'):
-        for mount in mounts_result.get('data', []):
-            mounts_map[mount['device']] = mount
-
-    # Get fstab entries
-    fstab_result = helper_call('fstab_read')
-    fstab_map = {}
-    fstab_uuid_map = {}
-    if fstab_result.get('success'):
-        for entry in fstab_result.get('data', []):
-            # Map by mountpoint for easy lookup
-            fstab_map[entry['mountpoint']] = entry
-            device = entry.get('device', '')
-            if device.startswith('UUID='):
-                fstab_uuid_map[device.replace('UUID=', '')] = entry
-
-    # Get disk usage
-    df_result = helper_call('df')
-    df_map = {}
-    if df_result.get('success'):
-        for entry in df_result.get('data', []):
-            df_map[entry.get('target', '')] = entry
-
-    # Process lsblk output
-    blockdevices = lsblk_result.get('data', {}).get('blockdevices', [])
-
-    for device in blockdevices:
-        disk = _process_device(device, blkid_map, mounts_map, fstab_map, fstab_uuid_map, df_map)
-        if disk:
-            result['disks'].append(disk)
-
-    return result
+    """Get complete disk inventory with mount status via the inventory service."""
+    return _disk_inventory().inventory()
 
 
 @disk_manager.route('/api/disks/seedbox', methods=['GET'])
@@ -262,71 +211,6 @@ def api_seedbox_set():
     }
     save_seedbox_config(config)
     return jsonify({'status': 'ok', 'config': config, 'mounted': _seedbox_is_mounted()})
-
-
-def _process_device(device, blkid_map, mounts_map, fstab_map, fstab_uuid_map, df_map, parent=None):
-    """Process a block device and its children."""
-    name = device.get('name', '')
-    dev_path = f"/dev/{name}"
-    dev_type = device.get('type', '')
-
-    # Skip loop devices and other virtual devices
-    if dev_type in ['loop', 'rom']:
-        return None
-
-    disk_info = {
-        'name': name,
-        'path': dev_path,
-        'type': dev_type,
-        'size': device.get('size', ''),
-        'model': device.get('model', ''),
-        'serial': device.get('serial', ''),
-        'transport': device.get('tran', ''),
-        'hotplug': device.get('hotplug', False),
-        'fstype': device.get('fstype', ''),
-        'mountpoint': device.get('mountpoint', ''),
-        'partitions': []
-    }
-
-    # Add blkid info
-    if dev_path in blkid_map:
-        blk = blkid_map[dev_path]
-        disk_info['uuid'] = blk.get('UUID', '')
-        disk_info['label'] = blk.get('LABEL', '')
-        if not disk_info['fstype']:
-            disk_info['fstype'] = blk.get('TYPE', '')
-
-    # Check mount status
-    disk_info['mounted'] = dev_path in mounts_map
-    if disk_info['mounted']:
-        mount_info = mounts_map[dev_path]
-        disk_info['mountpoint'] = mount_info['mountpoint']
-        disk_info['mount_options'] = mount_info['options']
-
-    # Check fstab status
-    mountpoint = disk_info.get('mountpoint', '')
-    disk_info['in_fstab'] = mountpoint in fstab_map
-    if not disk_info['in_fstab'] and disk_info.get('uuid'):
-        disk_info['in_fstab'] = disk_info['uuid'] in fstab_uuid_map
-
-    # Add usage info if mounted
-    if disk_info.get('mountpoint') and disk_info['mountpoint'] in df_map:
-        usage = df_map[disk_info['mountpoint']]
-        disk_info['usage'] = {
-            'total': int(usage.get('size', 0)),
-            'used': int(usage.get('used', 0)),
-            'available': int(usage.get('avail', 0)),
-            'percent': usage.get('pcent', '0%').rstrip('%')
-        }
-
-    # Process children (partitions)
-    children = device.get('children', [])
-    for child in children:
-        part = _process_device(child, blkid_map, mounts_map, fstab_map, fstab_uuid_map, df_map, parent=name)
-        if part:
-            disk_info['partitions'].append(part)
-
-    return disk_info
 
 
 # =============================================================================

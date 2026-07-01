@@ -627,17 +627,17 @@ class TestHelperFunctions:
             assert disk_manager._seedbox_is_mounted() is False
 
     def test_process_device_filters_loop(self):
-        """Test _process_device skips loop devices."""
-        import disk_manager
-        result = disk_manager._process_device(
+        """Test process_device skips loop devices."""
+        from disk_inventory_service import process_device
+        result = process_device(
             {'name': 'loop0', 'type': 'loop'},
             {}, {}, {}, {}, {}
         )
         assert result is None
 
     def test_process_device_usage_from_df(self):
-        """Test _process_device includes usage when mounted."""
-        import disk_manager
+        """Test process_device includes usage when mounted."""
+        from disk_inventory_service import process_device
         device = {
             'name': 'sda1',
             'type': 'part',
@@ -648,13 +648,13 @@ class TestHelperFunctions:
         }
         mounts = {'/dev/sda1': {'mountpoint': '/mnt/storage', 'options': 'rw'}}
         df_map = {'/mnt/storage': {'size': '100', 'used': '50', 'avail': '50', 'pcent': '50%'}}
-        result = disk_manager._process_device(device, {}, mounts, {}, {}, df_map)
+        result = process_device(device, {}, mounts, {}, {}, df_map)
         assert result['usage']['percent'] == '50'
 
     def test_get_disk_inventory_helper_unavailable(self):
         """Test get_disk_inventory returns helper_available False."""
         import disk_manager
-        with patch('disk_manager.helper_available', return_value=False):
+        with patch('helper_client.helper_available', return_value=False):
             result = disk_manager.get_disk_inventory()
         assert result['helper_available'] is False
 
