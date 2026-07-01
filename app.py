@@ -71,8 +71,8 @@ from network_diagnostics_service import (
     run_container_fallback_probe as execute_container_fallback_probe,
     socket_probe as execute_socket_probe,
 )
+from network_group_service import NetworkGroupService
 from container_helpers import (
-    _compose_label,
     analyze_network_topology,
     calculate_container_cpu_percent,
     calculate_container_memory_stats,
@@ -143,6 +143,7 @@ class AppDependencies:
     container_inventory_service: ContainerInventoryService | None = None
     container_operations_service: ContainerOperationsService | None = None
     network_diagnostics_service: NetworkDiagnosticsService | None = None
+    network_group_service: NetworkGroupService | None = None
 
 
 def _default_system_service():
@@ -194,6 +195,22 @@ def _network_diagnostics():
     if service is not None:
         return service
     return _default_network_diagnostics_service(DockerClientAdapter(docker_client))
+
+
+def _default_network_group_service(docker_port):
+    return NetworkGroupService(
+        docker=docker_port,
+        command_runner=subprocess.run,
+        host_ip_reader=get_host_public_ip,
+        container_ip_reader=get_container_public_ip,
+    )
+
+
+def _network_groups():
+    service = _extension("network_group_service")
+    if service is not None:
+        return service
+    return _default_network_group_service(DockerClientAdapter(docker_client))
 
 
 def _default_dependencies():
@@ -382,60 +399,7 @@ def list_network_groups(probe=False):
     """Return VPN-style network groups: a provider container plus the containers
     sharing its namespace, with health and orphan status. When probe=True, also
     compare the provider's public IP against the host's to detect a VPN leak."""
-    if not _docker_is_available():
-        return {"docker_available": False, "groups": [], "orphans": []}
-
-    try:
-        containers = _docker_client().containers.list(all=True)
-    except Exception as exc:
-        return {"docker_available": True, "error": str(exc), "groups": [], "orphans": []}
-
-    info, groups = analyze_network_topology(containers)
-    by_id = {c.id: c for c in containers}
-    by_name = {c.name: c for c in containers}
-    host_ip = get_host_public_ip() if probe else None
-
-    group_list = []
-    for provider_name, grp in groups.items():
-        provider = by_name.get(provider_name)
-        orphaned = sorted(grp['orphaned'])
-        group = {
-            'provider': provider_name,
-            'provider_id': provider.id[:12] if provider else None,
-            'provider_status': provider.status if provider else 'missing',
-            'provider_health': get_container_health(provider) if provider else None,
-            'members': sorted(grp['members']),
-            'member_count': len(grp['members']),
-            'orphaned_members': orphaned,
-            'status': 'ok',
-        }
-        if orphaned or provider is None or provider.status != 'running':
-            group['status'] = 'degraded'
-        elif group['provider_health'] == 'unhealthy':
-            group['status'] = 'provider_unhealthy'
-
-        if probe and provider is not None and provider.status == 'running':
-            provider_ip = get_container_public_ip(provider)
-            group['provider_public_ip'] = provider_ip
-            group['host_public_ip'] = host_ip
-            group['vpn_leak'] = bool(provider_ip and host_ip and provider_ip == host_ip)
-
-        group_list.append(group)
-
-    orphans = [
-        {
-            'name': by_id[cid].name,
-            'id': by_id[cid].id[:12],
-            'status': by_id[cid].status,
-            'provider': entry.get('provider'),
-        }
-        for cid, entry in info.items()
-        if entry.get('status') == 'orphaned' and cid in by_id
-    ]
-
-    group_list.sort(key=lambda g: g['provider'] or '')
-    orphans.sort(key=lambda o: o['name'])
-    return {"docker_available": True, "groups": group_list, "orphans": orphans}
+    return _network_groups().list_groups(probe=probe)
 
 
 def recreate_network_group(provider_name):
@@ -444,59 +408,10 @@ def recreate_network_group(provider_name):
 
     This is the one-click remedy for the orphaned-namespace failure: doing the
     services individually (or `docker start`) re-pins them to the dead namespace."""
-    if not _docker_is_available():
+    try:
+        return _network_groups().recreate(provider_name)
+    except DockerUnavailableError:
         return {"error": "Docker is not available"}
-
-    try:
-        provider = _docker_client().containers.get(provider_name)
-    except Exception as exc:
-        return {"error": f"Provider container '{provider_name}' not found: {exc}"}
-
-    config_files = _compose_label(provider, 'com.docker.compose.project.config_files')
-    working_dir = _compose_label(provider, 'com.docker.compose.project.working_dir')
-    if not config_files or not working_dir:
-        return {"error": "Provider is not managed by docker compose; cannot safely recreate the group."}
-
-    try:
-        containers = _docker_client().containers.list(all=True)
-    except Exception as exc:
-        return {"error": str(exc)}
-    by_name = {c.name: c for c in containers}
-    _, groups = analyze_network_topology(containers)
-    member_names = sorted(groups.get(provider_name, {}).get('members', set()))
-
-    # Resolve container names to compose service names (they can differ), provider first.
-    ordered_services = []
-    seen = set()
-    for name in [provider_name] + member_names:
-        container = by_name.get(name)
-        service = _compose_label(container, 'com.docker.compose.service') if container else None
-        service = service or name
-        if service not in seen:
-            seen.add(service)
-            ordered_services.append(service)
-
-    cmd = ["docker", "compose"]
-    for path in config_files.split(','):
-        path = path.strip()
-        if path:
-            cmd += ["-f", path]
-    cmd += ["--project-directory", working_dir, "up", "-d"] + ordered_services
-
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
-    except Exception as exc:
-        return {"error": str(exc)}
-
-    ok = result.returncode == 0
-    return {
-        "status": "recreated" if ok else "error",
-        "provider": provider_name,
-        "services": ordered_services,
-        "returncode": result.returncode,
-        "stdout": (result.stdout or "")[-2000:],
-        "stderr": (result.stderr or "")[-2000:],
-    }
 
 
 def control_container(container_id, action):
@@ -785,16 +700,19 @@ def api_network_groups():
 
     Pass ?probe=true to also compare provider vs host public IP (VPN leak check)."""
     probe = request.args.get('probe', 'false').lower() == 'true'
-    return jsonify(list_network_groups(probe=probe))
+    service = current_app.extensions["network_group_service"]
+    return jsonify(service.list_groups(probe=probe))
 
 
 @core_api.route('/api/network-groups/<provider>/recreate', methods=['POST'])
 @login_required
 def api_recreate_network_group(provider):
     """API endpoint to recreate a provider and its namespace-sharing members together."""
-    if not _docker_is_available():
-        return jsonify({"error": "Docker is not available"}), 503
-    return jsonify(recreate_network_group(provider))
+    service = current_app.extensions["network_group_service"]
+    try:
+        return jsonify(service.recreate(provider))
+    except DockerUnavailableError as exc:
+        return jsonify({"error": str(exc)}), 503
 
 
 @core_api.route('/api/pihealth/update/config', methods=['GET'])
@@ -875,6 +793,10 @@ def create_app(config=None, dependencies=None):
     application.extensions["network_diagnostics_service"] = (
         resolved.network_diagnostics_service
         or _default_network_diagnostics_service(application.extensions["docker"])
+    )
+    application.extensions["network_group_service"] = (
+        resolved.network_group_service
+        or _default_network_group_service(application.extensions["docker"])
     )
 
     application.register_blueprint(core_api)

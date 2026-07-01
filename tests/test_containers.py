@@ -691,14 +691,20 @@ class TestNetworkGroupsAPI:
     def test_network_groups_requires_auth(self, client):
         assert client.get('/api/network-groups').status_code == 401
 
-    def test_network_groups_format(self, authenticated_client, monkeypatch):
-        monkeypatch.setattr(
-            'app.list_network_groups',
-            lambda probe=False: {'docker_available': True, 'groups': [], 'orphans': []},
-        )
-        response = authenticated_client.get('/api/network-groups')
+    def test_network_groups_delegates_probe_to_service(self, authenticated_client):
+        service = Mock()
+        service.list_groups.return_value = {
+            'docker_available': True,
+            'groups': [],
+            'orphans': [],
+        }
+        authenticated_client.application.extensions["network_group_service"] = service
+
+        response = authenticated_client.get('/api/network-groups?probe=true')
+
         assert response.status_code == 200
         assert 'groups' in json.loads(response.data)
+        service.list_groups.assert_called_once_with(probe=True)
 
     def test_recreate_requires_auth(self, client):
         assert client.post('/api/network-groups/vpn/recreate').status_code == 401
@@ -708,15 +714,16 @@ class TestNetworkGroupsAPI:
         response = authenticated_client.post('/api/network-groups/vpn/recreate')
         assert response.status_code == 503
 
-    def test_recreate_delegates(self, authenticated_client, monkeypatch):
-        authenticated_client.application.extensions["docker_client"] = Mock()
-        monkeypatch.setattr(
-            'app.recreate_network_group',
-            lambda provider: {'status': 'recreated', 'provider': provider},
-        )
+    def test_recreate_delegates(self, authenticated_client):
+        service = Mock()
+        service.recreate.return_value = {'status': 'recreated', 'provider': 'vpn'}
+        authenticated_client.application.extensions["network_group_service"] = service
+
         response = authenticated_client.post('/api/network-groups/vpn/recreate')
+
         assert response.status_code == 200
         assert json.loads(response.data)['provider'] == 'vpn'
+        service.recreate.assert_called_once_with('vpn')
 
     def test_health_route_docker_unavailable(self, authenticated_client, monkeypatch):
         monkeypatch.setattr('app.docker_available', False)
