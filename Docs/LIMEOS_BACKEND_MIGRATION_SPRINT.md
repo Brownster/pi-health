@@ -81,7 +81,7 @@ Start implementation only when:
 |---|---|---|---|
 | BF-001 | Introduce an application factory | Entry gate | Complete (2026-06-30) |
 | BF-002 | Define service ports and shared adapters | BF-001 | Complete (2026-06-30) |
-| BF-003 | Extract domain services in bounded slices | BF-002 | In progress (stack artifact reads complete) |
+| BF-003 | Extract domain services in bounded slices | BF-002 | In progress (stack file mutations complete) |
 | BF-004 | Characterize security and stateful behavior | BF-001 | Pending |
 | BF-005 | Sign off the core boundary and agent handoff | BF-003, BF-004 | Pending |
 
@@ -228,6 +228,14 @@ Flask retains input validation and existing `404`/`500` mappings. Backup filteri
 only timestamped Compose filenames. Focused tests cover detail composition, missing environments,
 Compose filename selection, backup filtering and ordering, content reads, and route delegation.
 Full `tox -e all`: Ruff clean; unit `758 passed, 1 skipped`; E2E `97 passed`.
+
+Stack file mutations completed 2026-07-01. `StackMutationService` owns Compose and `.env` saves
+through injected path, lock, backup, validation, and atomic-write adapters. Compose validation
+runs before lock acquisition; successful saves preserve lock, backup, then atomic replacement
+ordering. Environment files retain mode `0600`. Dynamic adapters keep the existing process-lock,
+reentrancy, and replace-failure tests on the hardened implementations. Focused tests cover ordering,
+validation, missing stacks, backup failure, private env mode, and route delegation. Full
+`tox -e all`: Ruff clean; unit `766 passed, 1 skipped`; E2E `97 passed`.
 
 ## BF-004 - Characterize security and stateful behavior
 
