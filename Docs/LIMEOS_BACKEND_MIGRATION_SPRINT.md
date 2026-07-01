@@ -81,7 +81,7 @@ Start implementation only when:
 |---|---|---|---|
 | BF-001 | Introduce an application factory | Entry gate | Complete (2026-06-30) |
 | BF-002 | Define service ports and shared adapters | BF-001 | Complete (2026-06-30) |
-| BF-003 | Extract domain services in bounded slices | BF-002 | In progress (stack domain complete) |
+| BF-003 | Extract domain services in bounded slices | BF-002 | In progress (disk inventory reads complete) |
 | BF-004 | Characterize security and stateful behavior | BF-001 | Pending |
 | BF-005 | Sign off the core boundary and agent handoff | BF-003, BF-004 | Pending |
 
@@ -275,6 +275,18 @@ the existing process-scoped adapters. Focused tests cover validation timing, pri
 files, existing stacks, rollback cleanup, shutdown ordering and failure, force confirmation,
 forced deletion, and route delegation. Full `tox -e all`: Ruff clean; unit `792 passed, 1 skipped`;
 E2E `97 passed`.
+
+Disk inventory reads completed 2026-07-01. `DiskInventoryService` owns block-device inventory
+assembly from the privileged helper's `lsblk`, `blkid`, `mounts_read`, `fstab_read`, and `df`
+reads. The `HelperPort` gained a neutral `available()` method so the service checks helper
+readiness without importing the helper module; the pure `process_device` transform (loop/rom
+skipping, blkid enrichment, mount/fstab correlation, usage math, recursive partitions) moved into
+the service module. `/api/disks` and the `get_disk_inventory` compatibility wrapper now resolve
+the factory-injected service. Mount, unmount, media-path, seedbox, startup-service, and SMART
+routes remain on the existing helper client as later bounded slices. Focused tests cover
+unavailable-helper short-circuit, `lsblk` failure surfacing, full multi-read composition, virtual
+device filtering, and fstab-by-UUID correlation for unmounted devices. Full `tox -e all`: Ruff
+clean; unit `797 passed, 1 skipped`; E2E `97 passed`.
 
 ## BF-004 - Characterize security and stateful behavior
 
