@@ -21,7 +21,7 @@ import secrets
 import hashlib
 import getpass
 from urllib import request as urlrequest
-from stack_manager import stack_manager
+from stack_manager import default_stack_read_service, stack_manager
 from auth_utils import (
     LoginRateLimiter,
     get_csrf_token,
@@ -55,6 +55,7 @@ from ports import (
     monotonic_clock,
 )
 from system_service import SystemService
+from stack_read_service import StackReadService
 from container_inventory_service import ContainerInventoryService
 from container_operations_service import ContainerOperationsService
 from network_diagnostics_service import (
@@ -144,6 +145,7 @@ class AppDependencies:
     container_operations_service: ContainerOperationsService | None = None
     network_diagnostics_service: NetworkDiagnosticsService | None = None
     network_group_service: NetworkGroupService | None = None
+    stack_read_service: StackReadService | None = None
 
 
 def _default_system_service():
@@ -797,6 +799,9 @@ def create_app(config=None, dependencies=None):
     application.extensions["network_group_service"] = (
         resolved.network_group_service
         or _default_network_group_service(application.extensions["docker"])
+    )
+    application.extensions["stack_read_service"] = (
+        resolved.stack_read_service or default_stack_read_service()
     )
 
     application.register_blueprint(core_api)

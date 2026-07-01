@@ -1129,6 +1129,28 @@ class TestStackAdditionalRoutes:
         finally:
             stack_manager.STACKS_PATH = original_path
 
+    def test_list_route_delegates_status_query_to_service(self, authenticated_client):
+        service = MagicMock()
+        service.list_with_status.return_value = ([{"name": "alpha"}], None)
+        authenticated_client.application.extensions["stack_read_service"] = service
+
+        response = authenticated_client.get("/api/stacks?status=true")
+
+        assert response.status_code == 200
+        assert response.get_json() == {"stacks": [{"name": "alpha"}]}
+        service.list_with_status.assert_called_once_with(include_status=True)
+
+    def test_status_route_delegates_to_service(self, authenticated_client):
+        service = MagicMock()
+        service.status.return_value = ({"status": "running"}, None)
+        authenticated_client.application.extensions["stack_read_service"] = service
+
+        response = authenticated_client.get("/api/stacks/alpha/status")
+
+        assert response.status_code == 200
+        assert response.get_json() == {"status": "running"}
+        service.status.assert_called_once_with("alpha")
+
     def test_get_compose(self, authenticated_client, temp_stacks_dir):
         import stack_manager
         original_path = stack_manager.STACKS_PATH
@@ -1149,11 +1171,13 @@ class TestStackAdditionalRoutes:
         finally:
             stack_manager.STACKS_PATH = original_path
 
-    def test_stack_status_endpoint(self, authenticated_client, monkeypatch):
-        monkeypatch.setattr(
-            "stack_manager.get_stack_status",
-            lambda _name: ({"status": "running", "container_count": 2, "running_count": 2}, None),
+    def test_stack_status_endpoint(self, authenticated_client):
+        service = MagicMock()
+        service.status.return_value = (
+            {"status": "running", "container_count": 2, "running_count": 2},
+            None,
         )
+        authenticated_client.application.extensions["stack_read_service"] = service
 
         response = authenticated_client.get("/api/stacks/alpha/status")
         assert response.status_code == 200
