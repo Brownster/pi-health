@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+from datetime import datetime
 
 import pytest
 
@@ -36,6 +37,8 @@ def make_service(
 
     return StackMutationService(
         stacks_path_provider=lambda: str(stacks_path),
+        backup_path_provider=lambda: str(stacks_path / ".backups"),
+        now_provider=lambda: datetime(2026, 7, 1, 12, 34, 56),
         lock_provider=lock_provider,
         atomic_writer=atomic_writer or default_atomic_writer,
         backup_writer=backup_writer or default_backup_writer,
@@ -129,3 +132,86 @@ def test_save_env_rejects_missing_stack(tmp_path):
 
     with pytest.raises(StackMutationNotFoundError, match="Stack not found"):
         service.save_env("alpha", "KEY=value\n")
+
+
+def test_create_backup_uses_timestamp_and_prunes_to_ten(tmp_path):
+    write_stack(tmp_path)
+    backup_dir = tmp_path / ".backups" / "alpha"
+    backup_dir.mkdir(parents=True)
+    for index in range(11):
+        (backup_dir / f"compose-202601010000{index:02d}.yaml").write_text(str(index))
+
+    def atomic_writer(path, content, **_kwargs):
+        with open(path, "w") as handle:
+            handle.write(content)
+
+    service = make_service(tmp_path, atomic_writer=atomic_writer)
+
+    backup_path = service.create_backup("alpha")
+
+    assert backup_path.endswith("compose-20260701123456.yaml")
+    assert open(backup_path).read() == "services: {}\n"
+    assert len(list(backup_dir.iterdir())) == 10
+    assert not (backup_dir / "compose-20260101000000.yaml").exists()
+    assert not (backup_dir / "compose-20260101000001.yaml").exists()
+
+
+def test_create_backup_returns_none_for_missing_stack(tmp_path):
+    service = make_service(tmp_path)
+
+    assert service.create_backup("alpha") is None
+
+
+def test_restore_validates_then_backs_up_and_atomically_writes(tmp_path):
+    stack_dir = write_stack(tmp_path)
+    backup_dir = tmp_path / ".backups" / "alpha"
+    backup_dir.mkdir(parents=True)
+    backup_name = "compose-20240101010101.yaml"
+    (backup_dir / backup_name).write_text("services:\n  restored: {}\n")
+    events = []
+    service = make_service(tmp_path, events=events)
+
+    assert service.restore("alpha", backup_name) == {
+        "status": "restored",
+        "backup": backup_name,
+    }
+    assert events == [
+        ("lock-enter", "alpha"),
+        ("backup", "alpha"),
+        (
+            "write",
+            str(stack_dir / "compose.yaml"),
+            "services:\n  restored: {}\n",
+            {},
+        ),
+        ("lock-exit", "alpha"),
+    ]
+
+
+def test_restore_rejects_missing_backup_before_lock(tmp_path):
+    events = []
+    service = make_service(tmp_path, events=events)
+
+    with pytest.raises(StackMutationNotFoundError, match="Backup not found"):
+        service.restore("alpha", "compose-20240101010101.yaml")
+
+    assert events == []
+
+
+def test_restore_rejects_invalid_yaml_before_pre_restore_backup(tmp_path):
+    write_stack(tmp_path)
+    backup_dir = tmp_path / ".backups" / "alpha"
+    backup_dir.mkdir(parents=True)
+    backup_name = "compose-20240101010101.yaml"
+    (backup_dir / backup_name).write_text("invalid")
+    events = []
+    service = make_service(
+        tmp_path,
+        events=events,
+        validator=lambda _content: "invalid yaml",
+    )
+
+    with pytest.raises(StackComposeValidationError, match="invalid yaml"):
+        service.restore("alpha", backup_name)
+
+    assert events == [("lock-enter", "alpha"), ("lock-exit", "alpha")]

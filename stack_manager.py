@@ -187,6 +187,8 @@ def _stack_reads():
 def default_stack_mutation_service():
     return StackMutationService(
         stacks_path_provider=lambda: STACKS_PATH,
+        backup_path_provider=lambda: BACKUP_DIR,
+        now_provider=lambda: datetime.now(),
         lock_provider=lambda name: stack_lock(name),
         atomic_writer=lambda path, content, **kwargs: atomic_write_text(
             path, content, **kwargs
@@ -194,6 +196,14 @@ def default_stack_mutation_service():
         backup_writer=lambda name: backup_stack(name),
         compose_validator=lambda content: validate_compose_yaml(content),
     )
+
+
+def _stack_mutations():
+    if has_app_context():
+        service = current_app.extensions.get("stack_mutation_service")
+        if service is not None:
+            return service
+    return default_stack_mutation_service()
 
 
 def list_stacks():
@@ -213,29 +223,7 @@ def get_stack_status_snapshot(stacks):
 
 def backup_stack(stack_name):
     """Create a backup of a stack's compose file."""
-    with stack_lock(stack_name):
-        ensure_backup_directory()
-        stack_dir = get_stack_path(stack_name)
-        compose_file = find_compose_file(stack_dir)
-
-        if not compose_file:
-            return None
-
-        timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
-        backup_subdir = os.path.join(BACKUP_DIR, stack_name)
-        os.makedirs(backup_subdir, exist_ok=True)
-
-        backup_file = os.path.join(backup_subdir, f"compose-{timestamp}.yaml")
-        with open(compose_file) as handle:
-            atomic_write_text(backup_file, handle.read())
-
-        # Keep only the 10 most recent backups per stack
-        backups = sorted([f for f in os.listdir(backup_subdir) if f.startswith('compose-')])
-        if len(backups) > 10:
-            for old_backup in backups[:-10]:
-                os.remove(os.path.join(backup_subdir, old_backup))
-
-        return backup_file
+    return _stack_mutations().create_backup(stack_name)
 
 
 def list_backups(stack_name):
@@ -584,30 +572,15 @@ def api_restore_backup(name):
     if not BACKUP_NAME_RE.match(backup_name):
         return jsonify({'error': 'Invalid backup name'}), 400
 
-    backup_path = os.path.join(BACKUP_DIR, name, backup_name)
-    if not os.path.exists(backup_path):
-        return jsonify({'error': 'Backup not found'}), 404
-
-    with stack_lock(name):
-        stack_dir = get_stack_path(name)
-        compose_file = find_compose_file(stack_dir)
-        if not compose_file:
-            return jsonify({'error': 'Stack not found'}), 404
-
-        try:
-            with open(backup_path, 'r') as f:
-                content = f.read()
-
-            error = validate_compose_yaml(content)
-            if error:
-                return jsonify({'error': f'Compose YAML invalid: {error}'}), 400
-
-            backup_stack(name)
-            atomic_write_text(compose_file, content)
-
-            return jsonify({'status': 'restored', 'backup': backup_name})
-        except Exception as e:
-            return jsonify({'error': str(e)}), 500
+    service = current_app.extensions["stack_mutation_service"]
+    try:
+        return jsonify(service.restore(name, backup_name))
+    except StackComposeValidationError as exc:
+        return jsonify({'error': str(exc)}), 400
+    except StackMutationNotFoundError as exc:
+        return jsonify({'error': str(exc)}), 404
+    except StackMutationError as exc:
+        return jsonify({'error': str(exc)}), 500
 
 
 @stack_manager.route('/api/stacks/<name>/status', methods=['GET'])

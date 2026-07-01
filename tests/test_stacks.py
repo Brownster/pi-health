@@ -1203,6 +1203,20 @@ class TestStackAdditionalRoutes:
         assert response.status_code == 200
         service.save_env.assert_called_once_with("alpha", "KEY=value\n")
 
+    def test_restore_delegates_to_mutation_service(self, authenticated_client):
+        backup_name = "compose-20240101010101.yaml"
+        service = MagicMock()
+        service.restore.return_value = {"status": "restored", "backup": backup_name}
+        authenticated_client.application.extensions["stack_mutation_service"] = service
+
+        response = authenticated_client.post(
+            "/api/stacks/alpha/restore",
+            json={"backup": backup_name},
+        )
+
+        assert response.status_code == 200
+        service.restore.assert_called_once_with("alpha", backup_name)
+
     def test_get_compose(self, authenticated_client, temp_stacks_dir):
         import stack_manager
         original_path = stack_manager.STACKS_PATH
