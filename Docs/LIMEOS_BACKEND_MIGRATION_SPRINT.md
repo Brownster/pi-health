@@ -81,7 +81,7 @@ Start implementation only when:
 |---|---|---|---|
 | BF-001 | Introduce an application factory | Entry gate | Complete (2026-06-30) |
 | BF-002 | Define service ports and shared adapters | BF-001 | Complete (2026-06-30) |
-| BF-003 | Extract domain services in bounded slices | BF-002 | In progress (disk inventory reads complete) |
+| BF-003 | Extract domain services in bounded slices | BF-002 | In progress (mount operations implemented; E2E pending) |
 | BF-004 | Characterize security and stateful behavior | BF-001 | Pending |
 | BF-005 | Sign off the core boundary and agent handoff | BF-003, BF-004 | Pending |
 
@@ -287,6 +287,17 @@ routes remain on the existing helper client as later bounded slices. Focused tes
 unavailable-helper short-circuit, `lsblk` failure surfacing, full multi-read composition, virtual
 device filtering, and fstab-by-UUID correlation for unmounted devices. Full `tox -e all`: Ruff
 clean; unit `797 passed, 1 skipped`; E2E `97 passed`.
+
+Disk mount and unmount operations implemented 2026-07-02. `DiskMountService` now owns filesystem
+validation, fstab mutation ordering, direct-device resolution, privileged mount calls, dependency
+inspection, and fail-closed unmount behavior. Typed framework-neutral exceptions preserve the
+existing `400`, `409`, and `503` mappings, including partial fstab warnings and dependency detail.
+The app factory injects the helper and dependency inspector, while both routes only parse input,
+delegate, and map results. Focused tests cover ordering, direct mounts, validation, partial failure,
+dependency blockers, inspection failure, warnings, and route delegation. Ruff is clean; backend
+unit tests pass (`808 passed, 1 skipped`). Full E2E remains pending because the Python environment
+upgrade selected Playwright Chromium revision 1228, which is not installed locally; the browser
+download did not complete in the available environment.
 
 ## BF-004 - Characterize security and stateful behavior
 
