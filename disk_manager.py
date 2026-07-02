@@ -32,6 +32,7 @@ from seedbox_service import (
     SeedboxUnavailableError,
     SeedboxValidationError,
 )
+from disk_suggestion_service import DiskSuggestionService, parse_size_to_gb
 from smart_monitor import parse_smartctl_json
 from runtime_paths import CONFIG_DIR as RUNTIME_CONFIG_DIR, STORAGE_PLUGIN_CONFIG_DIR as RUNTIME_STORAGE_PLUGIN_CONFIG_DIR
 
@@ -129,6 +130,15 @@ def default_seedbox_service(helper=None, repository=None):
     )
 
 
+def default_disk_suggestion_service(inventory_service=None):
+    if inventory_service is None:
+        inventory_service = default_disk_inventory_service()
+    return DiskSuggestionService(
+        inventory_reader=inventory_service.inventory,
+        supported_filesystems=FSTAB_PRESETS,
+    )
+
+
 def _disk_inventory():
     if has_app_context():
         service = current_app.extensions.get("disk_inventory_service")
@@ -159,6 +169,14 @@ def _seedbox():
         if service is not None:
             return service
     return default_seedbox_service()
+
+
+def _disk_suggestions():
+    if has_app_context():
+        service = current_app.extensions.get("disk_suggestion_service")
+        if service is not None:
+            return service
+    return default_disk_suggestion_service(_disk_inventory())
 
 
 def get_disk_inventory():
@@ -366,80 +384,14 @@ def api_suggested_mounts():
     Returns mount suggestions for Setup 1 (NVMe + USB HDD + USB stick).
     """
     try:
-        inventory = get_disk_inventory()
+        return jsonify(_disk_suggestions().suggestions())
     except HelperError as e:
         return jsonify({'error': str(e)}), 503
-
-    suggestions = []
-    disks = inventory.get('disks', [])
-
-    for disk in disks:
-        # Check disk type and suggest mounts
-        transport = disk.get('transport', '')
-        is_nvme = 'nvme' in disk.get('name', '')
-        is_usb = transport == 'usb'
-        size_str = disk.get('size', '')
-
-        # Process partitions
-        partitions = disk.get('partitions', []) or [disk]
-        for part in partitions:
-            if part.get('mounted') or not part.get('uuid'):
-                continue
-
-            fstype = part.get('fstype', '')
-            if fstype not in FSTAB_PRESETS:
-                continue
-
-            suggestion = {
-                'device': part.get('path', ''),
-                'uuid': part.get('uuid', ''),
-                'size': part.get('size', ''),
-                'fstype': fstype,
-                'label': part.get('label', ''),
-                'suggested_mount': None,
-                'reason': ''
-            }
-
-            # Suggest mount based on device characteristics
-            if is_nvme:
-                suggestion['suggested_mount'] = '/mnt/downloads'
-                suggestion['reason'] = 'NVMe drive - fast storage for downloads'
-            elif is_usb:
-                # Parse size to determine suggestion
-                size_gb = _parse_size_to_gb(size_str)
-                if size_gb and size_gb < 64:
-                    suggestion['suggested_mount'] = '/mnt/backup'
-                    suggestion['reason'] = 'Small USB device - suitable for backups'
-                else:
-                    suggestion['suggested_mount'] = '/mnt/storage'
-                    suggestion['reason'] = 'USB storage device - suitable for media'
-
-            if suggestion['suggested_mount']:
-                suggestions.append(suggestion)
-
-    return jsonify({'suggestions': suggestions})
 
 
 def _parse_size_to_gb(size_str):
     """Parse a size string like '500G' or '1T' to gigabytes."""
-    if not size_str:
-        return None
-
-    size_str = size_str.upper().strip()
-    try:
-        if size_str.endswith('T'):
-            return float(size_str[:-1]) * 1024
-        elif size_str.endswith('G'):
-            return float(size_str[:-1])
-        elif size_str.endswith('M'):
-            return float(size_str[:-1]) / 1024
-        elif size_str.endswith('K'):
-            return float(size_str[:-1]) / (1024 * 1024)
-        else:
-            # Assume bytes
-            return float(size_str) / (1024 * 1024 * 1024)
-    except ValueError:
-        return None
+    return parse_size_to_gb(size_str)
 
 
 # =============================================================================

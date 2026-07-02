@@ -568,35 +568,17 @@ class TestSuggestedMounts:
 
     def test_suggested_mounts_with_nvme(self, authenticated_client):
         """Test suggested mounts include NVMe downloads suggestion."""
-        import disk_manager
-
-        inventory = {
-            'disks': [
-                {
-                    'name': 'nvme0n1',
-                    'transport': 'nvme',
-                    'size': '500G',
-                    'mounted': False,
-                    'uuid': 'abc',
-                    'fstype': 'ext4',
-                    'partitions': [
-                        {
-                            'path': '/dev/nvme0n1p1',
-                            'uuid': 'abc',
-                            'fstype': 'ext4',
-                            'size': '500G',
-                            'mounted': False
-                        }
-                    ]
-                }
-            ]
+        service = Mock()
+        service.suggestions.return_value = {
+            'suggestions': [{'suggested_mount': '/mnt/downloads'}]
         }
+        authenticated_client.application.extensions['disk_suggestion_service'] = service
 
-        with patch('disk_manager.get_disk_inventory', return_value=inventory):
-            response = authenticated_client.get('/api/disks/suggested-mounts')
-            assert response.status_code == 200
-            data = json.loads(response.data)
-            assert data['suggestions'][0]['suggested_mount'] == '/mnt/downloads'
+        response = authenticated_client.get('/api/disks/suggested-mounts')
+
+        assert response.status_code == 200
+        assert response.get_json()['suggestions'][0]['suggested_mount'] == '/mnt/downloads'
+        service.suggestions.assert_called_once_with()
 
 
 class TestHelperFunctions:

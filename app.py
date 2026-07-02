@@ -45,6 +45,7 @@ from backup_scheduler import backup_scheduler, init_backup_scheduler
 from disk_manager import (
     default_disk_inventory_service,
     default_disk_mount_service,
+    default_disk_suggestion_service,
     default_media_paths_service,
     default_seedbox_service,
     disk_manager,
@@ -53,6 +54,7 @@ from disk_inventory_service import DiskInventoryService
 from disk_mount_service import DiskMountService
 from media_paths_service import MediaPathsService
 from seedbox_service import SeedboxService
+from disk_suggestion_service import DiskSuggestionService
 from setup_manager import setup_manager
 from helper_client import helper_call, HelperError
 from operation_manager import OperationRegistry
@@ -169,6 +171,7 @@ class AppDependencies:
     disk_mount_service: DiskMountService | None = None
     media_paths_service: MediaPathsService | None = None
     seedbox_service: SeedboxService | None = None
+    disk_suggestion_service: DiskSuggestionService | None = None
 
 
 def _default_system_service():
@@ -849,6 +852,12 @@ def create_app(config=None, dependencies=None):
         resolved.seedbox_service
         or default_seedbox_service(
             application.extensions["helper"], application.extensions["config_repo"]
+        )
+    )
+    application.extensions["disk_suggestion_service"] = (
+        resolved.disk_suggestion_service
+        or default_disk_suggestion_service(
+            application.extensions["disk_inventory_service"]
         )
     )
 
