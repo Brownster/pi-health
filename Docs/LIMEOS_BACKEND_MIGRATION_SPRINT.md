@@ -81,7 +81,7 @@ Start implementation only when:
 |---|---|---|---|
 | BF-001 | Introduce an application factory | Entry gate | Complete (2026-06-30) |
 | BF-002 | Define service ports and shared adapters | BF-001 | Complete (2026-06-30) |
-| BF-003 | Extract domain services in bounded slices | BF-002 | In progress (mount suggestions implemented; E2E pending) |
+| BF-003 | Extract domain services in bounded slices | BF-002 | In progress (SMART operations implemented; E2E pending) |
 | BF-004 | Characterize security and stateful behavior | BF-001 | Pending |
 | BF-005 | Sign off the core boundary and agent handoff | BF-003, BF-004 | Pending |
 
@@ -328,6 +328,17 @@ performs only authentication, one service call, and JSON/error mapping. The size
 compatibility export for focused callers. Tests cover NVMe, small and large USB media, filtering,
 unpartitioned devices, unsupported transports, size units, and route delegation. Ruff is clean;
 backend unit tests pass (`841 passed, 1 skipped`). The full E2E gate remains pending on the recorded
+Playwright browser blocker.
+
+SMART health and self-test operations implemented 2026-07-02. `SmartService` owns safe device-name
+validation, all-device health assembly, per-device reads, smartctl result parsing, SAT passthrough,
+self-test type validation, and helper rejection classification. Partial all-device results retain
+per-disk error details. The app factory injects the helper and existing SMART parser; all three
+routes now parse transport input, call one service operation, and map neutral validation and
+operation errors. Existing route tests now patch the injected helper adapter boundary. Focused
+tests cover partial data, parser delegation, helper failures, unsafe devices, SAT reads, every
+supported self-test type, invalid types, rejection mapping, and route delegation. Ruff is clean;
+backend unit tests pass (`851 passed, 1 skipped`). The full E2E gate remains pending on the recorded
 Playwright browser blocker.
 
 ## BF-004 - Characterize security and stateful behavior
