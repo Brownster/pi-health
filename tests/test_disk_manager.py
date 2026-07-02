@@ -500,6 +500,33 @@ class TestMediaPaths:
         finally:
             disk_manager.MEDIA_PATHS_CONFIG = original_config
 
+    def test_media_path_routes_delegate_to_injected_service(self, authenticated_client, app):
+        service = Mock()
+        service.paths.return_value = {"storage": "/mnt/storage"}
+        service.update.return_value = {"status": "updated"}
+        service.preview_startup_service.return_value = {
+            "script": {"proposed": "script"},
+            "service": {"proposed": "service"},
+        }
+        service.apply_startup_service.return_value = {"success": True}
+        app.extensions["media_paths_service"] = service
+
+        assert authenticated_client.get("/api/disks/media-paths").status_code == 200
+        assert authenticated_client.post(
+            "/api/disks/media-paths", json={"storage": "/mnt/media"}
+        ).status_code == 200
+        assert authenticated_client.get(
+            "/api/disks/startup-service/preview"
+        ).status_code == 200
+        assert authenticated_client.post(
+            "/api/disks/startup-service"
+        ).status_code == 200
+
+        service.paths.assert_called_once_with()
+        service.update.assert_called_once_with({"storage": "/mnt/media"})
+        service.preview_startup_service.assert_called_once_with()
+        service.apply_startup_service.assert_called_once_with()
+
 
 class TestSuggestedMounts:
     """Test mount suggestions endpoint."""
@@ -700,8 +727,8 @@ class TestHelperFunctions:
 
     def test_update_startup_service_uses_typed_helper_command(self):
         import disk_manager
-        with patch('disk_manager.helper_available', return_value=True):
-            with patch('disk_manager.helper_call', return_value={'success': True}) as helper_call:
+        with patch('helper_client.helper_available', return_value=True):
+            with patch('helper_client.helper_call', return_value={'success': True}) as helper_call:
                 result = disk_manager.update_startup_service({'storage': '/mnt/storage'})
 
         assert result['success'] is True

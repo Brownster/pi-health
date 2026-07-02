@@ -11,7 +11,7 @@ from flask import Blueprint, current_app, has_app_context, jsonify, request
 from auth_utils import login_required
 from helper_client import helper_call, helper_available, HelperError, HELPER_SOCKET
 from disk_inventory_service import DiskInventoryService
-from ports import HelperClientAdapter
+from ports import HelperClientAdapter, JsonFileRepository
 from helper_templates import render_startup_files
 from fstab_presets import FSTAB_PRESETS
 from mount_dependencies import find_mount_dependencies
@@ -21,6 +21,11 @@ from disk_mount_service import (
     MountInUseError,
     MountOperationError,
     MountValidationError,
+)
+from media_paths_service import (
+    MediaPathValidationError,
+    MediaPathsService,
+    startup_service_params,
 )
 from smart_monitor import parse_smartctl_json
 from runtime_paths import CONFIG_DIR as RUNTIME_CONFIG_DIR, STORAGE_PLUGIN_CONFIG_DIR as RUNTIME_STORAGE_PLUGIN_CONFIG_DIR
@@ -51,24 +56,12 @@ SEEDBOX_MOUNT_POINT = '/mnt/seedbox'
 
 def load_media_paths():
     """Load media paths configuration."""
-    try:
-        if os.path.exists(MEDIA_PATHS_CONFIG):
-            with open(MEDIA_PATHS_CONFIG, 'r') as f:
-                config = json.load(f)
-                # Merge with defaults
-                merged = DEFAULT_MEDIA_PATHS.copy()
-                merged.update(config)
-                return merged
-    except Exception:
-        pass
-    return DEFAULT_MEDIA_PATHS.copy()
+    return _media_paths().paths()
 
 
 def save_media_paths(paths):
     """Save media paths configuration."""
-    os.makedirs(os.path.dirname(MEDIA_PATHS_CONFIG), exist_ok=True)
-    with open(MEDIA_PATHS_CONFIG, 'w') as f:
-        json.dump(paths, f, indent=2)
+    _media_paths().save(paths)
 
 
 def load_seedbox_config():
@@ -104,28 +97,11 @@ def _seedbox_is_mounted():
 
 
 def _startup_service_params(paths):
-    mount_points = []
-    for key in ('storage', 'downloads', 'backup'):
-        value = paths.get(key)
-        if isinstance(value, str) and value.startswith('/mnt/'):
-            mount_points.append(value)
-    return {
-        'mount_points': mount_points,
-        'compose_file': os.path.abspath(DOCKER_COMPOSE_PATH),
-    }
+    return startup_service_params(paths, DOCKER_COMPOSE_PATH)
 
 
 def update_startup_service(paths):
-    if not helper_available():
-        return {'success': False, 'error': 'Helper service unavailable'}
-
-    result = helper_call('configure_startup_service', _startup_service_params(paths))
-    if not result.get('success'):
-        return result
-
-    helper_call('systemctl', {'action': 'daemon-reload'})
-    helper_call('systemctl', {'action': 'enable', 'unit': STARTUP_SERVICE_NAME})
-    return {'success': True}
+    return _media_paths().apply_startup_service(paths)
 
 
 def default_disk_inventory_service():
@@ -146,6 +122,17 @@ def default_disk_mount_service(helper=None, docker_client=None):
     )
 
 
+def default_media_paths_service(helper=None, repository=None):
+    return MediaPathsService(
+        helper=helper if helper is not None else HelperClientAdapter(),
+        repository=repository if repository is not None else JsonFileRepository(),
+        config_path_provider=lambda: MEDIA_PATHS_CONFIG,
+        compose_path_provider=lambda: DOCKER_COMPOSE_PATH,
+        defaults=DEFAULT_MEDIA_PATHS,
+        startup_renderer=render_startup_files,
+    )
+
+
 def _disk_inventory():
     if has_app_context():
         service = current_app.extensions.get("disk_inventory_service")
@@ -160,6 +147,14 @@ def _disk_mounts():
         if service is not None:
             return service
     return default_disk_mount_service()
+
+
+def _media_paths():
+    if has_app_context():
+        service = current_app.extensions.get("media_paths_service")
+        if service is not None:
+            return service
+    return default_media_paths_service()
 
 
 def get_disk_inventory():
@@ -363,8 +358,7 @@ def api_unmount():
 @login_required
 def api_get_media_paths():
     """Get configured media paths."""
-    paths = load_media_paths()
-    return jsonify({'paths': paths})
+    return jsonify({'paths': _media_paths().paths()})
 
 
 @disk_manager.route('/api/disks/media-paths', methods=['POST'])
@@ -383,23 +377,10 @@ def api_set_media_paths():
     """
     data = request.get_json() or {}
 
-    paths = load_media_paths()
-
-    # Update only provided paths
-    for key in ['downloads', 'storage', 'backup', 'config']:
-        if key in data:
-            path = data[key]
-            if not isinstance(path, str) or not path.startswith('/'):
-                return jsonify({'error': f'Invalid path for {key}'}), 400
-            paths[key] = path
-
     try:
-        save_media_paths(paths)
-        startup_result = update_startup_service(paths)
-        response = {'status': 'updated', 'paths': paths}
-        if not startup_result.get('success'):
-            response['startup_warning'] = startup_result.get('error', 'Startup service not updated')
-        return jsonify(response)
+        return jsonify(_media_paths().update(data))
+    except MediaPathValidationError as exc:
+        return jsonify({'error': str(exc)}), 400
     except Exception as e:
         return jsonify({'error': f'Failed to save paths: {str(e)}'}), 500
 
@@ -408,60 +389,14 @@ def api_set_media_paths():
 @login_required
 def api_preview_startup_service():
     """Preview changes to startup service before applying."""
-    paths = load_media_paths()
-    params = _startup_service_params(paths)
-    if helper_available():
-        try:
-            result = helper_call('preview_startup_service', params)
-            if result.get('success'):
-                return jsonify({'script': result['script'], 'service': result['service']})
-        except HelperError:
-            pass
-
-    proposed_script, proposed_service = render_startup_files(
-        params['mount_points'],
-        params['compose_file'],
-    )
-    script_path = '/usr/local/bin/check_mount_and_start.sh'
-    service_path = '/etc/systemd/system/docker-compose-start.service'
-    current_script = ''
-    current_service = ''
-    script_exists = os.path.exists(script_path)
-    service_exists = os.path.exists(service_path)
-    try:
-        with open(script_path, 'r') as handle:
-            current_script = handle.read()
-    except (FileNotFoundError, PermissionError, OSError):
-        pass
-    try:
-        with open(service_path, 'r') as handle:
-            current_service = handle.read()
-    except (FileNotFoundError, PermissionError, OSError):
-        pass
-    return jsonify({
-        'script': {
-            'path': script_path,
-            'current': current_script,
-            'proposed': proposed_script,
-            'exists': script_exists,
-            'changed': current_script != proposed_script,
-        },
-        'service': {
-            'path': service_path,
-            'current': current_service,
-            'proposed': proposed_service,
-            'exists': service_exists,
-            'changed': current_service != proposed_service,
-        },
-    })
+    return jsonify(_media_paths().preview_startup_service())
 
 
 @disk_manager.route('/api/disks/startup-service', methods=['POST'])
 @login_required
 def api_regenerate_startup_service():
     """Regenerate mount-wait startup service."""
-    paths = load_media_paths()
-    result = update_startup_service(paths)
+    result = _media_paths().apply_startup_service()
     if result.get('success'):
         return jsonify({'status': 'updated'})
     return jsonify({'error': result.get('error', 'Failed to update startup service')}), 503

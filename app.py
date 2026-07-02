@@ -42,9 +42,15 @@ from storage_plugins.registry import init_plugins
 from pi_monitor import get_pi_metrics
 from update_scheduler import update_scheduler, init_scheduler
 from backup_scheduler import backup_scheduler, init_backup_scheduler
-from disk_manager import default_disk_inventory_service, default_disk_mount_service, disk_manager
+from disk_manager import (
+    default_disk_inventory_service,
+    default_disk_mount_service,
+    default_media_paths_service,
+    disk_manager,
+)
 from disk_inventory_service import DiskInventoryService
 from disk_mount_service import DiskMountService
+from media_paths_service import MediaPathsService
 from setup_manager import setup_manager
 from helper_client import helper_call, HelperError
 from operation_manager import OperationRegistry
@@ -159,6 +165,7 @@ class AppDependencies:
     stack_operations_service: StackOperationsService | None = None
     disk_inventory_service: DiskInventoryService | None = None
     disk_mount_service: DiskMountService | None = None
+    media_paths_service: MediaPathsService | None = None
 
 
 def _default_system_service():
@@ -828,6 +835,12 @@ def create_app(config=None, dependencies=None):
     application.extensions["disk_mount_service"] = (
         resolved.disk_mount_service
         or default_disk_mount_service(application.extensions["helper"], resolved.docker_client)
+    )
+    application.extensions["media_paths_service"] = (
+        resolved.media_paths_service
+        or default_media_paths_service(
+            application.extensions["helper"], application.extensions["config_repo"]
+        )
     )
 
     application.register_blueprint(core_api)
