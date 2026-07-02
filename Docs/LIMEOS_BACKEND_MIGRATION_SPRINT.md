@@ -81,7 +81,7 @@ Start implementation only when:
 |---|---|---|---|
 | BF-001 | Introduce an application factory | Entry gate | Complete (2026-06-30) |
 | BF-002 | Define service ports and shared adapters | BF-001 | Complete (2026-06-30) |
-| BF-003 | Extract domain services in bounded slices | BF-002 | In progress (seedbox implemented; E2E pending) |
+| BF-003 | Extract domain services in bounded slices | BF-002 | In progress (mount suggestions implemented; E2E pending) |
 | BF-004 | Characterize security and stateful behavior | BF-001 | Pending |
 | BF-005 | Sign off the core boundary and agent handoff | BF-003, BF-004 | Pending |
 
@@ -319,6 +319,16 @@ resolve the same service. Focused tests cover defaults, repository and mount-rea
 validation branch, helper availability, credential handling, helper-before-write ordering,
 rejection without persistence, and route delegation. Ruff is clean; backend unit tests pass (`831
 passed, 1 skipped`). The full E2E gate remains pending on the recorded Playwright browser blocker.
+
+Suggested mount reads implemented 2026-07-02. `DiskSuggestionService` derives recommendations from
+one injected disk-inventory snapshot and owns size parsing, filesystem filtering, mounted and
+identity filtering, and the existing NVMe and USB placement policy. The app factory composes it
+with the same `DiskInventoryService` instance used by `/api/disks`; the suggested-mount route now
+performs only authentication, one service call, and JSON/error mapping. The size parser remains a
+compatibility export for focused callers. Tests cover NVMe, small and large USB media, filtering,
+unpartitioned devices, unsupported transports, size units, and route delegation. Ruff is clean;
+backend unit tests pass (`841 passed, 1 skipped`). The full E2E gate remains pending on the recorded
+Playwright browser blocker.
 
 ## BF-004 - Characterize security and stateful behavior
 
