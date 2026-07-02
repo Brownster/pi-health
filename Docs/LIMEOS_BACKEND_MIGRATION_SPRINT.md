@@ -81,7 +81,7 @@ Start implementation only when:
 |---|---|---|---|
 | BF-001 | Introduce an application factory | Entry gate | Complete (2026-06-30) |
 | BF-002 | Define service ports and shared adapters | BF-001 | Complete (2026-06-30) |
-| BF-003 | Extract domain services in bounded slices | BF-002 | In progress (SMART operations implemented; E2E pending) |
+| BF-003 | Extract domain services in bounded slices | BF-002 | In progress (storage plugin reads implemented; E2E pending) |
 | BF-004 | Characterize security and stateful behavior | BF-001 | Pending |
 | BF-005 | Sign off the core boundary and agent handoff | BF-003, BF-004 | Pending |
 
@@ -329,6 +329,17 @@ compatibility export for focused callers. Tests cover NVMe, small and large USB 
 unpartitioned devices, unsupported transports, size units, and route delegation. Ruff is clean;
 backend unit tests pass (`841 passed, 1 skipped`). The full E2E gate remains pending on the recorded
 Playwright browser blocker.
+
+Read-only storage-plugin operations implemented 2026-07-02. `StorageReadService` owns managed and
+built-in inventory fallback, plugin detail composition, live status, optional recovery reads, and
+latest-log lookup. Framework-neutral exceptions distinguish missing plugins, unsupported optional
+capabilities, and missing log data. The app factory injects one service with a dynamic registry
+provider so plugin initialization remains deferred. Five Flask routes now authenticate, delegate,
+and map results; the latest-log adapter alone retains plain-text response headers. Focused tests
+cover manager fallback, metadata composition, missing-plugin classification across every read,
+status delegation, optional recovery and log capabilities, empty logs, neutral log records, and
+route delegation. Ruff is clean; backend unit tests pass (`860 passed, 1 skipped`). The full E2E
+gate remains pending on the recorded Playwright browser blocker.
 
 SMART health and self-test operations implemented 2026-07-02. `SmartService` owns safe device-name
 validation, all-device health assembly, per-device reads, smartctl result parsing, SAT passthrough,
