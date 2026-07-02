@@ -125,7 +125,7 @@ class TestDiskManagerEndpoints:
         import disk_manager
         from helper_client import HelperError
 
-        with patch('disk_manager.helper_call', side_effect=HelperError("no helper")):
+        with patch('helper_client.helper_call', side_effect=HelperError("no helper")):
             response = authenticated_client.post(
                 '/api/disks/mount',
                 data=json.dumps({'uuid': 'abc-123', 'mountpoint': '/mnt/test', 'fstype': 'ext4'}),
@@ -162,7 +162,7 @@ class TestDiskManagerEndpoints:
         )
 
     def test_mount_rejects_raw_options(self, authenticated_client):
-        with patch('disk_manager.helper_call') as helper_call:
+        with patch('helper_client.helper_call') as helper_call:
             response = authenticated_client.post(
                 '/api/disks/mount',
                 json={
@@ -183,7 +183,7 @@ class TestDiskManagerEndpoints:
         if fstype is not None:
             payload['fstype'] = fstype
 
-        with patch('disk_manager.helper_call') as helper_call:
+        with patch('helper_client.helper_call') as helper_call:
             response = authenticated_client.post('/api/disks/mount', json=payload)
 
         assert response.status_code == 400
@@ -265,7 +265,7 @@ class TestDiskManagerEndpoints:
 
         blocker = MountDependency('container', 'media', '/mnt/storage/media')
         with patch('disk_manager.find_mount_dependencies', return_value=[blocker]):
-            with patch('disk_manager.helper_call') as helper_call:
+            with patch('helper_client.helper_call') as helper_call:
                 response = authenticated_client.post(
                     '/api/disks/unmount',
                     json={'mountpoint': '/mnt/storage'},
@@ -288,7 +288,7 @@ class TestDiskManagerEndpoints:
 
         error = DependencyInspectionError(['Docker service unavailable'])
         with patch('disk_manager.find_mount_dependencies', side_effect=error):
-            with patch('disk_manager.helper_call') as helper_call:
+            with patch('helper_client.helper_call') as helper_call:
                 response = authenticated_client.post(
                     '/api/disks/unmount',
                     json={'mountpoint': '/mnt/storage'},
@@ -304,7 +304,7 @@ class TestDiskManagerEndpoints:
         helper_call.assert_not_called()
 
     def test_unmount_rejects_normalized_path_escape(self, authenticated_client):
-        with patch('disk_manager.helper_call') as helper_call:
+        with patch('helper_client.helper_call') as helper_call:
             response = authenticated_client.post(
                 '/api/disks/unmount',
                 json={'mountpoint': '/mnt/../etc'},
@@ -815,6 +815,28 @@ class TestSmartEndpoints:
         response = client.get('/api/disks/smart')
         assert response.status_code == 401
 
+    def test_smart_routes_delegate_to_injected_service(self, authenticated_client, app):
+        service = Mock()
+        service.all_devices.return_value = {"disks": []}
+        service.device.return_value = {"device": "/dev/sda"}
+        service.start_test.return_value = {"status": "started"}
+        app.extensions["smart_service"] = service
+
+        assert authenticated_client.get("/api/disks/smart").status_code == 200
+        assert authenticated_client.get(
+            "/api/disks/sda/smart?use_sat=true"
+        ).status_code == 200
+        assert authenticated_client.post(
+            "/api/disks/sda/smart-test",
+            json={"test_type": "long", "use_sat": True},
+        ).status_code == 200
+
+        service.all_devices.assert_called_once_with()
+        service.device.assert_called_once_with("sda", use_sat=True)
+        service.start_test.assert_called_once_with(
+            "sda", test_type="long", use_sat=True
+        )
+
     def test_smart_all_success(self, authenticated_client):
         """Test GET /api/disks/smart returns disk list."""
         mock_devices = [
@@ -839,7 +861,7 @@ class TestSmartEndpoints:
                 }
             }
         ]
-        with patch('disk_manager.helper_call', return_value={
+        with patch('helper_client.helper_call', return_value={
             'success': True,
             'devices': mock_devices
         }):
@@ -853,7 +875,7 @@ class TestSmartEndpoints:
 
     def test_smart_all_helper_failure(self, authenticated_client):
         """Test GET /api/disks/smart returns error when helper fails."""
-        with patch('disk_manager.helper_call', return_value={
+        with patch('helper_client.helper_call', return_value={
             'success': False,
             'error': 'smartctl not installed'
         }):
@@ -865,7 +887,7 @@ class TestSmartEndpoints:
     def test_smart_all_helper_unavailable(self, authenticated_client):
         """Test GET /api/disks/smart returns 503 when helper unavailable."""
         from helper_client import HelperError
-        with patch('disk_manager.helper_call', side_effect=HelperError("helper unavailable")):
+        with patch('helper_client.helper_call', side_effect=HelperError("helper unavailable")):
             response = authenticated_client.get('/api/disks/smart')
         assert response.status_code == 503
         data = response.get_json()
@@ -891,7 +913,7 @@ class TestSmartEndpoints:
             'power_on_time': {'hours': 1000},
             'ata_smart_attributes': {'table': []}
         }
-        with patch('disk_manager.helper_call', return_value={
+        with patch('helper_client.helper_call', return_value={
             'success': True,
             'data': mock_smartctl_data
         }):
@@ -910,7 +932,7 @@ class TestSmartEndpoints:
             'smart_status': {'passed': True},
             'ata_smart_attributes': {'table': []}
         }
-        with patch('disk_manager.helper_call', return_value={
+        with patch('helper_client.helper_call', return_value={
             'success': True,
             'data': mock_smartctl_data
         }) as mock_call:
@@ -946,7 +968,7 @@ class TestSmartEndpoints:
                 'power_on_hours': 500
             }
         }
-        with patch('disk_manager.helper_call', return_value={
+        with patch('helper_client.helper_call', return_value={
             'success': True,
             'data': mock_smartctl_data
         }):
@@ -958,7 +980,7 @@ class TestSmartEndpoints:
 
     def test_smart_device_helper_failure(self, authenticated_client):
         """Test GET /api/disks/<device>/smart when helper fails."""
-        with patch('disk_manager.helper_call', return_value={
+        with patch('helper_client.helper_call', return_value={
             'success': False,
             'error': 'Device not found'
         }):
@@ -976,7 +998,7 @@ class TestSmartEndpoints:
 
     def test_smart_test_short(self, authenticated_client):
         """Test POST /api/disks/<device>/smart-test starts short test."""
-        with patch('disk_manager.helper_call', return_value={
+        with patch('helper_client.helper_call', return_value={
             'success': True,
             'message': 'Test started'
         }) as mock_call:
@@ -997,7 +1019,7 @@ class TestSmartEndpoints:
 
     def test_smart_test_long(self, authenticated_client):
         """Test POST /api/disks/<device>/smart-test starts long test."""
-        with patch('disk_manager.helper_call', return_value={
+        with patch('helper_client.helper_call', return_value={
             'success': True,
             'message': 'Test started'
         }):
@@ -1012,7 +1034,7 @@ class TestSmartEndpoints:
 
     def test_smart_test_conveyance(self, authenticated_client):
         """Test POST /api/disks/<device>/smart-test starts conveyance test."""
-        with patch('disk_manager.helper_call', return_value={
+        with patch('helper_client.helper_call', return_value={
             'success': True,
             'message': 'Test started'
         }):
@@ -1049,7 +1071,7 @@ class TestSmartEndpoints:
 
     def test_smart_test_default_type(self, authenticated_client):
         """Test POST /api/disks/<device>/smart-test defaults to short test."""
-        with patch('disk_manager.helper_call', return_value={
+        with patch('helper_client.helper_call', return_value={
             'success': True,
             'message': 'Test started'
         }) as mock_call:
@@ -1068,7 +1090,7 @@ class TestSmartEndpoints:
 
     def test_smart_test_with_sat(self, authenticated_client):
         """Test POST /api/disks/<device>/smart-test with SAT passthrough."""
-        with patch('disk_manager.helper_call', return_value={
+        with patch('helper_client.helper_call', return_value={
             'success': True,
             'message': 'Test started'
         }) as mock_call:
@@ -1086,7 +1108,7 @@ class TestSmartEndpoints:
 
     def test_smart_test_helper_failure(self, authenticated_client):
         """Test POST /api/disks/<device>/smart-test when helper fails."""
-        with patch('disk_manager.helper_call', return_value={
+        with patch('helper_client.helper_call', return_value={
             'success': False,
             'error': 'SMART test failed to start'
         }):
@@ -1102,7 +1124,7 @@ class TestSmartEndpoints:
     def test_smart_test_helper_unavailable(self, authenticated_client):
         """Test POST /api/disks/<device>/smart-test when helper unavailable."""
         from helper_client import HelperError
-        with patch('disk_manager.helper_call', side_effect=HelperError("helper unavailable")):
+        with patch('helper_client.helper_call', side_effect=HelperError("helper unavailable")):
             response = authenticated_client.post(
                 '/api/disks/sda/smart-test',
                 data=json.dumps({'test_type': 'short'}),

@@ -33,6 +33,7 @@ from seedbox_service import (
     SeedboxValidationError,
 )
 from disk_suggestion_service import DiskSuggestionService, parse_size_to_gb
+from smart_service import SmartOperationError, SmartService, SmartValidationError
 from smart_monitor import parse_smartctl_json
 from runtime_paths import CONFIG_DIR as RUNTIME_CONFIG_DIR, STORAGE_PLUGIN_CONFIG_DIR as RUNTIME_STORAGE_PLUGIN_CONFIG_DIR
 
@@ -139,6 +140,13 @@ def default_disk_suggestion_service(inventory_service=None):
     )
 
 
+def default_smart_service(helper=None):
+    return SmartService(
+        helper=helper if helper is not None else HelperClientAdapter(),
+        parser=parse_smartctl_json,
+    )
+
+
 def _disk_inventory():
     if has_app_context():
         service = current_app.extensions.get("disk_inventory_service")
@@ -177,6 +185,14 @@ def _disk_suggestions():
         if service is not None:
             return service
     return default_disk_suggestion_service(_disk_inventory())
+
+
+def _smart():
+    if has_app_context():
+        service = current_app.extensions.get("smart_service")
+        if service is not None:
+            return service
+    return default_smart_service()
 
 
 def get_disk_inventory():
@@ -416,26 +432,9 @@ def api_smart_all():
         }
     """
     try:
-        result = helper_call('smart_all_devices', {})
-        if result.get('success'):
-            # Process each device's raw smartctl data through parser
-            processed_disks = []
-            for disk in result.get('devices', []):
-                device = disk.get('device', 'unknown')
-                raw_data = disk.get('data', {})
-                if raw_data:
-                    parsed = parse_smartctl_json(raw_data)
-                    processed_disks.append({
-                        'device': device,
-                        'data': parsed.to_dict()
-                    })
-                else:
-                    processed_disks.append({
-                        'device': device,
-                        'data': {'device': device, 'error_message': disk.get('error', 'No SMART data')}
-                    })
-            return jsonify({'disks': processed_disks})
-        return jsonify({'error': result.get('error', 'Failed to get SMART data')}), 503
+        return jsonify(_smart().all_devices())
+    except SmartOperationError as exc:
+        return jsonify({'error': str(exc)}), 503
     except HelperError as e:
         return jsonify({'error': str(e), 'helper_available': False}), 503
 
@@ -455,24 +454,14 @@ def api_smart_device(device):
     Returns:
         SMART health data for the device
     """
-    # Sanitize device name - only allow alphanumeric and common device name chars
-    if not device or not all(c.isalnum() or c in '-_' for c in device):
-        return jsonify({'error': 'Invalid device name'}), 400
-
-    device_path = f'/dev/{device}'
     use_sat = request.args.get('use_sat', 'false').lower() == 'true'
 
     try:
-        result = helper_call('smart_info', {
-            'device': device_path,
-            'use_sat': use_sat
-        })
-        if result.get('success'):
-            # Parse raw smartctl JSON into SmartHealth format
-            raw_data = result.get('data', {})
-            parsed = parse_smartctl_json(raw_data)
-            return jsonify(parsed.to_dict())
-        return jsonify({'error': result.get('error', 'Failed to get SMART data')}), 503
+        return jsonify(_smart().device(device, use_sat=use_sat))
+    except SmartValidationError as exc:
+        return jsonify({'error': str(exc)}), 400
+    except SmartOperationError as exc:
+        return jsonify({'error': str(exc)}), 503
     except HelperError as e:
         return jsonify({'error': str(e), 'helper_available': False}), 503
 
@@ -494,31 +483,19 @@ def api_smart_test(device):
     Returns:
         Result of starting the test
     """
-    # Sanitize device name
-    if not device or not all(c.isalnum() or c in '-_' for c in device):
-        return jsonify({'error': 'Invalid device name'}), 400
-
     data = request.get_json() or {}
     test_type = data.get('test_type', 'short')
-
-    if test_type not in ['short', 'long', 'conveyance']:
-        return jsonify({'error': 'Invalid test type. Use: short, long, or conveyance'}), 400
-
-    device_path = f'/dev/{device}'
     use_sat = data.get('use_sat', False)
 
     try:
-        result = helper_call('smart_test', {
-            'device': device_path,
-            'test_type': test_type,
-            'use_sat': use_sat
-        })
-        if result.get('success'):
-            return jsonify({
-                'status': 'started',
-                'test_type': test_type,
-                'message': result.get('message', 'SMART test started')
-            })
-        return jsonify({'error': result.get('error', 'Failed to start SMART test')}), 503
+        return jsonify(_smart().start_test(
+            device,
+            test_type=test_type,
+            use_sat=use_sat,
+        ))
+    except SmartValidationError as exc:
+        return jsonify({'error': str(exc)}), 400
+    except SmartOperationError as exc:
+        return jsonify({'error': str(exc)}), 503
     except HelperError as e:
         return jsonify({'error': str(e), 'helper_available': False}), 503

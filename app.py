@@ -48,6 +48,7 @@ from disk_manager import (
     default_disk_suggestion_service,
     default_media_paths_service,
     default_seedbox_service,
+    default_smart_service,
     disk_manager,
 )
 from disk_inventory_service import DiskInventoryService
@@ -55,6 +56,7 @@ from disk_mount_service import DiskMountService
 from media_paths_service import MediaPathsService
 from seedbox_service import SeedboxService
 from disk_suggestion_service import DiskSuggestionService
+from smart_service import SmartService
 from setup_manager import setup_manager
 from helper_client import helper_call, HelperError
 from operation_manager import OperationRegistry
@@ -172,6 +174,7 @@ class AppDependencies:
     media_paths_service: MediaPathsService | None = None
     seedbox_service: SeedboxService | None = None
     disk_suggestion_service: DiskSuggestionService | None = None
+    smart_service: SmartService | None = None
 
 
 def _default_system_service():
@@ -859,6 +862,9 @@ def create_app(config=None, dependencies=None):
         or default_disk_suggestion_service(
             application.extensions["disk_inventory_service"]
         )
+    )
+    application.extensions["smart_service"] = (
+        resolved.smart_service or default_smart_service(application.extensions["helper"])
     )
 
     application.register_blueprint(core_api)
