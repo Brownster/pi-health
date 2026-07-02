@@ -13,11 +13,14 @@ from helper_client import helper_call, helper_available, HelperError, HELPER_SOC
 from disk_inventory_service import DiskInventoryService
 from ports import HelperClientAdapter
 from helper_templates import render_startup_files
-from fstab_presets import FSTAB_PRESETS, normalize_fstype
-from mount_dependencies import (
-    DependencyInspectionError,
-    find_mount_dependencies,
-    normalize_managed_mountpoint,
+from fstab_presets import FSTAB_PRESETS
+from mount_dependencies import find_mount_dependencies
+from disk_mount_service import (
+    DiskMountService,
+    MountDependencyCheckError,
+    MountInUseError,
+    MountOperationError,
+    MountValidationError,
 )
 from smart_monitor import parse_smartctl_json
 from runtime_paths import CONFIG_DIR as RUNTIME_CONFIG_DIR, STORAGE_PLUGIN_CONFIG_DIR as RUNTIME_STORAGE_PLUGIN_CONFIG_DIR
@@ -129,12 +132,34 @@ def default_disk_inventory_service():
     return DiskInventoryService(helper=HelperClientAdapter())
 
 
+def default_disk_mount_service(helper=None, docker_client=None):
+    helper = helper or HelperClientAdapter()
+    return DiskMountService(
+        helper=helper,
+        dependency_inspector=lambda mountpoint: find_mount_dependencies(
+            mountpoint,
+            docker_client=docker_client,
+            media_paths_config=MEDIA_PATHS_CONFIG,
+            storage_plugin_config_dir=STORAGE_PLUGIN_CONFIG_DIR,
+            default_media_paths=DEFAULT_MEDIA_PATHS,
+        ),
+    )
+
+
 def _disk_inventory():
     if has_app_context():
         service = current_app.extensions.get("disk_inventory_service")
         if service is not None:
             return service
     return default_disk_inventory_service()
+
+
+def _disk_mounts():
+    if has_app_context():
+        service = current_app.extensions.get("disk_mount_service")
+        if service is not None:
+            return service
+    return default_disk_mount_service()
 
 
 def get_disk_inventory():
@@ -260,66 +285,28 @@ def api_mount():
     fstype = data.get('fstype')
     add_to_fstab = data.get('add_to_fstab', True)
 
-    if not uuid:
-        return jsonify({'error': 'UUID is required'}), 400
-    if not mountpoint:
-        return jsonify({'error': 'Mountpoint is required'}), 400
-    if not mountpoint.startswith('/mnt/'):
-        return jsonify({'error': 'Mountpoint must be under /mnt/'}), 400
-    if 'options' in data:
-        return jsonify({
-            'code': 'mount_options_not_allowed',
-            'error': 'Custom mount options are not allowed',
-            'message': 'Remove options and use the filesystem preset',
-        }), 400
     try:
-        fstype = normalize_fstype(fstype)
-    except ValueError as exc:
-        return jsonify({
-            'code': 'unsupported_filesystem',
-            'error': str(exc),
-            'details': sorted(FSTAB_PRESETS),
-        }), 400
-
-    try:
-        # Add to fstab if requested
-        if add_to_fstab:
-            fstab_result = helper_call('fstab_add', {
-                'uuid': uuid,
-                'mountpoint': mountpoint,
-                'fstype': fstype,
-            })
-            if not fstab_result.get('success'):
-                return jsonify({'error': fstab_result.get('error', 'Failed to add fstab entry')}), 400
-
-        mount_params = {'mountpoint': mountpoint}
-        if not add_to_fstab:
-            # Resolve device from UUID for direct mount
-            blkid_result = helper_call('blkid')
-            if not blkid_result.get('success'):
-                return jsonify({'error': blkid_result.get('error', 'Failed to resolve device')}), 400
-            device = None
-            for dev in blkid_result.get('data', []):
-                if dev.get('UUID') == uuid:
-                    device = dev.get('DEVNAME')
-                    break
-            if not device:
-                return jsonify({'error': 'Device not found for UUID'}), 400
-            mount_params['device'] = device
-
-        # Mount the filesystem
-        mount_result = helper_call('mount', mount_params)
-        if not mount_result.get('success'):
-            return jsonify({
-                'error': mount_result.get('error', 'Mount failed'),
-                'fstab_added': add_to_fstab
-            }), 400
-
-        return jsonify({
-            'status': 'mounted',
-            'mountpoint': mountpoint,
-            'fstab_added': add_to_fstab
-        })
+        return jsonify(_disk_mounts().mount(
+            uuid=uuid,
+            mountpoint=mountpoint,
+            fstype=fstype,
+            add_to_fstab=add_to_fstab,
+            custom_options_supplied='options' in data,
+        ))
+    except MountValidationError as exc:
+        payload = {'error': str(exc)}
+        if exc.code:
+            payload['code'] = exc.code
+        if exc.code == 'mount_options_not_allowed':
+            payload['message'] = 'Remove options and use the filesystem preset'
+        if exc.details is not None:
+            payload['details'] = exc.details
+        return jsonify(payload), 400
+    except MountOperationError as exc:
+        payload = {'error': str(exc)}
+        if exc.fstab_added is not None:
+            payload['fstab_added'] = exc.fstab_added
+        return jsonify(payload), 400
     except HelperError as e:
         return jsonify({'error': str(e)}), 503
 
@@ -341,22 +328,14 @@ def api_unmount():
     mountpoint = data.get('mountpoint', '')
     remove_from_fstab = data.get('remove_from_fstab', False)
 
-    if not mountpoint:
-        return jsonify({'error': 'Mountpoint is required'}), 400
     try:
-        mountpoint = normalize_managed_mountpoint(mountpoint)
-    except ValueError as exc:
+        return jsonify(_disk_mounts().unmount(
+            mountpoint=mountpoint,
+            remove_from_fstab=remove_from_fstab,
+        ))
+    except MountValidationError as exc:
         return jsonify({'error': str(exc)}), 400
-
-    try:
-        dependencies = find_mount_dependencies(
-            mountpoint,
-            docker_client=current_app.extensions.get('docker_client'),
-            media_paths_config=MEDIA_PATHS_CONFIG,
-            storage_plugin_config_dir=STORAGE_PLUGIN_CONFIG_DIR,
-            default_media_paths=DEFAULT_MEDIA_PATHS,
-        )
-    except DependencyInspectionError as exc:
+    except MountDependencyCheckError as exc:
         return jsonify({
             'code': 'dependency_check_failed',
             'error': 'Unable to verify mount dependencies',
@@ -364,7 +343,8 @@ def api_unmount():
             'details': exc.details,
         }), 503
 
-    if dependencies:
+    except MountInUseError as exc:
+        dependencies = exc.dependencies
         return jsonify({
             'code': 'mount_in_use',
             'error': 'Unmount blocked',
@@ -373,28 +353,8 @@ def api_unmount():
             'dependencies': [dependency.as_dict() for dependency in dependencies],
         }), 409
 
-    try:
-        # Unmount first
-        umount_result = helper_call('umount', {'mountpoint': mountpoint})
-        if not umount_result.get('success'):
-            return jsonify({'error': umount_result.get('error', 'Unmount failed')}), 400
-
-        # Remove from fstab if requested
-        if remove_from_fstab:
-            fstab_result = helper_call('fstab_remove', {'mountpoint': mountpoint})
-            # Don't fail if fstab removal fails, just note it
-            if not fstab_result.get('success'):
-                return jsonify({
-                    'status': 'unmounted',
-                    'warning': 'Unmounted but failed to remove fstab entry',
-                    'fstab_error': fstab_result.get('error')
-                })
-
-        return jsonify({
-            'status': 'unmounted',
-            'mountpoint': mountpoint,
-            'fstab_removed': remove_from_fstab
-        })
+    except MountOperationError as exc:
+        return jsonify({'error': str(exc)}), 400
     except HelperError as e:
         return jsonify({'error': str(e)}), 503
 

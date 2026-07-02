@@ -142,7 +142,7 @@ class TestDiskManagerEndpoints:
                 return {'success': True}
             return {'success': False, 'error': 'unexpected'}
 
-        with patch('disk_manager.helper_call', side_effect=helper_call_side_effect) as helper_call:
+        with patch('helper_client.helper_call', side_effect=helper_call_side_effect) as helper_call:
             response = authenticated_client.post(
                 '/api/disks/mount',
                 data=json.dumps({
@@ -199,7 +199,7 @@ class TestDiskManagerEndpoints:
                 return {'success': True}
             return {'success': False}
 
-        with patch('disk_manager.helper_call', side_effect=helper_call_side_effect):
+        with patch('helper_client.helper_call', side_effect=helper_call_side_effect):
             response = authenticated_client.post(
                 '/api/disks/mount',
                 data=json.dumps({
@@ -216,7 +216,7 @@ class TestDiskManagerEndpoints:
 
     def test_mount_without_fstab_device_not_found(self, authenticated_client):
         """Test mount without fstab fails when device not found."""
-        with patch('disk_manager.helper_call', return_value={'success': True, 'data': []}):
+        with patch('helper_client.helper_call', return_value={'success': True, 'data': []}):
             response = authenticated_client.post(
                 '/api/disks/mount',
                 data=json.dumps({
@@ -231,7 +231,7 @@ class TestDiskManagerEndpoints:
 
     def test_mount_fstab_add_failure(self, authenticated_client):
         """Test mount returns error when fstab add fails."""
-        with patch('disk_manager.helper_call', return_value={'success': False, 'error': 'nope'}):
+        with patch('helper_client.helper_call', return_value={'success': False, 'error': 'nope'}):
             response = authenticated_client.post(
                 '/api/disks/mount',
                 data=json.dumps({'uuid': 'abc-123', 'mountpoint': '/mnt/test', 'fstype': 'ext4'}),
@@ -249,7 +249,7 @@ class TestDiskManagerEndpoints:
             return {'success': False}
 
         with patch('disk_manager.find_mount_dependencies', return_value=[]):
-            with patch('disk_manager.helper_call', side_effect=helper_call_side_effect):
+            with patch('helper_client.helper_call', side_effect=helper_call_side_effect):
                 response = authenticated_client.post(
                     '/api/disks/unmount',
                     data=json.dumps({'mountpoint': '/mnt/test', 'remove_from_fstab': True}),
@@ -312,6 +312,39 @@ class TestDiskManagerEndpoints:
 
         assert response.status_code == 400
         helper_call.assert_not_called()
+
+    def test_mount_routes_delegate_to_injected_service(self, authenticated_client, app):
+        service = Mock()
+        service.mount.return_value = {"status": "mounted"}
+        service.unmount.return_value = {"status": "unmounted"}
+        app.extensions["disk_mount_service"] = service
+
+        mount_response = authenticated_client.post(
+            "/api/disks/mount",
+            json={
+                "uuid": "abc-123",
+                "mountpoint": "/mnt/storage",
+                "fstype": "ext4",
+                "add_to_fstab": False,
+            },
+        )
+        unmount_response = authenticated_client.post(
+            "/api/disks/unmount",
+            json={"mountpoint": "/mnt/storage", "remove_from_fstab": True},
+        )
+
+        assert mount_response.status_code == 200
+        service.mount.assert_called_once_with(
+            uuid="abc-123",
+            mountpoint="/mnt/storage",
+            fstype="ext4",
+            add_to_fstab=False,
+            custom_options_supplied=False,
+        )
+        assert unmount_response.status_code == 200
+        service.unmount.assert_called_once_with(
+            mountpoint="/mnt/storage", remove_from_fstab=True
+        )
 
 
 class TestMediaPaths:
