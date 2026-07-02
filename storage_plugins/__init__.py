@@ -3,23 +3,41 @@ Storage plugins Flask blueprint.
 Provides REST API for plugin management.
 """
 import json
-from flask import Blueprint, jsonify, request, Response, session
+from flask import Blueprint, current_app, jsonify, request, Response, session
 from auth_utils import login_required
 from storage_plugins.registry import get_registry
+from storage_read_service import (
+    StoragePluginCapabilityError,
+    StoragePluginDataNotFoundError,
+    StoragePluginNotFoundError,
+    StorageReadService,
+)
 
 storage_bp = Blueprint("storage", __name__)
+
+
+def _managed_plugin_list(registry):
+    import plugin_manager
+
+    return plugin_manager.list_plugins(registry)
+
+
+def default_storage_read_service():
+    return StorageReadService(
+        registry_provider=lambda: get_registry(),
+        managed_list_reader=_managed_plugin_list,
+    )
+
+
+def _storage_reads():
+    service = current_app.extensions.get("storage_read_service")
+    return service if service is not None else default_storage_read_service()
 
 
 @storage_bp.route("/api/storage/plugins", methods=["GET"])
 @login_required
 def list_plugins():
-    registry = get_registry()
-    try:
-        import plugin_manager
-        plugins = plugin_manager.list_plugins(registry)
-    except Exception:
-        plugins = registry.list_plugins()
-    return jsonify({"plugins": plugins})
+    return jsonify(_storage_reads().list_plugins())
 
 
 @storage_bp.route("/api/storage/plugins/<plugin_id>/toggle", methods=["POST"])
@@ -103,24 +121,10 @@ def remove_plugin(plugin_id: str):
 @storage_bp.route("/api/storage/plugins/<plugin_id>", methods=["GET"])
 @login_required
 def get_plugin(plugin_id: str):
-    registry = get_registry()
-    plugin = registry.get(plugin_id)
-
-    if not plugin:
-        return jsonify({"error": f"Plugin not found: {plugin_id}"}), 404
-
-    return jsonify({
-        "id": plugin.PLUGIN_ID,
-        "name": plugin.PLUGIN_NAME,
-        "description": plugin.PLUGIN_DESCRIPTION,
-        "version": plugin.PLUGIN_VERSION,
-        "installed": plugin.is_installed(),
-        "install_instructions": plugin.get_install_instructions(),
-        "schema": plugin.get_schema(),
-        "config": plugin.get_config(),
-        "status": plugin.get_status(),
-        "commands": plugin.get_commands()
-    })
+    try:
+        return jsonify(_storage_reads().details(plugin_id))
+    except StoragePluginNotFoundError as exc:
+        return jsonify({"error": str(exc)}), 404
 
 
 @storage_bp.route("/api/storage/plugins/<plugin_id>/config", methods=["POST"])
@@ -182,45 +186,32 @@ def apply_plugin_config(plugin_id: str):
 @storage_bp.route("/api/storage/plugins/<plugin_id>/status", methods=["GET"])
 @login_required
 def get_plugin_status(plugin_id: str):
-    registry = get_registry()
-    plugin = registry.get(plugin_id)
-
-    if not plugin:
-        return jsonify({"error": f"Plugin not found: {plugin_id}"}), 404
-
-    return jsonify(plugin.get_status())
+    try:
+        return jsonify(_storage_reads().status(plugin_id))
+    except StoragePluginNotFoundError as exc:
+        return jsonify({"error": str(exc)}), 404
 
 
 @storage_bp.route("/api/storage/plugins/<plugin_id>/recovery", methods=["GET"])
 @login_required
 def get_plugin_recovery(plugin_id: str):
-    registry = get_registry()
-    plugin = registry.get(plugin_id)
-
-    if not plugin:
-        return jsonify({"error": f"Plugin not found: {plugin_id}"}), 404
-
-    if not hasattr(plugin, "get_recovery_status"):
-        return jsonify({"error": "Recovery not supported"}), 404
-
-    return jsonify(plugin.get_recovery_status())
+    try:
+        return jsonify(_storage_reads().recovery(plugin_id))
+    except (StoragePluginNotFoundError, StoragePluginCapabilityError) as exc:
+        return jsonify({"error": str(exc)}), 404
 
 
 @storage_bp.route("/api/storage/plugins/<plugin_id>/logs/latest", methods=["GET"])
 @login_required
 def get_plugin_latest_log(plugin_id: str):
-    registry = get_registry()
-    plugin = registry.get(plugin_id)
-
-    if not plugin:
-        return jsonify({"error": f"Plugin not found: {plugin_id}"}), 404
-
-    if not hasattr(plugin, "get_latest_log"):
-        return jsonify({"error": "Logs not supported"}), 404
-
-    result = plugin.get_latest_log()
-    if not result:
-        return jsonify({"error": "No logs available"}), 404
+    try:
+        result = _storage_reads().latest_log(plugin_id)
+    except (
+        StoragePluginNotFoundError,
+        StoragePluginCapabilityError,
+        StoragePluginDataNotFoundError,
+    ) as exc:
+        return jsonify({"error": str(exc)}), 404
 
     return Response(
         result.get("content", ""),

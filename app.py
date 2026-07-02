@@ -37,7 +37,7 @@ from auth_utils import (
 )
 from catalog_manager import catalog_manager
 from tools_manager import tools_manager
-from storage_plugins import storage_bp
+from storage_plugins import default_storage_read_service, storage_bp
 from storage_plugins.registry import init_plugins
 from pi_monitor import get_pi_metrics
 from update_scheduler import update_scheduler, init_scheduler
@@ -57,6 +57,7 @@ from media_paths_service import MediaPathsService
 from seedbox_service import SeedboxService
 from disk_suggestion_service import DiskSuggestionService
 from smart_service import SmartService
+from storage_read_service import StorageReadService
 from setup_manager import setup_manager
 from helper_client import helper_call, HelperError
 from operation_manager import OperationRegistry
@@ -175,6 +176,7 @@ class AppDependencies:
     seedbox_service: SeedboxService | None = None
     disk_suggestion_service: DiskSuggestionService | None = None
     smart_service: SmartService | None = None
+    storage_read_service: StorageReadService | None = None
 
 
 def _default_system_service():
@@ -865,6 +867,9 @@ def create_app(config=None, dependencies=None):
     )
     application.extensions["smart_service"] = (
         resolved.smart_service or default_smart_service(application.extensions["helper"])
+    )
+    application.extensions["storage_read_service"] = (
+        resolved.storage_read_service or default_storage_read_service()
     )
 
     application.register_blueprint(core_api)

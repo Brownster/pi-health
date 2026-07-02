@@ -5,6 +5,7 @@ Tests for storage plugin API endpoints.
 import json
 import os
 import sys
+from unittest.mock import Mock
 
 import pytest
 
@@ -229,6 +230,40 @@ def test_get_plugin_details(authenticated_client, monkeypatch):
     assert data["id"] == "dummy"
     assert "schema" in data
     assert "config" in data
+
+
+def test_storage_read_routes_delegate_to_injected_service(authenticated_client, app):
+    service = Mock()
+    service.list_plugins.return_value = {"plugins": []}
+    service.details.return_value = {"id": "dummy"}
+    service.status.return_value = {"status": "healthy"}
+    service.recovery.return_value = {"recoverable": True}
+    service.latest_log.return_value = {
+        "content": "latest",
+        "path": "/tmp/latest.log",
+        "truncated": False,
+    }
+    app.extensions["storage_read_service"] = service
+
+    assert authenticated_client.get("/api/storage/plugins").status_code == 200
+    assert authenticated_client.get("/api/storage/plugins/dummy").status_code == 200
+    assert authenticated_client.get(
+        "/api/storage/plugins/dummy/status"
+    ).status_code == 200
+    assert authenticated_client.get(
+        "/api/storage/plugins/dummy/recovery"
+    ).status_code == 200
+    log_response = authenticated_client.get(
+        "/api/storage/plugins/dummy/logs/latest"
+    )
+
+    assert log_response.status_code == 200
+    assert log_response.get_data(as_text=True) == "latest"
+    service.list_plugins.assert_called_once_with()
+    service.details.assert_called_once_with("dummy")
+    service.status.assert_called_once_with("dummy")
+    service.recovery.assert_called_once_with("dummy")
+    service.latest_log.assert_called_once_with("dummy")
 
 
 def test_set_plugin_config_validation_error(authenticated_client, monkeypatch):
