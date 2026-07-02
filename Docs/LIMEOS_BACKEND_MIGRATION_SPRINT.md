@@ -81,7 +81,7 @@ Start implementation only when:
 |---|---|---|---|
 | BF-001 | Introduce an application factory | Entry gate | Complete (2026-06-30) |
 | BF-002 | Define service ports and shared adapters | BF-001 | Complete (2026-06-30) |
-| BF-003 | Extract domain services in bounded slices | BF-002 | In progress (mount operations implemented; E2E pending) |
+| BF-003 | Extract domain services in bounded slices | BF-002 | In progress (media paths implemented; E2E pending) |
 | BF-004 | Characterize security and stateful behavior | BF-001 | Pending |
 | BF-005 | Sign off the core boundary and agent handoff | BF-003, BF-004 | Pending |
 
@@ -298,6 +298,16 @@ dependency blockers, inspection failure, warnings, and route delegation. Ruff is
 unit tests pass (`808 passed, 1 skipped`). Full E2E remains pending because the Python environment
 upgrade selected Playwright Chromium revision 1228, which is not installed locally; the browser
 download did not complete in the available environment.
+
+Media paths and startup-service management implemented 2026-07-02. `MediaPathsService` owns
+default merging, absolute-path validation, atomic JSON persistence, typed startup parameters,
+helper configuration/reload/enable sequencing, and local preview fallback. The app factory injects
+the existing helper and config-repository ports. Compatibility functions and the four HTTP routes
+resolve the same service, leaving Flask responsible only for transport parsing and error mapping.
+Focused tests cover repository failure, validation-before-write, merged updates, helper ordering,
+configuration failure, privileged previews, local fallback comparison, and route delegation. Ruff
+is clean; backend unit tests pass (`817 passed, 1 skipped`). The full E2E gate remains pending on
+the missing Playwright Chromium revision recorded above.
 
 ## BF-004 - Characterize security and stateful behavior
 
