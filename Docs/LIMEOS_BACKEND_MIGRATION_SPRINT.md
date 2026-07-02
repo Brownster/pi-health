@@ -81,7 +81,7 @@ Start implementation only when:
 |---|---|---|---|
 | BF-001 | Introduce an application factory | Entry gate | Complete (2026-06-30) |
 | BF-002 | Define service ports and shared adapters | BF-001 | Complete (2026-06-30) |
-| BF-003 | Extract domain services in bounded slices | BF-002 | In progress (media paths implemented; E2E pending) |
+| BF-003 | Extract domain services in bounded slices | BF-002 | In progress (seedbox implemented; E2E pending) |
 | BF-004 | Characterize security and stateful behavior | BF-001 | Pending |
 | BF-005 | Sign off the core boundary and agent handoff | BF-003, BF-004 | Pending |
 
@@ -308,6 +308,17 @@ Focused tests cover repository failure, validation-before-write, merged updates,
 configuration failure, privileged previews, local fallback comparison, and route delegation. Ruff
 is clean; backend unit tests pass (`817 passed, 1 skipped`). The full E2E gate remains pending on
 the missing Playwright Chromium revision recorded above.
+
+Seedbox configuration implemented 2026-07-02. `SeedboxService` owns default and persisted state,
+mounted-state inspection, input normalization and validation, helper availability, configure and
+disable mutations, and atomic non-secret config persistence. Passwords cross only the typed helper
+call and are excluded from the saved configuration and response. Typed exceptions preserve the
+existing validation, unavailable-helper, helper-transport, and rejected-operation HTTP mappings.
+The app factory injects the helper and config repository; compatibility functions and both routes
+resolve the same service. Focused tests cover defaults, repository and mount-reader failures, every
+validation branch, helper availability, credential handling, helper-before-write ordering,
+rejection without persistence, and route delegation. Ruff is clean; backend unit tests pass (`831
+passed, 1 skipped`). The full E2E gate remains pending on the recorded Playwright browser blocker.
 
 ## BF-004 - Characterize security and stateful behavior
 
