@@ -457,18 +457,32 @@ class TestMediaPaths:
         """Test seedbox returns 503 when helper unavailable."""
         import disk_manager
         original_config = disk_manager.SEEDBOX_CONFIG
-        original_helper_available = disk_manager.helper_available
         disk_manager.SEEDBOX_CONFIG = os.path.join(temp_config_dir, 'seedbox_mount.json')
 
         try:
-            disk_manager.helper_available = lambda: False
-            response = authenticated_client.post('/api/disks/seedbox',
-                                                 data=json.dumps({'enabled': True, 'host': 'x', 'username': 'u', 'remote_path': '/data', 'password': 'p'}),
-                                                 content_type='application/json')
+            with patch('helper_client.helper_available', return_value=False):
+                response = authenticated_client.post('/api/disks/seedbox',
+                                                     data=json.dumps({'enabled': True, 'host': 'x', 'username': 'u', 'remote_path': '/data', 'password': 'p'}),
+                                                     content_type='application/json')
             assert response.status_code == 503
         finally:
             disk_manager.SEEDBOX_CONFIG = original_config
-            disk_manager.helper_available = original_helper_available
+
+    def test_seedbox_routes_delegate_to_injected_service(self, authenticated_client, app):
+        service = Mock()
+        service.state.return_value = {"config": {}, "mounted": False}
+        service.configure.return_value = {"status": "ok"}
+        app.extensions["seedbox_service"] = service
+
+        get_response = authenticated_client.get("/api/disks/seedbox")
+        post_response = authenticated_client.post(
+            "/api/disks/seedbox", json={"enabled": False}
+        )
+
+        assert get_response.status_code == 200
+        service.state.assert_called_once_with()
+        assert post_response.status_code == 200
+        service.configure.assert_called_once_with({"enabled": False})
 
     def test_startup_service_params_include_mounts(self):
         """Only typed mount and compose parameters cross the helper boundary."""

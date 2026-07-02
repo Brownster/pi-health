@@ -6,7 +6,6 @@ Communicates with the privileged helper service over Unix socket.
 """
 
 import os
-import json
 from flask import Blueprint, current_app, has_app_context, jsonify, request
 from auth_utils import login_required
 from helper_client import helper_call, helper_available, HelperError, HELPER_SOCKET
@@ -26,6 +25,12 @@ from media_paths_service import (
     MediaPathValidationError,
     MediaPathsService,
     startup_service_params,
+)
+from seedbox_service import (
+    SeedboxOperationError,
+    SeedboxService,
+    SeedboxUnavailableError,
+    SeedboxValidationError,
 )
 from smart_monitor import parse_smartctl_json
 from runtime_paths import CONFIG_DIR as RUNTIME_CONFIG_DIR, STORAGE_PLUGIN_CONFIG_DIR as RUNTIME_STORAGE_PLUGIN_CONFIG_DIR
@@ -48,7 +53,6 @@ DEFAULT_MEDIA_PATHS = {
 }
 
 DOCKER_COMPOSE_PATH = os.getenv('DOCKER_COMPOSE_PATH', './docker-compose.yml')
-STARTUP_SERVICE_NAME = 'docker-compose-start.service'
 SEEDBOX_MOUNT_POINT = '/mnt/seedbox'
 
 
@@ -66,34 +70,16 @@ def save_media_paths(paths):
 
 def load_seedbox_config():
     """Load seedbox mount configuration."""
-    try:
-        if os.path.exists(SEEDBOX_CONFIG):
-            with open(SEEDBOX_CONFIG, 'r') as f:
-                return json.load(f)
-    except Exception:
-        pass
-    return {
-        'enabled': False,
-        'host': '',
-        'username': '',
-        'port': 22,
-        'remote_path': '',
-        'mount_point': SEEDBOX_MOUNT_POINT
-    }
+    return _seedbox().config()
 
 
 def save_seedbox_config(config):
     """Save seedbox mount configuration."""
-    os.makedirs(os.path.dirname(SEEDBOX_CONFIG), exist_ok=True)
-    with open(SEEDBOX_CONFIG, 'w') as f:
-        json.dump(config, f, indent=2)
+    _seedbox().save(config)
 
 
 def _seedbox_is_mounted():
-    try:
-        return os.path.ismount(SEEDBOX_MOUNT_POINT)
-    except Exception:
-        return False
+    return _seedbox().is_mounted()
 
 
 def _startup_service_params(paths):
@@ -133,6 +119,16 @@ def default_media_paths_service(helper=None, repository=None):
     )
 
 
+def default_seedbox_service(helper=None, repository=None):
+    return SeedboxService(
+        helper=helper if helper is not None else HelperClientAdapter(),
+        repository=repository if repository is not None else JsonFileRepository(),
+        config_path_provider=lambda: SEEDBOX_CONFIG,
+        mount_point_provider=lambda: SEEDBOX_MOUNT_POINT,
+        mounted_reader=os.path.ismount,
+    )
+
+
 def _disk_inventory():
     if has_app_context():
         service = current_app.extensions.get("disk_inventory_service")
@@ -157,6 +153,14 @@ def _media_paths():
     return default_media_paths_service()
 
 
+def _seedbox():
+    if has_app_context():
+        service = current_app.extensions.get("seedbox_service")
+        if service is not None:
+            return service
+    return default_seedbox_service()
+
+
 def get_disk_inventory():
     """Get complete disk inventory with mount status via the inventory service."""
     return _disk_inventory().inventory()
@@ -165,72 +169,23 @@ def get_disk_inventory():
 @disk_manager.route('/api/disks/seedbox', methods=['GET'])
 @login_required
 def api_seedbox_get():
-    config = load_seedbox_config()
-    return jsonify({
-        'config': config,
-        'mounted': _seedbox_is_mounted()
-    })
+    return jsonify(_seedbox().state())
 
 
 @disk_manager.route('/api/disks/seedbox', methods=['POST'])
 @login_required
 def api_seedbox_set():
-    if not helper_available():
-        return jsonify({'error': 'Helper service unavailable'}), 503
-
     data = request.get_json() or {}
-    enabled = bool(data.get('enabled', False))
-    host = str(data.get('host', '')).strip()
-    username = str(data.get('username', '')).strip()
-    remote_path = str(data.get('remote_path', '')).strip()
-    port = data.get('port', 22)
-    password = data.get('password', '')
-
     try:
-        port = int(port)
-    except (TypeError, ValueError):
-        return jsonify({'error': 'Invalid port'}), 400
-
-    if enabled:
-        if not host or not username or not remote_path:
-            return jsonify({'error': 'host, username, and remote_path required'}), 400
-        if not remote_path.startswith('/') or '..' in remote_path:
-            return jsonify({'error': 'Invalid remote_path'}), 400
-        if not password:
-            return jsonify({'error': 'Password required'}), 400
-        if port < 1 or port > 65535:
-            return jsonify({'error': 'Invalid port'}), 400
-
-        try:
-            result = helper_call('seedbox_configure', {
-                'host': host,
-                'username': username,
-                'password': password,
-                'remote_path': remote_path,
-                'port': port
-            })
-            if not result.get('success'):
-                return jsonify({'error': result.get('error', 'Failed to configure seedbox')}), 500
-        except HelperError as exc:
-            return jsonify({'error': str(exc)}), 503
-    else:
-        try:
-            result = helper_call('seedbox_disable', {})
-            if not result.get('success'):
-                return jsonify({'error': result.get('error', 'Failed to disable seedbox')}), 500
-        except HelperError as exc:
-            return jsonify({'error': str(exc)}), 503
-
-    config = {
-        'enabled': enabled,
-        'host': host,
-        'username': username,
-        'port': port,
-        'remote_path': remote_path,
-        'mount_point': SEEDBOX_MOUNT_POINT
-    }
-    save_seedbox_config(config)
-    return jsonify({'status': 'ok', 'config': config, 'mounted': _seedbox_is_mounted()})
+        return jsonify(_seedbox().configure(data))
+    except SeedboxValidationError as exc:
+        return jsonify({'error': str(exc)}), 400
+    except SeedboxUnavailableError as exc:
+        return jsonify({'error': str(exc)}), 503
+    except SeedboxOperationError as exc:
+        return jsonify({'error': str(exc)}), 500
+    except HelperError as exc:
+        return jsonify({'error': str(exc)}), 503
 
 
 # =============================================================================
