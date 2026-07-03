@@ -81,7 +81,7 @@ Start implementation only when:
 |---|---|---|---|
 | BF-001 | Introduce an application factory | Entry gate | Complete (2026-06-30) |
 | BF-002 | Define service ports and shared adapters | BF-001 | Complete (2026-06-30) |
-| BF-003 | Extract domain services in bounded slices | BF-002 | In progress (domains 1-4 done; auto-update extracted; backups/catalog/tools pending) |
+| BF-003 | Extract domain services in bounded slices | BF-002 | In progress (domains 1-4 done; auto-update + backups extracted; catalog/tools pending) |
 | BF-004 | Characterize security and stateful behavior | BF-001 | In progress (auth/CSRF/credential invariants characterized) |
 | BF-005 | Sign off the core boundary and agent handoff | BF-003, BF-004 | Pending |
 
@@ -371,6 +371,25 @@ and merged config, validation-before-write, enable/disable rescheduling, schedul
 registration, missing-job removal tolerance, next-run reads, update/skip/pull-failure/up-failure/
 list-failure run paths, concurrent-run rejection, last-run persistence, status and logs read models,
 and route delegation for every endpoint. Ruff is clean; backend unit tests pass (`891 passed, 1
+skipped`); full E2E `97 passed`.
+
+Backup scheduling, execution, and restore implemented 2026-07-03. `BackupService` owns backup
+configuration reads and validated writes (retention bounds, absolute non-traversal paths, known
+schedule presets), job registration on an injected scheduler, the concurrency-guarded primary and
+plugin backup run, archive listing, and restore/restore-plugins orchestration including stack
+stop/start. It receives a config repository, scheduler port, helper port, cron trigger factory,
+clock, and providers for defaults (media-path aware), primary and plugin sources, stack listing, and
+compose commands; environment wiring (runtime paths, `load_media_paths`, and the dedicated
+`BackgroundScheduler`) stays in the transport module. Typed exceptions map restore validation to
+`400`, missing archives to `404`, an unavailable helper to `503`, and failed operations to `500`,
+while `HelperError` still maps to `503`; the seven `/api/backups` routes now parse input, resolve the
+factory-injected service, and map results. Module-level `load_config`, `save_config`, `run_backup_job`,
+`_update_schedule`, `list_backups`, `_default_config`, `_get_sources`, and `init_backup_scheduler`
+remain as compatibility shims, with a module helper adapter and dynamic stack imports so existing
+patch-based tests stay green. Focused tests cover config merge, every validation branch, run helper
+paths (unavailable, primary+plugin, plugin-disabled, helper error, concurrency), restore
+orchestration (stop/start, traversal, missing, unavailable, list error, failed result), plugin
+restore, status, and route delegation. Ruff is clean; backend unit tests pass (`930 passed, 1
 skipped`); full E2E `97 passed`.
 
 ## BF-004 - Characterize security and stateful behavior
