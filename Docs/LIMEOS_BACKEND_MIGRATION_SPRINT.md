@@ -82,7 +82,7 @@ Start implementation only when:
 | BF-001 | Introduce an application factory | Entry gate | Complete (2026-06-30) |
 | BF-002 | Define service ports and shared adapters | BF-001 | Complete (2026-06-30) |
 | BF-003 | Extract domain services in bounded slices | BF-002 | In progress (domains 1-4 done; auto-update extracted; backups/catalog/tools pending) |
-| BF-004 | Characterize security and stateful behavior | BF-001 | Pending |
+| BF-004 | Characterize security and stateful behavior | BF-001 | In progress (auth/CSRF/credential invariants characterized) |
 | BF-005 | Sign off the core boundary and agent handoff | BF-003, BF-004 | Pending |
 
 ## BF-001 - Introduce an application factory
@@ -393,6 +393,20 @@ Acceptance:
 - Tests fail when an invariant changes even if HTTP payload shapes remain valid.
 - Frontend API models may change in the same slice as their backend endpoint.
 - No endpoint-specific rollout flag or duplicate transport implementation is introduced.
+
+Authentication and CSRF invariants characterized 2026-07-03. `tests/test_security_invariants.py`
+locks in the `csrf_protect` decorator (rejects a mutation with a missing header, a missing session
+token, or a mismatched value; allows only the exact session token), the CSRF token lifecycle
+(`rotate_csrf_token` persists a high-entropy token; `get_csrf_token` returns a valid token but
+re-mints when the session token is missing or shorter than 32 characters), and the
+`verify_credentials` constant-work guarantee (an unknown username still runs a hash comparison and
+returns `False` even when that comparison would match, so account existence does not leak through
+timing). Operation ownership (`hmac.compare_digest` owner plus `expected_kind` isolation) and audit
+attribution already have coverage in `test_operation_manager.py`, `test_ports.py`, and
+`test_storage_api.py`. Ruff is clean; backend unit tests pass (`902 passed, 1 skipped`). Remaining
+BF-004 areas (operation/SSE reconnect, per-stack locks and atomic writes, helper fail-closed paths,
+scheduler restart, and Docker/SnapRAID/MergerFS/mount/repository failure mapping) largely rest on
+existing focused tests and will be characterized in later slices where gaps remain.
 
 ## BF-005 - Core boundary and agent handoff signoff
 
