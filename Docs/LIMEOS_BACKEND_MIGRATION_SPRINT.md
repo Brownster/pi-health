@@ -81,7 +81,7 @@ Start implementation only when:
 |---|---|---|---|
 | BF-001 | Introduce an application factory | Entry gate | Complete (2026-06-30) |
 | BF-002 | Define service ports and shared adapters | BF-001 | Complete (2026-06-30) |
-| BF-003 | Extract domain services in bounded slices | BF-002 | In progress (storage plugin reads implemented; E2E pending) |
+| BF-003 | Extract domain services in bounded slices | BF-002 | In progress (domains 1-4 done; auto-update extracted; backups/catalog/tools pending) |
 | BF-004 | Characterize security and stateful behavior | BF-001 | Pending |
 | BF-005 | Sign off the core boundary and agent handoff | BF-003, BF-004 | Pending |
 
@@ -351,6 +351,27 @@ tests cover partial data, parser delegation, helper failures, unsafe devices, SA
 supported self-test type, invalid types, rejection mapping, and route delegation. Ruff is clean;
 backend unit tests pass (`851 passed, 1 skipped`). The full E2E gate remains pending on the recorded
 Playwright browser blocker.
+
+Playwright browser blocker resolved 2026-07-03. Chromium headless-shell revision 1228 was installed
+locally, clearing the gate recorded across the 2026-07-02 disk and storage slices. The full E2E suite
+now passes `97 passed` (95 through the dynamic-port `v2_server` fixture plus the two legacy
+`test_login_page.py` checks, which require an app served at `localhost:8002`).
+
+Auto-update scheduling and execution implemented 2026-07-03. `AutoUpdateService` owns auto-update
+configuration reads and validated writes, schedule-preset-to-cron mapping, job registration on an
+injected scheduler, next-run lookup, and the concurrency-guarded pull/recreate run loop. It receives
+a config repository, a scheduler port, a stack lister, a compose runner, a cron trigger factory, and
+a clock; the dedicated `BackgroundScheduler` and its `CronTrigger.from_crontab` factory stay wired in
+the transport module so scheduler behavior is unchanged. Typed `UpdateConfigError` preserves the
+existing `400` validation responses while save failures still map to `500`; the five `/api/auto-update`
+routes now parse transport input, resolve the factory-injected service, and map results. Module-level
+`load_config`, `save_config`, `run_auto_update`, `init_scheduler`, `get_schedule_cron`, and
+`has_new_images` remain as compatibility shims over the resolved service. Focused tests cover default
+and merged config, validation-before-write, enable/disable rescheduling, scheduler start and job
+registration, missing-job removal tolerance, next-run reads, update/skip/pull-failure/up-failure/
+list-failure run paths, concurrent-run rejection, last-run persistence, status and logs read models,
+and route delegation for every endpoint. Ruff is clean; backend unit tests pass (`891 passed, 1
+skipped`); full E2E `97 passed`.
 
 ## BF-004 - Characterize security and stateful behavior
 
