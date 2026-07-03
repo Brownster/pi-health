@@ -1,102 +1,55 @@
+"""Backup Scheduler transport.
+
+Creates compressed backups of docker config + stacks on a schedule and restores
+them. Domain behavior lives in :mod:`backup_service`; this module wires the Flask
+blueprint, supplies environment-specific providers, and preserves the historical
+module-level functions used by internal callers and tests.
 """
-Backup Scheduler Module
 
-Creates compressed backups of docker config + stacks on a schedule.
-Backups are written to a mounted USB path (default /mnt/backup).
-"""
-
-import os
-import json
-import tempfile
-import threading
-from datetime import datetime, timezone
-from flask import Blueprint, jsonify, request
-
-from auth_utils import login_required
-from helper_client import helper_call, helper_available, HelperError
-from disk_manager import load_media_paths
-from runtime_paths import (
-    CONFIG_DIR as RUNTIME_CONFIG_DIR,
-    CREDENTIALS_FILE,
-    STATE_DIR as RUNTIME_STATE_DIR,
-    SNAPRAID_LOG_DIR,
-    STORAGE_PLUGIN_CONFIG_DIR,
-    STORAGE_PLUGIN_STATE_DIR,
-)
+from flask import Blueprint, current_app, has_app_context, jsonify, request
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+
+from auth_utils import login_required
+from disk_manager import load_media_paths
+from helper_client import HelperError, helper_available, helper_call
+from ports import ApschedulerAdapter, JsonFileRepository
+from runtime_paths import (
+    CONFIG_DIR as RUNTIME_CONFIG_DIR,
+    CREDENTIALS_FILE,
+    SNAPRAID_LOG_DIR,
+    STATE_DIR as RUNTIME_STATE_DIR,
+    STORAGE_PLUGIN_CONFIG_DIR,
+    STORAGE_PLUGIN_STATE_DIR,
+)
+from backup_service import (  # noqa: F401  (re-exported for compatibility)
+    DEFAULT_CONFIG,
+    DEFAULT_EXCLUDES,
+    SCHEDULE_PRESETS,
+    BackupConfigError,
+    BackupHelperUnavailable,
+    BackupNotFound,
+    BackupOperationError,
+    BackupService,
+    list_backups,
+)
 
 backup_scheduler = Blueprint('backup_scheduler', __name__)
 
 CONFIG_DIR = str(RUNTIME_STATE_DIR)
 CONFIG_FILE = str(RUNTIME_STATE_DIR / 'backup_config.json')
 
-DEFAULT_CONFIG = {
-    'version': 1,
-    'enabled': False,
-    'schedule_preset': 'disabled',
-    'retention_count': 7,
-    'dest_dir': '/mnt/backup',
-    'config_dir': '/home/pi/docker',
-    'stacks_path': '/opt/stacks',
-    'include_env': True,
-    'compression': 'zst',
-    'last_run': None,
-    'last_run_result': None,
-    'plugin_backup_enabled': True,
-    'plugin_retention_count': 10,
-    'last_plugin_backup': None,
-    'last_plugin_backup_result': None,
-    'last_restore': None,
-    'last_restore_result': None
-}
-
-# Default patterns to exclude from backups (media, cache, logs, temp files)
-DEFAULT_EXCLUDES = [
-    # Media files (podcasts, videos, music)
-    '*.mp3',
-    '*.mp4',
-    '*.mkv',
-    '*.avi',
-    '*.mov',
-    '*.flac',
-    '*.wav',
-    '*.m4a',
-    '*.webm',
-    # Image cache directories (Sonarr, Radarr, etc.)
-    '*/MediaCover/*',
-    '*/MediaCover',
-    # Cache and temporary files
-    '*/cache/*',
-    '*/Cache/*',
-    '*/.cache/*',
-    '*/logs/*',
-    '*.log',
-    '*.log.*',
-    # Database journals/temp (keep main db, exclude temp)
-    '*-shm',
-    '*-wal',
-    '*.db-journal',
-    # Transcoding/temp
-    '*/transcode/*',
-    '*/Transcode/*',
-    '*/temp/*',
-    '*/tmp/*',
-]
-
-SCHEDULE_PRESETS = {
-    'disabled': None,
-    'daily_2am': '0 2 * * *',
-    'weekly_sunday_2am': '0 2 * * 0'
-}
-
+# Dedicated background scheduler for backup jobs (separate from other schedulers).
 scheduler = BackgroundScheduler(daemon=True)
-_backup_lock = threading.Lock()
-_backup_running = False
 
+
+# =============================================================================
+# Environment-specific providers (kept out of the neutral service)
+# =============================================================================
 
 def _default_config():
+    """Build defaults, overriding backup/config dirs from configured media paths."""
     defaults = DEFAULT_CONFIG.copy()
     paths = load_media_paths()
     defaults['dest_dir'] = paths.get('backup', defaults['dest_dir'])
@@ -104,33 +57,8 @@ def _default_config():
     return defaults
 
 
-def load_config():
-    try:
-        if os.path.exists(CONFIG_FILE):
-            with open(CONFIG_FILE, 'r') as f:
-                config = json.load(f)
-                merged = _default_config()
-                merged.update(config)
-                return merged
-    except (json.JSONDecodeError, IOError):
-        pass
-    return _default_config()
-
-
-def save_config(config):
-    os.makedirs(CONFIG_DIR, exist_ok=True)
-    fd, temp_path = tempfile.mkstemp(dir=CONFIG_DIR, suffix='.json')
-    try:
-        with os.fdopen(fd, 'w') as f:
-            json.dump(config, f, indent=2)
-        os.replace(temp_path, CONFIG_FILE)
-    except Exception:
-        if os.path.exists(temp_path):
-            os.unlink(temp_path)
-        raise
-
-
 def _get_sources(config):
+    """Assemble the primary backup source paths for a config."""
     sources = []
     config_dir = config.get('config_dir', '').strip()
     stacks_path = config.get('stacks_path', '').strip()
@@ -144,207 +72,132 @@ def _get_sources(config):
     return sources
 
 
+def _plugin_sources():
+    return [
+        str(STORAGE_PLUGIN_CONFIG_DIR),
+        str(STORAGE_PLUGIN_STATE_DIR),
+        str(SNAPRAID_LOG_DIR),
+    ]
+
+
+def _list_stacks():
+    from stack_manager import list_stacks
+    return list_stacks()
+
+
+def _run_compose(name, command):
+    from stack_manager import run_compose_command
+    return run_compose_command(name, command)
+
+
+class _ModuleHelperAdapter:
+    """Helper port delegating to this module's ``helper_*`` names (test-patchable)."""
+
+    def available(self):
+        return helper_available()
+
+    def call(self, command, params=None):
+        return helper_call(command, params or {})
+
+
+# =============================================================================
+# Service construction and resolution
+# =============================================================================
+
+def default_backup_service(repository=None, scheduler_port=None, helper=None):
+    """Build a BackupService bound to this module's paths, scheduler, and helper."""
+    return BackupService(
+        repository=repository if repository is not None else JsonFileRepository(),
+        scheduler=(
+            scheduler_port if scheduler_port is not None else ApschedulerAdapter(scheduler)
+        ),
+        helper=helper if helper is not None else _ModuleHelperAdapter(),
+        config_path_provider=lambda: CONFIG_FILE,
+        default_config_provider=_default_config,
+        sources_provider=_get_sources,
+        plugin_sources_provider=_plugin_sources,
+        stack_lister=_list_stacks,
+        compose_runner=_run_compose,
+        trigger_factory=CronTrigger.from_crontab,
+        excludes=DEFAULT_EXCLUDES,
+    )
+
+
+def _backup_service():
+    if has_app_context():
+        service = current_app.extensions.get("backup_service")
+        if service is not None:
+            return service
+    return default_backup_service()
+
+
+# =============================================================================
+# Compatibility shims (module-level functions preserved for internal callers)
+# =============================================================================
+
+def load_config():
+    return _backup_service().load_config()
+
+
+def save_config(config):
+    _backup_service().save_config(config)
+
+
 def _update_schedule(preset):
-    try:
-        scheduler.remove_job('pihealth_backup')
-    except Exception:
-        pass
-
-    cron = SCHEDULE_PRESETS.get(preset)
-    if cron:
-        scheduler.add_job(
-            run_backup_job,
-            CronTrigger.from_crontab(cron),
-            id='pihealth_backup',
-            name='Pi-Health Backup',
-            replace_existing=True
-        )
-
-
-def init_backup_scheduler(app=None):
-    config = load_config()
-    if config.get('enabled') and config.get('schedule_preset') != 'disabled':
-        _update_schedule(config['schedule_preset'])
-
-    if not scheduler.running:
-        scheduler.start()
-
-
-def run_backup_job():
-    global _backup_running
-
-    if not _backup_lock.acquire(blocking=False):
-        return {'error': 'Backup already in progress'}
-
-    try:
-        _backup_running = True
-        config = load_config()
-
-        if not helper_available():
-            result = {'success': False, 'error': 'Helper service unavailable'}
-            plugin_result = {'success': False, 'error': 'Helper service unavailable'}
-        else:
-            try:
-                result = helper_call('backup_create', {
-                    'sources': _get_sources(config),
-                    'dest_dir': config.get('dest_dir'),
-                    'retention_count': config.get('retention_count', 7),
-                    'compression': config.get('compression', 'zst'),
-                    'archive_prefix': 'pi-health-backup',
-                    'excludes': DEFAULT_EXCLUDES
-                })
-                if config.get('plugin_backup_enabled', True):
-                    plugin_result = helper_call('backup_create', {
-                        'sources': [
-                            str(STORAGE_PLUGIN_CONFIG_DIR),
-                            str(STORAGE_PLUGIN_STATE_DIR),
-                            str(SNAPRAID_LOG_DIR),
-                        ],
-                        'dest_dir': config.get('dest_dir'),
-                        'retention_count': config.get('plugin_retention_count', 10),
-                        'compression': config.get('compression', 'zst'),
-                        'archive_prefix': 'storage-plugins'
-                    })
-                else:
-                    plugin_result = {'success': False, 'error': 'Plugin backup disabled'}
-            except HelperError as exc:
-                result = {'success': False, 'error': str(exc)}
-                plugin_result = {'success': False, 'error': str(exc)}
-
-        config['last_run'] = datetime.now(timezone.utc).isoformat()
-        config['last_run_result'] = result
-        config['last_plugin_backup'] = datetime.now(timezone.utc).isoformat()
-        config['last_plugin_backup_result'] = plugin_result
-        save_config(config)
-        return {'primary': result, 'plugins': plugin_result}
-    finally:
-        _backup_running = False
-        _backup_lock.release()
+    _backup_service().apply_schedule(preset)
 
 
 def get_next_run_time():
-    try:
-        job = scheduler.get_job('pihealth_backup')
-        if job and job.next_run_time:
-            return job.next_run_time.isoformat()
-    except Exception:
-        pass
-    return None
+    return _backup_service().next_run_time()
 
 
-def list_backups(dest_dir):
-    entries = []
-    if not dest_dir or not os.path.isdir(dest_dir):
-        return entries
+def run_backup_job():
+    return _backup_service().run_backup()
 
-    # Include both primary backups and plugin backups
-    prefixes = ('pi-health-backup-', 'storage-plugins-')
-    for name in sorted(os.listdir(dest_dir)):
-        if not any(name.startswith(p) for p in prefixes):
-            continue
-        if not (name.endswith('.tar.zst') or name.endswith('.tar.gz')):
-            continue
-        path = os.path.join(dest_dir, name)
-        try:
-            stat = os.stat(path)
-            entries.append({
-                'name': name,
-                'size': stat.st_size,
-                'mtime': stat.st_mtime
-            })
-        except OSError:
-            continue
-    entries.sort(key=lambda item: item['mtime'], reverse=True)
-    return entries
 
+def init_backup_scheduler(app=None):
+    service = None
+    if app is not None:
+        service = getattr(app, "extensions", {}).get("backup_service")
+    if service is None:
+        service = _backup_service()
+    service.init_scheduler()
+
+
+# =============================================================================
+# API Endpoints
+# =============================================================================
 
 @backup_scheduler.route('/api/backups/config', methods=['GET'])
 @login_required
 def api_backup_config():
-    return jsonify(load_config())
+    return jsonify(_backup_service().load_config())
 
 
 @backup_scheduler.route('/api/backups/config', methods=['POST'])
 @login_required
 def api_backup_config_update():
     data = request.get_json() or {}
-    config = load_config()
-
-    for key in ('enabled', 'schedule_preset', 'retention_count', 'dest_dir',
-                'config_dir', 'stacks_path', 'include_env', 'plugin_backup_enabled',
-                'plugin_retention_count'):
-        if key in data:
-            config[key] = data[key]
-
-    retention = config.get('retention_count', 7)
     try:
-        retention = int(retention)
-    except (TypeError, ValueError):
-        return jsonify({'error': 'Invalid retention_count'}), 400
-    if retention < 1:
-        return jsonify({'error': 'retention_count must be >= 1'}), 400
-    config['retention_count'] = retention
-
-    plugin_retention = config.get('plugin_retention_count', 10)
-    try:
-        plugin_retention = int(plugin_retention)
-    except (TypeError, ValueError):
-        return jsonify({'error': 'Invalid plugin_retention_count'}), 400
-    if plugin_retention < 1:
-        return jsonify({'error': 'plugin_retention_count must be >= 1'}), 400
-    config['plugin_retention_count'] = plugin_retention
-
-    dest_dir = str(config.get('dest_dir', '')).strip()
-    if not dest_dir.startswith('/'):
-        return jsonify({'error': 'dest_dir must be absolute'}), 400
-    if '..' in dest_dir:
-        return jsonify({'error': 'dest_dir invalid'}), 400
-
-    config_dir = str(config.get('config_dir', '')).strip()
-    if config_dir and (not config_dir.startswith('/') or '..' in config_dir):
-        return jsonify({'error': 'config_dir invalid'}), 400
-
-    stacks_path = str(config.get('stacks_path', '')).strip()
-    if stacks_path and (not stacks_path.startswith('/') or '..' in stacks_path):
-        return jsonify({'error': 'stacks_path invalid'}), 400
-
-    schedule = config.get('schedule_preset', 'disabled')
-    if schedule not in SCHEDULE_PRESETS:
-        return jsonify({'error': 'Invalid schedule_preset'}), 400
-
-    save_config(config)
-
-    if config.get('enabled') and schedule != 'disabled':
-        _update_schedule(schedule)
-    else:
-        _update_schedule('disabled')
-
+        config = _backup_service().update_config(data)
+    except BackupConfigError as exc:
+        return jsonify({'error': str(exc)}), 400
     return jsonify({'status': 'ok', 'config': config})
 
 
 @backup_scheduler.route('/api/backups/status', methods=['GET'])
 @login_required
 def api_backup_status():
-    config = load_config()
-    return jsonify({
-        'enabled': config.get('enabled', False),
-        'next_run': get_next_run_time(),
-        'backup_running': _backup_running,
-        'last_run': config.get('last_run'),
-        'last_run_result': config.get('last_run_result'),
-        'last_plugin_backup': config.get('last_plugin_backup'),
-        'last_plugin_backup_result': config.get('last_plugin_backup_result')
-    })
+    return jsonify(_backup_service().status())
 
 
 @backup_scheduler.route('/api/backups/run', methods=['POST'])
 @login_required
 def api_backup_run():
-    result = run_backup_job()
+    result = _backup_service().run_backup()
     if not result:
         return jsonify({'error': 'Backup failed'}), 500
 
-    # Check if this is the structured result from run_backup_job
     primary = result.get('primary', result)
     if not primary.get('success'):
         return jsonify({'error': primary.get('error', 'Backup failed'), 'result': result}), 500
@@ -355,109 +208,48 @@ def api_backup_run():
 @backup_scheduler.route('/api/backups/list', methods=['GET'])
 @login_required
 def api_backup_list():
-    config = load_config()
-    dest_dir = config.get('dest_dir')
-    return jsonify({'backups': list_backups(dest_dir)})
+    return jsonify({'backups': _backup_service().list_backups()})
 
 
 @backup_scheduler.route('/api/backups/restore', methods=['POST'])
 @login_required
 def api_backup_restore():
     data = request.get_json() or {}
-    archive_name = data.get('archive_name', '').strip()
-    stop_stacks = bool(data.get('stop_stacks', True))
-    start_stacks = bool(data.get('start_stacks', True))
-
-    if not archive_name or '/' in archive_name or '..' in archive_name:
-        return jsonify({'error': 'Invalid archive name'}), 400
-
-    config = load_config()
-    dest_dir = config.get('dest_dir', '')
-    archive_path = os.path.join(dest_dir, archive_name)
-
-    if not os.path.exists(archive_path):
-        return jsonify({'error': 'Backup not found'}), 404
-
-    if not helper_available():
-        return jsonify({'error': 'Helper service unavailable'}), 503
-
-    stacks_stopped = []
-    stacks_started = []
     try:
-        if stop_stacks:
-            from stack_manager import list_stacks, run_compose_command
-            stacks, err = list_stacks()
-            if err:
-                return jsonify({'error': err}), 500
-            for stack in stacks:
-                name = stack.get('name')
-                if not name:
-                    continue
-                result = run_compose_command(name, 'stop')
-                if result and result.get('success'):
-                    stacks_stopped.append(name)
-
-        restore_result = helper_call('backup_restore', {
-            'archive_path': archive_path
-        })
-        if not restore_result.get('success'):
-            return jsonify({'error': restore_result.get('error', 'Restore failed')}), 500
-
-        if start_stacks and stacks_stopped:
-            from stack_manager import run_compose_command
-            for name in stacks_stopped:
-                result = run_compose_command(name, 'up')
-                if result and result.get('success'):
-                    stacks_started.append(name)
-
-        config['last_restore'] = datetime.now(timezone.utc).isoformat()
-        config['last_restore_result'] = {
-            'restore': restore_result,
-            'stopped': stacks_stopped,
-            'started': stacks_started
-        }
-        save_config(config)
-
-        return jsonify({
-            'status': 'ok',
-            'result': config['last_restore_result']
-        })
+        result = _backup_service().restore(
+            data.get('archive_name', ''),
+            stop_stacks=bool(data.get('stop_stacks', True)),
+            start_stacks=bool(data.get('start_stacks', True)),
+        )
+    except BackupConfigError as exc:
+        return jsonify({'error': str(exc)}), 400
+    except BackupNotFound as exc:
+        return jsonify({'error': str(exc)}), 404
+    except BackupHelperUnavailable as exc:
+        return jsonify({'error': str(exc)}), 503
+    except BackupOperationError as exc:
+        return jsonify({'error': str(exc)}), 500
     except HelperError as exc:
         return jsonify({'error': str(exc)}), 503
+
+    return jsonify({'status': 'ok', 'result': result})
 
 
 @backup_scheduler.route('/api/backups/restore-plugins', methods=['POST'])
 @login_required
 def api_backup_restore_plugins():
     data = request.get_json() or {}
-    archive_name = data.get('archive_name', '').strip()
-
-    if not archive_name or '/' in archive_name or '..' in archive_name:
-        return jsonify({'error': 'Invalid archive name'}), 400
-    if not archive_name.startswith('storage-plugins-'):
-        return jsonify({'error': 'Invalid plugin archive'}), 400
-
-    config = load_config()
-    dest_dir = config.get('dest_dir', '')
-    archive_path = os.path.join(dest_dir, archive_name)
-
-    if not os.path.exists(archive_path):
-        return jsonify({'error': 'Backup not found'}), 404
-
-    if not helper_available():
-        return jsonify({'error': 'Helper service unavailable'}), 503
-
     try:
-        restore_result = helper_call('backup_restore', {
-            'archive_path': archive_path
-        })
-        if not restore_result.get('success'):
-            return jsonify({'error': restore_result.get('error', 'Restore failed')}), 500
-
-        config['last_plugin_backup'] = datetime.now(timezone.utc).isoformat()
-        config['last_plugin_backup_result'] = restore_result
-        save_config(config)
-
-        return jsonify({'status': 'ok', 'result': restore_result})
+        result = _backup_service().restore_plugins(data.get('archive_name', ''))
+    except BackupConfigError as exc:
+        return jsonify({'error': str(exc)}), 400
+    except BackupNotFound as exc:
+        return jsonify({'error': str(exc)}), 404
+    except BackupHelperUnavailable as exc:
+        return jsonify({'error': str(exc)}), 503
+    except BackupOperationError as exc:
+        return jsonify({'error': str(exc)}), 500
     except HelperError as exc:
         return jsonify({'error': str(exc)}), 503
+
+    return jsonify({'status': 'ok', 'result': result})

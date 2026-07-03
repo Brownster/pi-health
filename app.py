@@ -42,7 +42,8 @@ from storage_plugins.registry import init_plugins
 from pi_monitor import get_pi_metrics
 from update_scheduler import update_scheduler, init_scheduler, default_update_service
 from update_service import AutoUpdateService
-from backup_scheduler import backup_scheduler, init_backup_scheduler
+from backup_scheduler import backup_scheduler, init_backup_scheduler, default_backup_service
+from backup_service import BackupService
 from disk_manager import (
     default_disk_inventory_service,
     default_disk_mount_service,
@@ -179,6 +180,7 @@ class AppDependencies:
     smart_service: SmartService | None = None
     storage_read_service: StorageReadService | None = None
     update_service: AutoUpdateService | None = None
+    backup_service: BackupService | None = None
 
 
 def _default_system_service():
@@ -876,6 +878,10 @@ def create_app(config=None, dependencies=None):
     application.extensions["update_service"] = (
         resolved.update_service
         or default_update_service(application.extensions["config_repo"])
+    )
+    application.extensions["backup_service"] = (
+        resolved.backup_service
+        or default_backup_service(application.extensions["config_repo"])
     )
 
     application.register_blueprint(core_api)
