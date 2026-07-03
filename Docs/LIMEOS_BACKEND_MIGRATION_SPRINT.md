@@ -81,7 +81,7 @@ Start implementation only when:
 |---|---|---|---|
 | BF-001 | Introduce an application factory | Entry gate | Complete (2026-06-30) |
 | BF-002 | Define service ports and shared adapters | BF-001 | Complete (2026-06-30) |
-| BF-003 | Extract domain services in bounded slices | BF-002 | In progress (domains 1-4 done; auto-update + backups extracted; catalog/tools pending) |
+| BF-003 | Extract domain services in bounded slices | BF-002 | In progress (domains 1-4 done; auto-update + backups + catalog extracted; tools pending) |
 | BF-004 | Characterize security and stateful behavior | BF-001 | In progress (auth/CSRF/credential invariants characterized) |
 | BF-005 | Sign off the core boundary and agent handoff | BF-003, BF-004 | Pending |
 
@@ -391,6 +391,24 @@ paths (unavailable, primary+plugin, plugin-disabled, helper error, concurrency),
 orchestration (stop/start, traversal, missing, unavailable, list error, failed result), plugin
 restore, status, and route delegation. Ruff is clean; backend unit tests pass (`930 passed, 1
 skipped`); full E2E `97 passed`.
+
+Catalog reads, install, and remove implemented 2026-07-03. `CatalogService` owns catalog loading,
+template rendering, placeholder detection, compose-section merging, dependency checks, installed
+service discovery, and the full install/remove orchestration including per-stack locking and the
+streaming startup operation. It receives a catalog-directory provider, a media-paths loader, compose
+load/save callables, the stack operations (`list_stacks`, `get_stack_path`, `validate_stack_name`,
+`backup_stack`, `run_compose_command`, `stream_compose_command`, `stack_lock`), and the compose
+conflict class. A neutral `CatalogError(payload, status_code)` carries each failure's exact JSON body
+and HTTP status, so the seven `/api/catalog` routes only parse input, resolve the factory-injected
+service, and map results; identity (`csrf_token` owner and username) and the process-scoped operation
+registry are passed into `install` by the route. `_load_stack_compose`/`_save_stack_compose` stay as
+module-level functions and the patchable `run_compose_command`/`stream_compose_command`/`CATALOG_DIR`
+names remain, wired through dynamic providers so existing route tests stay green; the pure helpers
+(`_render_template`, `_check_dependencies`, `_merge_compose_section`, ...) are re-exported. Focused
+tests cover catalog reads, media-path defaults, status, dependency checks, install (new stack,
+already-installed, unresolved placeholders, streaming operation, thread-failure mapping), remove
+(success, missing service, stop failure), and route delegation including CSRF enforcement. Ruff is
+clean; backend unit tests pass (`949 passed, 1 skipped`); full E2E `97 passed`.
 
 ## BF-004 - Characterize security and stateful behavior
 
