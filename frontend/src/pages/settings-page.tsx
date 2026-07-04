@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Activity, RefreshCw, TriangleAlert } from "lucide-react";
+import { Activity, CheckCircle2, Loader2, RefreshCw, TriangleAlert } from "lucide-react";
 
 import { StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,13 +15,16 @@ import {
   fetchBackupList,
   fetchBackupStatus,
   fetchPiHealthUpdateConfig,
+  isStillAuthenticated,
+  type OperationEvent,
   restoreBackup,
   runAutoUpdateNow,
   runBackup,
+  runPiHealthUpdate,
   saveAutoUpdateConfig,
   saveBackupConfig,
   savePiHealthUpdateConfig,
-  triggerPiHealthUpdate,
+  waitForServiceRecovery,
 } from "@/lib/settings";
 import { formatClockTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -93,6 +96,85 @@ function ToggleField({
   );
 }
 
+type UpdatePhase = "idle" | "running" | "restarting" | "recovered" | "loggedout" | "failed";
+
+interface UpdateLogLine {
+  step?: string;
+  text: string;
+  tone: "info" | "error";
+}
+
+function UpdateProgressPanel({
+  phase,
+  log,
+  commit,
+}: {
+  phase: UpdatePhase;
+  log: UpdateLogLine[];
+  commit: string | null;
+}) {
+  const header = (() => {
+    switch (phase) {
+      case "running":
+        return { icon: <Loader2 aria-hidden className="h-4 w-4 animate-spin" />, text: "Updating…", tone: "info" as const };
+      case "restarting":
+        return { icon: <Loader2 aria-hidden className="h-4 w-4 animate-spin" />, text: "Restarting — reconnecting…", tone: "info" as const };
+      case "recovered":
+        return {
+          icon: <CheckCircle2 aria-hidden className="h-4 w-4" />,
+          text: commit ? `Update complete — now at ${commit}.` : "Update complete.",
+          tone: "success" as const,
+        };
+      case "loggedout":
+        return {
+          icon: <CheckCircle2 aria-hidden className="h-4 w-4" />,
+          text: commit ? `Update complete (now at ${commit}) — please log in again.` : "Update complete — please log in again.",
+          tone: "success" as const,
+        };
+      case "failed":
+        return { icon: <TriangleAlert aria-hidden className="h-4 w-4" />, text: "Update failed.", tone: "error" as const };
+      default:
+        return null;
+    }
+  })();
+
+  if (!header) {
+    return null;
+  }
+
+  return (
+    <div className="mt-3 space-y-2 rounded-md border border-border bg-muted/30 p-3" data-testid="pihealth-update-progress">
+      <div
+        className={cn(
+          "flex items-center gap-2 text-sm font-medium",
+          header.tone === "success" ? "text-success" : header.tone === "error" ? "text-danger" : "text-info",
+        )}
+      >
+        {header.icon}
+        <span>{header.text}</span>
+      </div>
+      {log.length > 0 ? (
+        <ul className="max-h-48 space-y-1 overflow-y-auto font-mono text-xs">
+          {log.map((line, index) => (
+            <li
+              key={index}
+              className={cn("flex gap-2", line.tone === "error" ? "text-danger" : "text-muted-foreground")}
+            >
+              {line.step ? <span className="shrink-0 uppercase tracking-wide opacity-70">{line.step}</span> : null}
+              <span className="break-all">{line.text}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {phase === "loggedout" ? (
+        <Button onClick={() => window.location.assign("/login.html")} variant="outline">
+          Go to login
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
 export function SettingsPage() {
   const [pihealth, setPihealth] = useState<PiHealthUpdateConfig>({ repo_path: "", service_name: "" });
   const [backup, setBackup] = useState<BackupConfig>({
@@ -115,6 +197,9 @@ export function SettingsPage() {
   const [actionNotice, setActionNotice] = useState<ActionNotice | null>(null);
   const [pendingKey, setPendingKey] = useState<string | null>(null);
   const [confirmKey, setConfirmKey] = useState<string | null>(null);
+  const [updatePhase, setUpdatePhase] = useState<UpdatePhase>("idle");
+  const [updateLog, setUpdateLog] = useState<UpdateLogLine[]>([]);
+  const [updateCommit, setUpdateCommit] = useState<string | null>(null);
   const isMountedRef = useRef(true);
 
   const loadAll = useCallback(async (reason: "initial" | "manual") => {
@@ -184,6 +269,78 @@ export function SettingsPage() {
     [loadAll, pendingKey],
   );
 
+  const runUpdate = useCallback(async () => {
+    if (updatePhase === "running" || updatePhase === "restarting") {
+      return;
+    }
+    setConfirmKey(null);
+    setUpdatePhase("running");
+    setUpdateLog([]);
+    setUpdateCommit(null);
+
+    let sawRestart = false;
+    let sawError = false;
+
+    const onEvent = (event: OperationEvent) => {
+      if (!isMountedRef.current) {
+        return;
+      }
+      if (event.new_commit) {
+        setUpdateCommit(event.new_commit.slice(0, 8));
+      }
+      if (event.error) {
+        sawError = true;
+        setUpdateLog((lines) => [...lines, { step: event.step, text: event.error ?? "Update failed", tone: "error" }]);
+        return;
+      }
+      if (event.line) {
+        setUpdateLog((lines) => [...lines, { step: event.step, text: event.line ?? "", tone: "info" }]);
+      }
+      if (event.restarting) {
+        sawRestart = true;
+        setUpdatePhase("restarting");
+      }
+    };
+
+    try {
+      await runPiHealthUpdate(onEvent);
+    } catch (caughtError) {
+      if (!isMountedRef.current) {
+        return;
+      }
+      sawError = true;
+      setUpdateLog((lines) => [...lines, { text: getErrorMessage(caughtError), tone: "error" }]);
+    }
+
+    if (!isMountedRef.current) {
+      return;
+    }
+    if (sawError) {
+      setUpdatePhase("failed");
+      return;
+    }
+    if (!sawRestart) {
+      // "Already up to date" — the service was not restarted.
+      setUpdatePhase("recovered");
+      return;
+    }
+
+    const recovered = await waitForServiceRecovery();
+    if (!isMountedRef.current) {
+      return;
+    }
+    if (!recovered) {
+      setUpdateLog((lines) => [...lines, { text: "Timed out waiting for the service to come back online.", tone: "error" }]);
+      setUpdatePhase("failed");
+      return;
+    }
+    const stillAuthenticated = await isStillAuthenticated();
+    if (!isMountedRef.current) {
+      return;
+    }
+    setUpdatePhase(stillAuthenticated ? "recovered" : "loggedout");
+  }, [updatePhase]);
+
   useEffect(() => {
     isMountedRef.current = true;
     void loadAll("initial");
@@ -252,7 +409,9 @@ export function SettingsPage() {
           <Card className="transition-colors duration-200 hover:border-primary/25" id="v2-settings-pihealth">
             <CardHeader>
               <CardTitle className="text-base sm:text-lg">Pi-Health self-update</CardTitle>
-              <CardDescription>Update Pi-Health from its git repository and restart the service.</CardDescription>
+              <CardDescription>
+                Pull the latest code, install dependencies, apply migrations, refresh the UI, and restart — with live progress.
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
               <TextField
@@ -267,45 +426,47 @@ export function SettingsPage() {
                 testId="pihealth-service"
                 value={pihealth.service_name}
               />
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  disabled={busy}
-                  id="v2-settings-pihealth-save"
-                  onClick={() =>
-                    void runAction("save-pihealth", () => savePiHealthUpdateConfig(pihealth), "Pi-Health update config saved")
-                  }
-                >
-                  {pendingKey === "save-pihealth" ? "Saving..." : "Save"}
-                </Button>
-                {confirmKey === "update-pihealth" ? (
-                  <span className="flex items-center gap-1.5">
+              {(() => {
+                const updateInFlight = updatePhase === "running" || updatePhase === "restarting";
+                return (
+                  <div className="flex flex-wrap items-center gap-2">
                     <Button
-                      className="border-info/30 bg-info/10 text-info hover:bg-info/15"
-                      id="v2-settings-pihealth-update-confirm"
+                      disabled={busy || updateInFlight}
+                      id="v2-settings-pihealth-save"
                       onClick={() =>
-                        void runAction("update-pihealth", async () => {
-                          await triggerPiHealthUpdate();
-                        }, "Pi-Health update triggered")
+                        void runAction("save-pihealth", () => savePiHealthUpdateConfig(pihealth), "Pi-Health update config saved")
                       }
-                      variant="outline"
                     >
-                      Confirm update
+                      {pendingKey === "save-pihealth" ? "Saving..." : "Save"}
                     </Button>
-                    <Button onClick={() => setConfirmKey(null)} variant="outline">
-                      Cancel
-                    </Button>
-                  </span>
-                ) : (
-                  <Button
-                    disabled={busy}
-                    id="v2-settings-pihealth-update"
-                    onClick={() => setConfirmKey("update-pihealth")}
-                    variant="outline"
-                  >
-                    Update now
-                  </Button>
-                )}
-              </div>
+                    {confirmKey === "update-pihealth" ? (
+                      <span className="flex items-center gap-1.5">
+                        <Button
+                          className="border-info/30 bg-info/10 text-info hover:bg-info/15"
+                          id="v2-settings-pihealth-update-confirm"
+                          onClick={() => void runUpdate()}
+                          variant="outline"
+                        >
+                          Confirm update
+                        </Button>
+                        <Button onClick={() => setConfirmKey(null)} variant="outline">
+                          Cancel
+                        </Button>
+                      </span>
+                    ) : (
+                      <Button
+                        disabled={busy || updateInFlight}
+                        id="v2-settings-pihealth-update"
+                        onClick={() => setConfirmKey("update-pihealth")}
+                        variant="outline"
+                      >
+                        {updateInFlight ? "Updating…" : "Update now"}
+                      </Button>
+                    )}
+                  </div>
+                );
+              })()}
+              <UpdateProgressPanel commit={updateCommit} log={updateLog} phase={updatePhase} />
             </CardContent>
           </Card>
 

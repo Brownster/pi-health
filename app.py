@@ -29,6 +29,7 @@ from stack_manager import (
 )
 from auth_utils import (
     LoginRateLimiter,
+    csrf_protect,
     get_csrf_token,
     load_users,
     login_required,
@@ -64,7 +65,9 @@ from smart_service import SmartService
 from storage_read_service import StorageReadService
 from setup_manager import setup_manager
 from helper_client import helper_call, HelperError
-from operation_manager import OperationRegistry
+from operation_manager import OperationRegistry, OperationCapacityError
+from operation_sse import stream_operation_response
+from pihealth_update_service import stream_update as stream_pihealth_update
 from ports import (
     AuditPort,
     Clock,
@@ -779,20 +782,51 @@ def api_pihealth_update_config_save():
     return jsonify({"status": "saved", "config": config})
 
 
+@core_api.route('/api/health', methods=['GET'])
+def api_health():
+    """Unauthenticated liveness probe used to detect recovery after a restart."""
+    return jsonify({"status": "ok"})
+
+
 @core_api.route('/api/pihealth/update', methods=['POST'])
 @login_required
+@csrf_protect
 def api_pihealth_update():
+    """Start a streamed self-update and return its read-only event stream."""
     config = _load_pihealth_update_config()
     config["user"] = getpass.getuser()
+
+    def produce_events():
+        yield from stream_pihealth_update(helper_call, config)
+
     try:
-        result = helper_call("pihealth_update", config)
-    except HelperError as exc:
-        return jsonify({"error": str(exc)}), 503
+        operation = current_app.extensions["operation_registry"].create(
+            owner=session['csrf_token'],
+            username=session.get('username', 'unknown'),
+            kind='pihealth_update',
+            target='pi-health',
+            producer=produce_events,
+        )
+    except OperationCapacityError as exc:
+        return jsonify({'error': str(exc)}), 429
+    except RuntimeError as exc:
+        return jsonify({'error': f'Unable to start update: {exc}'}), 500
 
-    if not result.get("success"):
-        return jsonify({"error": result.get("error", "Update failed")}), 400
+    return jsonify({
+        'operation_id': operation.operation_id,
+        'stream_url': f'/api/pihealth/update/operations/{operation.operation_id}/stream',
+    }), 202
 
-    return jsonify({"status": "updating"})
+
+@core_api.route('/api/pihealth/update/operations/<operation_id>/stream', methods=['GET'])
+@login_required
+def api_stream_pihealth_update(operation_id):
+    """Replay and follow one previously created self-update operation."""
+    return stream_operation_response(
+        current_app.extensions["operation_registry"],
+        operation_id,
+        expected_kind='pihealth_update',
+    )
 
 
 def create_app(config=None, dependencies=None):

@@ -800,8 +800,29 @@ def install_v2_settings_api_mocks():
             if path == "/api/pihealth/update/config" and method == "POST":
                 _json_fulfill(route, {"status": "saved", "config": {}})
                 return
+            if path == "/api/auth/check" and method == "GET":
+                _json_fulfill(route, {"authenticated": True, "username": "admin", "csrf_token": "mock-csrf"})
+                return
             if path == "/api/pihealth/update" and method == "POST":
-                _json_fulfill(route, {"status": "updating"})
+                _json_fulfill(
+                    route,
+                    {
+                        "operation_id": "mock-update-op",
+                        "stream_url": "/api/pihealth/update/operations/mock-update-op/stream",
+                    },
+                    status=202,
+                )
+                return
+            if path == "/api/pihealth/update/operations/mock-update-op/stream" and method == "GET":
+                route.fulfill(
+                    status=200,
+                    content_type="text/event-stream",
+                    body=(
+                        'id: 0\ndata: {"step":"pull","line":"Pulling latest code\\u2026"}\n\n'
+                        'id: 1\ndata: {"step":"pull","line":"Already up to date (abc123de); no restart needed.",'
+                        '"new_commit":"abc123def456","done":true}\n\n'
+                    ),
+                )
                 return
             if path == "/api/backups/config" and method == "GET":
                 _json_fulfill(route, {"enabled": True, "schedule_preset": "daily", "retention_count": 5, "dest_dir": "/mnt/backup/ph"})
