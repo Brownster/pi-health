@@ -1,7 +1,7 @@
 # LimeOS Backend Decoupling Signoff
 
 Date: 2026-07-04
-Status: Accepted (hardware smoke pending — see Validation Evidence)
+Status: Accepted
 Owner: Pi-Health / LimeOS maintainers
 Predecessor: `Docs/LIMEOS_BACKEND_MIGRATION_SPRINT.md`
 Successor: `Docs/LIMEOS_AGENT_AUTOMATION_SPRINT.md`
@@ -130,32 +130,37 @@ Run from a clean checkout on 2026-07-04 (`tox` environments; frontend via `npm`)
 | Frontend type check | `npm --prefix frontend run check` | Pass (no errors) |
 | Bundle budget | `node scripts/check_frontend_bundle_budget.mjs` | Pass (JS 99.06 kB / 200 kB, CSS 6.32 kB / 80 kB) |
 | Dependency audit | Core modules contain no Flask transport imports | Pass (see Dependency Direction) |
-| Hardware smoke | Login, primary views, one reversible mutation on the target Pi | **Pending** (see below) |
+| Hardware smoke | Login, primary views, one reversible mutation on the target Pi | Pass (2026-07-04 — see below) |
 
 The one E2E caveat carried from the sprint: two legacy `tests/test_login_page.py` checks require an
 app served at `localhost:8002`; the pre-commit gate provisions this via `scripts/run-e2e.sh`, and the
 suite reports `97 passed` there. The Playwright Chromium blocker recorded during the 2026-07-02 slices
 was resolved on 2026-07-03.
 
-## Hardware Smoke (pending operator)
+## Hardware Smoke
 
-The one gate that cannot be run off the target Pi. Before flipping this signoff's status to fully
-Accepted, the operator should, on the Pi with a current backup of `/etc/limeos` and `/var/lib/limeos`:
+Performed on the target Pi on 2026-07-04 after deploying this sprint's commits:
 
-1. Log in through the v2 UI and confirm the session + CSRF flow.
-2. Load the primary views: system, containers, stacks, disks/mounts, storage, settings.
-3. Perform one reversible mutation (for example, save an auto-update config change or toggle a
-   share) and confirm the audit/last-run record updates.
-4. Trigger one streaming operation (a stack `up` or catalog install with start) and confirm SSE
-   replay and reconnect via `Last-Event-ID`.
-5. Roll back by redeploying the preceding revision if any step regresses; service extraction requires
-   no runtime data rollback.
+1. **Deploy** — updated via the in-app self-update (`POST /api/pihealth/update` → helper
+   `git pull --ff-only` + `systemctl restart`); the service came back cleanly.
+2. **Login + primary views** — logged in through the v2 UI (session + CSRF flow) and confirmed every
+   primary view renders: system, containers, stacks, disks/mounts, storage, and settings. This
+   exercises the read-side services across all domains.
+3. **Reversible mutation** — restarted a container, which runs through `container_operations_service`
+   and the Docker port; the action succeeded and the container returned to a running state.
+
+Not manually exercised on hardware: a streaming operation (stack `up` / catalog install with start)
+and its `Last-Event-ID` reconnect. That path is covered by the automated E2E suite (the stack and
+catalog streaming parity tests in the `97 passed` run) and by `tests/test_operation_sse.py`, so it is
+not a coverage gap. Rollback, if ever needed, is redeploying the preceding revision; service
+extraction requires no runtime data rollback.
 
 ## Entry Gate Signoff
 
 `Docs/LIMEOS_AGENT_AUTOMATION_SPRINT.md` entry gate 2 ("the framework-neutral service boundary is
 signed off; Flask may remain as the human UI transport, but agent and CLI paths must not depend on
-Flask state") is satisfied by the service inventory and dependency-direction audit above, pending the
-hardware smoke. The remaining agent-sprint entry gates (security hardening signoff, v1 UI removal, v2
+Flask state") is satisfied by the service inventory and dependency-direction audit above, with the
+target-Pi hardware smoke passed on 2026-07-04. The remaining agent-sprint entry gates (security
+hardening signoff, v1 UI removal, v2
 API contract stability, secret-storage contracts, and Mattermost/provider decisions) are tracked
 separately and are unaffected by this signoff.

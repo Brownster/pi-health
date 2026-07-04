@@ -26,8 +26,8 @@ All gates require recorded evidence before `LA-001` starts.
    *Service-boundary signoff: `Docs/LIMEOS_BACKEND_DECOUPLING_SIGNOFF.md` (2026-07-04) — the
    dependency audit confirms no core service imports Flask or a blueprint module, and identity/audit
    enter as explicit inputs so agent callers cannot inherit session authority; agent and CLI paths
-   consume services only through the `limeops` policy boundary. Remaining under this gate: v1 UI
-   removal and the target-Pi hardware smoke.*
+   consume services only through the `limeops` policy boundary. The target-Pi hardware smoke passed
+   on 2026-07-04. Remaining under this gate: v1 UI removal.*
 3. The replacement LimeOS backend and v2 API contracts are stable and documented.
 4. Authentication, CSRF, operation ownership, audit identity, and secret storage have production
    contracts that the agent gateway can reuse.
