@@ -11,5 +11,7 @@ dist/
 config/plugins.json
 config/copyparty.json
 config/pihealth_update.json
-static/v2/
+# static/v2/ is the built web UI bundle. It is committed (not ignored) so that
+# `git pull` ships a ready-to-serve UI to hosts without a Node toolchain.
+# Rebuild with `cd frontend && npm run build:publish` and commit the result.
 *.tar.zst

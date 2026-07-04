@@ -42,7 +42,11 @@ def test_v2_settings_pihealth_update_with_confirm(
 
     page.click("#v2-settings-pihealth-update")
     page.click("#v2-settings-pihealth-update-confirm")
-    expect(page.get_by_text("Pi-Health update triggered")).to_be_visible()
+    progress = page.get_by_test_id("pihealth-update-progress")
+    expect(progress).to_be_visible()
+    expect(progress).to_contain_text("Pulling latest code")
+    expect(progress).to_contain_text("Update complete")
+    expect(progress).to_contain_text("abc123de")
 
 
 def test_v2_settings_backup_save_and_restore(

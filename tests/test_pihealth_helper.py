@@ -457,3 +457,59 @@ class TestNetworkInfo:
         assert result["interfaces"]
         assert result["default_gateway"]["ip"] == "192.168.1.1"
         assert "8.8.8.8" in result["dns_servers"]
+
+
+class TestPihealthUpdate:
+    def test_rejects_invalid_user(self):
+        result = helper.cmd_pihealth_update({"user": "Bad User", "step": "pull"})
+        assert result == {"success": False, "error": "Invalid user"}
+
+    def test_rejects_repo_outside_home(self):
+        result = helper.cmd_pihealth_update(
+            {"user": "pi", "repo_path": "/opt/pi-health", "step": "pull"}
+        )
+        assert result == {"success": False, "error": "repo_path must be under /home/<user>"}
+
+    @patch("pihealth_helper.os.path.isdir", return_value=True)
+    def test_rejects_unknown_step(self, _isdir):
+        result = helper.cmd_pihealth_update(
+            {"user": "pi", "repo_path": "/home/pi/pi-health", "step": "bogus"}
+        )
+        assert result["success"] is False
+        assert "unknown update step" in result["error"]
+
+    @patch("pihealth_helper.run_command")
+    @patch("pihealth_helper.shutil.which", return_value="/usr/bin/systemd-run")
+    @patch("pihealth_helper.os.path.isdir", return_value=True)
+    def test_restart_step_schedules_delayed_restart(self, _isdir, _which, mock_run):
+        mock_run.return_value = {"returncode": 0, "stdout": "", "stderr": ""}
+        result = helper.cmd_pihealth_update(
+            {"user": "pi", "repo_path": "/home/pi/pi-health", "step": "restart"}
+        )
+        assert result == {"success": True, "scheduled": True}
+        argv = mock_run.call_args[0][0]
+        assert argv[0] == "systemd-run"
+        assert argv[-3:] == ["systemctl", "restart", "pi-health.service"]
+
+    @patch("pihealth_helper.shutil.rmtree")
+    @patch("pihealth_helper.os.path.isdir", return_value=True)
+    @patch("pihealth_helper._git_as")
+    def test_pull_retries_after_removing_untracked_bundle(self, mock_git, _isdir, mock_rmtree):
+        collision = (
+            "error: The following untracked working tree files would be overwritten "
+            "by merge:\n\tstatic/v2/index.html\n"
+        )
+        mock_git.side_effect = [
+            {"returncode": 0, "stdout": "a" * 40},          # rev-parse HEAD (old)
+            {"returncode": 1, "stderr": collision},          # first pull -> collision
+            {"returncode": 1, "stderr": "does not exist"},   # ls-files --error-unmatch (untracked)
+            {"returncode": 0, "stdout": "Updating"},         # retry pull -> ok
+            {"returncode": 0, "stdout": "b" * 40},           # rev-parse HEAD (new)
+            {"returncode": 0, "stdout": ""},                 # diff --name-only
+        ]
+        result = helper.cmd_pihealth_update(
+            {"user": "pi", "repo_path": "/home/pi/pi-health", "step": "pull"}
+        )
+        assert result["success"] is True
+        assert result["new_commit"] == "b" * 40
+        mock_rmtree.assert_called_once()

@@ -1,4 +1,5 @@
 import { requestApi, toNullableString } from "@/lib/api";
+import { createOperation, streamOperation, type OperationEvent } from "@/lib/operations";
 
 // --- Pi-Health self-update ---------------------------------------------------
 
@@ -30,15 +31,72 @@ export async function savePiHealthUpdateConfig(config: PiHealthUpdateConfig, sig
   }
 }
 
-export async function triggerPiHealthUpdate(signal?: AbortSignal): Promise<string> {
-  const payload = await requestApi<{ status?: string; error?: string }>("/api/pihealth/update", {
-    method: "POST",
-    signal,
-  });
-  if (payload.error) {
-    throw new Error(payload.error);
+export type { OperationEvent };
+
+/**
+ * Start a streamed self-update and forward each progress event to `onEvent`.
+ *
+ * Resolves once the operation stream completes. The terminal event is either an
+ * error, an "already up to date" done, or a `restarting` done — in the last case
+ * the service is going down, so callers should then poll {@link waitForServiceRecovery}.
+ */
+export async function runPiHealthUpdate(
+  onEvent: (event: OperationEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const { stream_url } = await createOperation("/api/pihealth/update", {}, signal);
+  await streamOperation(stream_url, onEvent, signal);
+}
+
+/**
+ * Poll `/api/health` until the service answers again after a restart.
+ *
+ * Any HTTP response (even 401) means the server is back; a rejected fetch means
+ * it is still restarting. Resolves `true` on recovery, `false` if it times out.
+ */
+export async function waitForServiceRecovery(
+  { timeoutMs = 120_000, intervalMs = 2_000 }: { timeoutMs?: number; intervalMs?: number } = {},
+  signal?: AbortSignal,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (signal?.aborted) {
+      return false;
+    }
+    try {
+      const response = await fetch("/api/health", {
+        method: "GET",
+        credentials: "same-origin",
+        cache: "no-store",
+        signal,
+      });
+      if (response.status > 0) {
+        return true;
+      }
+    } catch {
+      // Connection refused / reset while the service restarts — keep polling.
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
-  return payload.status || "updating";
+  return false;
+}
+
+/**
+ * After recovery, report whether the browser session survived the restart.
+ *
+ * These installs do not persist `SECRET_KEY`, so a restart usually invalidates
+ * the session and the user must log in again.
+ */
+export async function isStillAuthenticated(signal?: AbortSignal): Promise<boolean> {
+  try {
+    const payload = await requestApi<{ authenticated?: boolean }>("/api/auth/check", {
+      method: "GET",
+      signal,
+    });
+    return Boolean(payload.authenticated);
+  } catch {
+    return false;
+  }
 }
 
 // --- Backups -----------------------------------------------------------------

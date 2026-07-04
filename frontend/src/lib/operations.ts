@@ -5,6 +5,10 @@ export interface OperationEvent {
   done?: boolean;
   returncode?: number;
   error?: string;
+  // Self-update operations add step labels and a pending-restart signal.
+  step?: string;
+  restarting?: boolean;
+  new_commit?: string;
 }
 
 export interface OperationCreated {

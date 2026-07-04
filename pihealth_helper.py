@@ -2267,26 +2267,30 @@ def cmd_copyparty_status(params):
     }
 
 
-def cmd_pihealth_update(params):
-    """Update Pi-Health repo and restart the service."""
+def _validate_pihealth_update_params(params):
+    """Return (context, error) for a Pi-Health self-update request.
+
+    Shared by every update step so validation stays identical whether the
+    orchestrator drives one step at a time or the legacy combined path runs.
+    """
     user = params.get("user", "").strip()
     repo_path = params.get("repo_path", "").strip()
     service_name = params.get("service_name", "").strip() or PIHEALTH_SERVICE_NAME
 
     if not user or not re.match(r"^[a-z_][a-z0-9_-]*$", user):
-        return {'success': False, 'error': 'Invalid user'}
+        return None, 'Invalid user'
 
     if not repo_path:
         repo_path = PIHEALTH_REPO_DIR or f"/home/{user}/pi-health"
 
     if not repo_path.startswith(f"/home/{user}/") or ".." in repo_path:
-        return {'success': False, 'error': 'repo_path must be under /home/<user>'}
+        return None, 'repo_path must be under /home/<user>'
 
     if not os.path.isdir(repo_path):
-        return {'success': False, 'error': 'repo_path not found'}
+        return None, 'repo_path not found'
 
     if not os.path.isdir(os.path.join(repo_path, ".git")):
-        return {'success': False, 'error': 'repo_path is not a git repo'}
+        return None, 'repo_path is not a git repo'
 
     if not service_name.endswith(".service"):
         service_name = f"{service_name}.service"
@@ -2300,26 +2304,237 @@ def cmd_pihealth_update(params):
                 allowed_services.add(entry)
 
     if service_name not in allowed_services:
-        return {'success': False, 'error': 'service_name not allowed'}
+        return None, 'service_name not allowed'
 
-    pull_result = run_command(
-        ["runuser", "-u", user, "--", "git", "-C", repo_path, "pull", "--ff-only"],
-        timeout=120
+    return {"user": user, "repo_path": repo_path, "service_name": service_name}, None
+
+
+def _git_as(user, repo_path, *args, timeout=30):
+    """Run a git command in ``repo_path`` as ``user``."""
+    return run_command(
+        ["runuser", "-u", user, "--", "git", "-C", repo_path, *args],
+        timeout=timeout,
     )
-    if pull_result.get('returncode') != 0:
+
+
+def _pihealth_update_pull(ctx):
+    """Fast-forward the checkout and report the commit range and changed files."""
+    user = ctx["user"]
+    repo_path = ctx["repo_path"]
+
+    head = _git_as(user, repo_path, "rev-parse", "HEAD")
+    old_commit = (head.get("stdout") or "").strip() if head.get("returncode") == 0 else None
+
+    pull = _git_as(user, repo_path, "pull", "--ff-only", timeout=180)
+    stderr = pull.get("stderr", "") or pull.get("error", "") or ""
+    if pull.get("returncode") != 0 and "static/v2" in stderr and (
+        "would be overwritten by merge" in stderr
+        or "untracked working tree files" in stderr
+    ):
+        # One-time transition: the committed static/v2 bundle collides with the
+        # previously-gitignored local build. It is a generated artifact about to
+        # arrive from git, so drop the untracked copy and retry the pull once.
+        tracked = _git_as(user, repo_path, "ls-files", "--error-unmatch", "static/v2/index.html")
+        bundle = os.path.join(repo_path, "static", "v2")
+        if tracked.get("returncode") != 0 and os.path.isdir(bundle):
+            shutil.rmtree(bundle, ignore_errors=True)
+            pull = _git_as(user, repo_path, "pull", "--ff-only", timeout=180)
+
+    if pull.get("returncode") != 0:
         return {
             'success': False,
-            'error': pull_result.get('stderr', 'git pull failed')
+            'error': pull.get("stderr") or pull.get("error") or 'git pull failed',
+            'stdout': pull.get("stdout", ""),
         }
 
-    restart_result = run_command(["systemctl", "restart", service_name], timeout=60)
-    if restart_result.get('returncode') != 0:
+    head2 = _git_as(user, repo_path, "rev-parse", "HEAD")
+    new_commit = (head2.get("stdout") or "").strip() if head2.get("returncode") == 0 else None
+
+    changed_files = []
+    if old_commit and new_commit and old_commit != new_commit:
+        diff = _git_as(user, repo_path, "diff", "--name-only", f"{old_commit}..{new_commit}")
+        if diff.get("returncode") == 0:
+            changed_files = [line for line in (diff.get("stdout") or "").splitlines() if line.strip()]
+
+    return {
+        'success': True,
+        'old_commit': old_commit,
+        'new_commit': new_commit,
+        'changed_files': changed_files,
+        'stdout': pull.get("stdout", ""),
+    }
+
+
+def _pihealth_update_deps(ctx):
+    """Install Python dependencies into the service virtualenv."""
+    repo_path = ctx["repo_path"]
+    venv_py = os.path.join(repo_path, ".venv", "bin", "python")
+    requirements = os.path.join(repo_path, "requirements.txt")
+
+    if not os.path.isfile(venv_py):
+        return {'success': True, 'skipped': True, 'reason': 'no virtualenv found'}
+    if not os.path.isfile(requirements):
+        return {'success': True, 'skipped': True, 'reason': 'no requirements.txt'}
+
+    result = run_command([venv_py, "-m", "pip", "install", "-r", requirements], timeout=1200)
+    if result.get("returncode") != 0:
         return {
             'success': False,
-            'error': restart_result.get('stderr', 'service restart failed')
+            'error': result.get("stderr") or result.get("error") or 'pip install failed',
+            'stdout': result.get("stdout", ""),
+        }
+    return {'success': True, 'stdout': result.get("stdout", "")}
+
+
+def _pihealth_update_migrate(ctx):
+    """Ensure LimeOS runtime directories exist and run the idempotent migration."""
+    user = ctx["user"]
+    repo_path = ctx["repo_path"]
+    script = os.path.join(repo_path, "scripts", "migrate_runtime_state.py")
+    if not os.path.isfile(script):
+        return {'success': True, 'skipped': True, 'reason': 'no migration script'}
+
+    config_dir = os.getenv("LIMEOS_CONFIG_DIR", "/etc/limeos")
+    state_dir = os.getenv("LIMEOS_STATE_DIR", "/var/lib/limeos")
+    log_dir = os.getenv("LIMEOS_LOG_DIR", "/var/log/limeos")
+    credentials_file = os.getenv("LIMEOS_CREDENTIALS_FILE", os.path.join(config_dir, "credentials.env"))
+
+    if run_command(["getent", "group", "pihealth"]).get("returncode") != 0:
+        run_command(["groupadd", "pihealth"])
+
+    directory_layout = (
+        (config_dir, ["storage_plugins"]),
+        (state_dir, ["storage_plugins"]),
+        (log_dir, ["snapraid"]),
+    )
+    for base, subdirs in directory_layout:
+        run_command(["install", "-d", "-m", "0750", "-o", user, "-g", "pihealth", base])
+        for subdir in subdirs:
+            run_command(["install", "-d", "-m", "0750", "-o", user, "-g", "pihealth", os.path.join(base, subdir)])
+
+    venv_py = os.path.join(repo_path, ".venv", "bin", "python")
+    python_bin = venv_py if os.path.isfile(venv_py) else "python3"
+    result = run_command(
+        [
+            python_bin, script,
+            "--source-root", repo_path,
+            "--config-dir", config_dir,
+            "--state-dir", state_dir,
+            "--log-dir", log_dir,
+            "--legacy-credentials", "/etc/pi-health.env",
+            "--credentials-file", credentials_file,
+        ],
+        timeout=300,
+    )
+
+    # Restore service ownership regardless of whether new files were copied.
+    run_command(["chown", "-R", f"{user}:pihealth", config_dir, state_dir, log_dir])
+
+    if result.get("returncode") != 0:
+        return {
+            'success': False,
+            'error': result.get("stderr") or result.get("error") or 'migration failed',
+            'stdout': result.get("stdout", ""),
+        }
+    return {'success': True, 'stdout': result.get("stdout", "")}
+
+
+def _pihealth_update_build(ctx):
+    """Rebuild and publish the web UI bundle when a toolchain is available."""
+    user = ctx["user"]
+    repo_path = ctx["repo_path"]
+    frontend = os.path.join(repo_path, "frontend")
+
+    if not os.path.isdir(frontend):
+        return {'success': True, 'skipped': True, 'reason': 'no frontend directory'}
+    if not shutil.which("npm"):
+        return {'success': True, 'skipped': True, 'reason': 'npm not installed; committed bundle used'}
+
+    if not os.path.isdir(os.path.join(frontend, "node_modules")):
+        install = run_command(
+            ["runuser", "-u", user, "--", "npm", "ci"], timeout=1800, cwd=frontend
+        )
+        if install.get("returncode") != 0:
+            return {
+                'success': False,
+                'error': install.get("stderr") or install.get("error") or 'npm ci failed',
+                'stdout': install.get("stdout", ""),
+            }
+
+    result = run_command(
+        ["runuser", "-u", user, "--", "npm", "run", "build:publish"], timeout=1800, cwd=frontend
+    )
+    if result.get("returncode") != 0:
+        return {
+            'success': False,
+            'error': result.get("stderr") or result.get("error") or 'npm build failed',
+            'stdout': result.get("stdout", ""),
+        }
+    return {'success': True, 'stdout': result.get("stdout", "")}
+
+
+def _pihealth_update_restart(ctx):
+    """Schedule a short-delayed restart so the caller can flush its response first."""
+    service_name = ctx["service_name"]
+
+    if shutil.which("systemd-run"):
+        result = run_command([
+            "systemd-run",
+            "--on-active=2",
+            "--timer-property=RemainAfterElapse=no",
+            "systemctl", "restart", service_name,
+        ])
+        if result.get("returncode") == 0:
+            return {'success': True, 'scheduled': True}
+
+    try:
+        subprocess.Popen(
+            ["sh", "-c", f"sleep 2; systemctl restart {shlex.quote(service_name)}"],
+            start_new_session=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return {'success': True, 'scheduled': True}
+    except Exception as exc:
+        return {'success': False, 'error': str(exc)}
+
+
+def cmd_pihealth_update(params):
+    """Run one Pi-Health self-update step, or the legacy combined pull+restart.
+
+    The orchestrator (``pihealth_update_service``) drives the steps one at a
+    time so it can stream progress; an empty/``all`` step keeps older callers
+    working with the original pull-then-restart behaviour.
+    """
+    ctx, error = _validate_pihealth_update_params(params)
+    if error:
+        return {'success': False, 'error': error}
+
+    step = (params.get("step") or "").strip().lower()
+    step_handlers = {
+        "pull": _pihealth_update_pull,
+        "deps": _pihealth_update_deps,
+        "migrate": _pihealth_update_migrate,
+        "build": _pihealth_update_build,
+        "restart": _pihealth_update_restart,
+    }
+    if step in step_handlers:
+        return step_handlers[step](ctx)
+
+    if step in ("", "all", "legacy"):
+        pull = _pihealth_update_pull(ctx)
+        if not pull.get("success"):
+            return pull
+        restart = _pihealth_update_restart(ctx)
+        if not restart.get("success"):
+            return restart
+        return {
+            'success': True,
+            'old_commit': pull.get("old_commit"),
+            'new_commit': pull.get("new_commit"),
         }
 
-    return {'success': True}
+    return {'success': False, 'error': f'unknown update step: {step}'}
 
 
 def cmd_plugin_install(params):
