@@ -82,7 +82,7 @@ Start implementation only when:
 | BF-001 | Introduce an application factory | Entry gate | Complete (2026-06-30) |
 | BF-002 | Define service ports and shared adapters | BF-001 | Complete (2026-06-30) |
 | BF-003 | Extract domain services in bounded slices | BF-002 | Complete (2026-07-04) — all domain slices extracted (system, containers, network, stacks, disks/storage, auto-update, backups, catalog, tools) |
-| BF-004 | Characterize security and stateful behavior | BF-001 | In progress (auth/CSRF/credential invariants characterized) |
+| BF-004 | Characterize security and stateful behavior | BF-001 | Complete (2026-07-04) — all required invariant areas covered |
 | BF-005 | Sign off the core boundary and agent handoff | BF-003, BF-004 | Pending |
 
 ## BF-001 - Introduce an application factory
@@ -455,10 +455,28 @@ re-mints when the session token is missing or shorter than 32 characters), and t
 returns `False` even when that comparison would match, so account existence does not leak through
 timing). Operation ownership (`hmac.compare_digest` owner plus `expected_kind` isolation) and audit
 attribution already have coverage in `test_operation_manager.py`, `test_ports.py`, and
-`test_storage_api.py`. Ruff is clean; backend unit tests pass (`902 passed, 1 skipped`). Remaining
-BF-004 areas (operation/SSE reconnect, per-stack locks and atomic writes, helper fail-closed paths,
-scheduler restart, and Docker/SnapRAID/MergerFS/mount/repository failure mapping) largely rest on
-existing focused tests and will be characterized in later slices where gaps remain.
+`test_storage_api.py`. Ruff is clean; backend unit tests pass (`902 passed, 1 skipped`).
+
+SSE operation transport characterized 2026-07-04. `tests/test_operation_sse.py` locks in the
+reconnect and ownership invariants of `stream_operation_response` with a fake registry (no threads or
+sockets): the session `csrf_token` maps to the ownership check with the route's `expected_kind`; a
+non-owner or missing token yields `404`; the `Last-Event-ID` header resumes at `id + 1`, missing and
+non-integer values start at `0`, and negatives clamp to `0`; events are framed as
+`id: <n>\ndata: <json>`; a batch with no events and no completion emits a keep-alive; and the stream
+ends on completion or when `events_since` reports lost ownership. This closes the one area
+(SSE reconnect at the transport layer) that had only indirect route coverage.
+
+BF-004 completed 2026-07-04. All required areas are now covered by focused invariant tests:
+authentication, CSRF, and credential timing (`test_security_invariants.py`); operation creation,
+capacity, TTL pruning, terminal state, replay, and SSE reconnect/ownership (`test_operation_manager.py`,
+`test_operation_sse.py`); per-stack locks, reentrancy, and atomic writes (`test_stack_mutation_service.py`,
+`test_stack_operations_service.py`); helper request validation, socket/frame failures, injection
+rejection, and fail-closed dispatch (`test_helper_client.py`, `test_pihealth_helper.py`); scheduler
+registration, replacement, removal, and restart (`test_ports.py`, `test_update_service.py`,
+`test_backup_service.py`); and Docker, SnapRAID, MergerFS, mount, and repository failure mapping
+(the per-domain service and plugin tests). These tests assert on behavior rather than payload shape,
+so they fail when an invariant moves. Ruff is clean; backend unit tests pass (`976 passed, 1
+skipped`); full E2E `97 passed`.
 
 ## BF-005 - Core boundary and agent handoff signoff
 
