@@ -1,108 +1,80 @@
-"""
-Tools manager for auxiliary services (e.g., CopyParty).
-"""
-import json
-import os
+"""Tools manager transport for auxiliary services (e.g., CopyParty).
 
-from flask import Blueprint, jsonify, request
+Domain behavior lives in :mod:`tools_service`; this module wires the Flask
+blueprint, supplies the config path and helper call, and preserves the historical
+module-level names used by tests.
+"""
+from flask import Blueprint, current_app, has_app_context, jsonify, request
 
 from auth_utils import login_required
-from helper_client import helper_call, HelperError
+from helper_client import HelperError, helper_call  # noqa: F401  (helper_call patched in tests)
+from ports import JsonFileRepository
 from runtime_paths import CONFIG_DIR as RUNTIME_CONFIG_DIR
+from tools_service import (  # noqa: F401  (re-exported for compatibility)
+    DEFAULT_CONFIG,
+    ToolsConfigError,
+    ToolsHelperError,
+    ToolsOperationError,
+    ToolsService,
+)
 
 
 tools_manager = Blueprint("tools_manager", __name__)
 
 CONFIG_PATH = RUNTIME_CONFIG_DIR / "copyparty.json"
-DEFAULT_CONFIG = {
-    "share_path": "/srv/copyparty",
-    "port": 3923,
-    "extra_args": ""
-}
 
 
-def _load_config() -> dict:
-    if os.path.exists(CONFIG_PATH):
-        try:
-            with open(CONFIG_PATH, "r") as handle:
-                data = json.load(handle)
-                return {**DEFAULT_CONFIG, **data}
-        except Exception:
-            return DEFAULT_CONFIG.copy()
-    return DEFAULT_CONFIG.copy()
+def default_tools_service(repository=None):
+    """Build a ToolsService bound to this module's config path and helper call."""
+    return ToolsService(
+        repository=repository if repository is not None else JsonFileRepository(),
+        helper_call=lambda command, params: helper_call(command, params),
+        config_path_provider=lambda: CONFIG_PATH,
+        defaults=DEFAULT_CONFIG,
+    )
 
 
-def _save_config(config: dict) -> None:
-    os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
-    with open(CONFIG_PATH, "w") as handle:
-        json.dump(config, handle, indent=2)
+def _tools_service():
+    if has_app_context():
+        service = current_app.extensions.get("tools_service")
+        if service is not None:
+            return service
+    return default_tools_service()
 
 
 @tools_manager.route("/api/tools/copyparty/status", methods=["GET"])
 @login_required
 def copyparty_status():
-    config = _load_config()
     try:
-        status = helper_call("copyparty_status", {})
-    except HelperError as exc:
-        return jsonify({"error": str(exc), "config": config}), 503
+        result = _tools_service().status()
+    except ToolsHelperError as exc:
+        return jsonify({"error": str(exc), "config": exc.config}), 503
 
     host = request.host.split(":", 1)[0]
-    url = f"http://{host}:{config.get('port', 3923)}"
-
-    return jsonify({
-        "config": config,
-        "installed": status.get("installed", False),
-        "service_active": status.get("service_active", False),
-        "service_status": status.get("service_status", "unknown"),
-        "url": url
-    })
+    result["url"] = f"http://{host}:{result['config'].get('port', 3923)}"
+    return jsonify(result)
 
 
 @tools_manager.route("/api/tools/copyparty/install", methods=["POST"])
 @login_required
 def copyparty_install():
-    config = _load_config()
     try:
-        result = helper_call("copyparty_install", config)
-    except HelperError as exc:
+        return jsonify(_tools_service().install())
+    except ToolsOperationError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except ToolsHelperError as exc:
         return jsonify({"error": str(exc)}), 503
-
-    if not result.get("success"):
-        return jsonify({"error": result.get("error", "Install failed")}), 400
-
-    return jsonify({"status": "installed"})
 
 
 @tools_manager.route("/api/tools/copyparty/config", methods=["POST"])
 @login_required
 def copyparty_config():
     data = request.get_json() or {}
-    share_path = str(data.get("share_path", "")).strip()
-    port = data.get("port", DEFAULT_CONFIG["port"])
-    extra_args = str(data.get("extra_args", "")).strip()
-
-    if not share_path.startswith("/"):
-        return jsonify({"error": "share_path must be absolute"}), 400
-
     try:
-        port = int(port)
-    except (TypeError, ValueError):
-        return jsonify({"error": "port must be an integer"}), 400
-
-    config = {
-        "share_path": share_path,
-        "port": port,
-        "extra_args": extra_args
-    }
-    _save_config(config)
-
-    try:
-        result = helper_call("copyparty_configure", config)
-    except HelperError as exc:
+        return jsonify(_tools_service().configure(data))
+    except ToolsConfigError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except ToolsOperationError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except ToolsHelperError as exc:
         return jsonify({"error": str(exc)}), 503
-
-    if not result.get("success"):
-        return jsonify({"error": result.get("error", "Configure failed")}), 400
-
-    return jsonify({"status": "configured"})

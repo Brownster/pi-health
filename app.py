@@ -37,7 +37,8 @@ from auth_utils import (
 )
 from catalog_manager import catalog_manager, default_catalog_service
 from catalog_service import CatalogService
-from tools_manager import tools_manager
+from tools_manager import tools_manager, default_tools_service
+from tools_service import ToolsService
 from storage_plugins import default_storage_read_service, storage_bp
 from storage_plugins.registry import init_plugins
 from pi_monitor import get_pi_metrics
@@ -183,6 +184,7 @@ class AppDependencies:
     update_service: AutoUpdateService | None = None
     backup_service: BackupService | None = None
     catalog_service: CatalogService | None = None
+    tools_service: ToolsService | None = None
 
 
 def _default_system_service():
@@ -887,6 +889,10 @@ def create_app(config=None, dependencies=None):
     )
     application.extensions["catalog_service"] = (
         resolved.catalog_service or default_catalog_service()
+    )
+    application.extensions["tools_service"] = (
+        resolved.tools_service
+        or default_tools_service(application.extensions["config_repo"])
     )
 
     application.register_blueprint(core_api)
