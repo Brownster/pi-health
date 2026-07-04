@@ -8,15 +8,45 @@ response body still looks valid.
 
 from flask import Flask, jsonify
 
+from app import AppDependencies, create_app
 from auth_utils import (
+    LoginRateLimiter,
     csrf_protect,
     get_csrf_token,
     rotate_csrf_token,
     verify_credentials,
 )
+from operation_manager import OperationRegistry
 from werkzeug.security import generate_password_hash
 
 VALID_TOKEN = "x" * 40
+
+
+def _authenticated_client(*, csrf_header):
+    """Build an authenticated test client, optionally sending the CSRF header."""
+    dependencies = AppDependencies(
+        users={"u": generate_password_hash("pw", method="pbkdf2:sha256:600000")},
+        login_rate_limiter=LoginRateLimiter(),
+        docker_client=None,
+        operation_registry=OperationRegistry(),
+    )
+    application = create_app(
+        {
+            "TESTING": True,
+            "SECRET_KEY": "test-secret",
+            "INIT_PLUGINS": False,
+            "START_SCHEDULERS": False,
+        },
+        dependencies,
+    )
+    client = application.test_client()
+    with client.session_transaction() as session:
+        session["authenticated"] = True
+        session["username"] = "u"
+        session["csrf_token"] = "session-token"
+    if csrf_header:
+        client.environ_base["HTTP_X_CSRF_TOKEN"] = "session-token"
+    return client
 
 
 def _make_app():
@@ -126,6 +156,37 @@ def test_verify_credentials_accepts_correct_password():
 def test_verify_credentials_rejects_wrong_password():
     users = {"admin": generate_password_hash("secret", method="pbkdf2:sha256:600000")}
     assert verify_credentials(users, "admin", "nope") is False
+
+
+# --- app-wide CSRF enforcement (before_request) ------------------------------
+
+def test_authenticated_mutation_without_token_is_rejected():
+    """An authenticated POST without X-CSRF-Token is blocked app-wide (403)."""
+    response = _authenticated_client(csrf_header=False).post("/api/logout")
+    assert response.status_code == 403
+
+
+def test_authenticated_mutation_with_matching_token_passes():
+    """An authenticated POST with the matching token is allowed through."""
+    response = _authenticated_client(csrf_header=True).post("/api/logout")
+    assert response.status_code == 200
+
+
+def test_get_requests_do_not_require_csrf():
+    response = _authenticated_client(csrf_header=False).get("/api/auth/check")
+    assert response.status_code == 200
+
+
+def test_login_route_is_exempt_from_csrf():
+    """POST /api/login must not be blocked by CSRF (no token exists pre-login)."""
+    client = _authenticated_client(csrf_header=False)
+    with client.session_transaction() as session:
+        session.clear()  # unauthenticated, no token
+    response = client.post(
+        "/api/login",
+        json={"username": "u", "password": "wrong"},
+    )
+    assert response.status_code != 403
 
 
 def test_verify_credentials_unknown_user_still_performs_comparison(monkeypatch):

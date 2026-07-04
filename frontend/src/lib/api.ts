@@ -151,15 +151,59 @@ async function createApiError(response: Response, path: string): Promise<ApiErro
   });
 }
 
+const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+let cachedCsrfToken: string | null = null;
+
+/** Prime the CSRF token cache (e.g. from an auth-check response). */
+export function setCsrfToken(token: string | null): void {
+  cachedCsrfToken = token;
+}
+
+async function ensureCsrfToken(): Promise<string | null> {
+  if (cachedCsrfToken) {
+    return cachedCsrfToken;
+  }
+  try {
+    const response = await fetch("/api/auth/check", {
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+    });
+    if (response.ok) {
+      const data = (await response.json()) as { csrf_token?: string };
+      cachedCsrfToken = data.csrf_token ?? null;
+    }
+  } catch {
+    // Leave the cache empty; the caller proceeds without a token.
+  }
+  return cachedCsrfToken;
+}
+
+/** Headers required to authorize a mutating request (empty for safe methods). */
+export async function csrfHeaders(method: string | undefined): Promise<Record<string, string>> {
+  if (!MUTATING_METHODS.has((method ?? "GET").toUpperCase())) {
+    return {};
+  }
+  const token = await ensureCsrfToken();
+  return token ? { "X-CSRF-Token": token } : {};
+}
+
 export async function requestApi<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
-    ...init,
-    credentials: "same-origin",
-    headers: {
-      Accept: "application/json",
-      ...(init?.headers ?? {}),
-    },
-  });
+  const method = (init?.method ?? "GET").toUpperCase();
+  const headers = {
+    Accept: "application/json",
+    ...(init?.headers ?? {}),
+    ...(await csrfHeaders(method)),
+  };
+
+  let response = await fetch(path, { ...init, credentials: "same-origin", headers });
+
+  if (response.status === 403 && MUTATING_METHODS.has(method)) {
+    // The session token may have rotated; refresh once and retry.
+    cachedCsrfToken = null;
+    const retryHeaders = { ...headers, ...(await csrfHeaders(method)) };
+    response = await fetch(path, { ...init, credentials: "same-origin", headers: retryHeaders });
+  }
 
   if (!response.ok) {
     throw await createApiError(response, path);

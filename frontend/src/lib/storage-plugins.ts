@@ -1,4 +1,4 @@
-import { requestApi, toNullableString } from "@/lib/api";
+import { csrfHeaders, requestApi, toNullableString } from "@/lib/api";
 
 export interface StoragePlugin {
   id: string;
@@ -108,7 +108,11 @@ export async function savePluginConfig(
   const response = await fetch(`/api/storage/plugins/${encodeURIComponent(pluginId)}/config`, {
     method: "POST",
     credentials: "same-origin",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      ...(await csrfHeaders("POST")),
+    },
     body: JSON.stringify(config),
     signal,
   });
@@ -221,7 +225,11 @@ export async function streamPluginCommand(
     {
       method: "POST",
       credentials: "same-origin",
-      headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "text/event-stream",
+        ...(await csrfHeaders("POST")),
+      },
       body: JSON.stringify(params ?? {}),
       signal,
     },

@@ -1483,6 +1483,8 @@ class TestStackConcurrencyAndAtomicWrites:
                 with thread_client.session_transaction() as session:
                     session["authenticated"] = True
                     session["username"] = "testuser"
+                    session["csrf_token"] = "test-csrf-token"
+                thread_client.environ_base["HTTP_X_CSRF_TOKEN"] = "test-csrf-token"
                 responses.append(
                     thread_client.post(
                         "/api/stacks/alpha/compose",

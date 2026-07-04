@@ -18,6 +18,7 @@ import docker
 import subprocess
 import socket
 import json
+import hmac
 import secrets
 import getpass
 from urllib import request as urlrequest
@@ -874,10 +875,31 @@ def create_app(config=None, dependencies=None):
     application.config.from_mapping(
         INIT_PLUGINS=True,
         START_SCHEDULERS=True,
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE="Lax",
     )
     application.config.update(config)
     if not application.config.get("SECRET_KEY"):
         application.config["SECRET_KEY"] = _resolve_secret_key()
+
+    @application.before_request
+    def _enforce_csrf():
+        """Require a valid CSRF token for authenticated state-changing requests."""
+        if request.method not in ("POST", "PUT", "PATCH", "DELETE"):
+            return None
+        if request.path == "/api/login":
+            return None  # Login mints the token; it cannot require one yet.
+        if not session.get("authenticated"):
+            return None  # Unauthenticated mutations are rejected by login_required (401).
+        expected = session.get("csrf_token")
+        provided = request.headers.get("X-CSRF-Token", "")
+        if (
+            not isinstance(expected, str)
+            or not isinstance(provided, str)
+            or not hmac.compare_digest(expected, provided)
+        ):
+            return jsonify({"error": "CSRF token missing or invalid"}), 403
+        return None
 
     resolved = dependencies or _default_dependencies()
     application.extensions["auth_users"] = dict(resolved.users)
