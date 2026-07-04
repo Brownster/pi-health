@@ -238,6 +238,10 @@ ProtectSystem=strict
 ProtectHome=read-only
 ReadWritePaths=/etc/fstab /etc/systemd/system /etc/sshfs /mnt /run/pihealth ${LIMEOS_LOG_DIR}
 ReadWritePaths=/backups
+# Self-update writes to the checkout (git pull, venv pip, npm build) and the
+# LimeOS runtime dirs (migration); ProtectHome/ProtectSystem block these
+# without explicit write paths.
+ReadWritePaths=${REPO_DIR} ${LIMEOS_CONFIG_DIR} ${LIMEOS_STATE_DIR}
 PrivateTmp=true
 
 # Socket permissions
