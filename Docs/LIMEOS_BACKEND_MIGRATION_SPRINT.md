@@ -81,7 +81,7 @@ Start implementation only when:
 |---|---|---|---|
 | BF-001 | Introduce an application factory | Entry gate | Complete (2026-06-30) |
 | BF-002 | Define service ports and shared adapters | BF-001 | Complete (2026-06-30) |
-| BF-003 | Extract domain services in bounded slices | BF-002 | In progress (domains 1-4 done; auto-update + backups + catalog extracted; tools pending) |
+| BF-003 | Extract domain services in bounded slices | BF-002 | Complete (2026-07-04) — all domain slices extracted (system, containers, network, stacks, disks/storage, auto-update, backups, catalog, tools) |
 | BF-004 | Characterize security and stateful behavior | BF-001 | In progress (auth/CSRF/credential invariants characterized) |
 | BF-005 | Sign off the core boundary and agent handoff | BF-003, BF-004 | Pending |
 
@@ -409,6 +409,21 @@ tests cover catalog reads, media-path defaults, status, dependency checks, insta
 already-installed, unresolved placeholders, streaming operation, thread-failure mapping), remove
 (success, missing service, stop failure), and route delegation including CSRF enforcement. Ruff is
 clean; backend unit tests pass (`949 passed, 1 skipped`); full E2E `97 passed`.
+
+Auxiliary tools (CopyParty) implemented 2026-07-04. `ToolsService` owns the CopyParty configuration
+(defaults merge, absolute-path and integer-port validation, atomic persistence) and the privileged
+status, install, and configure operations through an injected config repository and helper call.
+Typed exceptions map validation and rejected operations to `400` and an unavailable helper to `503`;
+`ToolsHelperError` carries the current config so the status route preserves its `{error, config}`
+body. The three `/api/tools/copyparty` routes now parse input, resolve the factory-injected service,
+and map results, with the status route alone deriving the display URL from the request host. The
+patchable `CONFIG_PATH` and `helper_call` module names remain, wired through dynamic providers so the
+existing route tests stay green. Focused tests cover config merge, status (success and helper error
+with config), install (success, helper error, rejected result), configure (persist+apply, absolute
+path, integer port, rejected result), and route delegation. Ruff is clean; backend unit tests pass
+(`964 passed, 1 skipped`); full E2E `97 passed`. This completes the BF-003 domain slices: system
+metrics, containers, network, stacks, disks/mounts/storage, auto-update, backups, catalog, and tools
+are all extracted behind framework-neutral services.
 
 ## BF-004 - Characterize security and stateful behavior
 
