@@ -1,6 +1,5 @@
 """Tests for the SMART disk health monitoring module."""
 
-import pytest
 from unittest.mock import patch, MagicMock
 import subprocess
 
@@ -464,7 +463,7 @@ class TestGetAllSmartData:
 
         with patch('smart_monitor.get_smart_data') as mock_get:
             mock_get.return_value = SmartHealth(device="/dev/sda")
-            results = get_all_smart_data()
+            get_all_smart_data()
 
             # Only sda should be queried (disk type)
             assert mock_get.call_count == 1

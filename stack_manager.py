@@ -21,7 +21,7 @@ from operation_manager import (
     OperationCapacityError,
 )
 from operation_sse import stream_operation_response
-from stack_read_service import (
+from stack_read_service import (  # noqa: F401  (DOCKER_PS_STACK_FORMAT/STACK_FILENAMES re-exported)
     BACKUP_NAME_RE,
     DOCKER_PS_STACK_FORMAT,
     STACK_FILENAMES,

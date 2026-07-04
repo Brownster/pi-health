@@ -11,14 +11,14 @@ from flask import (
     send_from_directory,
     session,
 )
-import psutil
 import os
+import time
+import psutil  # noqa: F401  (referenced as app.psutil in tests)
 import docker
 import subprocess
 import socket
 import json
 import secrets
-import hashlib
 import getpass
 from urllib import request as urlrequest
 from stack_manager import (
@@ -64,7 +64,7 @@ from disk_suggestion_service import DiskSuggestionService
 from smart_service import SmartService
 from storage_read_service import StorageReadService
 from setup_manager import setup_manager
-from helper_client import helper_call, HelperError
+from helper_client import helper_call
 from operation_manager import OperationRegistry, OperationCapacityError
 from operation_sse import stream_operation_response
 from pihealth_update_service import stream_update as stream_pihealth_update
@@ -87,7 +87,7 @@ from stack_mutation_service import StackMutationService
 from stack_operations_service import StackOperationsService
 from container_inventory_service import ContainerInventoryService
 from container_operations_service import ContainerOperationsService
-from network_diagnostics_service import (
+from network_diagnostics_service import (  # noqa: F401  (several names re-exported for tests)
     ContainerNotFoundError,
     DockerUnavailableError,
     NetworkDiagnosticsService,
@@ -102,7 +102,7 @@ from network_diagnostics_service import (
     socket_probe as execute_socket_probe,
 )
 from network_group_service import NetworkGroupService
-from container_helpers import (
+from container_helpers import (  # noqa: F401  (several names re-exported for tests)
     analyze_network_topology,
     calculate_container_cpu_percent,
     calculate_container_memory_stats,
@@ -116,7 +116,7 @@ from runtime_paths import (
     CONFIG_DIR as RUNTIME_CONFIG_DIR,
     STORAGE_PLUGIN_CONFIG_DIR as RUNTIME_STORAGE_PLUGIN_CONFIG_DIR,
 )
-from system_stats import (
+from system_stats import (  # noqa: F401  (several names re-exported for tests)
     _collect_disk_usage as collect_disk_usage,
     _cpu_percent_from_delta,
     _read_proc_stat_cpu,
@@ -317,7 +317,6 @@ docker_available = False
 container_updates = {}
 
 # Container stats cache with TTL
-import time
 _container_stats_cache = {}
 _container_stats_timestamps = {}
 CONTAINER_STATS_TTL = 5  # seconds

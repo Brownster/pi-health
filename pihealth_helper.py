@@ -24,7 +24,6 @@ import logging
 import signal
 import shutil
 import struct
-from pathlib import Path
 from datetime import datetime
 from typing import Optional
 import urllib.request
@@ -344,7 +343,7 @@ def cmd_fstab_add(params):
 
         # Append to fstab
         with open('/etc/fstab', 'a') as f:
-            f.write(f"# Added by pi-health\n")
+            f.write("# Added by pi-health\n")
             f.write(fstab_line)
 
         logger.info(f"Added fstab entry: {fstab_line.strip()}")
@@ -1337,7 +1336,7 @@ def _write_rclone_remote(config):
         new_lines.append(line)
 
     new_lines.append(f"[{remote_name}]")
-    new_lines.append(f"type = s3")
+    new_lines.append("type = s3")
     new_lines.append(f"provider = {provider}")
     new_lines.append(f"access_key_id = {access_key_id}")
     new_lines.append(f"secret_access_key = {secret_access_key}")
@@ -1558,251 +1557,6 @@ SSHFS_CONFIG_DIR = '/etc/sshfs'
 SSHFS_MOUNTS_CONFIG = '/etc/sshfs/mounts.json'
 
 
-def _get_sshfs_unit_names(mount_id: str) -> dict:
-    """Get systemd unit names for a mount ID."""
-    safe_id = re.sub(r'[^a-zA-Z0-9]', '-', mount_id)
-    return {
-        'mount': f'sshfs-{safe_id}.mount',
-        'automount': f'sshfs-{safe_id}.automount'
-    }
-
-
-def cmd_sshfs_list(params):
-    """List all configured SSHFS mounts with status."""
-    try:
-        if os.path.exists(SSHFS_MOUNTS_CONFIG):
-            with open(SSHFS_MOUNTS_CONFIG, 'r') as f:
-                mounts = json.load(f).get('mounts', [])
-        else:
-            mounts = []
-
-        result = []
-        for mount in mounts:
-            mount_point = mount.get('mount_point', '')
-            mount_id = mount.get('id', '')
-            units = _get_sshfs_unit_names(mount_id)
-
-            mp_result = run_command(['mountpoint', '-q', mount_point])
-            is_mounted = mp_result.get('returncode') == 0
-
-            enabled_result = run_command(['systemctl', 'is-enabled', units['automount']])
-            is_enabled = enabled_result.get('returncode') == 0
-
-            result.append({
-                'id': mount_id,
-                'name': mount.get('name', ''),
-                'host': mount.get('host', ''),
-                'port': mount.get('port', 22),
-                'username': mount.get('username', ''),
-                'remote_path': mount.get('remote_path', ''),
-                'mount_point': mount_point,
-                'mounted': is_mounted,
-                'enabled': is_enabled
-            })
-
-        return {'success': True, 'mounts': result}
-    except Exception as e:
-        return {'success': False, 'error': str(e)}
-
-
-def cmd_sshfs_configure(params):
-    """Configure an SSHFS mount (add or update)."""
-    mount_id = params.get('id', '').strip()
-    name = params.get('name', '').strip()
-    host = params.get('host', '').strip()
-    port = str(params.get('port', '22')).strip()
-    username = params.get('username', '').strip()
-    password = params.get('password', '')
-    remote_path = params.get('remote_path', '').strip()
-    mount_point = params.get('mount_point', '').strip()
-    auth_type = params.get('auth_type', 'password')
-    ssh_key_path = params.get('ssh_key_path', '')
-    options = params.get('options', {})
-
-    if not mount_id or not host or not username or not remote_path or not mount_point:
-        return {'success': False, 'error': 'id, host, username, remote_path, mount_point required'}
-
-    if not re.match(r'^[a-z0-9-]+$', mount_id):
-        return {'success': False, 'error': 'ID must be lowercase alphanumeric with hyphens'}
-
-    if not mount_point.startswith('/mnt/') or '..' in mount_point:
-        return {'success': False, 'error': 'Mount point must be under /mnt/'}
-
-    if not remote_path.startswith('/'):
-        return {'success': False, 'error': 'Remote path must be absolute'}
-
-    if not port.isdigit() or not (1 <= int(port) <= 65535):
-        return {'success': False, 'error': 'Invalid port'}
-
-    passfile = f"{SSHFS_CONFIG_DIR}/{mount_id}.pass"
-    if auth_type == 'password' and not password and not os.path.exists(passfile):
-        return {'success': False, 'error': 'Password required for password auth'}
-
-    os.makedirs(SSHFS_CONFIG_DIR, exist_ok=True)
-    os.makedirs(mount_point, exist_ok=True)
-
-    units = _get_sshfs_unit_names(mount_id)
-    if auth_type == 'password' and password:
-        with open(passfile, 'w') as f:
-            f.write(password)
-        os.chmod(passfile, 0o600)
-
-    opts = ['_netdev', 'users', 'reconnect', 'ServerAliveInterval=15',
-            'ServerAliveCountMax=3', 'StrictHostKeyChecking=accept-new']
-
-    if options.get('allow_other', True):
-        opts.append('allow_other')
-    if options.get('compression', False):
-        opts.append('Compression=yes')
-
-    if auth_type == 'password':
-        opts.append(f'ssh_command=sshpass -f {passfile} ssh')
-    elif auth_type == 'key' and ssh_key_path:
-        opts.append(f'IdentityFile={ssh_key_path}')
-
-    opts.append(f'port={port}')
-
-    mount_unit = f"""[Unit]
-Description=SSHFS Mount: {name}
-After=network-online.target
-Wants=network-online.target
-
-[Mount]
-What=sshfs#{username}@{host}:{remote_path}
-Where={mount_point}
-Type=fuse.sshfs
-Options={','.join(opts)}
-TimeoutSec=30
-
-[Install]
-WantedBy=multi-user.target
-"""
-
-    automount_unit = f"""[Unit]
-Description=SSHFS Automount: {name}
-After=network-online.target
-Wants=network-online.target
-
-[Automount]
-Where={mount_point}
-TimeoutIdleSec=0
-
-[Install]
-WantedBy=multi-user.target
-"""
-
-    try:
-        with open(f"/etc/systemd/system/{units['mount']}", 'w') as f:
-            f.write(mount_unit)
-        with open(f"/etc/systemd/system/{units['automount']}", 'w') as f:
-            f.write(automount_unit)
-    except Exception as e:
-        return {'success': False, 'error': f'Failed to write unit files: {e}'}
-
-    run_command(['systemctl', 'daemon-reload'])
-
-    if params.get('enabled', True):
-        result = run_command(['systemctl', 'enable', '--now', units['automount']])
-        if result.get('returncode') != 0:
-            return {'success': False, 'error': result.get('stderr', 'Failed to enable')}
-    else:
-        run_command(['systemctl', 'disable', '--now', units['automount']])
-        run_command(['systemctl', 'stop', units['mount']])
-
-    try:
-        if os.path.exists(SSHFS_MOUNTS_CONFIG):
-            with open(SSHFS_MOUNTS_CONFIG, 'r') as f:
-                stored = json.load(f).get('mounts', [])
-        else:
-            stored = []
-    except Exception:
-        stored = []
-
-    config = {
-        'id': mount_id,
-        'name': name,
-        'host': host,
-        'port': int(port),
-        'username': username,
-        'remote_path': remote_path,
-        'mount_point': mount_point,
-        'auth_type': auth_type,
-        'ssh_key_path': ssh_key_path,
-        'enabled': params.get('enabled', True),
-        'options': options
-    }
-
-    stored = [m for m in stored if m.get('id') != mount_id]
-    stored.append(config)
-
-    with open(SSHFS_MOUNTS_CONFIG, 'w') as f:
-        json.dump({'mounts': stored}, f, indent=2)
-
-    return {'success': True, 'message': f'Mount {mount_id} configured'}
-
-
-def cmd_sshfs_remove(params):
-    """Remove an SSHFS mount configuration."""
-    mount_id = params.get('id', '').strip()
-    if not mount_id:
-        return {'success': False, 'error': 'id required'}
-
-    units = _get_sshfs_unit_names(mount_id)
-    passfile = f"{SSHFS_CONFIG_DIR}/{mount_id}.pass"
-
-    run_command(['systemctl', 'disable', '--now', units['automount']])
-    run_command(['systemctl', 'stop', units['mount']])
-
-    for unit in [units['mount'], units['automount']]:
-        path = f"/etc/systemd/system/{unit}"
-        if os.path.exists(path):
-            os.remove(path)
-
-    if os.path.exists(passfile):
-        os.remove(passfile)
-
-    try:
-        if os.path.exists(SSHFS_MOUNTS_CONFIG):
-            with open(SSHFS_MOUNTS_CONFIG, 'r') as f:
-                stored = json.load(f).get('mounts', [])
-            stored = [m for m in stored if m.get('id') != mount_id]
-            with open(SSHFS_MOUNTS_CONFIG, 'w') as f:
-                json.dump({'mounts': stored}, f, indent=2)
-    except Exception:
-        pass
-
-    run_command(['systemctl', 'daemon-reload'])
-    return {'success': True}
-
-
-def cmd_sshfs_mount(params):
-    """Manually mount an SSHFS filesystem."""
-    mount_id = params.get('id', '').strip()
-    if not mount_id:
-        return {'success': False, 'error': 'id required'}
-
-    units = _get_sshfs_unit_names(mount_id)
-    result = run_command(['systemctl', 'start', units['mount']])
-
-    if result.get('returncode') == 0:
-        return {'success': True}
-    return {'success': False, 'error': result.get('stderr', 'Mount failed')}
-
-
-def cmd_sshfs_unmount(params):
-    """Manually unmount an SSHFS filesystem."""
-    mount_id = params.get('id', '').strip()
-    if not mount_id:
-        return {'success': False, 'error': 'id required'}
-
-    units = _get_sshfs_unit_names(mount_id)
-    result = run_command(['systemctl', 'stop', units['mount']])
-
-    if result.get('returncode') == 0:
-        return {'success': True}
-    return {'success': False, 'error': result.get('stderr', 'Unmount failed')}
-
-
 # =============================================================================
 # SSHFS Multi-Mount Commands
 # =============================================================================
@@ -1941,8 +1695,6 @@ def cmd_sshfs_configure(params):
     mount_opts.append('StrictHostKeyChecking=accept-new')
     mount_opts.append(f'ssh_command=sshpass -f {passfile} ssh')
 
-    # Escape mount point for systemd unit name
-    mount_unit_path = mount_point.replace('/', '-').strip('-')
 
     mount_unit = f"""[Unit]
 Description=SSHFS Mount - {name or mount_id}

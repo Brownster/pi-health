@@ -10,7 +10,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from storage_plugins.mergerfs_plugin import MergerFSPlugin, POLICIES
+from storage_plugins.mergerfs_plugin import MergerFSPlugin
 
 
 def consume_command(generator):

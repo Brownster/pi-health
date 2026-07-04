@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:#0a0d12;}
+  ::-webkit-scrollbar{height:10px;width:10px;}
+  ::-webkit-scrollbar-track{background:transparent;}
+  ::-webkit-scrollbar-thumb{background:#1f2733;border-radius:6px;}
+  ::-webkit-scrollbar-thumb:hover{background:#2a3340;}
+</style>
+</helmet>
+
+<div style="display:flex;min-height:100vh;background:#0a0d12;font-family:'IBM Plex Sans',system-ui,sans-serif;color:#e6edf3;position:relative;">
+
+  <!-- scrim -->
+  <sc-if value="{{ scrimShow }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeNav }}" style="position:fixed;inset:0;background:rgba(4,6,9,.6);z-index:55;"></div>
+  </sc-if>
+
+  <!-- ============ SIDEBAR ============ -->
+  <div style="{{ sidebarStyle }}">
+    <div style="display:flex;align-items:center;gap:11px;padding:0 22px 24px;">
+      <div style="width:30px;height:30px;border-radius:7px;background:#c7f24a;display:flex;align-items:center;justify-content:center;color:#0a0d12;font-weight:700;font-size:15px;font-family:'IBM Plex Mono',monospace;">N</div>
+      <div style="font-family:'IBM Plex Mono',monospace;font-weight:600;font-size:15px;color:#e6edf3;letter-spacing:.02em;">nas<span style="color:#c7f24a;">os</span></div>
+    </div>
+
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.18em;color:#5a6573;padding:0 22px 8px;text-transform:uppercase;">Main</div>
+    <a onClick="{{ goHome }}" style="{{ navHome }}">
+      <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9l6-5 6 5"/><path d="M6 8.5V16h8V8.5"/></svg>Home</a>
+    <a onClick="{{ goHealth }}" style="{{ navHealth }}">
+      <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11h3l2-5 3 9 2-4h4"/></svg>System Health</a>
+
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.18em;color:#5a6573;padding:18px 22px 8px;text-transform:uppercase;display:flex;align-items:center;gap:8px;">
+      <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="4" width="5" height="5" rx="1"/><rect x="11" y="4" width="5" height="5" rx="1"/><rect x="4" y="11" width="5" height="5" rx="1"/><rect x="11" y="11" width="5" height="5" rx="1"/></svg>My Apps</div>
+    <a onClick="{{ goContainers }}" style="{{ navContainers }}">Containers</a>
+    <a onClick="{{ goStacks }}" style="{{ navStacks }}">Stacks</a>
+    <a onClick="{{ goCatalog }}" style="{{ navCatalog }}">App Catalog</a>
+
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.18em;color:#5a6573;padding:18px 22px 8px;text-transform:uppercase;">System</div>
+    <a onClick="{{ goStorage }}" style="{{ navStorage }}">
+      <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="5" width="14" height="4" rx="1"/><rect x="3" y="11" width="14" height="4" rx="1"/><circle cx="6" cy="7" r=".7" fill="currentColor" stroke="none"/><circle cx="6" cy="13" r=".7" fill="currentColor" stroke="none"/></svg>Storage</a>
+    <a onClick="{{ goNetwork }}" style="{{ navNetwork }}">
+      <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="10" cy="5" r="2"/><circle cx="5" cy="15" r="2"/><circle cx="15" cy="15" r="2"/><path d="M10 7v3M9 11l-3 2M11 11l3 2"/></svg>Network</a>
+    <a onClick="{{ goTools }}" style="{{ navTools }}">
+      <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4 7h7M4 13h3"/><circle cx="13" cy="7" r="2"/><circle cx="9" cy="13" r="2"/></svg>Tools</a>
+    <a onClick="{{ goSettings }}" style="{{ navSettings }}">
+      <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="10" cy="10" r="3"/><path d="M10 3.5v2M10 14.5v2M3.5 10h2M14.5 10h2"/></svg>Settings</a>
+
+    <div style="margin-top:auto;padding:16px 22px 0;border-top:1px solid #1b222c;display:flex;align-items:center;gap:11px;">
+      <div style="width:30px;height:30px;border-radius:50%;background:#1a2230;display:flex;align-items:center;justify-content:center;color:#c7f24a;font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:600;">h</div>
+      <div style="flex:1;min-width:0;"><div style="font-size:13px;color:#e6edf3;font-weight:600;">holly</div><div style="font-size:11px;color:#5a6573;font-family:'IBM Plex Mono',monospace;">admin</div></div>
+      <a style="color:#8b97a6;text-decoration:none;font-size:12px;font-family:'IBM Plex Mono',monospace;cursor:pointer;">exit</a>
+    </div>
+  </div>
+
+  <!-- ============ MAIN COLUMN ============ -->
+  <div style="flex:1;min-width:0;display:flex;flex-direction:column;">
+
+    <!-- mobile top bar -->
+    <sc-if value="{{ isNarrow }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;align-items:center;gap:14px;padding:14px 18px;border-bottom:1px solid #1b222c;background:#0d1117;position:sticky;top:0;z-index:40;">
+        <button onClick="{{ openNav }}" style="display:flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:8px;background:#11161d;border:1px solid #1d2530;color:#e6edf3;cursor:pointer;">
+          <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M3 6h14M3 10h14M3 14h14"/></svg>
+        </button>
+        <div style="font-family:'IBM Plex Mono',monospace;font-weight:600;font-size:15px;">nas<span style="color:#c7f24a;">os</span></div>
+      </div>
+    </sc-if>
+
+    <div style="flex:1;overflow:auto;">
+
+      <!-- ===================== HOME ===================== -->
+      <sc-if value="{{ isHome }}" hint-placeholder-val="{{ true }}">
+        <div data-screen-label="Home" style="padding:28px 32px;max-width:1320px;">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:22px;">
+            <div>
+              <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;"><h1 style="margin:0;font-family:'IBM Plex Mono',monospace;font-size:22px;font-weight:600;letter-spacing:.01em;">web_services</h1><span style="display:inline-flex;align-items:center;gap:6px;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#3fb950;background:rgba(63,185,80,.1);padding:3px 9px;border-radius:5px;"><span style="width:6px;height:6px;border-radius:50%;background:#3fb950;"></span>8 up</span></div>
+              <div style="font-size:13px;color:#5a6573;font-family:'IBM Plex Mono',monospace;margin-top:6px;">docker · 12 containers · synced 18:49:08</div>
+            </div>
+            <button style="font-family:'IBM Plex Mono',monospace;font-size:13px;color:#0a0d12;background:#c7f24a;border:none;padding:10px 16px;border-radius:7px;font-weight:600;cursor:pointer;" style-hover="filter:brightness(1.08);">+ deploy</button>
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;margin-bottom:22px;">
+            <div style="background:#11161d;border:1px solid #1d2530;border-radius:9px;padding:14px 16px;"><div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8b97a6;text-transform:uppercase;letter-spacing:.1em;">cpu</div><div style="font-family:'IBM Plex Mono',monospace;font-size:21px;color:#3fb950;margin:4px 0 9px;">0.8%</div><div style="height:4px;background:#1d2530;border-radius:3px;overflow:hidden;"><div style="width:2%;height:100%;background:#3fb950;"></div></div></div>
+            <div style="background:#11161d;border:1px solid #1d2530;border-radius:9px;padding:14px 16px;"><div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8b97a6;text-transform:uppercase;letter-spacing:.1em;">mem</div><div style="font-family:'IBM Plex Mono',monospace;font-size:21px;color:#e6edf3;margin:4px 0 9px;">29%</div><div style="height:4px;background:#1d2530;border-radius:3px;overflow:hidden;"><div style="width:29%;height:100%;background:#c7f24a;"></div></div></div>
+            <div style="background:#11161d;border:1px solid #1d2530;border-radius:9px;padding:14px 16px;"><div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8b97a6;text-transform:uppercase;letter-spacing:.1em;">temp</div><div style="font-family:'IBM Plex Mono',monospace;font-size:21px;color:#e3a008;margin:4px 0 9px;">54.5°</div><div style="height:4px;background:#1d2530;border-radius:3px;overflow:hidden;"><div style="width:60%;height:100%;background:#e3a008;"></div></div></div>
+            <div style="background:#11161d;border:1px solid #1d2530;border-radius:9px;padding:14px 16px;"><div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8b97a6;text-transform:uppercase;letter-spacing:.1em;">storage</div><div style="font-family:'IBM Plex Mono',monospace;font-size:21px;color:#f85149;margin:4px 0 9px;">92.5%</div><div style="height:4px;background:#1d2530;border-radius:3px;overflow:hidden;"><div style="width:92%;height:100%;background:#f85149;"></div></div></div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px;">
+            <sc-for list="{{ services }}" as="s" hint-placeholder-count="9">
+              <div style="background:#11161d;border:1px solid #1d2530;border-radius:9px;padding:16px;" style-hover="border-color:#2c3a22;">
+                <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
+                  <div style="width:42px;height:42px;flex:none;border-radius:9px;background:#1a2230;border:1px solid #28323f;display:flex;align-items:center;justify-content:center;color:#c7f24a;font-family:'IBM Plex Mono',monospace;font-weight:600;font-size:14px;">{{ s.m }}</div>
+                  <div style="min-width:0;"><div style="font-size:15px;font-weight:600;color:#e6edf3;">{{ s.n }}</div><div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#5a6573;margin-top:2px;">{{ s.d }}</div></div>
+                </div>
+                <div style="display:flex;align-items:center;justify-content:space-between;">
+                  <sc-if value="{{ s.up }}" hint-placeholder-val="{{ true }}">
+                    <span style="display:inline-flex;align-items:center;gap:6px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#3fb950;"><span style="width:6px;height:6px;border-radius:50%;background:#3fb950;"></span>running</span>
+                  </sc-if>
+                  <sc-if value="{{ s.down }}" hint-placeholder-val="{{ false }}">
+                    <span style="display:inline-flex;align-items:center;gap:6px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#7c8694;"><span style="width:6px;height:6px;border-radius:50%;background:#7c8694;"></span>stopped</span>
+                  </sc-if>
+                  <button style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#c7f24a;background:transparent;border:1px solid #2c3a22;padding:6px 12px;border-radius:6px;cursor:pointer;" style-hover="background:rgba(199,242,74,.08);">open ›</button>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===================== SYSTEM HEALTH ===================== -->
+      <sc-if value="{{ isHealth }}" hint-placeholder-val="{{ false }}">
+        <div data-screen-label="System Health" style="padding:28px 32px;max-width:1320px;">
+          <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:22px;">
+            <h1 style="margin:0;font-family:'IBM Plex Mono',monospace;font-size:22px;font-weight:600;">system_metrics</h1>
+            <div style="font-size:13px;color:#5a6573;font-family:'IBM Plex Mono',monospace;">last updated: 18:47:40</div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;">
+            <!-- CPU -->
+            <div style="background:#11161d;border:1px solid #1d2530;border-radius:11px;padding:20px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;"><div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#8b97a6;text-transform:uppercase;letter-spacing:.12em;">CPU Usage</div><svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="#5a6573" stroke-width="1.5"><rect x="6" y="6" width="8" height="8" rx="1"/><path d="M8 3v3M12 3v3M8 14v3M12 14v3M3 8h3M3 12h3M14 8h3M14 12h3" stroke-linecap="round"/></svg></div>
+              <div style="font-family:'IBM Plex Mono',monospace;font-size:30px;font-weight:600;color:#3fb950;">0.8%</div>
+              <div style="height:5px;background:#1d2530;border-radius:3px;overflow:hidden;margin:12px 0 16px;"><div style="width:2%;height:100%;background:#3fb950;"></div></div>
+              <div style="display:flex;flex-direction:column;gap:9px;">
+                <sc-for list="{{ cores }}" as="c" hint-placeholder-count="4">
+                  <div style="display:flex;align-items:center;gap:12px;">
+                    <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#8b97a6;width:38px;">{{ c.n }}</span>
+                    <div style="flex:1;height:4px;background:#1d2530;border-radius:3px;overflow:hidden;"><div style="width:3%;height:100%;background:#58708a;"></div></div>
+                    <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#8b97a6;width:36px;text-align:right;">{{ c.v }}</span>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+            <!-- Memory -->
+            <div style="background:#11161d;border:1px solid #1d2530;border-radius:11px;padding:20px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;"><div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#8b97a6;text-transform:uppercase;letter-spacing:.12em;">Memory Usage</div><svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="#5a6573" stroke-width="1.5"><rect x="3" y="6" width="14" height="8" rx="1"/><path d="M6 6v8M10 6v8M14 6v8"/></svg></div>
+              <div style="font-family:'IBM Plex Mono',monospace;font-size:30px;font-weight:600;color:#3fb950;">29.0%</div>
+              <div style="font-family:'IBM Plex Mono',monospace;font-size:13px;color:#8b97a6;margin-top:4px;">2.28 GB / 7.87 GB</div>
+              <div style="height:5px;background:#1d2530;border-radius:3px;overflow:hidden;margin-top:16px;"><div style="width:29%;height:100%;background:#c7f24a;"></div></div>
+            </div>
+            <!-- Temperature -->
+            <div style="background:#11161d;border:1px solid #1d2530;border-radius:11px;padding:20px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;"><div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#8b97a6;text-transform:uppercase;letter-spacing:.12em;">Temperature</div><svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="#e3a008" stroke-width="1.5" stroke-linecap="round"><path d="M9 4a1.5 1.5 0 0 1 3 0v7a3 3 0 1 1-3 0z"/></svg></div>
+              <div style="font-family:'IBM Plex Mono',monospace;font-size:30px;font-weight:600;color:#e3a008;">54.5 °C</div>
+              <div style="font-family:'IBM Plex Mono',monospace;font-size:13px;color:#8b97a6;margin-top:4px;">threshold 70 °C</div>
+              <div style="height:5px;background:#1d2530;border-radius:3px;overflow:hidden;margin-top:16px;"><div style="width:60%;height:100%;background:#e3a008;"></div></div>
+            </div>
+            <!-- Disk storage -->
+            <div style="background:#11161d;border:1px solid #1d2530;border-radius:11px;padding:20px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;"><div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#8b97a6;text-transform:uppercase;letter-spacing:.12em;">Disk · /mnt/storage</div><svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="#5a6573" stroke-width="1.5"><ellipse cx="10" cy="6" rx="6" ry="2.2"/><path d="M4 6v8c0 1.2 2.7 2.2 6 2.2s6-1 6-2.2V6"/></svg></div>
+              <div style="font-family:'IBM Plex Mono',monospace;font-size:30px;font-weight:600;color:#f85149;">92.5%</div>
+              <div style="font-family:'IBM Plex Mono',monospace;font-size:13px;color:#8b97a6;margin-top:4px;">6.73 TB / 7.28 TB</div>
+              <div style="height:5px;background:#1d2530;border-radius:3px;overflow:hidden;margin-top:16px;"><div style="width:92%;height:100%;background:#f85149;"></div></div>
+            </div>
+            <!-- Disk downloads -->
+            <div style="background:#11161d;border:1px solid #1d2530;border-radius:11px;padding:20px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;"><div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#8b97a6;text-transform:uppercase;letter-spacing:.12em;">Disk · /mnt/downloads</div><svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="#5a6573" stroke-width="1.5"><ellipse cx="10" cy="6" rx="6" ry="2.2"/><path d="M4 6v8c0 1.2 2.7 2.2 6 2.2s6-1 6-2.2V6"/></svg></div>
+              <div style="font-family:'IBM Plex Mono',monospace;font-size:30px;font-weight:600;color:#e3a008;">75.4%</div>
+              <div style="font-family:'IBM Plex Mono',monospace;font-size:13px;color:#8b97a6;margin-top:4px;">84.39 GB / 118.02 GB</div>
+              <div style="height:5px;background:#1d2530;border-radius:3px;overflow:hidden;margin-top:16px;"><div style="width:75%;height:100%;background:#e3a008;"></div></div>
+            </div>
+            <!-- Network I/O -->
+            <div style="background:#11161d;border:1px solid #1d2530;border-radius:11px;padding:20px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;"><div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#8b97a6;text-transform:uppercase;letter-spacing:.12em;">Network I/O</div><svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="#5a6573" stroke-width="1.5" stroke-linecap="round"><path d="M4 8h9l-3-3M16 12H7l3 3"/></svg></div>
+              <div style="display:flex;flex-direction:column;gap:13px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;"><span style="font-family:'IBM Plex Mono',monospace;font-size:13px;color:#8b97a6;">↓ received</span><span style="font-family:'IBM Plex Mono',monospace;font-size:16px;color:#3fb950;">45.1 GB</span></div>
+                <div style="display:flex;align-items:center;justify-content:space-between;"><span style="font-family:'IBM Plex Mono',monospace;font-size:13px;color:#8b97a6;">↑ sent</span><span style="font-family:'IBM Plex Mono',monospace;font-size:16px;color:#58a6ff;">37.44 GB</span></div>
+                <div style="display:flex;align-items:center;justify-content:space-between;border-top:1px solid #1d2530;padding-top:13px;"><span style="font-family:'IBM Plex Mono',monospace;font-size:13px;color:#8b97a6;">rate</span><span style="font-family:'IBM Plex Mono',monospace;font-size:13px;color:#5a6573;">— idle</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===================== CONTAINERS ===================== -->
+      <sc-if value="{{ isContainers }}" hint-placeholder-val="{{ false }}">
+        <div data-screen-label="Containers" style="padding:28px 32px;max-width:1320px;">
+          <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:20px;">
+            <h1 style="margin:0;font-family:'IBM Plex Mono',monospace;font-size:22px;font-weight:600;">docker_containers</h1>
+            <div style="font-size:13px;color:#5a6573;font-family:'IBM Plex Mono',monospace;">last updated: 18:48:14</div>
+          </div>
+
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:18px;">
+            <div style="display:flex;gap:8px;">
+              <button onClick="{{ setAll }}" style="{{ filterAll }}">All</button>
+              <button onClick="{{ setRunning }}" style="{{ filterRunning }}">Running</button>
+              <button onClick="{{ setStopped }}" style="{{ filterStopped }}">Stopped</button>
+            </div>
+            <div style="display:flex;gap:8px;">
+              <button style="display:inline-flex;align-items:center;gap:7px;font-family:'IBM Plex Mono',monospace;font-size:13px;color:#e6edf3;background:#11161d;border:1px solid #1d2530;padding:8px 14px;border-radius:7px;cursor:pointer;" style-hover="border-color:#2a3340;">
+                <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M15 7a6 6 0 1 0 1 4M15 3v4h-4"/></svg>refresh</button>
+              <button style="font-family:'IBM Plex Mono',monospace;font-size:13px;color:#0a0d12;background:#c7f24a;border:none;padding:8px 14px;border-radius:7px;font-weight:600;cursor:pointer;" style-hover="filter:brightness(1.08);">network test</button>
+            </div>
+          </div>
+
+          <div style="background:#11161d;border:1px solid #1d2530;border-radius:11px;overflow:hidden;">
+            <div style="overflow-x:auto;">
+              <table style="width:100%;min-width:820px;border-collapse:collapse;font-size:13px;">
+                <thead>
+                  <tr style="background:#0e131a;">
+                    <th style="text-align:left;padding:13px 18px;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.12em;color:#5a6573;text-transform:uppercase;font-weight:500;">Container</th>
+                    <th style="text-align:left;padding:13px 18px;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.12em;color:#5a6573;text-transform:uppercase;font-weight:500;">Image</th>
+                    <th style="text-align:left;padding:13px 18px;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.12em;color:#5a6573;text-transform:uppercase;font-weight:500;">Status</th>
+                    <th style="text-align:right;padding:13px 18px;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.12em;color:#5a6573;text-transform:uppercase;font-weight:500;">CPU</th>
+                    <th style="text-align:right;padding:13px 18px;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.12em;color:#5a6573;text-transform:uppercase;font-weight:500;">Mem</th>
+                    <th style="text-align:right;padding:13px 18px;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.12em;color:#5a6573;text-transform:uppercase;font-weight:500;">Net</th>
+                    <th style="text-align:center;padding:13px 18px;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.12em;color:#5a6573;text-transform:uppercase;font-weight:500;">Web</th>
+                    <th style="text-align:right;padding:13px 18px;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.12em;color:#5a6573;text-transform:uppercase;font-weight:500;">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <sc-for list="{{ containers }}" as="r" hint-placeholder-count="7">
+                    <tr style="border-top:1px solid #1a212b;">
+                      <td style="padding:14px 18px;font-weight:600;color:#e6edf3;">{{ r.name }}</td>
+                      <td style="padding:14px 18px;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#8b97a6;">{{ r.image }}</td>
+                      <td style="padding:14px 18px;">
+                        <sc-if value="{{ r.up }}" hint-placeholder-val="{{ true }}"><span style="display:inline-flex;align-items:center;gap:6px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#3fb950;background:rgba(63,185,80,.1);padding:3px 9px;border-radius:5px;"><span style="width:6px;height:6px;border-radius:50%;background:#3fb950;"></span>running</span></sc-if>
+                        <sc-if value="{{ r.down }}" hint-placeholder-val="{{ false }}"><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#e3a008;background:rgba(227,160,8,.1);padding:3px 9px;border-radius:5px;">created</span></sc-if>
+                      </td>
+                      <td style="padding:14px 18px;text-align:right;font-family:'IBM Plex Mono',monospace;color:#8b97a6;">{{ r.cpu }}</td>
+                      <td style="padding:14px 18px;text-align:right;font-family:'IBM Plex Mono',monospace;color:#8b97a6;">{{ r.mem }}</td>
+                      <td style="padding:14px 18px;text-align:right;font-family:'IBM Plex Mono',monospace;color:#8b97a6;">{{ r.net }}</td>
+                      <td style="padding:14px 18px;text-align:center;"><a style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#c7f24a;text-decoration:none;cursor:pointer;">open</a></td>
+                      <td style="padding:14px 18px;">
+                        <div style="display:flex;gap:6px;justify-content:flex-end;align-items:center;">
+                          <button style="font-family:'IBM Plex Mono',monospace;font-size:11px;padding:6px 10px;border-radius:6px;cursor:pointer;border:1px solid #1f3326;background:rgba(63,185,80,.08);color:#3fb950;">start</button>
+                          <button style="font-family:'IBM Plex Mono',monospace;font-size:11px;padding:6px 10px;border-radius:6px;cursor:pointer;border:1px solid #3a2618;background:rgba(227,160,8,.08);color:#e3a008;">stop</button>
+                          <button style="font-family:'IBM Plex Mono',monospace;font-size:11px;padding:6px 10px;border-radius:6px;cursor:pointer;border:1px solid #1d3149;background:rgba(88,166,255,.08);color:#58a6ff;">restart</button>
+                          <button style="font-family:'IBM Plex Mono',monospace;font-size:13px;padding:5px 9px;border-radius:6px;cursor:pointer;border:1px solid #1d2530;background:transparent;color:#5a6573;">⋮</button>
+                        </div>
+                      </td>
+                    </tr>
+                  </sc-for>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===================== STACKS ===================== -->
+      <sc-if value="{{ isStacks }}" hint-placeholder-val="{{ false }}">
+        <div data-screen-label="Stacks" style="padding:28px 32px;max-width:1320px;">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:8px;">
+            <h1 style="margin:0;font-family:'IBM Plex Mono',monospace;font-size:22px;font-weight:600;">docker_stacks</h1>
+            <div style="display:flex;gap:8px;">
+              <button style="display:inline-flex;align-items:center;gap:7px;font-family:'IBM Plex Mono',monospace;font-size:13px;color:#e6edf3;background:#11161d;border:1px solid #1d2530;padding:8px 14px;border-radius:7px;cursor:pointer;" style-hover="border-color:#2a3340;"><svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M15 7a6 6 0 1 0 1 4M15 3v4h-4"/></svg>refresh</button>
+              <button style="font-family:'IBM Plex Mono',monospace;font-size:13px;color:#0a0d12;background:#c7f24a;border:none;padding:8px 14px;border-radius:7px;font-weight:600;cursor:pointer;" style-hover="filter:brightness(1.08);">+ new stack</button>
+            </div>
+          </div>
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#5a6573;margin-bottom:22px;">dir: /opt/stacks · synced 18:49:08</div>
+
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px;">
+            <div style="background:#11161d;border:1px solid #1d2530;border-radius:11px;padding:20px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+                <div style="font-size:17px;font-weight:600;color:#e6edf3;">media</div>
+                <span style="display:inline-flex;align-items:center;gap:6px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#3fb950;background:rgba(63,185,80,.1);padding:3px 9px;border-radius:5px;"><span style="width:6px;height:6px;border-radius:50%;background:#3fb950;"></span>running</span>
+              </div>
+              <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#5a6573;">docker-compose.yml</div>
+              <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#8b97a6;margin-top:4px;">12 / 12 services up</div>
+              <div style="height:5px;background:#1d2530;border-radius:3px;overflow:hidden;margin:14px 0 18px;"><div style="width:100%;height:100%;background:#3fb950;"></div></div>
+              <div style="display:flex;gap:8px;">
+                <button style="flex:1;font-family:'IBM Plex Mono',monospace;font-size:12px;padding:8px;border-radius:6px;cursor:pointer;border:1px solid #1f3326;background:rgba(63,185,80,.08);color:#3fb950;">start</button>
+                <button style="flex:1;font-family:'IBM Plex Mono',monospace;font-size:12px;padding:8px;border-radius:6px;cursor:pointer;border:1px solid #3a2620;background:rgba(248,81,73,.08);color:#f85149;">stop</button>
+                <button style="flex:1;font-family:'IBM Plex Mono',monospace;font-size:12px;padding:8px;border-radius:6px;cursor:pointer;border:1px solid #3a2618;background:rgba(227,160,8,.08);color:#e3a008;">restart</button>
+              </div>
+            </div>
+            <div style="border:1px dashed #1d2530;border-radius:11px;padding:20px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;color:#5a6573;min-height:200px;cursor:pointer;" style-hover="border-color:#2c3a22;color:#8b97a6;">
+              <svg width="26" height="26" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M10 4v12M4 10h12"/></svg>
+              <div style="font-family:'IBM Plex Mono',monospace;font-size:13px;margin-top:10px;">new stack</div>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===================== CATALOG ===================== -->
+      <sc-if value="{{ isCatalog }}" hint-placeholder-val="{{ false }}">
+        <div data-screen-label="App Catalog" style="padding:28px 32px;max-width:1320px;">
+          <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:22px;">
+            <div>
+              <h1 style="margin:0;font-family:'IBM Plex Mono',monospace;font-size:22px;font-weight:600;">app_catalog</h1>
+              <div style="font-family:'IBM Plex Mono',monospace;font-size:13px;color:#5a6573;margin-top:6px;">6 installed · 3 available</div>
+            </div>
+            <button style="display:inline-flex;align-items:center;gap:7px;font-family:'IBM Plex Mono',monospace;font-size:13px;color:#e6edf3;background:#11161d;border:1px solid #1d2530;padding:8px 14px;border-radius:7px;cursor:pointer;" style-hover="border-color:#2a3340;"><svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M15 7a6 6 0 1 0 1 4M15 3v4h-4"/></svg>refresh</button>
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;">
+            <sc-for list="{{ catalog }}" as="a" hint-placeholder-count="9">
+              <div style="background:#11161d;border:1px solid #1d2530;border-radius:11px;padding:18px;display:flex;flex-direction:column;">
+                <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:6px;">
+                  <div style="display:flex;align-items:center;gap:11px;">
+                    <div style="width:38px;height:38px;flex:none;border-radius:9px;background:#1a2230;border:1px solid #28323f;display:flex;align-items:center;justify-content:center;color:#c7f24a;font-family:'IBM Plex Mono',monospace;font-weight:600;font-size:13px;">{{ a.m }}</div>
+                    <div style="font-size:15px;font-weight:600;color:#e6edf3;">{{ a.n }}</div>
+                  </div>
+                  <sc-if value="{{ a.installed }}" hint-placeholder-val="{{ true }}"><span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#3fb950;letter-spacing:.08em;text-transform:uppercase;">installed</span></sc-if>
+                </div>
+                <div style="font-size:13px;color:#8b97a6;line-height:1.5;margin-bottom:12px;">{{ a.d }}</div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;min-height:22px;">
+                  <sc-if value="{{ a.requires }}" hint-placeholder-val="{{ false }}"><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#e3a008;background:rgba(227,160,8,.08);border:1px solid #3a2618;padding:2px 8px;border-radius:5px;">requires: {{ a.requires }}</span></sc-if>
+                  <sc-if value="{{ a.stack }}" hint-placeholder-val="{{ false }}"><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8b97a6;background:#0e131a;border:1px solid #1d2530;padding:2px 8px;border-radius:5px;">stack: {{ a.stack }}</span></sc-if>
+                </div>
+                <div style="margin-top:auto;">
+                  <sc-if value="{{ a.installed }}" hint-placeholder-val="{{ true }}"><button style="font-family:'IBM Plex Mono',monospace;font-size:12px;padding:8px 16px;border-radius:7px;cursor:pointer;border:1px solid #3a2620;background:rgba(248,81,73,.08);color:#f85149;" style-hover="background:rgba(248,81,73,.16);">remove</button></sc-if>
+                  <sc-if value="{{ a.available }}" hint-placeholder-val="{{ false }}"><button style="font-family:'IBM Plex Mono',monospace;font-size:12px;padding:8px 16px;border-radius:7px;cursor:pointer;border:none;background:#c7f24a;color:#0a0d12;font-weight:600;" style-hover="filter:brightness(1.08);">install</button></sc-if>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===================== STORAGE ===================== -->
+      <sc-if value="{{ isStorage }}" hint-placeholder-val="{{ false }}">
+        <div data-screen-label="Storage" style="padding:28px 32px;max-width:1320px;">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:22px;">
+            <div>
+              <h1 style="margin:0;font-family:'IBM Plex Mono',monospace;font-size:22px;font-weight:600;">disk_management</h1>
+              <div style="font-size:13px;color:#5a6573;font-family:'IBM Plex Mono',monospace;margin-top:6px;">view and manage storage devices</div>
+            </div>
+            <button style="display:inline-flex;align-items:center;gap:7px;font-family:'IBM Plex Mono',monospace;font-size:13px;color:#e6edf3;background:#11161d;border:1px solid #1d2530;padding:8px 14px;border-radius:7px;cursor:pointer;" style-hover="border-color:#2a3340;"><svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M15 7a6 6 0 1 0 1 4M15 3v4h-4"/></svg>refresh</button>
+          </div>
+
+          <div style="display:flex;flex-direction:column;gap:16px;">
+            <sc-for list="{{ disks }}" as="d" hint-placeholder-count="3">
+              <div style="background:#11161d;border:1px solid #1d2530;border-radius:11px;overflow:hidden;">
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:14px;padding:18px 20px;border-bottom:1px solid #1a212b;flex-wrap:wrap;">
+                  <div style="display:flex;align-items:center;gap:14px;">
+                    <div style="width:40px;height:40px;flex:none;border-radius:9px;background:#1a2230;border:1px solid #28323f;display:flex;align-items:center;justify-content:center;color:#8b97a6;"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><ellipse cx="10" cy="6" rx="6" ry="2.2"/><path d="M4 6v8c0 1.2 2.7 2.2 6 2.2s6-1 6-2.2V6"/></svg></div>
+                    <div>
+                      <div style="font-family:'IBM Plex Mono',monospace;font-size:15px;font-weight:600;color:#e6edf3;">{{ d.dev }}</div>
+                      <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#5a6573;margin-top:3px;">{{ d.model }}</div>
+                    </div>
+                  </div>
+                  <div style="text-align:right;">
+                    <div style="font-family:'IBM Plex Mono',monospace;font-size:17px;font-weight:600;color:#e6edf3;">{{ d.size }}</div>
+                    <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#5a6573;">{{ d.kind }}</div>
+                  </div>
+                </div>
+                <sc-for list="{{ d.parts }}" as="p" hint-placeholder-count="1">
+                  <div style="display:flex;align-items:center;justify-content:space-between;gap:14px;padding:16px 20px 16px 34px;flex-wrap:wrap;">
+                    <div style="min-width:0;">
+                      <div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap;">
+                        <span style="font-family:'IBM Plex Mono',monospace;font-size:14px;color:#e6edf3;">{{ p.dev }}</span>
+                        <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#58a6ff;background:rgba(88,166,255,.1);padding:2px 7px;border-radius:4px;text-transform:uppercase;">{{ p.fs }}</span>
+                        <span style="display:inline-flex;align-items:center;gap:5px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#3fb950;"><span style="width:5px;height:5px;border-radius:50%;background:#3fb950;"></span>mounted</span>
+                      </div>
+                      <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#8b97a6;margin-top:5px;">mount: {{ p.mount }}</div>
+                      <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#5a6573;margin-top:2px;">uuid: {{ p.uuid }}</div>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:16px;">
+                      <span style="font-family:'IBM Plex Mono',monospace;font-size:14px;color:#8b97a6;">{{ p.size }}</span>
+                      <button style="font-family:'IBM Plex Mono',monospace;font-size:12px;padding:8px 14px;border-radius:7px;cursor:pointer;border:1px solid #3a2620;background:rgba(248,81,73,.08);color:#f85149;" style-hover="background:rgba(248,81,73,.16);">unmount</button>
+                    </div>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===================== PLACEHOLDER (network/tools/settings) ===================== -->
+      <sc-if value="{{ isPlaceholder }}" hint-placeholder-val="{{ false }}">
+        <div data-screen-label="Placeholder" style="padding:60px 32px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;color:#5a6573;min-height:60vh;">
+          <div style="width:60px;height:60px;border-radius:14px;background:#11161d;border:1px solid #1d2530;display:flex;align-items:center;justify-content:center;margin-bottom:18px;"><svg width="26" height="26" viewBox="0 0 20 20" fill="none" stroke="#5a6573" stroke-width="1.4" stroke-linecap="round"><circle cx="10" cy="10" r="7"/><path d="M10 7v3l2 2"/></svg></div>
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:16px;color:#8b97a6;">{{ placeholderName }}</div>
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:13px;margin-top:8px;">screen coming next</div>
+        </div>
+      </sc-if>
+
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = { screen: 'home', filter: 'all', vw: (typeof window !== 'undefined' ? window.innerWidth : 1280), navOpen: false };
+
+  componentDidMount() {
+    this._onResize = () => this.setState({ vw: window.innerWidth });
+    window.addEventListener('resize', this._onResize);
+  }
+  componentWillUnmount() {
+    window.removeEventListener('resize', this._onResize);
+  }
+
+  renderVals() {
+    const s = this.state;
+    const lime = '#c7f24a';
+    const isNarrow = s.vw < 980;
+    const navOpen = s.navOpen;
+
+    const navBase = { display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 22px', textDecoration: 'none', fontSize: '14px', borderLeft: '2px solid transparent', color: '#8b97a6', cursor: 'pointer' };
+    const nav = (a) => a ? { ...navBase, color: lime, background: 'rgba(199,242,74,.08)', borderLeftColor: lime, fontWeight: 600 } : navBase;
+    const subBase = { display: 'block', padding: '8px 22px 8px 50px', textDecoration: 'none', fontSize: '13.5px', borderLeft: '2px solid transparent', color: '#8b97a6', cursor: 'pointer' };
+    const subNav = (a) => a ? { ...subBase, color: lime, background: 'rgba(199,242,74,.08)', borderLeftColor: lime, fontWeight: 600 } : subBase;
+
+    const tabBase = { fontFamily: "'IBM Plex Mono',monospace", fontSize: '13px', padding: '8px 16px', borderRadius: '7px', cursor: 'pointer', border: '1px solid #1d2530', background: '#11161d', color: '#8b97a6' };
+    const tab = (a) => a ? { ...tabBase, background: 'rgba(199,242,74,.1)', borderColor: '#2c3a22', color: lime, fontWeight: 600 } : tabBase;
+
+    const sidebarStyle = {
+      width: '236px', flex: 'none', background: '#0d1117', borderRight: '1px solid #1b222c',
+      display: 'flex', flexDirection: 'column', padding: '22px 0',
+      ...(isNarrow
+        ? { position: 'fixed', top: 0, bottom: 0, left: 0, zIndex: 60, transform: navOpen ? 'none' : 'translateX(-100%)', transition: 'transform .25s ease', boxShadow: navOpen ? '0 0 50px rgba(0,0,0,.7)' : 'none' }
+        : { position: 'relative' })
+    };
+
+    const services = [
+      { n: 'Jellyfin', d: 'Media server', m: 'Jf', up: true },
+      { n: 'Jackett', d: 'Indexer proxy', m: 'Jk', up: true },
+      { n: 'Radarr', d: 'Movie library', m: 'Ra', up: true },
+      { n: 'Sonarr', d: 'TV library', m: 'So', up: true },
+      { n: 'Get iPlayer', d: 'BBC downloads', m: 'iP', up: true },
+      { n: 'RDT Client', d: 'Debrid client', m: 'RD', up: true },
+      { n: 'Navidrome', d: 'Music streaming', m: 'Nv', up: true },
+      { n: 'SABnzbd', d: 'Usenet downloader', m: 'SA', up: false },
+      { n: 'Gluetun VPN', d: 'Network tunnel', m: 'VP', up: true },
+    ].map(x => ({ ...x, down: !x.up }));
+
+    const cores = [
+      { n: 'cpu0', v: '0.7%' }, { n: 'cpu1', v: '0.8%' }, { n: 'cpu2', v: '0.8%' }, { n: 'cpu3', v: '0.7%' },
+    ];
+
+    const allContainers = [
+      { name: 'jellyfin', image: 'linuxserver/jellyfin:latest', up: true, cpu: '1.2%', mem: '412 MB', net: '1.4 MB/s' },
+      { name: 'jackett', image: 'linuxserver/jackett:latest', up: true, cpu: '0.3%', mem: '186 MB', net: '22 KB/s' },
+      { name: 'radarr', image: 'linuxserver/radarr:latest', up: true, cpu: '0.8%', mem: '240 MB', net: '40 KB/s' },
+      { name: 'sonarr', image: 'linuxserver/sonarr:latest', up: true, cpu: '0.6%', mem: '255 MB', net: '31 KB/s' },
+      { name: 'get_iplayer', image: 'ghcr.io/thespad/get_iplayer:latest', up: true, cpu: '0.1%', mem: '64 MB', net: '—' },
+      { name: 'sabnzbd', image: 'lscr.io/linuxserver/sabnzbd:latest', up: false, cpu: '—', mem: '—', net: '—' },
+      { name: 'transmission', image: 'linuxserver/transmission:latest', up: false, cpu: '—', mem: '—', net: '—' },
+    ].map(x => ({ ...x, down: !x.up }));
+    const containers = allContainers.filter(c => s.filter === 'all' ? true : s.filter === 'running' ? c.up : !c.up);
+
+    const catalog = [
+      { n: 'Watchtower', m: 'Wt', d: 'Container auto-updater', installed: true, stack: 'media' },
+      { n: 'RGSX', m: 'Rg', d: 'Retro game server', installed: false },
+      { n: 'SABnzbd', m: 'SA', d: 'Usenet downloader', installed: true, requires: 'vpn', stack: 'media' },
+      { n: 'Sonarr', m: 'So', d: 'TV show manager and downloader', installed: true, requires: 'vpn', stack: 'media' },
+      { n: 'Gitea', m: 'Gt', d: 'Self-hosted Git service', installed: false, requires: 'gitea-db' },
+      { n: 'Podfetch', m: 'Pf', d: 'Podcast manager', installed: false },
+      { n: 'RDTClient', m: 'RD', d: 'Real-Debrid download client', installed: true, stack: 'media' },
+      { n: 'Navidrome', m: 'Nv', d: 'Music streaming server', installed: true, stack: 'media' },
+      { n: 'Gluetun VPN', m: 'VP', d: 'VPN network gateway', installed: true, stack: 'media' },
+    ].map(x => ({ ...x, available: !x.installed }));
+
+    const disks = [
+      { dev: '/dev/sda', model: 'DataTraveler 3.0 (1C1B0D6C196DE820F9070C15)', size: '115.5G', kind: 'usb · removable', parts: [{ dev: '/dev/sda1', fs: 'ntfs', mount: '/mnt/backups', size: '115.4G', uuid: '865AACAB5AAC9A07' }] },
+      { dev: '/dev/sdb', model: 'WDC WD80EDAZ-11CEWB0 (WD-RD1ENASE)', size: '7.3T', kind: 'usb · removable', parts: [{ dev: '/dev/sdb1', fs: 'ntfs', mount: '/mnt/storage', size: '7.3T', uuid: 'D4544CBA544CA15A' }] },
+      { dev: '/dev/sdc', model: 'Samsung SSD 870 EVO (S5RANS0W900012)', size: '118G', kind: 'usb · removable', parts: [{ dev: '/dev/sdc1', fs: 'ext4', mount: '/mnt/downloads', size: '118G', uuid: 'a1b2c3d4-e5f6' }] },
+    ];
+
+    const go = (scr) => () => this.setState({ screen: scr, navOpen: false });
+    const placeholderNames = { network: 'network', tools: 'tools', settings: 'settings' };
+    const isPlaceholder = ['network', 'tools', 'settings'].includes(s.screen);
+
+    return {
+      isNarrow, navOpen, sidebarStyle, scrimShow: isNarrow && navOpen,
+      navHome: nav(s.screen === 'home'), navHealth: nav(s.screen === 'health'),
+      navContainers: subNav(s.screen === 'containers'), navStacks: subNav(s.screen === 'stacks'), navCatalog: subNav(s.screen === 'catalog'),
+      navStorage: nav(s.screen === 'storage'), navNetwork: nav(s.screen === 'network'), navTools: nav(s.screen === 'tools'), navSettings: nav(s.screen === 'settings'),
+      isHome: s.screen === 'home', isHealth: s.screen === 'health', isContainers: s.screen === 'containers',
+      isStacks: s.screen === 'stacks', isCatalog: s.screen === 'catalog', isStorage: s.screen === 'storage',
+      isPlaceholder, placeholderName: placeholderNames[s.screen] || '',
+      services, cores, containers, catalog, disks,
+      filterAll: tab(s.filter === 'all'), filterRunning: tab(s.filter === 'running'), filterStopped: tab(s.filter === 'stopped'),
+      goHome: go('home'), goHealth: go('health'), goContainers: go('containers'), goStacks: go('stacks'),
+      goCatalog: go('catalog'), goStorage: go('storage'), goNetwork: go('network'), goTools: go('tools'), goSettings: go('settings'),
+      openNav: () => this.setState({ navOpen: true }), closeNav: () => this.setState({ navOpen: false }),
+      setAll: () => this.setState({ filter: 'all' }), setRunning: () => this.setState({ filter: 'running' }), setStopped: () => this.setState({ filter: 'stopped' }),
+    };
+  }
+}
+</script>
+</body>
+</html>

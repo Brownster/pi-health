@@ -5,7 +5,6 @@ Parses smartctl output and provides health status for drives.
 
 import json
 import subprocess
-import re
 from typing import Optional
 from dataclasses import dataclass, field, asdict
 
@@ -299,7 +298,7 @@ def get_all_smart_data() -> list:
                 health = get_smart_data(device)
                 results.append(health)
 
-    except Exception as e:
+    except Exception:
         # Return empty list on error
         pass
 

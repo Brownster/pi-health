@@ -489,7 +489,7 @@ class TestListStacks:
 
     def test_list_stacks_empty_dir(self, temp_stacks_dir):
         """Test listing stacks in empty directory."""
-        from stack_manager import list_stacks, STACKS_PATH
+        from stack_manager import list_stacks
         import stack_manager
 
         # Temporarily override STACKS_PATH

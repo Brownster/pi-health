@@ -130,7 +130,8 @@ def init_plugins(config_dir: str) -> PluginRegistry:
         import plugin_manager
         enabled = plugin_manager.is_enabled
     except Exception:
-        enabled = lambda _id: True
+        def enabled(_id):
+            return True
 
     try:
         from storage_plugins.snapraid_plugin import SnapRAIDPlugin

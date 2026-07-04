@@ -8,7 +8,7 @@ import sys
 import os
 import tempfile
 import shutil
-from unittest.mock import patch, Mock, MagicMock
+from unittest.mock import patch, Mock
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -122,7 +122,6 @@ class TestDiskManagerEndpoints:
 
     def test_mount_helper_error(self, authenticated_client):
         """Test mount returns 503 when helper raises."""
-        import disk_manager
         from helper_client import HelperError
 
         with patch('helper_client.helper_call', side_effect=HelperError("no helper")):

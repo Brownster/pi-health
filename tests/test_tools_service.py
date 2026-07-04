@@ -58,7 +58,9 @@ def test_load_config_merges_stored_over_defaults():
 # --- Status ------------------------------------------------------------------
 
 def test_status_returns_helper_state_and_config():
-    helper = lambda command, params: {"installed": True, "service_active": True, "service_status": "active"}
+    def helper(command, params):
+        return {"installed": True, "service_active": True, "service_status": "active"}
+
     result = make_service(helper_call=helper).status()
     assert result["installed"] is True
     assert result["service_status"] == "active"

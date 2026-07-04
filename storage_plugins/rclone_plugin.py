@@ -2,7 +2,6 @@
 Rclone remote mount plugin.
 Mounts cloud storage backends (S3-compatible) via rclone.
 """
-import os
 import re
 import subprocess
 

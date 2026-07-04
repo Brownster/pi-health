@@ -8,7 +8,7 @@ Communicates with the privileged helper service over Unix socket.
 import os
 from flask import Blueprint, current_app, has_app_context, jsonify, request
 from auth_utils import login_required
-from helper_client import helper_call, helper_available, HelperError, HELPER_SOCKET
+from helper_client import helper_available, HelperError, HELPER_SOCKET
 from disk_inventory_service import DiskInventoryService
 from ports import HelperClientAdapter, JsonFileRepository
 from helper_templates import render_startup_files

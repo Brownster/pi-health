@@ -10,7 +10,7 @@ import tempfile
 import shutil
 import threading
 import yaml
-from unittest.mock import patch, MagicMock, Mock
+from unittest.mock import patch, MagicMock
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -153,7 +153,6 @@ class TestCatalogEndpoints:
 
     def test_catalog_status_returns_services(self, authenticated_client, temp_stacks_dir):
         """Test GET /api/catalog/status returns installed services."""
-        import catalog_manager
         import stack_manager
         original_stacks = stack_manager.STACKS_PATH
         original_backup = stack_manager.BACKUP_DIR
@@ -488,7 +487,6 @@ class TestCatalogRemove:
 
     def test_remove_not_installed(self, authenticated_client, temp_stacks_dir):
         """Test remove of non-installed app returns error."""
-        import catalog_manager
         import stack_manager
         original_stacks = stack_manager.STACKS_PATH
         original_backup = stack_manager.BACKUP_DIR

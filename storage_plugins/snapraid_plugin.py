@@ -11,7 +11,7 @@ import re
 import subprocess
 import time
 from datetime import datetime
-from typing import Generator, Optional
+from typing import Generator
 
 from storage_plugins.base import StoragePlugin, CommandResult, PluginStatus
 from helper_client import helper_call, helper_available, HelperError

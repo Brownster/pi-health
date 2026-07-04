@@ -3,7 +3,6 @@ Pi-specific hardware monitoring module.
 Provides throttling detection, CPU frequency/voltage, and WiFi signal metrics.
 """
 import subprocess
-import os
 import re
 
 
