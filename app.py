@@ -828,6 +828,44 @@ def api_stream_pihealth_update(operation_id):
     )
 
 
+SECRET_KEY_FILE = RUNTIME_CONFIG_DIR / "secret_key"
+
+
+def _load_or_create_secret_key():
+    """Return a persisted Flask secret key, creating one on first run.
+
+    Persisting the key keeps sessions and CSRF tokens valid across restarts,
+    including the in-app self-update (which restarts the service). Falls back to an
+    ephemeral key only if the file cannot be written (e.g. a read-only runtime dir).
+    """
+    try:
+        existing = SECRET_KEY_FILE.read_text().strip()
+        if existing:
+            return existing
+    except OSError:
+        pass
+
+    key = secrets.token_hex(32)
+    try:
+        SECRET_KEY_FILE.parent.mkdir(parents=True, exist_ok=True)
+        # O_EXCL so concurrent workers don't clobber each other's key.
+        fd = os.open(SECRET_KEY_FILE, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w") as handle:
+            handle.write(key)
+        return key
+    except FileExistsError:
+        try:
+            return SECRET_KEY_FILE.read_text().strip() or key
+        except OSError:
+            return key
+    except OSError:
+        return key
+
+
+def _resolve_secret_key():
+    return os.getenv("SECRET_KEY") or _load_or_create_secret_key()
+
+
 def create_app(config=None, dependencies=None):
     """Build an isolated LimeOS web application."""
     config = dict(config or {})
@@ -836,9 +874,10 @@ def create_app(config=None, dependencies=None):
     application.config.from_mapping(
         INIT_PLUGINS=True,
         START_SCHEDULERS=True,
-        SECRET_KEY=os.getenv("SECRET_KEY") or secrets.token_hex(32),
     )
     application.config.update(config)
+    if not application.config.get("SECRET_KEY"):
+        application.config["SECRET_KEY"] = _resolve_secret_key()
 
     resolved = dependencies or _default_dependencies()
     application.extensions["auth_users"] = dict(resolved.users)
