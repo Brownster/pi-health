@@ -1,7 +1,7 @@
 # LimeOS Backend Decoupling Sprint
 
 Date: 2026-06-30
-Status: Planned
+Status: Complete (2026-07-04) — signoff in `Docs/LIMEOS_BACKEND_DECOUPLING_SIGNOFF.md`
 Owner: Pi-Health / LimeOS maintainers
 Predecessor: `Docs/UI_V2_LEGACY_REMOVAL_SIGNOFF.md`
 Successor: `Docs/LIMEOS_AGENT_AUTOMATION_SPRINT.md`
@@ -83,7 +83,7 @@ Start implementation only when:
 | BF-002 | Define service ports and shared adapters | BF-001 | Complete (2026-06-30) |
 | BF-003 | Extract domain services in bounded slices | BF-002 | Complete (2026-07-04) — all domain slices extracted (system, containers, network, stacks, disks/storage, auto-update, backups, catalog, tools) |
 | BF-004 | Characterize security and stateful behavior | BF-001 | Complete (2026-07-04) — all required invariant areas covered |
-| BF-005 | Sign off the core boundary and agent handoff | BF-003, BF-004 | Pending |
+| BF-005 | Sign off the core boundary and agent handoff | BF-003, BF-004 | Complete (2026-07-04) — see `Docs/LIMEOS_BACKEND_DECOUPLING_SIGNOFF.md` (hardware smoke pending) |
 
 ## BF-001 - Introduce an application factory
 
@@ -491,6 +491,15 @@ Acceptance:
 - Agent and CLI architecture cannot bypass policy, approvals, identity, or audit.
 - Full validation passes from a clean checkout and on the target Pi.
 - The Flask-independence entry gate in `Docs/LIMEOS_AGENT_AUTOMATION_SPRINT.md` is complete.
+
+Completed 2026-07-04. `Docs/LIMEOS_BACKEND_DECOUPLING_SIGNOFF.md` records the 19-service inventory,
+the dependency-direction audit (no `*_service.py` imports Flask or a blueprint module; identity and
+audit enter as explicit inputs), the remaining Flask-only behavior (auth/CSRF, `operation_sse`, the
+blueprints, and the app factory), and the validation evidence: ruff clean, unit `976 passed, 1
+skipped`, E2E `97 passed`, frontend type check pass, and bundle budget pass (JS 99.06 kB / 200 kB,
+CSS 6.32 kB / 80 kB). Entry gate 2 of `Docs/LIMEOS_AGENT_AUTOMATION_SPRINT.md` is signed off pending
+the target-Pi hardware smoke, whose procedure the signoff enumerates. This closes the backend
+decoupling sprint.
 
 ## Validation Matrix
 
