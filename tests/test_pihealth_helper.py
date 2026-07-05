@@ -244,6 +244,43 @@ class TestValidationFailures:
         result = helper.cmd_tailscale_install({})
         assert result["success"] is False
 
+
+class TestHelperConcurrency:
+    """The helper serves connections concurrently; mutations still serialize."""
+
+    def _run_async(self, command):
+        import threading
+
+        holder = {}
+        done = threading.Event()
+
+        def call():
+            holder["result"] = helper.handle_request(
+                json.dumps({"command": command, "params": {}})
+            )
+            done.set()
+
+        threading.Thread(target=call, daemon=True).start()
+        return holder, done
+
+    def test_read_command_runs_while_mutation_lock_held(self, monkeypatch):
+        monkeypatch.setitem(helper.COMMANDS, "lsblk", lambda params: {"ran": True})
+        with helper._mutation_lock:
+            holder, done = self._run_async("lsblk")
+            # A read command must not wait on the mutation lock.
+            assert done.wait(timeout=2)
+        assert holder["result"]["ran"] is True
+
+    def test_mutating_command_blocks_on_mutation_lock(self, monkeypatch):
+        monkeypatch.setitem(helper.COMMANDS, "mount", lambda params: {"ran": True})
+        with helper._mutation_lock:
+            holder, done = self._run_async("mount")
+            # A mutating command must wait while the lock is held.
+            assert not done.wait(timeout=0.3)
+        # Released now; it should proceed.
+        assert done.wait(timeout=2)
+        assert holder["result"]["ran"] is True
+
     def test_cmd_mergerfs_mount_invalid(self):
         result = helper.cmd_mergerfs_mount({"branches": "/mnt/a", "mount_point": "/bad"})
         assert result["success"] is False

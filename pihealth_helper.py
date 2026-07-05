@@ -24,6 +24,7 @@ import logging
 import signal
 import shutil
 import struct
+import threading
 from datetime import datetime
 from typing import Optional
 import urllib.request
@@ -2508,6 +2509,24 @@ COMMANDS = {
 }
 
 
+# Quick commands that mutate shared system config/state (fstab, mounts, unit files)
+# and must not run concurrently with each other. Long or read-only commands run
+# lock-free so a slow backup/sync does not block a quick mount or status check.
+_MUTATING_COMMANDS = frozenset({
+    'fstab_add', 'fstab_remove', 'fstab_set_section',
+    'mount', 'umount',
+    'mergerfs_mount', 'mergerfs_umount',
+    'write_snapraid_conf', 'configure_startup_service', 'configure_snapraid_schedule',
+    'systemctl', 'docker_network_create', 'write_vpn_env',
+    'seedbox_configure', 'seedbox_disable',
+    'sshfs_configure', 'sshfs_remove', 'sshfs_mount', 'sshfs_unmount',
+    'rclone_configure', 'rclone_remove', 'rclone_mount', 'rclone_unmount',
+    'copyparty_configure',
+})
+
+_mutation_lock = threading.Lock()
+
+
 def handle_request(data):
     """Handle a request from the client."""
     try:
@@ -2533,8 +2552,10 @@ def handle_request(data):
 
     logger.info(f"Executing command: {cmd}")
     try:
-        result = COMMANDS[cmd](params)
-        return result
+        if cmd in _MUTATING_COMMANDS:
+            with _mutation_lock:
+                return COMMANDS[cmd](params)
+        return COMMANDS[cmd](params)
     except Exception as e:
         logger.error(f"Command {cmd} failed: {e}")
         return {'success': False, 'error': str(e)}
@@ -2643,6 +2664,15 @@ def _serve_connection(conn, allowed_gid):
             pass
 
 
+def _handle_connection(conn, allowed_gid):
+    """Serve one connection to completion and close it (runs in its own thread)."""
+    try:
+        conn.settimeout(10)
+        _serve_connection(conn, allowed_gid)
+    finally:
+        conn.close()
+
+
 def cleanup(signum=None, frame=None):
     """Clean up socket on exit."""
     if os.path.exists(SOCKET_PATH):
@@ -2685,11 +2715,13 @@ def main():
     try:
         while True:
             conn, _ = server.accept()
-            try:
-                conn.settimeout(10)
-                _serve_connection(conn, allowed_gid)
-            finally:
-                conn.close()
+            # Serve each connection in its own daemon thread so a long-running
+            # command (backup, snapraid sync) does not block other helper calls.
+            threading.Thread(
+                target=_handle_connection,
+                args=(conn, allowed_gid),
+                daemon=True,
+            ).start()
     finally:
         cleanup()
 
