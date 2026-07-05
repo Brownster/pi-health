@@ -127,9 +127,10 @@ def test_v2_storage_details_and_command(
     expect(modal).to_contain_text("Pool active")
 
     # Run a streamed plugin command (SSE over POST consumed via fetch reader).
+    # `status` has no params and is not dangerous, so it runs on click.
     page.click("button[data-plugin-command='status']")
     expect(page.locator("#v2-plugin-command-output")).to_contain_text("checking pool mergerfs", timeout=10000)
-    expect(page.locator("#v2-plugin-command-output")).to_contain_text("completed", timeout=10000)
+    expect(page.locator("[data-command-summary]")).to_contain_text("Completed", timeout=10000)
 
     page.click("#v2-plugin-detail-close")
     expect(page.locator("#v2-plugin-detail-modal")).to_have_count(0)

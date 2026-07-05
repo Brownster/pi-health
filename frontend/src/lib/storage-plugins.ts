@@ -53,11 +53,14 @@ export interface PluginRecovery {
 }
 
 export interface PluginCommandEvent {
-  type: string;
+  type: string; // "output" | "tag" | "complete" | "error"
   line?: string;
   success?: boolean;
   message?: string;
   error?: string;
+  name?: string; // tag name (run, summary, msg, ...)
+  values?: unknown[]; // tag values
+  data?: Record<string, unknown>; // completion payload (e.g. parsed summary)
 }
 
 function normalizePlugin(raw: Record<string, unknown> | undefined): StoragePlugin {

@@ -335,6 +335,7 @@ def test_run_plugin_command_adds_authenticated_audit_user(authenticated_client, 
     assert plugin.params == {
         "force_reason": "confirmed",
         "_audit_user": "testuser",
+        "stream_tags": True,
     }
 
 
@@ -597,3 +598,31 @@ def test_config_preview_unsupported_plugin_returns_400(authenticated_client, mon
     )
 
     assert response.status_code == 400
+
+
+def test_snapraid_command_defaults_stream_tags_and_audit(authenticated_client, monkeypatch):
+    recorded = {}
+
+    class FakePlugin:
+        def get_commands(self):
+            return [{"id": "sync"}]
+
+        def run_command(self, command_id, params):
+            recorded["params"] = dict(params)
+            if False:  # make this a generator
+                yield ""
+            return CommandResult(success=True, message="ok")
+
+    registry = Mock()
+    registry.get.return_value = FakePlugin()
+    monkeypatch.setattr("storage_plugins.get_registry", lambda: registry)
+
+    response = authenticated_client.post(
+        "/api/storage/plugins/snapraid/commands/sync",
+        data=json.dumps({}),
+        content_type="application/json",
+    )
+    response.get_data()  # drain the SSE generator so run_command executes
+
+    assert recorded["params"]["stream_tags"] is True
+    assert recorded["params"]["_audit_user"]

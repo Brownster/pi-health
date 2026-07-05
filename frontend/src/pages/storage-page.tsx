@@ -5,7 +5,6 @@ import {
   Loader2,
   Plus,
   RefreshCw,
-  Terminal,
   TriangleAlert,
 } from "lucide-react";
 
@@ -16,6 +15,7 @@ import {
   MergerfsPoolCard,
   MergerfsSetupCard,
 } from "@/components/storage/mergerfs-pool-card";
+import { CommandRunner } from "@/components/storage/command-runner";
 import { mergerfsPools } from "@/lib/pools";
 import { Button } from "@/components/ui/button";
 import {
@@ -28,7 +28,6 @@ import {
 import { ModalOverlay } from "@/components/ui/modal-overlay";
 import { PageHeader } from "@/components/ui/page-header";
 import {
-  type PluginCommand,
   type PluginDetail,
   type PluginRecovery,
   type StoragePlugin,
@@ -40,7 +39,6 @@ import {
   isPoolPlugin,
   removePlugin,
   savePluginConfig,
-  streamPluginCommand,
   togglePlugin,
 } from "@/lib/storage-plugins";
 import { formatClockTime } from "@/lib/format";
@@ -320,75 +318,6 @@ export function StoragePage() {
   const closeDetails = useCallback(() => {
     setDetailModal((current) => ({ ...current, open: false }));
   }, []);
-
-  const runCommand = useCallback(
-    async (pluginId: string, command: PluginCommand) => {
-      setDetailModal((current) => ({
-        ...current,
-        command: {
-          running: true,
-          commandId: command.id,
-          lines: [],
-          error: null,
-        },
-      }));
-
-      try {
-        await streamPluginCommand(pluginId, command.id, {}, (event) => {
-          if (!isMountedRef.current) {
-            return;
-          }
-          if (event.type === "output" && typeof event.line === "string") {
-            const line = event.line;
-            setDetailModal((current) => ({
-              ...current,
-              command: {
-                ...current.command,
-                lines: [...current.command.lines, line],
-              },
-            }));
-          } else if (event.type === "complete") {
-            const summary = `— ${event.success ? "completed" : "failed"}${event.message ? `: ${event.message}` : ""}`;
-            setDetailModal((current) => ({
-              ...current,
-              command: {
-                ...current.command,
-                running: false,
-                lines: [...current.command.lines, summary],
-              },
-            }));
-          } else if (event.type === "error") {
-            setDetailModal((current) => ({
-              ...current,
-              command: {
-                ...current.command,
-                running: false,
-                error: event.error ?? "Command error",
-              },
-            }));
-          }
-        });
-        if (isMountedRef.current) {
-          setDetailModal((current) => ({
-            ...current,
-            command: { ...current.command, running: false },
-          }));
-        }
-      } catch (caughtError) {
-        if (isMountedRef.current) {
-          setDetailModal((current) => ({
-            ...current,
-            command: {
-              ...current.command,
-              running: false,
-              error: getErrorMessage(caughtError),
-            },
-          }));
-        }
-      }
-    },
-    [],
-  );
 
   const saveConfig = useCallback(async (pluginId: string, text: string) => {
     let parsed: Record<string, unknown>;
@@ -746,63 +675,12 @@ export function StoragePage() {
                   </div>
 
                   {detailModal.detail.commands.length ? (
-                    <div className="space-y-2">
-                      <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                        Commands
-                      </p>
-                      <div className="flex flex-wrap gap-2">
-                        {detailModal.detail.commands.map((command) => {
-                          // Commands with required params need the schema-driven config form
-                          // (PH3-006b); disable rather than run them with empty params.
-                          const needsParams = command.params.length > 0;
-                          return (
-                            <Button
-                              className="gap-1.5 text-xs sm:text-sm"
-                              data-plugin-command={command.id}
-                              disabled={
-                                detailModal.command.running || needsParams
-                              }
-                              key={command.id}
-                              onClick={() =>
-                                void runCommand(detailModal.detail!.id, command)
-                              }
-                              size="sm"
-                              title={
-                                needsParams
-                                  ? "Requires parameters — available in the upcoming plugin config editor"
-                                  : undefined
-                              }
-                              variant="outline"
-                            >
-                              <Terminal
-                                aria-hidden="true"
-                                className="h-3.5 w-3.5"
-                              />
-                              {command.label}
-                              {needsParams ? " (needs params)" : ""}
-                            </Button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ) : null}
-
-                  {detailModal.command.commandId ? (
-                    <div className="rounded-lg border border-border/70 bg-muted/20 p-3">
-                      <p className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">
-                        Command output{" "}
-                        {detailModal.command.running ? "(running...)" : ""}
-                      </p>
-                      <pre
-                        className="max-h-[20vh] overflow-auto whitespace-pre-wrap break-words text-xs sm:text-sm"
-                        id="v2-plugin-command-output"
-                      >
-                        {detailModal.command.error
-                          ? detailModal.command.error
-                          : detailModal.command.lines.join("\n") ||
-                            "Waiting for output..."}
-                      </pre>
-                    </div>
+                    <CommandRunner
+                      commands={detailModal.detail.commands}
+                      onCompleted={() => void loadPlugins("manual")}
+                      pluginId={detailModal.detail.id}
+                      poolNames={mergerfsPools(detailModal.detail).map((pool) => pool.name)}
+                    />
                   ) : null}
 
                   {detailModal.recovery?.supported ? (

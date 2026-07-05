@@ -256,8 +256,11 @@ def run_plugin_command(plugin_id: str, command_id: str):
         return jsonify({"error": f"Unknown command: {command_id}"}), 404
 
     params = request.get_json() or {}
-    if plugin_id == "snapraid" and command_id == "sync":
-        params["_audit_user"] = session.get("username", "unknown")
+    if plugin_id == "snapraid":
+        # The v2 UI relies on log-tag events for live progress/summary.
+        params.setdefault("stream_tags", True)
+        if command_id == "sync":
+            params["_audit_user"] = session.get("username", "unknown")
 
     def generate():
         try:
