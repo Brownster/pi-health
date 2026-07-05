@@ -56,6 +56,11 @@ def test_v2_storage_pools_route_defaults_to_pools_tab(
     # /v2/pools opens with the Pools tab active -> only mergerfs.
     expect(page.locator("button[data-storage-tab='pools'][aria-pressed='true']")).to_be_visible()
     expect(page.get_by_text("Samba")).to_have_count(0)
+    # The pool-aware MergerFS card renders (unconfigured -> Set up CTA).
+    expect(page.locator("[data-pool-plugin='mergerfs']")).to_be_visible()
+    expect(
+        page.locator("button[data-pool-action='setup'][data-plugin='mergerfs']")
+    ).to_be_visible()
 
 
 def test_v2_storage_tab_syncs_with_shell_nav(

@@ -11,6 +11,12 @@ import {
 
 import { Badge, StatusBadge } from "@/components/ui/badge";
 import { PluginCard } from "@/components/storage/plugin-card";
+import { SnapraidCard } from "@/components/storage/snapraid-card";
+import {
+  MergerfsPoolCard,
+  MergerfsSetupCard,
+} from "@/components/storage/mergerfs-pool-card";
+import { mergerfsPools } from "@/lib/pools";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -139,6 +145,7 @@ export function StoragePage() {
   const [actionNotice, setActionNotice] = useState<ActionNotice | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
+  const [poolDetails, setPoolDetails] = useState<Record<string, PluginDetail | null>>({});
   const [detailModal, setDetailModal] = useState<DetailModalState>({
     open: false,
     pluginId: "",
@@ -169,6 +176,20 @@ export function StoragePage() {
       setPlugins(next);
       setError(null);
       setLastUpdated(formatClockTime(new Date()));
+
+      // Pool cards need per-plugin status detail (list + per-plugin detail only).
+      const poolPlugins = next.filter((plugin) => isPoolPlugin(plugin));
+      void Promise.all(
+        poolPlugins.map((plugin) =>
+          fetchPluginDetail(plugin.id)
+            .then((detail) => [plugin.id, detail] as const)
+            .catch(() => [plugin.id, null] as const),
+        ),
+      ).then((entries) => {
+        if (isMountedRef.current) {
+          setPoolDetails(Object.fromEntries(entries));
+        }
+      });
     } catch (caughtError) {
       if (isMountedRef.current) {
         setError(getErrorMessage(caughtError));
@@ -476,6 +497,64 @@ export function StoragePage() {
       ? plugins.filter((plugin) => isPoolPlugin(plugin))
       : plugins;
 
+  // Set up leads to the config editor. Until the guided editors land (PH4-004/005)
+  // it opens the plugin detail modal, which already has config editing.
+  const onSetup = onDetails;
+
+  const renderPoolCards = (plugin: StoragePlugin) => {
+    const detail = poolDetails[plugin.id] ?? null;
+    const loading = !(plugin.id in poolDetails);
+
+    if (plugin.id === "mergerfs") {
+      const pools = mergerfsPools(detail);
+      if (pools.length) {
+        return pools.map((pool) => (
+          <MergerfsPoolCard
+            key={`${plugin.id}:${pool.name}`}
+            onDetails={onDetails}
+            plugin={plugin}
+            pool={pool}
+          />
+        ));
+      }
+      return [
+        <MergerfsSetupCard
+          key={plugin.id}
+          onDetails={onDetails}
+          onSetup={onSetup}
+          plugin={plugin}
+        />,
+      ];
+    }
+
+    if (plugin.id === "snapraid") {
+      return [
+        <SnapraidCard
+          detail={detail}
+          key={plugin.id}
+          loading={loading}
+          onDetails={onDetails}
+          onSetup={onSetup}
+          plugin={plugin}
+        />,
+      ];
+    }
+
+    return [
+      <PluginCard
+        confirmingRemove={confirmRemoveId === plugin.id}
+        key={plugin.id}
+        onDetails={onDetails}
+        onRemoveCancel={() => setConfirmRemoveId(null)}
+        onRemoveConfirm={onRemoveConfirm}
+        onRemoveRequest={(id) => setConfirmRemoveId(id)}
+        onToggle={onToggle}
+        pending={pendingId === plugin.id}
+        plugin={plugin}
+      />,
+    ];
+  };
+
   return (
     <section className="space-y-4 sm:space-y-6">
       <PageHeader
@@ -592,19 +671,21 @@ export function StoragePage() {
 
       {!isLoading && visiblePlugins.length ? (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {visiblePlugins.map((plugin) => (
-            <PluginCard
-              confirmingRemove={confirmRemoveId === plugin.id}
-              key={plugin.id}
-              onDetails={onDetails}
-              onRemoveCancel={() => setConfirmRemoveId(null)}
-              onRemoveConfirm={onRemoveConfirm}
-              onRemoveRequest={(id) => setConfirmRemoveId(id)}
-              onToggle={onToggle}
-              pending={pendingId === plugin.id}
-              plugin={plugin}
-            />
-          ))}
+          {tab === "pools"
+            ? visiblePlugins.flatMap((plugin) => renderPoolCards(plugin))
+            : visiblePlugins.map((plugin) => (
+                <PluginCard
+                  confirmingRemove={confirmRemoveId === plugin.id}
+                  key={plugin.id}
+                  onDetails={onDetails}
+                  onRemoveCancel={() => setConfirmRemoveId(null)}
+                  onRemoveConfirm={onRemoveConfirm}
+                  onRemoveRequest={(id) => setConfirmRemoveId(id)}
+                  onToggle={onToggle}
+                  pending={pendingId === plugin.id}
+                  plugin={plugin}
+                />
+              ))}
         </div>
       ) : null}
 

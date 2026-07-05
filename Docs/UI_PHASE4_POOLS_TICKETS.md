@@ -75,7 +75,7 @@ v2 UI gaps (all in `frontend/src/pages/storage-page.tsx` + `frontend/src/lib/sto
 | Order | Ticket | Depends On | Critical Path | Status |
 |---|---|---|---|---|
 | 1 | PH4-001 Backend surface: command param metadata + typed status | — | Yes | In progress |
-| 2 | PH4-002 Pools tab: SnapRAID + MergerFS status cards | PH4-001 | Yes | Planned |
+| 2 | PH4-002 Pools tab: SnapRAID + MergerFS status cards | PH4-001 | Yes | In progress |
 | 3 | PH4-003 Parameterized commands + confirm + live progress | PH4-001 | Yes | Planned |
 | 4 | PH4-004 SnapRAID guided config editor | PH4-001 | Yes | Planned |
 | 5 | PH4-005 MergerFS pool editor | PH4-001 | Yes | Planned |
