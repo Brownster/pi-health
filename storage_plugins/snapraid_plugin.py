@@ -41,6 +41,7 @@ class SnapRAIDPlugin(StoragePlugin):
     PLUGIN_VERSION = "1.0.0"
     PLUGIN_DESCRIPTION = "Parity-based backup for data recovery"
     PLUGIN_CATEGORY = "storage"  # UI appears on Pools page
+    PLUGIN_KIND = "pool"
 
     SNAPRAID_BIN = "/usr/bin/snapraid"
     SNAPRAID_CONF = "/etc/snapraid.conf"
@@ -408,7 +409,8 @@ class SnapRAIDPlugin(StoragePlugin):
             "parity_drives": len(parity_drives),
             "last_sync": None,
             "last_scrub": None,
-            "sync_in_progress": False
+            "sync_in_progress": False,
+            "sync_required": False,
         }
         state = self._load_state()
         if state:
@@ -441,6 +443,7 @@ class SnapRAIDPlugin(StoragePlugin):
                         "details": details
                     }
                 if "sync" in output.lower() and "required" in output.lower():
+                    details["sync_required"] = True
                     return {
                         "status": PluginStatus.DEGRADED.value,
                         "message": "Sync required",
@@ -462,6 +465,10 @@ class SnapRAIDPlugin(StoragePlugin):
             "message": "Status unknown",
             "details": details
         }
+
+    def preview_config(self, config: dict) -> str:
+        """Render snapraid.conf for a candidate config without writing it."""
+        return self._generate_config(config)
 
     def get_commands(self) -> list[dict]:
         return [
@@ -487,7 +494,26 @@ class SnapRAIDPlugin(StoragePlugin):
                 "id": "scrub",
                 "name": "Scrub",
                 "description": "Verify data integrity",
-                "dangerous": False
+                "dangerous": False,
+                "param_schema": [
+                    {
+                        "name": "percent",
+                        "label": "Percent to scrub",
+                        "type": "number",
+                        "min": 0,
+                        "max": 100,
+                        "default": 8,
+                        "required": False,
+                    },
+                    {
+                        "name": "age_days",
+                        "label": "Minimum age (days)",
+                        "type": "number",
+                        "min": 0,
+                        "default": 10,
+                        "required": False,
+                    },
+                ],
             },
             {
                 "id": "check",

@@ -334,3 +334,22 @@ class TestMergerFSApplyConfig:
         content = fstab_path.read_text()
         assert "# pi-health mergerfs start" not in content
         assert "fuse.mergerfs" not in content
+
+
+class TestPoolSurfacePH4001:
+    """PH4-001 additive surface: pool kind + param schema for pool commands."""
+
+    def test_plugin_kind_is_pool(self, mergerfs_plugin):
+        assert mergerfs_plugin.PLUGIN_KIND == "pool"
+
+    def test_pool_commands_declare_pool_name_param_schema(self, mergerfs_plugin):
+        commands = {c["id"]: c for c in mergerfs_plugin.get_commands()}
+        for command_id in ("mount", "unmount", "balance"):
+            schema = commands[command_id]["param_schema"]
+            assert schema[0]["name"] == "pool_name"
+            assert schema[0]["type"] == "select"
+            assert schema[0]["source"] == "status.details.pools[].name"
+
+    def test_unmount_is_flagged_dangerous(self, mergerfs_plugin):
+        commands = {c["id"]: c for c in mergerfs_plugin.get_commands()}
+        assert commands["unmount"]["dangerous"] is True

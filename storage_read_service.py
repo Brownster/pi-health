@@ -45,6 +45,7 @@ class StorageReadService:
             "name": plugin.PLUGIN_NAME,
             "description": plugin.PLUGIN_DESCRIPTION,
             "version": plugin.PLUGIN_VERSION,
+            "kind": getattr(plugin, "PLUGIN_KIND", "generic"),
             "installed": plugin.is_installed(),
             "install_instructions": plugin.get_install_instructions(),
             "schema": plugin.get_schema(),

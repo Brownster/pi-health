@@ -77,6 +77,7 @@ class PluginRegistry:
                 "description": plugin.PLUGIN_DESCRIPTION,
                 "version": plugin.PLUGIN_VERSION,
                 "category": category,
+                "kind": getattr(plugin, "PLUGIN_KIND", "generic"),
                 "installed": plugin.is_installed(),
                 "install_instructions": plugin.get_install_instructions(),
                 "enabled": enabled,

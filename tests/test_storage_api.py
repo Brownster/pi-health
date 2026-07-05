@@ -562,3 +562,38 @@ def test_share_endpoints(authenticated_client, monkeypatch):
     response = authenticated_client.delete("/api/storage/shares/share/media")
     assert response.status_code == 200
     assert response.get_json()["status"] == "deleted"
+
+
+def test_config_preview_returns_generated_text(authenticated_client, monkeypatch):
+    plugin = Mock()
+    plugin.preview_config.return_value = "parity /mnt/parity/snapraid.parity\n"
+    registry = Mock()
+    registry.get.return_value = plugin
+    monkeypatch.setattr("storage_plugins.get_registry", lambda: registry)
+
+    response = authenticated_client.post(
+        "/api/storage/plugins/snapraid/config-preview",
+        data=json.dumps({"enabled": True, "drives": []}),
+        content_type="application/json",
+    )
+
+    assert response.status_code == 200
+    assert "parity" in response.get_json()["preview"]
+    plugin.preview_config.assert_called_once_with({"enabled": True, "drives": []})
+    plugin.set_config.assert_not_called()  # preview must not write
+
+
+def test_config_preview_unsupported_plugin_returns_400(authenticated_client, monkeypatch):
+    plugin = Mock()
+    plugin.preview_config.return_value = None
+    registry = Mock()
+    registry.get.return_value = plugin
+    monkeypatch.setattr("storage_plugins.get_registry", lambda: registry)
+
+    response = authenticated_client.post(
+        "/api/storage/plugins/rclone/config-preview",
+        data=json.dumps({}),
+        content_type="application/json",
+    )
+
+    assert response.status_code == 400

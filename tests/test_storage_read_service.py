@@ -61,6 +61,7 @@ def test_details_composes_plugin_metadata_and_live_reads():
     plugin.get_config.return_value = {"enabled": True}
     plugin.get_status.return_value = {"status": "healthy"}
     plugin.get_commands.return_value = [{"id": "sync"}]
+    plugin.PLUGIN_KIND = "pool"
 
     result = service(plugin=plugin).details("snapraid")
 
@@ -69,6 +70,7 @@ def test_details_composes_plugin_metadata_and_live_reads():
         "name": "SnapRAID",
         "description": "Parity",
         "version": "1.0",
+        "kind": "pool",
         "installed": True,
         "install_instructions": "",
         "schema": {"type": "object"},

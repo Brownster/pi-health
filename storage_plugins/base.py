@@ -39,6 +39,9 @@ class StoragePlugin(ABC):
     PLUGIN_DESCRIPTION: str = ""
     PLUGIN_CATEGORY: str = "storage"  # UI appears on Pools page
     PLUGIN_ENABLED_DEFAULT: bool = True  # Whether plugin is enabled by default
+    # Capability hint for the UI: "pool" plugins (SnapRAID, MergerFS) get pool-aware
+    # cards/editors; everything else falls back to the generic plugin card.
+    PLUGIN_KIND: str = "generic"
 
     def __init__(self, config_dir: str):
         self.config_dir = config_dir
@@ -83,6 +86,14 @@ class StoragePlugin(ABC):
     def run_command(self, command_id: str, params: dict = None) -> Generator[str, None, CommandResult]:
         """Execute a plugin command with streaming output."""
         raise NotImplementedError
+
+    def preview_config(self, config: dict) -> str | None:
+        """Render the generated config text for a candidate config without writing.
+
+        Returns None when the plugin has no generated on-disk representation to
+        preview. Must not mutate anything.
+        """
+        return None
 
     def is_installed(self) -> bool:
         """Check if required binaries are installed."""

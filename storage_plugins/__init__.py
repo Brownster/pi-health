@@ -167,6 +167,24 @@ def validate_plugin_config(plugin_id: str):
     })
 
 
+@storage_bp.route("/api/storage/plugins/<plugin_id>/config-preview", methods=["POST"])
+@login_required
+def preview_plugin_config(plugin_id: str):
+    """Render a plugin's generated config text for a candidate config (no write)."""
+    registry = get_registry()
+    plugin = registry.get(plugin_id)
+
+    if not plugin:
+        return jsonify({"error": f"Plugin not found: {plugin_id}"}), 404
+
+    config = request.get_json() or {}
+    preview = plugin.preview_config(config)
+    if preview is None:
+        return jsonify({"error": "Plugin does not support config preview"}), 400
+
+    return jsonify({"preview": preview})
+
+
 @storage_bp.route("/api/storage/plugins/<plugin_id>/apply", methods=["POST"])
 @login_required
 def apply_plugin_config(plugin_id: str):

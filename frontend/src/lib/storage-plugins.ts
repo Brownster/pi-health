@@ -11,13 +11,28 @@ export interface StoragePlugin {
   status: string;
   status_message: string;
   category: string;
+  kind: string;
   type: string;
+}
+
+/** One parameter a command accepts (PH4-001 param_schema). */
+export interface PluginCommandParam {
+  name: string;
+  label?: string;
+  type: string; // "select" | "number" | "text"
+  required?: boolean;
+  source?: string; // e.g. "status.details.pools[].name"
+  default?: unknown;
+  min?: number;
+  max?: number;
 }
 
 export interface PluginCommand {
   id: string;
   label: string;
   params: string[];
+  dangerous?: boolean;
+  param_schema?: PluginCommandParam[];
 }
 
 export interface PluginDetail {
@@ -25,6 +40,7 @@ export interface PluginDetail {
   name: string;
   description: string;
   installed: boolean;
+  kind: string;
   status: Record<string, unknown>;
   commands: PluginCommand[];
   schema: Record<string, unknown>;
@@ -56,6 +72,7 @@ function normalizePlugin(raw: Record<string, unknown> | undefined): StoragePlugi
     status: String(raw?.status ?? "unknown"),
     status_message: String(raw?.status_message ?? ""),
     category: String(raw?.category ?? "storage"),
+    kind: String(raw?.kind ?? "generic"),
     type: String(raw?.type ?? "builtin"),
   };
 }
@@ -82,11 +99,16 @@ export async function fetchPluginDetail(pluginId: string, signal?: AbortSignal):
     name: String(payload.name ?? pluginId),
     description: String(payload.description ?? ""),
     installed: Boolean(payload.installed),
+    kind: String(payload.kind ?? "generic"),
     status: (payload.status as Record<string, unknown>) ?? {},
     commands: commands.map((cmd) => ({
       id: String(cmd.id ?? ""),
-      label: String(cmd.label ?? cmd.id ?? ""),
+      label: String(cmd.name ?? cmd.label ?? cmd.id ?? ""),
       params: Array.isArray(cmd.params) ? cmd.params.map((p) => String(p)) : [],
+      dangerous: Boolean(cmd.dangerous),
+      param_schema: Array.isArray(cmd.param_schema)
+        ? (cmd.param_schema as PluginCommandParam[])
+        : undefined,
     })),
     schema: (payload.schema as Record<string, unknown>) ?? {},
     config: (payload.config as Record<string, unknown>) ?? {},
@@ -267,8 +289,11 @@ export async function streamPluginCommand(
 }
 
 export function isPoolPlugin(plugin: StoragePlugin): boolean {
-  // No explicit capability flag in the list payload; treat the parity/pool plugins as
-  // pool-capable (documented heuristic; revisit if the API gains a capability field).
+  // Prefer the explicit PH4-001 capability flag; fall back to the legacy heuristic for
+  // payloads (e.g. older mocks) that predate `kind`.
+  if (plugin.kind === "pool") {
+    return true;
+  }
   return plugin.category.toLowerCase().includes("pool") || ["mergerfs", "snapraid"].includes(plugin.id);
 }
 

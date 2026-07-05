@@ -57,6 +57,7 @@ class MergerFSPlugin(StoragePlugin):
     PLUGIN_VERSION = "1.0.0"
     PLUGIN_DESCRIPTION = "Combine multiple drives into a single unified pool"
     PLUGIN_CATEGORY = "storage"  # UI appears on Pools page
+    PLUGIN_KIND = "pool"
 
     MERGERFS_BIN = "/usr/bin/mergerfs"
     FSTAB_PATH = "/etc/fstab"
@@ -343,6 +344,17 @@ class MergerFSPlugin(StoragePlugin):
             "details": {"pools": pool_status}
         }
 
+    @staticmethod
+    def _pool_name_param() -> dict:
+        """Descriptor for the pool selector, sourced from live status details."""
+        return {
+            "name": "pool_name",
+            "label": "Pool",
+            "type": "select",
+            "source": "status.details.pools[].name",
+            "required": True,
+        }
+
     def get_commands(self) -> list[dict]:
         return [
             {
@@ -350,21 +362,24 @@ class MergerFSPlugin(StoragePlugin):
                 "name": "Mount Pool",
                 "description": "Mount a MergerFS pool",
                 "dangerous": False,
-                "params": ["pool_name"]
+                "params": ["pool_name"],
+                "param_schema": [self._pool_name_param()],
             },
             {
                 "id": "unmount",
                 "name": "Unmount Pool",
                 "description": "Unmount a MergerFS pool",
-                "dangerous": False,
-                "params": ["pool_name"]
+                "dangerous": True,
+                "params": ["pool_name"],
+                "param_schema": [self._pool_name_param()],
             },
             {
                 "id": "balance",
                 "name": "Balance",
                 "description": "Rebalance files across branches",
                 "dangerous": False,
-                "params": ["pool_name"]
+                "params": ["pool_name"],
+                "param_schema": [self._pool_name_param()],
             },
             {
                 "id": "status",

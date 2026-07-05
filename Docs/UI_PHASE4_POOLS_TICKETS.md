@@ -1,6 +1,9 @@
 # Phase 4 Pools - SnapRAID + MergerFS Management Tickets (Draft)
 
 Date: 2026-07-05
+Reviewed: 2026-07-05 — added CSRF/helper-hardening/concurrency integration notes from the security
+review remediation (see "Security posture" below); PH4-001 preview endpoint changed GET->POST for
+unsaved-form previews; PH4-004 "Suggest layout" reclassified as new backend (follow-up).
 Branch: `feature/ui-phase4-pools` (recommended)
 Source: `Docs/snapraid-roadmap.md`, `Docs/mergerfs-roadmap.md` (rebased onto the v2 React UI)
 Precondition signoff: `Docs/UI_PHASE3_RELEASE_SIGNOFF.md`
@@ -39,6 +42,20 @@ v2 UI gaps (all in `frontend/src/pages/storage-page.tsx` + `frontend/src/lib/sto
   mount/unmount/balance are currently unusable from v2, and scrub can't take options.
 - No schedule UI, no pre-sync diff/safety gate, no live progress (raw lines only).
 
+### Security posture (2026-07-04/05 review remediation) — affects this work
+- **CSRF is enforced app-wide.** Every authenticated `POST/PUT/PATCH/DELETE` now requires a valid
+  `X-CSRF-Token` (a `before_request` in `app.py`). The storage command (`.../commands/<cmd>`) and
+  config (`.../config`) POSTs are covered; the current frontend already sends the token because
+  `storage-plugins.ts` uses `csrfHeaders`. **Any new or modified mutating fetch must send it too**
+  (`...(await csrfHeaders("POST"))` or go through `requestApi`), or it 403s.
+- **Helper `cmd_snapraid` is constrained:** `conf_path` must be `/etc/snapraid.conf` or
+  `/etc/snapraid-diff.conf`; `log_target` must be `>&1`/`>&2` or a file under the managed snapraid
+  log dir. The plugin already uses `/etc/snapraid.conf` + `>&1`, so no change is needed — but new
+  code (e.g. the pre-sync diff) must stay within those.
+- **Helper serves connections concurrently (M1):** SnapRAID `sync`/`scrub`/`diff` run lock-free, so a
+  long run no longer blocks status refreshes or a MergerFS mount check (good for live progress).
+  MergerFS `mount`/`unmount`, `fstab_set_section`, and `systemctl` serialize under a mutation lock.
+
 ## Scope Guardrails
 1. API changes are **additive only** (new fields/params on existing `/api/storage/plugins*`
    contracts); legacy consumers must keep working.
@@ -50,11 +67,14 @@ v2 UI gaps (all in `frontend/src/pages/storage-page.tsx` + `frontend/src/lib/sto
 5. Dangerous or destructive actions (`fix`, unmount, apply that rewrites fstab) require an
    explicit confirm step; never run them as a side effect of Save.
 6. Bundle budget from PH3 still applies (JS <= 200 kB gz).
+7. Every new or modified mutating request (POST/PUT/PATCH/DELETE) must send the session CSRF token
+   via `...(await csrfHeaders("POST"))` or by routing through `requestApi`; app-wide enforcement now
+   rejects authenticated mutations without a valid `X-CSRF-Token` (403).
 
 ## Execution Order and Dependencies
 | Order | Ticket | Depends On | Critical Path | Status |
 |---|---|---|---|---|
-| 1 | PH4-001 Backend surface: command param metadata + typed status | — | Yes | Planned |
+| 1 | PH4-001 Backend surface: command param metadata + typed status | — | Yes | In progress |
 | 2 | PH4-002 Pools tab: SnapRAID + MergerFS status cards | PH4-001 | Yes | Planned |
 | 3 | PH4-003 Parameterized commands + confirm + live progress | PH4-001 | Yes | Planned |
 | 4 | PH4-004 SnapRAID guided config editor | PH4-001 | Yes | Planned |
@@ -87,13 +107,16 @@ Small additive API changes so the UI can be schema-driven instead of hardcoding 
    `isPoolPlugin()` stops guessing from ids.
 4. SnapRAID status: add an explicit `details.sync_required: bool` (today the UI would have
    to parse the message string).
-5. Add a read-only `GET .../snapraid/config-preview` (or a `preview=true` flag on validate)
-   that returns the generated `snapraid.conf` text from `_generate_config` without writing.
+5. Add a `POST .../snapraid/config-preview` that accepts a **candidate config body** and returns the
+   generated `snapraid.conf` text from `_generate_config` without writing — so the editor can preview
+   *unsaved* form state (a GET of the saved config can't do that). As a POST it also needs the CSRF
+   token; it must not mutate anything.
 
 ### Acceptance Criteria
 1. Existing tests pass unchanged (contract is additive).
 2. `/api/storage/plugins` and plugin detail expose param schemas, pool capability, and
    `sync_required` and are covered by unit tests.
+3. `config-preview` returns generated conf for a candidate config, writes nothing, and is CSRF-gated.
 
 ---
 
@@ -157,6 +180,8 @@ Unblocks the currently-disabled commands and makes long runs legible.
 1. MergerFS mount/unmount/balance runnable from v2 with pool selection.
 2. Scrub runnable with percent/age options; fix requires explicit confirmation.
 3. A sync shows live progress; a completed run shows summary counts without reading logs.
+4. Transport failures (helper unavailable/503, CSRF/403, 500) surface distinctly from a command that
+   ran and reported a tag-level error — the user can tell "couldn't start" from "ran and failed".
 
 ---
 
@@ -172,9 +197,10 @@ Replace the JSON textarea (for SnapRAID) with a structured form; keep JSON as Ad
 
 ### Tasks
 1. Drive assignment: pick from mounted `/mnt/*` disks via the existing disks inventory API;
-   assign role data/parity per drive; show size per drive. Surface
-   `disk_suggestion_service` suggestions as a one-click "Suggest layout" (if its API is
-   already exposed; otherwise defer suggestion wiring to a follow-up).
+   assign role data/parity per drive; show size per drive. A one-click "Suggest layout" is a
+   **follow-up, not existing-API wiring**: the only exposed suggestion endpoint today
+   (`/api/disks/suggested-mounts`) does mount placement (NVMe/USB), not SnapRAID data/parity role
+   assignment — role suggestions need new backend logic and should not be scoped inside this ticket.
 2. Client-side validation mirroring the roadmap rules, as inline warnings (server stays
    authoritative via `validate_config`):
    - >= 1 parity, >= 1 data drive;
@@ -182,7 +208,8 @@ Replace the JSON textarea (for SnapRAID) with a structured form; keep JSON as Ad
    - recommend content files on multiple disks.
 3. Settings/thresholds/scrub sections generated from `config/schemas/snapraid.schema.json`
    with the schema `description` strings as tooltips (nohidden, autosave, blocksize, ...).
-4. "Preview snapraid.conf" using the PH4-001 preview endpoint before Apply.
+4. "Preview snapraid.conf" using the PH4-001 preview endpoint (POST with the candidate config)
+   before Apply.
 5. Save (`set_config`) and Apply (`apply_config`) as distinct actions with distinct
    feedback, reusing the field-level error details `savePluginConfig` already returns.
 6. Advanced tab: the existing raw JSON editor, unchanged, for all plugins.
@@ -218,6 +245,8 @@ Estimate: 1-1.5 days
 2. Per-pool validation errors render at the offending pool/branch row.
 3. Disabling a pool and applying removes it from the managed fstab section (existing
    backend behaviour) with a visible warning beforehand.
+4. If a mount fails *after* the fstab rewrite, the UI surfaces the partial state (and the fstab
+   backup path the helper returns); the helper backs up fstab and writes it via `O_NOFOLLOW`.
 
 ---
 
@@ -239,6 +268,12 @@ Estimate: 1 day
    added/removed/updated/moved counts from tags, and requires confirmation when removals
    exceed `thresholds` from config (backend `thresholds` schema section already exists).
    Offer "Sync anyway" with the dangerous-action styling.
+
+NOTE (backend constraints): the pre-sync `diff` must run against an allowlisted conf
+(`/etc/snapraid.conf` or `/etc/snapraid-diff.conf`) and a `log_target` of `>&1`/`>&2`/the managed
+snapraid log dir — the privileged helper now rejects other values. Timer-state reads go through the
+helper `systemctl` command, which serializes under the mutation lock (M1); if you poll timer state,
+prefer exposing it once via PH4-001 or add a dedicated read-only status command rather than polling.
 
 ### Acceptance Criteria
 1. Enabling a schedule creates/enables the systemd timers via the existing helper path.

@@ -388,3 +388,50 @@ class TestSnapRAIDScheduling:
             "cron": "30 4 * * 0",
         }
         assert "content" not in configure_call.args[1]
+
+
+class TestPoolSurfacePH4001:
+    """PH4-001 additive surface: pool kind, param schema, sync_required, preview."""
+
+    def test_plugin_kind_is_pool(self, snapraid_plugin):
+        assert snapraid_plugin.PLUGIN_KIND == "pool"
+
+    def test_scrub_declares_param_schema_and_fix_is_dangerous(self, snapraid_plugin):
+        commands = {c["id"]: c for c in snapraid_plugin.get_commands()}
+        schema = {p["name"]: p for p in commands["scrub"]["param_schema"]}
+        assert schema["percent"]["type"] == "number"
+        assert schema["percent"]["max"] == 100
+        assert schema["age_days"]["type"] == "number"
+        assert commands["fix"]["dangerous"] is True
+
+    def test_preview_config_renders_without_writing(self, snapraid_plugin, valid_config, tmp_path, monkeypatch):
+        conf = tmp_path / "snapraid.conf"
+        monkeypatch.setattr(snapraid_plugin, "SNAPRAID_CONF", str(conf))
+        preview = snapraid_plugin.preview_config(valid_config)
+        assert isinstance(preview, str) and preview.strip()
+        assert not conf.exists()  # preview must never write
+
+    def test_status_sets_sync_required_when_degraded(self, snapraid_plugin, valid_config, tmp_path, monkeypatch):
+        conf = tmp_path / "snapraid.conf"
+        conf.write_text("")
+        monkeypatch.setattr(snapraid_plugin, "SNAPRAID_CONF", str(conf))
+        monkeypatch.setattr(snapraid_plugin, "get_config", lambda: valid_config)
+        with patch(
+            "storage_plugins.snapraid_plugin.subprocess.run",
+            return_value=MagicMock(returncode=0, stdout="A sync is required.\n", stderr=""),
+        ):
+            status = snapraid_plugin.get_status()
+        assert status["status"] == "degraded"
+        assert status["details"]["sync_required"] is True
+
+    def test_status_sync_required_false_when_healthy(self, snapraid_plugin, valid_config, tmp_path, monkeypatch):
+        conf = tmp_path / "snapraid.conf"
+        conf.write_text("")
+        monkeypatch.setattr(snapraid_plugin, "SNAPRAID_CONF", str(conf))
+        monkeypatch.setattr(snapraid_plugin, "get_config", lambda: valid_config)
+        with patch(
+            "storage_plugins.snapraid_plugin.subprocess.run",
+            return_value=MagicMock(returncode=0, stdout="No error detected\n", stderr=""),
+        ):
+            status = snapraid_plugin.get_status()
+        assert status["details"]["sync_required"] is False
