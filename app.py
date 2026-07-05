@@ -564,10 +564,30 @@ def serve_v2_path(path):
     return send_from_directory(v2_static_dir, 'index.html')
 
 
+def _env_flag(name):
+    return os.getenv(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _login_client_key():
+    """Client identity for login rate limiting.
+
+    Only trusts the left-most ``X-Forwarded-For`` hop when ``TRUSTED_PROXY`` is
+    enabled, so a direct client cannot spoof the header to share or evade another
+    client's bucket. Behind a reverse proxy this keys per real client instead of
+    lumping everyone under the proxy's address.
+    """
+    if current_app.config.get("TRUSTED_PROXY"):
+        forwarded = request.headers.get("X-Forwarded-For", "")
+        first = forwarded.split(",")[0].strip()
+        if first:
+            return first
+    return request.remote_addr or "unknown"
+
+
 @core_api.route('/api/login', methods=['POST'])
 def api_login():
     """API endpoint for user authentication."""
-    client_key = request.remote_addr or "unknown"
+    client_key = _login_client_key()
     retry_after = _login_rate_limiter().retry_after(client_key)
     if retry_after:
         response = jsonify({'error': 'Too many login attempts. Try again later.'})
@@ -877,6 +897,7 @@ def create_app(config=None, dependencies=None):
         START_SCHEDULERS=True,
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
+        TRUSTED_PROXY=_env_flag("PIHEALTH_TRUSTED_PROXY"),
     )
     application.config.update(config)
     if not application.config.get("SECRET_KEY"):

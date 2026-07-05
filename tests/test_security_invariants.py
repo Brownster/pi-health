@@ -146,6 +146,47 @@ def test_get_token_rotates_when_existing_token_is_too_short():
     assert len(token) >= 32
 
 
+# --- login rate-limit client key (trusted proxy) -----------------------------
+
+def _app_with_trusted_proxy(enabled):
+    import app as app_module
+
+    dependencies = AppDependencies(
+        users={"u": generate_password_hash("pw", method="pbkdf2:sha256:600000")},
+        login_rate_limiter=LoginRateLimiter(),
+        docker_client=None,
+        operation_registry=OperationRegistry(),
+    )
+    return app_module, create_app(
+        {
+            "TESTING": True,
+            "SECRET_KEY": "test-secret",
+            "INIT_PLUGINS": False,
+            "START_SCHEDULERS": False,
+            "TRUSTED_PROXY": enabled,
+        },
+        dependencies,
+    )
+
+
+def test_login_key_ignores_forwarded_when_proxy_untrusted():
+    app_module, application = _app_with_trusted_proxy(False)
+    with application.test_request_context(
+        headers={"X-Forwarded-For": "1.2.3.4"},
+        environ_base={"REMOTE_ADDR": "10.0.0.5"},
+    ):
+        assert app_module._login_client_key() == "10.0.0.5"
+
+
+def test_login_key_uses_first_forwarded_hop_when_proxy_trusted():
+    app_module, application = _app_with_trusted_proxy(True)
+    with application.test_request_context(
+        headers={"X-Forwarded-For": "1.2.3.4, 5.6.7.8"},
+        environ_base={"REMOTE_ADDR": "10.0.0.5"},
+    ):
+        assert app_module._login_client_key() == "1.2.3.4"
+
+
 # --- verify_credentials ------------------------------------------------------
 
 def test_verify_credentials_accepts_correct_password():
