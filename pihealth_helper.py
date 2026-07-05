@@ -451,6 +451,11 @@ def cmd_fstab_set_section(params):
             updated.append(end)
             updated.append('')
 
+        # Refuse to operate through a symlink: a planted symlink at `path` would
+        # otherwise let root back up (read) or overwrite an arbitrary target.
+        if os.path.islink(path):
+            return {'success': False, 'error': 'Path must not be a symlink'}
+
         if os.path.exists(path):
             backup_path = f"{path}.backup.{datetime.now().strftime('%Y%m%d_%H%M%S')}"
             shutil.copy(path, backup_path)
@@ -459,7 +464,9 @@ def cmd_fstab_set_section(params):
             backup_path = None
 
         content = "\n".join(updated).rstrip("\n") + "\n"
-        with open(path, 'w') as handle:
+        # O_NOFOLLOW closes the TOCTOU window on the final path component.
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o644)
+        with os.fdopen(fd, 'w') as handle:
             handle.write(content)
 
         return {'success': True, 'backup': backup_path, 'path': path}
@@ -627,6 +634,33 @@ def cmd_df(params):
     return {'success': False, 'error': result.get('stderr', 'df failed')}
 
 
+SNAPRAID_ALLOWED_CONF = frozenset({'/etc/snapraid.conf', '/etc/snapraid-diff.conf'})
+
+
+def _snapraid_log_dir():
+    return os.path.join(os.getenv("LIMEOS_LOG_DIR", "/var/log/limeos"), "snapraid")
+
+
+def _snapraid_log_target_allowed(target):
+    """Allow only stdout/stderr or a file under the managed snapraid log dir.
+
+    A crafted target would otherwise let a caller redirect root-owned writes to
+    an arbitrary path.
+    """
+    if target in ('>&1', '>&2'):
+        return True
+    candidate = target
+    for prefix in ('>>', '>'):
+        if candidate.startswith(prefix):
+            candidate = candidate[len(prefix):]
+            break
+    if not candidate or '..' in candidate:
+        return False
+    log_dir = os.path.realpath(_snapraid_log_dir())
+    resolved = os.path.realpath(candidate)
+    return resolved == log_dir or resolved.startswith(log_dir + os.sep)
+
+
 def cmd_snapraid(params):
     """Run snapraid command."""
     allowed_cmds = ['status', 'diff', 'sync', 'scrub', 'check', 'fix']
@@ -636,8 +670,14 @@ def cmd_snapraid(params):
         return {'success': False, 'error': f'Command not allowed: {cmd}'}
 
     conf_path = params.get('conf_path')
+    if conf_path is not None and conf_path not in SNAPRAID_ALLOWED_CONF:
+        return {'success': False, 'error': 'conf_path not allowed'}
+
     log_tags = params.get('log_tags', True)
     log_target = params.get('log_target', '>&2')
+    if log_tags and not _snapraid_log_target_allowed(log_target):
+        return {'success': False, 'error': 'log_target not allowed'}
+
     gui = params.get('gui', True)
 
     args = ['snapraid']
@@ -2331,17 +2371,9 @@ def cmd_plugin_install(params):
         return {'success': True, 'id': plugin_id}
 
     if source_type == 'pip':
-        try:
-            version_check = run_command([sys.executable, '-m', 'pip', '--version'])
-        except Exception:
-            version_check = {'returncode': 1}
-        if version_check.get('returncode') != 0:
-            return {'success': False, 'error': 'pip is not available'}
-
-        result = run_command([sys.executable, '-m', 'pip', 'install', source], timeout=1200)
-        if result.get('returncode') != 0:
-            return {'success': False, 'error': result.get('stderr', 'pip install failed')}
-        return {'success': True, 'id': plugin_id or source}
+        # Disabled: `pip install` runs arbitrary setup.py as root into the system
+        # Python. Install from a GitHub source instead, or add a sandboxed installer.
+        return {'success': False, 'error': 'pip plugins are not supported'}
 
     return {'success': False, 'error': 'Unsupported plugin type'}
 

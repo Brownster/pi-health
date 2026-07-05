@@ -179,6 +179,43 @@ class TestValidationFailures:
         result = helper.cmd_snapraid({"command": "rm"})
         assert result["success"] is False
 
+    def test_cmd_snapraid_rejects_unmanaged_conf_path(self):
+        result = helper.cmd_snapraid({"command": "status", "conf_path": "/tmp/evil.conf"})
+        assert result["success"] is False
+        assert "conf_path" in result["error"]
+
+    def test_cmd_snapraid_rejects_arbitrary_log_target(self):
+        result = helper.cmd_snapraid({"command": "status", "log_target": "/etc/cron.d/evil"})
+        assert result["success"] is False
+        assert "log_target" in result["error"]
+
+    def test_snapraid_log_target_allows_stderr_and_rejects_arbitrary(self):
+        assert helper._snapraid_log_target_allowed(">&2") is True
+        assert helper._snapraid_log_target_allowed(">&1") is True
+        assert helper._snapraid_log_target_allowed("/etc/cron.d/evil") is False
+        assert helper._snapraid_log_target_allowed("../../etc/passwd") is False
+
+    def test_cmd_fstab_set_section_rejects_symlink(self, tmp_path):
+        target = tmp_path / "target"
+        target.write_text("original\n")
+        link = tmp_path / "fstab"
+        os.symlink(target, link)
+
+        result = helper.cmd_fstab_set_section({
+            "marker": "mergerfs",
+            "lines": ["/a /b fuse.mergerfs defaults 0 0"],
+            "path": str(link),
+        })
+
+        assert result["success"] is False
+        assert "symlink" in result["error"].lower()
+        assert target.read_text() == "original\n"  # target must be untouched
+
+    def test_cmd_plugin_install_pip_is_disabled(self):
+        result = helper.cmd_plugin_install({"type": "pip", "source": "requests"})
+        assert result["success"] is False
+        assert "not supported" in result["error"]
+
     def test_cmd_mergerfs_mount_invalid(self):
         result = helper.cmd_mergerfs_mount({"branches": "/mnt/a", "mount_point": "/bad"})
         assert result["success"] is False
