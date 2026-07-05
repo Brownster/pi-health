@@ -298,19 +298,17 @@ def _docker_is_available():
 
 
 def _login_rate_limiter():
-    return _extension("login_rate_limiter", LOGIN_RATE_LIMITER)
+    return _extension("login_rate_limiter")
 
 
 def verify_credentials(username, password, users=None):
     """Verify username and password against configured users."""
-    configured_users = users or _extension("auth_users", AUTH_USERS)
+    configured_users = users or _extension("auth_users")
     if not configured_users:
         return False
     return verify_password(configured_users, username, password)
 
 # Compatibility fallbacks for helper functions called outside an app context.
-AUTH_USERS = None
-LOGIN_RATE_LIMITER = None
 docker_client = None
 docker_available = False
 
