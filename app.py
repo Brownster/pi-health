@@ -569,16 +569,16 @@ def _env_flag(name):
 def _login_client_key():
     """Client identity for login rate limiting.
 
-    Only trusts the left-most ``X-Forwarded-For`` hop when ``TRUSTED_PROXY`` is
-    enabled, so a direct client cannot spoof the header to share or evade another
-    client's bucket. Behind a reverse proxy this keys per real client instead of
-    lumping everyone under the proxy's address.
+    When ``TRUSTED_PROXY`` is enabled, uses the right-most ``X-Forwarded-For``
+    hop — the address the trusted proxy itself appended. The left-most hops are
+    client-supplied, so keying on them would let an attacker mint a fresh
+    rate-limit bucket per request by rotating a fake header value.
     """
     if current_app.config.get("TRUSTED_PROXY"):
         forwarded = request.headers.get("X-Forwarded-For", "")
-        first = forwarded.split(",")[0].strip()
-        if first:
-            return first
+        last = forwarded.rsplit(",", 1)[-1].strip()
+        if last:
+            return last
     return request.remote_addr or "unknown"
 
 

@@ -178,10 +178,12 @@ def test_login_key_ignores_forwarded_when_proxy_untrusted():
         assert app_module._login_client_key() == "10.0.0.5"
 
 
-def test_login_key_uses_first_forwarded_hop_when_proxy_trusted():
+def test_login_key_uses_last_forwarded_hop_when_proxy_trusted():
+    """The right-most hop is the one the trusted proxy appended; left-most hops
+    are client-supplied and would let an attacker rotate rate-limit buckets."""
     app_module, application = _app_with_trusted_proxy(True)
     with application.test_request_context(
-        headers={"X-Forwarded-For": "1.2.3.4, 5.6.7.8"},
+        headers={"X-Forwarded-For": "6.6.6.6, 1.2.3.4"},
         environ_base={"REMOTE_ADDR": "10.0.0.5"},
     ):
         assert app_module._login_client_key() == "1.2.3.4"
