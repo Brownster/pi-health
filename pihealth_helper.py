@@ -893,16 +893,56 @@ def cmd_systemctl(params):
     }
 
 
+def _read_os_release():
+    data = {}
+    try:
+        with open("/etc/os-release") as handle:
+            for line in handle:
+                key, sep, value = line.partition("=")
+                if sep:
+                    data[key.strip()] = value.strip().strip('"')
+    except OSError:
+        pass
+    return data
+
+
 def cmd_tailscale_install(params):
-    """Install Tailscale using official script."""
-    cmd = ["/bin/sh", "-c", "curl -fsSL https://tailscale.com/install.sh | sh"]
-    result = run_command(cmd, timeout=600)
-    return {
-        'success': result.get('returncode') == 0,
-        'stdout': result.get('stdout', ''),
-        'stderr': result.get('stderr', ''),
-        'returncode': result.get('returncode')
-    }
+    """Install Tailscale from its signed apt repository (no pipe-to-shell).
+
+    Packages are gpg-verified by apt, which is the documented secure method and
+    avoids running an unverified `curl | sh` script as root.
+    """
+    os_release = _read_os_release()
+    distro = os_release.get("ID", "")
+    codename = os_release.get("VERSION_CODENAME", "")
+    if distro not in ("debian", "ubuntu", "raspbian") or not codename:
+        return {
+            'success': False,
+            'error': 'Unsupported distribution for apt install; install Tailscale manually',
+        }
+
+    keyring = "/usr/share/keyrings/tailscale-archive-keyring.gpg"
+    base = f"https://pkgs.tailscale.com/stable/{distro}/{codename}"
+    steps = [
+        ["curl", "-fsSL", f"{base}.noarmor.gpg", "-o", keyring],
+        [
+            "curl", "-fsSL", f"{base}.tailscale-keyring.list",
+            "-o", "/etc/apt/sources.list.d/tailscale.list",
+        ],
+        ["apt-get", "update"],
+        ["apt-get", "install", "-y", "tailscale"],
+    ]
+    for step in steps:
+        result = run_command(step, timeout=600)
+        if result.get('returncode') != 0:
+            return {
+                'success': False,
+                'error': result.get('stderr', 'tailscale install step failed'),
+                'stdout': result.get('stdout', ''),
+                'returncode': result.get('returncode'),
+                'step': step[0],
+            }
+    return {'success': True}
 
 
 def cmd_tailscale_up(params):
@@ -2159,6 +2199,7 @@ def _pihealth_update_pull(ctx):
 
 def _pihealth_update_deps(ctx):
     """Install Python dependencies into the service virtualenv."""
+    user = ctx["user"]
     repo_path = ctx["repo_path"]
     venv_py = os.path.join(repo_path, ".venv", "bin", "python")
     requirements = os.path.join(repo_path, "requirements.txt")
@@ -2168,7 +2209,12 @@ def _pihealth_update_deps(ctx):
     if not os.path.isfile(requirements):
         return {'success': True, 'skipped': True, 'reason': 'no requirements.txt'}
 
-    result = run_command([venv_py, "-m", "pip", "install", "-r", requirements], timeout=1200)
+    # Run as the service user (like the git/npm steps) so the venv doesn't end up
+    # with root-owned files that later break manual pip runs as the user.
+    result = run_command(
+        ["runuser", "-u", user, "--", venv_py, "-m", "pip", "install", "-r", requirements],
+        timeout=1200,
+    )
     if result.get("returncode") != 0:
         return {
             'success': False,

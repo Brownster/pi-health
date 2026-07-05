@@ -216,6 +216,34 @@ class TestValidationFailures:
         assert result["success"] is False
         assert "not supported" in result["error"]
 
+    @patch("pihealth_helper.os.path.isfile", return_value=True)
+    @patch("pihealth_helper.run_command")
+    def test_pihealth_update_deps_runs_pip_as_service_user(self, mock_run, mock_isfile):
+        mock_run.return_value = {"returncode": 0, "stdout": ""}
+        result = helper._pihealth_update_deps({"user": "pi", "repo_path": "/home/pi/pi-health"})
+        assert result["success"] is True
+        cmd = mock_run.call_args[0][0]
+        assert cmd[:4] == ["runuser", "-u", "pi", "--"]
+        assert "pip" in cmd
+
+    @patch("pihealth_helper.run_command")
+    @patch(
+        "pihealth_helper._read_os_release",
+        return_value={"ID": "debian", "VERSION_CODENAME": "bookworm"},
+    )
+    def test_tailscale_install_uses_apt_not_pipe_to_shell(self, mock_os, mock_run):
+        mock_run.return_value = {"returncode": 0}
+        result = helper.cmd_tailscale_install({})
+        assert result["success"] is True
+        commands = [call.args[0] for call in mock_run.call_args_list]
+        assert ["apt-get", "install", "-y", "tailscale"] in commands
+        assert all("| sh" not in " ".join(cmd) for cmd in commands)
+
+    @patch("pihealth_helper._read_os_release", return_value={})
+    def test_tailscale_install_rejects_unknown_distro(self, mock_os):
+        result = helper.cmd_tailscale_install({})
+        assert result["success"] is False
+
     def test_cmd_mergerfs_mount_invalid(self):
         result = helper.cmd_mergerfs_mount({"branches": "/mnt/a", "mount_point": "/bad"})
         assert result["success"] is False
