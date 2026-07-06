@@ -552,7 +552,14 @@ def install_v2_storage_api_mocks():
             {
                 "id": "mergerfs", "name": "MergerFS", "description": "Union filesystem pooling",
                 "version": "1.0", "installed": True, "enabled": False, "configured": False,
-                "status": "disabled", "status_message": "Disabled", "category": "storage", "type": "builtin",
+                "status": "disabled", "status_message": "Disabled", "category": "storage",
+                "kind": "pool", "type": "builtin",
+            },
+            {
+                "id": "snapraid", "name": "SnapRAID", "description": "Parity protection",
+                "version": "1.0", "installed": True, "enabled": True, "configured": False,
+                "status": "unconfigured", "status_message": "No drives", "category": "storage",
+                "kind": "pool", "type": "builtin",
             },
             {
                 "id": "samba", "name": "Samba", "description": "SMB shares",
@@ -574,6 +581,43 @@ def install_v2_storage_api_mocks():
             "config": {"mountpoint": "/mnt/pool"},
             "install_instructions": "",
         }
+        snapraid_detail = {
+            "id": "snapraid", "name": "SnapRAID", "description": "Parity protection",
+            "version": "1.0", "installed": True, "kind": "pool",
+            "status": {"status": "unconfigured", "message": "No drives", "details": {"sync_required": False}},
+            "commands": [
+                {"id": "sync", "name": "Sync", "dangerous": False},
+                {"id": "scrub", "name": "Scrub", "dangerous": False,
+                 "param_schema": [{"name": "percent", "type": "number", "default": 8}]},
+                {"id": "fix", "name": "Fix", "dangerous": True},
+            ],
+            "schema": {"properties": {}},
+            "config": {"enabled": False, "drives": []},
+            "install_instructions": "",
+        }
+        disks_inventory = {
+            "helper_available": True,
+            "disks": [
+                {
+                    "name": "sda", "path": "/dev/sda", "type": "disk", "size": "1T",
+                    "model": None, "serial": None, "transport": "sata", "mountpoint": None,
+                    "fstype": None, "uuid": None, "label": None,
+                    "partitions": [{
+                        "name": "sda1", "path": "/dev/sda1", "size": "1T", "fstype": "ext4",
+                        "mountpoint": "/mnt/disk1", "uuid": "uuid-1", "label": None,
+                    }],
+                },
+                {
+                    "name": "sdb", "path": "/dev/sdb", "type": "disk", "size": "2T",
+                    "model": None, "serial": None, "transport": "sata", "mountpoint": None,
+                    "fstype": None, "uuid": None, "label": None,
+                    "partitions": [{
+                        "name": "sdb1", "path": "/dev/sdb1", "size": "2T", "fstype": "ext4",
+                        "mountpoint": "/mnt/parity", "uuid": "uuid-2", "label": None,
+                    }],
+                },
+            ],
+        }
         command_sse = (
             'data: {"type": "output", "line": "checking pool mergerfs"}\n\n'
             'data: {"type": "complete", "success": true, "message": "pool healthy"}\n\n'
@@ -589,6 +633,24 @@ def install_v2_storage_api_mocks():
                 return
             if path == "/api/storage/plugins/mergerfs" and method == "GET":
                 _json_fulfill(route, mergerfs_detail)
+                return
+            if path == "/api/storage/plugins/snapraid" and method == "GET":
+                _json_fulfill(route, snapraid_detail)
+                return
+            if path == "/api/storage/plugins/snapraid/config-preview" and method == "POST":
+                _json_fulfill(route, {"preview": "parity /mnt/parity/snapraid.parity\ndata d1 /mnt/disk1/\n"})
+                return
+            if path == "/api/storage/plugins/snapraid/recovery" and method == "GET":
+                _json_fulfill(route, {"error": "Recovery not supported"}, status=404)
+                return
+            if path == "/api/storage/plugins/snapraid/logs/latest" and method == "GET":
+                route.fulfill(status=200, content_type="text/plain", body="snapraid log line")
+                return
+            if path == "/api/storage/plugins/snapraid/config" and method == "POST":
+                _json_fulfill(route, {"status": "saved", "config": {"enabled": True, "drives": []}})
+                return
+            if path == "/api/disks" and method == "GET":
+                _json_fulfill(route, disks_inventory)
                 return
             if path.startswith("/api/storage/plugins/") and path.endswith("/toggle") and method == "POST":
                 _json_fulfill(route, {"status": "ok", "enabled": True})

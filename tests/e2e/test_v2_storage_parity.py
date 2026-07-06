@@ -63,6 +63,34 @@ def test_v2_storage_pools_route_defaults_to_pools_tab(
     ).to_be_visible()
 
 
+def test_v2_snapraid_guided_editor(
+    page: Page,
+    v2_server,
+    v2_login,
+    install_v2_storage_api_mocks,
+):
+    base_url = v2_server["base_url"]
+    _open_v2_storage(page, base_url, "pools", v2_login, install_v2_storage_api_mocks)
+
+    # Unconfigured SnapRAID -> Set up opens the modal on the guided editor.
+    page.click("button[data-pool-action='setup'][data-plugin='snapraid']")
+    expect(page.locator("[data-snapraid-editor]")).to_be_visible()
+
+    # Mounted /mnt/* disks from /api/disks are listed as assignable drives.
+    expect(page.locator("[data-drive='/mnt/disk1']")).to_be_visible()
+    expect(page.locator("[data-drive='/mnt/parity']")).to_be_visible()
+
+    # Assign roles, then preview the generated snapraid.conf.
+    page.select_option("select[data-drive-role='/mnt/disk1']", "data")
+    page.select_option("select[data-drive-role='/mnt/parity']", "parity")
+    page.get_by_role("button", name="Preview").click()
+    expect(page.locator("[data-snapraid-preview]")).to_contain_text("parity", timeout=10000)
+
+    # Advanced tab still exposes the raw JSON editor (fallback / third-party parity).
+    page.click("button[data-config-view='advanced']")
+    expect(page.locator("#v2-plugin-config-textarea")).to_be_visible()
+
+
 def test_v2_storage_tab_syncs_with_shell_nav(
     page: Page,
     v2_server,

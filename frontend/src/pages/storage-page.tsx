@@ -16,6 +16,7 @@ import {
   MergerfsSetupCard,
 } from "@/components/storage/mergerfs-pool-card";
 import { CommandRunner } from "@/components/storage/command-runner";
+import { SnapraidEditor } from "@/components/storage/snapraid-editor";
 import { mergerfsPools } from "@/lib/pools";
 import { Button } from "@/components/ui/button";
 import {
@@ -144,6 +145,7 @@ export function StoragePage() {
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
   const [poolDetails, setPoolDetails] = useState<Record<string, PluginDetail | null>>({});
+  const [configView, setConfigView] = useState<"guided" | "advanced">("guided");
   const [detailModal, setDetailModal] = useState<DetailModalState>({
     open: false,
     pluginId: "",
@@ -264,6 +266,7 @@ export function StoragePage() {
   );
 
   const onDetails = useCallback(async (plugin: StoragePlugin) => {
+    setConfigView("guided");
     setDetailModal({
       open: true,
       pluginId: plugin.id,
@@ -706,6 +709,35 @@ export function StoragePage() {
                   ) : null}
 
                   <div className="space-y-2" id="v2-plugin-config">
+                    {detailModal.detail.id === "snapraid" ? (
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          data-config-view="guided"
+                          onClick={() => setConfigView("guided")}
+                          size="sm"
+                          variant={configView === "guided" ? "default" : "outline"}
+                        >
+                          Guided
+                        </Button>
+                        <Button
+                          data-config-view="advanced"
+                          onClick={() => setConfigView("advanced")}
+                          size="sm"
+                          variant={configView === "advanced" ? "default" : "outline"}
+                        >
+                          Advanced (JSON)
+                        </Button>
+                      </div>
+                    ) : null}
+
+                    {detailModal.detail.id === "snapraid" && configView === "guided" ? (
+                      <SnapraidEditor
+                        config={detailModal.detail.config}
+                        onSaved={() => void loadPlugins("manual")}
+                        pluginId="snapraid"
+                      />
+                    ) : (
+                    <>
                     <p className="text-xs uppercase tracking-wide text-muted-foreground">
                       Configuration (JSON)
                     </p>
@@ -791,6 +823,8 @@ export function StoragePage() {
                         </ul>
                       </details>
                     ) : null}
+                    </>
+                    )}
                   </div>
                 </>
               ) : null}

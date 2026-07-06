@@ -157,6 +157,51 @@ export async function savePluginConfig(
   return { ok: false, error: payload.error || `Save failed (${response.status})`, details };
 }
 
+/** Apply the saved plugin config to the system (writes conf, rewrites fstab, etc.). */
+export async function applyPluginConfig(
+  pluginId: string,
+): Promise<{ ok: boolean; error: string | null; message: string | null }> {
+  const response = await fetch(`/api/storage/plugins/${encodeURIComponent(pluginId)}/apply`, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { Accept: "application/json", ...(await csrfHeaders("POST")) },
+  });
+  const payload = (await response.json().catch(() => ({}))) as {
+    status?: string;
+    error?: string;
+    message?: string;
+  };
+  if (response.ok && !payload.error) {
+    return { ok: true, error: null, message: payload.message ?? null };
+  }
+  return { ok: false, error: payload.error || `Apply failed (${response.status})`, message: null };
+}
+
+/** Render the generated config text for a candidate config without writing it. */
+export async function previewPluginConfig(
+  pluginId: string,
+  config: Record<string, unknown>,
+): Promise<string> {
+  const response = await fetch(
+    `/api/storage/plugins/${encodeURIComponent(pluginId)}/config-preview`,
+    {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        ...(await csrfHeaders("POST")),
+      },
+      body: JSON.stringify(config),
+    },
+  );
+  const payload = (await response.json().catch(() => ({}))) as { preview?: string; error?: string };
+  if (!response.ok || payload.error) {
+    throw new Error(payload.error || `Preview failed (${response.status})`);
+  }
+  return String(payload.preview ?? "");
+}
+
 export interface InstallPluginRequest {
   type: string;
   source: string;
