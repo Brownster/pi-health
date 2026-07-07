@@ -60,7 +60,7 @@ Structural gaps:
 | 1 | PH5-001 Backend additive surface (stack label, inspect, dry-run validate) | — | Yes | Complete (2026-07-07) |
 | 2 | PH5-002 Stack lifecycle UI: create / delete / scan | — | Yes | Complete (2026-07-07) |
 | 3 | PH5-003 Compose/env editor upgrades + restore preview | PH5-001 | Yes | Complete (2026-07-07) |
-| 4 | PH5-004 Container detail drawer + healthcheck + logs QoL | PH5-001 | Yes | Planned |
+| 4 | PH5-004 Container detail drawer + healthcheck + logs QoL | PH5-001 | Yes | Complete (2026-07-07) |
 | 5 | PH5-005 Stack<->container linking + VPN-group awareness | PH5-001 | No | Planned |
 | 6 | PH5-006 Update workflow: check-all + provider-safe updates | PH5-005 | No | Planned |
 | 7 | PH5-007 E2E parity + release signoff | all | Yes | Planned |
@@ -204,6 +204,14 @@ Estimate: 1-1.5 days
 1. Unhealthy containers are visible at a glance in the list and explained in the drawer.
 2. Env values never appear without an explicit per-key reveal.
 3. Logs can be tailed at 1000 lines, auto-refreshed, and downloaded on phone and desktop.
+
+Completed 2026-07-07 in `6c15cbc`. Container names now open a responsive operational-detail
+dialog with image/lifecycle/restart metadata, mounts, networks, healthcheck state and output, and
+environment keys. Values require an explicit per-key reveal, and the full environment payload is
+fetched only on first reveal. Health dots surface configured healthchecks in the list. A shared
+container/stack log viewer adds 100/200/500/1000-line tails, manual refresh, five-second
+auto-refresh, and client-side download. Validation: TypeScript and production build pass, initial
+JS is `113.17 kB` gzip, and focused container plus stack E2E is `21 passed` across all viewports.
 
 ---
 
