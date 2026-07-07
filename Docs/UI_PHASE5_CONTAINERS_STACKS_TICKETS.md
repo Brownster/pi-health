@@ -58,7 +58,7 @@ Structural gaps:
 | Order | Ticket | Depends On | Critical Path | Status |
 |---|---|---|---|---|
 | 1 | PH5-001 Backend additive surface (stack label, inspect, dry-run validate) | — | Yes | Complete (2026-07-07) |
-| 2 | PH5-002 Stack lifecycle UI: create / delete / scan | — | Yes | Planned |
+| 2 | PH5-002 Stack lifecycle UI: create / delete / scan | — | Yes | Complete (2026-07-07) |
 | 3 | PH5-003 Compose/env editor upgrades + restore preview | PH5-001 | Yes | Planned |
 | 4 | PH5-004 Container detail drawer + healthcheck + logs QoL | PH5-001 | Yes | Planned |
 | 5 | PH5-005 Stack<->container linking + VPN-group awareness | PH5-001 | No | Planned |
@@ -132,6 +132,14 @@ Estimate: 1-1.5 days
 1. A stack can be created, brought up, and deleted entirely from `/v2/stacks`.
 2. Deleting a running stack requires the two-step force confirmation.
 3. Invalid compose on create shows the server's validation message inline, not a toast.
+
+Completed 2026-07-07 in `2cb6a69`. The stacks page now provides a validated create modal with
+Compose and optional environment content, directory scanning with an accessible result notice,
+and typed-name deletion. A `409` shutdown conflict keeps the dialog open and requires a second
+explicit “Stop and delete” action using the backend's `force` plus `confirm_name` contract. New
+stacks refresh the list and open in the editor. Validation: frontend TypeScript and production
+build pass, initial JS is `110.54 kB` gzip (within budget), and the existing stacks E2E suite is
+`7 passed` across desktop, phone, and tablet.
 
 ---
 
