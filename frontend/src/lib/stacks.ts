@@ -112,6 +112,73 @@ export interface StackComposeValidationResult {
   status: "valid";
 }
 
+export interface CreateStackInput {
+  name: string;
+  composeContent: string;
+  envContent: string;
+}
+
+export interface StackMutationResult {
+  status: string;
+  name?: string;
+  path?: string;
+  forced?: boolean;
+}
+
+export interface StackScanResult {
+  stacks: StackSummary[];
+  count: number;
+}
+
+export async function createStack(
+  input: CreateStackInput,
+  signal?: AbortSignal,
+): Promise<StackMutationResult> {
+  return requestApi<StackMutationResult>(
+    `/api/stacks/${encodeURIComponent(input.name)}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        compose_content: input.composeContent,
+        env_content: input.envContent,
+      }),
+      signal,
+    },
+  );
+}
+
+export async function deleteStack(
+  name: string,
+  options: { force?: boolean; confirmName: string },
+  signal?: AbortSignal,
+): Promise<StackMutationResult> {
+  return requestApi<StackMutationResult>(`/api/stacks/${encodeURIComponent(name)}`, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      force: options.force === true,
+      confirm_name: options.confirmName,
+    }),
+    signal,
+  });
+}
+
+export async function scanStacks(signal?: AbortSignal): Promise<StackScanResult> {
+  const payload = await requestApi<{
+    stacks?: Partial<StackSummary>[];
+    count?: number;
+    error?: string;
+  }>("/api/stacks/scan", { method: "POST", signal });
+  if (payload.error) {
+    throw new Error(payload.error);
+  }
+  const stacks = Array.isArray(payload.stacks)
+    ? payload.stacks.map((item) => normalizeStack(item))
+    : [];
+  return { stacks, count: toNullableNumber(payload.count) ?? stacks.length };
+}
+
 export async function fetchStackCompose(name: string, signal?: AbortSignal): Promise<StackComposeResult> {
   const payload = await requestApi<{ content?: string; filename?: string; error?: string }>(
     `/api/stacks/${encodeURIComponent(name)}/compose`,

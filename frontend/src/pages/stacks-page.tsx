@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Activity, Loader2, RefreshCw, TriangleAlert } from "lucide-react";
+import {
+  Activity,
+  Loader2,
+  Plus,
+  RefreshCw,
+  ScanSearch,
+  TriangleAlert,
+} from "lucide-react";
 
 import { STACK_ACTION_META, StackCard } from "@/components/stacks/stack-card";
+import { StackCreateModal } from "@/components/stacks/stack-create-modal";
 import { StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -16,17 +24,22 @@ import { PageHeader } from "@/components/ui/page-header";
 import {
   type StackAction,
   type StackSummary,
+  type CreateStackInput,
+  createStack,
   createStackOperation,
+  deleteStack,
   fetchStackBackups,
   fetchStackCompose,
   fetchStackEnv,
   fetchStackLogs,
   fetchStacks,
   restoreStackBackup,
+  scanStacks,
   saveStackCompose,
   saveStackEnv,
   streamStackOperation,
 } from "@/lib/stacks";
+import { ApiError } from "@/lib/api";
 import { formatClockTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -85,6 +98,14 @@ interface BackupsModalState {
   notice: string | null;
 }
 
+interface DeleteModalState {
+  open: boolean;
+  stackName: string;
+  confirmName: string;
+  status: "idle" | "deleting" | "conflict" | "forcing";
+  error: string | null;
+}
+
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message) {
     return error.message;
@@ -106,6 +127,8 @@ export function StacksPage() {
   const [stacks, setStacks] = useState<StackSummary[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState("Never");
   const [actionNotice, setActionNotice] = useState<ActionNotice | null>(null);
@@ -149,6 +172,13 @@ export function StacksPage() {
     confirming: null,
     restoring: null,
     notice: null,
+  });
+  const [deleteModal, setDeleteModal] = useState<DeleteModalState>({
+    open: false,
+    stackName: "",
+    confirmName: "",
+    status: "idle",
+    error: null,
   });
 
   const isMountedRef = useRef(true);
@@ -447,6 +477,123 @@ export function StacksPage() {
     setEditorModal((current) => ({ ...current, open: false }));
   }, []);
 
+  const onCreateStack = useCallback(
+    async (input: CreateStackInput) => {
+      await createStack(input);
+      if (!isMountedRef.current) {
+        return;
+      }
+      setCreateOpen(false);
+      setActionNotice({
+        tone: "success",
+        message: `Created stack ${input.name}`,
+      });
+      await loadStacks("action");
+      void onEdit({
+        name: input.name,
+        status: "stopped",
+        running_count: 0,
+        container_count: 0,
+        path: null,
+        compose_file: "compose.yaml",
+      });
+    },
+    [loadStacks, onEdit],
+  );
+
+  const onScan = useCallback(async () => {
+    if (isScanning) {
+      return;
+    }
+    setIsScanning(true);
+    setActionNotice({ tone: "info", message: "Scanning stack directories..." });
+    try {
+      const result = await scanStacks();
+      if (!isMountedRef.current) {
+        return;
+      }
+      setActionNotice({
+        tone: "success",
+        message: `Scan complete: ${result.count} stack${result.count === 1 ? "" : "s"} discovered`,
+      });
+      await loadStacks("action");
+    } catch (caughtError) {
+      if (isMountedRef.current) {
+        setActionNotice({
+          tone: "error",
+          message: `Scan failed: ${getErrorMessage(caughtError)}`,
+        });
+      }
+    } finally {
+      if (isMountedRef.current) {
+        setIsScanning(false);
+      }
+    }
+  }, [isScanning, loadStacks]);
+
+  const openDelete = useCallback((stack: StackSummary) => {
+    setDeleteModal({
+      open: true,
+      stackName: stack.name,
+      confirmName: "",
+      status: "idle",
+      error: null,
+    });
+  }, []);
+
+  const closeDelete = useCallback(() => {
+    setDeleteModal((current) =>
+      current.status === "deleting" || current.status === "forcing"
+        ? current
+        : { ...current, open: false },
+    );
+  }, []);
+
+  const confirmDelete = useCallback(
+    async (force: boolean) => {
+      const { stackName, confirmName } = deleteModal;
+      if (confirmName !== stackName) {
+        setDeleteModal((current) => ({
+          ...current,
+          error: `Type ${stackName} exactly to continue.`,
+        }));
+        return;
+      }
+      setDeleteModal((current) => ({
+        ...current,
+        status: force ? "forcing" : "deleting",
+        error: null,
+      }));
+      try {
+        await deleteStack(stackName, { force, confirmName });
+        if (!isMountedRef.current) {
+          return;
+        }
+        setDeleteModal((current) => ({ ...current, open: false }));
+        setActionNotice({ tone: "success", message: `Deleted stack ${stackName}` });
+        await loadStacks("action");
+      } catch (caughtError) {
+        if (!isMountedRef.current) {
+          return;
+        }
+        if (!force && caughtError instanceof ApiError && caughtError.status === 409) {
+          setDeleteModal((current) => ({
+            ...current,
+            status: "conflict",
+            error: caughtError.message,
+          }));
+          return;
+        }
+        setDeleteModal((current) => ({
+          ...current,
+          status: force ? "conflict" : "idle",
+          error: getErrorMessage(caughtError),
+        }));
+      }
+    },
+    [deleteModal, loadStacks],
+  );
+
   const saveEditor = useCallback(async () => {
     const name = editorModal.stackName;
     const tab = editorModal.tab;
@@ -594,18 +741,36 @@ export function StacksPage() {
     <section className="space-y-4 sm:space-y-6">
       <PageHeader
         actions={
-          <Button
-            className="gap-2"
-            disabled={isRefreshing}
-            onClick={() => void loadStacks("manual")}
-            variant="secondary"
-          >
-            <RefreshCw
-              aria-hidden="true"
-              className={cn("h-4 w-4", isRefreshing ? "animate-spin" : "")}
-            />
-            {isRefreshing ? "refreshing" : "refresh"}
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button className="gap-2" onClick={() => setCreateOpen(true)}>
+              <Plus aria-hidden="true" className="h-4 w-4" />
+              New stack
+            </Button>
+            <Button
+              className="gap-2"
+              disabled={isScanning}
+              onClick={() => void onScan()}
+              variant="secondary"
+            >
+              <ScanSearch
+                aria-hidden="true"
+                className={cn("h-4 w-4", isScanning ? "animate-pulse" : "")}
+              />
+              {isScanning ? "Scanning..." : "Scan"}
+            </Button>
+            <Button
+              className="gap-2"
+              disabled={isRefreshing}
+              onClick={() => void loadStacks("manual")}
+              variant="secondary"
+            >
+              <RefreshCw
+                aria-hidden="true"
+                className={cn("h-4 w-4", isRefreshing ? "animate-spin" : "")}
+              />
+              {isRefreshing ? "refreshing" : "refresh"}
+            </Button>
+          </div>
         }
         description={`${stacks.length} stacks · synced ${lastUpdated}`}
         status={
@@ -687,6 +852,7 @@ export function StacksPage() {
               key={stack.name}
               onAction={onAction}
               onBackups={onBackups}
+              onDelete={openDelete}
               onEdit={onEdit}
               onLogs={onLogs}
               pendingAction={pendingActions[stack.name]}
@@ -694,6 +860,94 @@ export function StacksPage() {
             />
           ))}
         </div>
+      ) : null}
+
+      {createOpen ? (
+        <StackCreateModal
+          onClose={() => setCreateOpen(false)}
+          onCreate={onCreateStack}
+        />
+      ) : null}
+
+      {deleteModal.open ? (
+        <ModalOverlay onClose={closeDelete}>
+          <Card
+            aria-labelledby="v2-stack-delete-title"
+            aria-modal="true"
+            className="w-full max-w-lg"
+            id="v2-stack-delete-modal"
+            role="dialog"
+          >
+            <CardHeader>
+              <CardTitle id="v2-stack-delete-title">
+                Delete {deleteModal.stackName}
+              </CardTitle>
+              <CardDescription>
+                This removes the stack directory after stopping its containers. Type the
+                stack name to confirm.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <label className="block space-y-1.5 text-sm font-medium">
+                Stack name
+                <input
+                  autoComplete="off"
+                  autoFocus
+                  className="min-h-11 w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-sm"
+                  id="v2-stack-delete-confirm-name"
+                  onChange={(event) =>
+                    setDeleteModal((current) => ({
+                      ...current,
+                      confirmName: event.target.value,
+                      error: current.status === "conflict" ? current.error : null,
+                    }))
+                  }
+                  value={deleteModal.confirmName}
+                />
+              </label>
+              {deleteModal.error ? (
+                <p aria-live="assertive" className="text-sm text-danger" role="alert">
+                  {deleteModal.error}
+                </p>
+              ) : null}
+              {deleteModal.status === "conflict" ? (
+                <div className="rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-warning">
+                  Containers are still running or Compose could not stop cleanly. Force
+                  deletion will retry shutdown, create a backup, then remove the stack.
+                </div>
+              ) : null}
+              <div className="flex flex-wrap justify-end gap-2">
+                <Button onClick={closeDelete} variant="outline">
+                  Cancel
+                </Button>
+                <Button
+                  disabled={
+                    deleteModal.confirmName !== deleteModal.stackName ||
+                    deleteModal.status === "deleting" ||
+                    deleteModal.status === "forcing"
+                  }
+                  id={
+                    deleteModal.status === "conflict"
+                      ? "v2-stack-force-delete"
+                      : "v2-stack-delete-submit"
+                  }
+                  onClick={() =>
+                    void confirmDelete(deleteModal.status === "conflict")
+                  }
+                  variant="danger"
+                >
+                  {deleteModal.status === "deleting"
+                    ? "Deleting..."
+                    : deleteModal.status === "forcing"
+                      ? "Stopping and deleting..."
+                      : deleteModal.status === "conflict"
+                        ? "Stop and delete"
+                        : "Delete stack"}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </ModalOverlay>
       ) : null}
 
       {consoleModal.open ? (

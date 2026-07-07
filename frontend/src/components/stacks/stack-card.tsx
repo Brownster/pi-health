@@ -7,6 +7,7 @@ import {
   Play,
   RotateCw,
   Square,
+  Trash2,
 } from "lucide-react";
 
 import { StatusBadge, type BadgeProps } from "@/components/ui/badge";
@@ -72,6 +73,7 @@ export function StackCard({
   onLogs,
   onEdit,
   onBackups,
+  onDelete,
 }: {
   stack: StackSummary;
   pendingAction?: StackAction;
@@ -79,6 +81,7 @@ export function StackCard({
   onLogs: (stack: StackSummary) => void;
   onEdit: (stack: StackSummary) => void;
   onBackups: (stack: StackSummary) => void;
+  onDelete: (stack: StackSummary) => void;
 }) {
   const percent = getStackServicesPercent(stack);
   const barWidth = percent === null ? 0 : Math.max(0, Math.min(percent, 100));
@@ -181,6 +184,19 @@ export function StackCard({
           >
             <Archive aria-hidden="true" className="h-3.5 w-3.5" />
             Backups
+          </Button>
+          <Button
+            aria-label={`Delete ${stack.name}`}
+            className="gap-1.5 text-xs sm:text-sm"
+            data-stack-action="delete"
+            data-stack={stack.name}
+            disabled={busy}
+            onClick={() => onDelete(stack)}
+            size="sm"
+            variant="danger"
+          >
+            <Trash2 aria-hidden="true" className="h-3.5 w-3.5" />
+            Delete
           </Button>
         </div>
       </CardContent>
