@@ -57,7 +57,7 @@ Structural gaps:
 ## Execution Order and Dependencies
 | Order | Ticket | Depends On | Critical Path | Status |
 |---|---|---|---|---|
-| 1 | PH5-001 Backend additive surface (stack label, inspect, dry-run validate) | — | Yes | Planned |
+| 1 | PH5-001 Backend additive surface (stack label, inspect, dry-run validate) | — | Yes | Complete (2026-07-07) |
 | 2 | PH5-002 Stack lifecycle UI: create / delete / scan | — | Yes | Planned |
 | 3 | PH5-003 Compose/env editor upgrades + restore preview | PH5-001 | Yes | Planned |
 | 4 | PH5-004 Container detail drawer + healthcheck + logs QoL | PH5-001 | Yes | Planned |
@@ -95,6 +95,13 @@ Estimate: 1 day
 ### Acceptance Criteria
 1. Existing container/stack tests pass unchanged.
 2. New payloads covered by unit tests; env values absent unless explicitly requested.
+
+Completed 2026-07-07 in `74c4227`. Container summaries now expose the Compose project label;
+the authenticated inspect endpoint returns image, lifecycle, restart, mount, network, command, and
+environment-key details, with values available only through explicit `?env=full`; and compose
+validation can run without a file read, write, backup, or stack lock. Frontend types cover the new
+additive payloads. Validation: Ruff clean, focused backend `180 passed`, full backend `1034 passed,
+1 skipped`, and frontend TypeScript checks pass.
 
 ---
 
