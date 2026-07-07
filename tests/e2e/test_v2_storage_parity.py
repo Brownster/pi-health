@@ -63,6 +63,37 @@ def test_v2_storage_pools_route_defaults_to_pools_tab(
     ).to_be_visible()
 
 
+def test_v2_pools_configured_cards_across_viewports(
+    profiled_page: Page,
+    viewport_profile_name: str,
+    assert_no_horizontal_overflow,
+    v2_server,
+    v2_login,
+    install_v2_storage_configured_mocks,
+):
+    page = profiled_page
+    base_url = v2_server["base_url"]
+    v2_login(page, base_url)
+    install_v2_storage_configured_mocks(page)
+    page.goto(f"{base_url}/v2/pools")
+    expect(page.get_by_role("heading", name="storage_pools")).to_be_visible()
+
+    # Healthy SnapRAID card: protection badge, drive counts, last-run summary chips.
+    snap = page.locator("[data-pool-plugin='snapraid']")
+    expect(snap).to_contain_text("protected")
+    expect(snap).to_contain_text("Data drives")
+    expect(page.locator("[data-pool-summary='snapraid']")).to_contain_text("removed")
+
+    # MergerFS: a mounted pool (with capacity) and a degraded (unmounted) pool.
+    mounted = page.locator("[data-pool-card='media']")
+    expect(mounted).to_contain_text("mounted")
+    expect(mounted).to_contain_text("3 branches")
+    expect(mounted.locator("[role='progressbar']")).to_have_attribute("aria-valuenow", "42")
+    expect(page.locator("[data-pool-card='backup']")).to_contain_text("unmounted")
+
+    assert_no_horizontal_overflow(page, f"v2 pools configured ({viewport_profile_name})")
+
+
 def test_v2_snapraid_guided_editor(
     page: Page,
     v2_server,

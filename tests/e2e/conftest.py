@@ -703,6 +703,81 @@ def install_v2_storage_api_mocks():
 
 
 @pytest.fixture(scope="function")
+def install_v2_storage_configured_mocks():
+    """Configured pools: healthy SnapRAID + MergerFS with a mounted and a degraded pool."""
+
+    def _json_fulfill(route, payload, status: int = 200) -> None:
+        route.fulfill(status=status, content_type="application/json", body=json.dumps(payload))
+
+    def _install(page: Page) -> None:
+        plugins = [
+            {
+                "id": "snapraid", "name": "SnapRAID", "description": "Parity protection",
+                "version": "1.0", "installed": True, "enabled": True, "configured": True,
+                "status": "healthy", "status_message": "All data protected",
+                "category": "storage", "kind": "pool", "type": "builtin",
+            },
+            {
+                "id": "mergerfs", "name": "MergerFS", "description": "Union filesystem pooling",
+                "version": "1.0", "installed": True, "enabled": True, "configured": True,
+                "status": "ok", "status_message": "2 pool(s)",
+                "category": "storage", "kind": "pool", "type": "builtin",
+            },
+        ]
+        snapraid_detail = {
+            "id": "snapraid", "name": "SnapRAID", "version": "1.0", "installed": True, "kind": "pool",
+            "status": {
+                "status": "healthy", "message": "All data protected",
+                "details": {
+                    "data_drives": 2, "parity_drives": 1, "sync_required": False,
+                    "last_command": "sync", "last_run_at": "2026-07-05T00:00:00Z",
+                    "last_summary": {"added": 3, "removed": 1, "updated": 2},
+                },
+            },
+            "commands": [{"id": "sync", "name": "Sync", "dangerous": False}],
+            "schema": {"properties": {}}, "config": {"enabled": True, "drives": []},
+            "install_instructions": "",
+        }
+        mergerfs_detail = {
+            "id": "mergerfs", "name": "MergerFS", "version": "1.0", "installed": True, "kind": "pool",
+            "status": {
+                "status": "ok", "message": "2 pool(s)",
+                "details": {"pools": [
+                    {"name": "media", "mount_point": "/mnt/media", "mounted": True, "branches": 3,
+                     "total_bytes": 4000000000000, "free_bytes": 2320000000000, "used_percent": 42},
+                    {"name": "backup", "mount_point": "/mnt/backup", "mounted": False, "branches": 2},
+                ]},
+            },
+            "commands": [{"id": "status", "name": "Status", "dangerous": False}],
+            "schema": {"properties": {}}, "config": {"pools": []}, "install_instructions": "",
+        }
+
+        def _handler(route):
+            path = urlparse(route.request.url).path
+            method = route.request.method
+            if path == "/api/storage/plugins" and method == "GET":
+                _json_fulfill(route, {"plugins": plugins})
+                return
+            if path == "/api/storage/plugins/snapraid" and method == "GET":
+                _json_fulfill(route, snapraid_detail)
+                return
+            if path == "/api/storage/plugins/mergerfs" and method == "GET":
+                _json_fulfill(route, mergerfs_detail)
+                return
+            if path.endswith("/recovery") and method == "GET":
+                _json_fulfill(route, {"error": "Recovery not supported"}, status=404)
+                return
+            if path.endswith("/logs/latest") and method == "GET":
+                route.fulfill(status=200, content_type="text/plain", body="log line")
+                return
+            route.continue_()
+
+        page.route("**/api/**", _handler)
+
+    return _install
+
+
+@pytest.fixture(scope="function")
 def install_v2_mounts_api_mocks():
     """Returns a callable(page) installing deterministic mounts mocks (media paths + mount plugin)."""
 
