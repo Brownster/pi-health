@@ -373,6 +373,21 @@ def install_v2_stacks_api_mocks():
                 _json_fulfill(route, stacks_payload)
                 return
 
+            if path == "/api/stacks/media" and method == "GET":
+                _json_fulfill(
+                    route,
+                    {
+                        "name": "media",
+                        "path": "/opt/stacks/media",
+                        "compose_file": "docker-compose.yml",
+                        "compose_content": "services:\n  web:\n    image: nginx:latest\n",
+                        "has_env": True,
+                        "env_content": "PUID=1000\nPGID=1000\n",
+                        "status": {"status": "running"},
+                    },
+                )
+                return
+
             if path == "/api/stacks/media/operations" and method == "POST":
                 _json_fulfill(
                     route,
@@ -412,6 +427,18 @@ def install_v2_stacks_api_mocks():
 
             if path == "/api/stacks/media/backups" and method == "GET":
                 _json_fulfill(route, {"backups": ["docker-compose.yml.20260101-000000.bak"]})
+                return
+            if (
+                path == "/api/stacks/media/backups/docker-compose.yml.20260101-000000.bak"
+                and method == "GET"
+            ):
+                _json_fulfill(
+                    route,
+                    {
+                        "content": "services:\n  web:\n    image: nginx:1.26\n",
+                        "filename": "docker-compose.yml.20260101-000000.bak",
+                    },
+                )
                 return
             if path == "/api/stacks/media/restore" and method == "POST":
                 _json_fulfill(route, {"status": "restored", "backup": "docker-compose.yml.20260101-000000.bak"})

@@ -112,6 +112,16 @@ export interface StackComposeValidationResult {
   status: "valid";
 }
 
+export interface StackDetails {
+  name: string;
+  path: string | null;
+  compose_file: string | null;
+  compose_content: string;
+  has_env: boolean;
+  env_content: string;
+  status: Record<string, unknown> | null;
+}
+
 export interface CreateStackInput {
   name: string;
   composeContent: string;
@@ -190,6 +200,44 @@ export async function fetchStackCompose(name: string, signal?: AbortSignal): Pro
   return { content: payload.content ?? "", filename: toNullableString(payload.filename) };
 }
 
+export async function fetchStackDetails(
+  name: string,
+  signal?: AbortSignal,
+): Promise<StackDetails> {
+  const payload = await requestApi<Partial<StackDetails> & { error?: string }>(
+    `/api/stacks/${encodeURIComponent(name)}`,
+    { method: "GET", signal },
+  );
+  if (payload.error) {
+    throw new Error(payload.error);
+  }
+  return {
+    name: String(payload.name ?? name),
+    path: toNullableString(payload.path),
+    compose_file: toNullableString(payload.compose_file),
+    compose_content: String(payload.compose_content ?? ""),
+    has_env: Boolean(payload.has_env),
+    env_content: String(payload.env_content ?? ""),
+    status: payload.status && typeof payload.status === "object" ? payload.status : null,
+  };
+}
+
+export async function validateStackCompose(
+  name: string,
+  content: string,
+  signal?: AbortSignal,
+): Promise<StackComposeValidationResult> {
+  return requestApi<StackComposeValidationResult>(
+    `/api/stacks/${encodeURIComponent(name)}/compose?validate_only=true`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content }),
+      signal,
+    },
+  );
+}
+
 export async function saveStackCompose(name: string, content: string, signal?: AbortSignal): Promise<void> {
   const payload = await requestApi<{ status?: string; error?: string }>(
     `/api/stacks/${encodeURIComponent(name)}/compose`,
@@ -242,6 +290,28 @@ export async function fetchStackBackups(name: string, signal?: AbortSignal): Pro
   return Array.isArray(payload.backups)
     ? payload.backups.map((item) => String(item)).filter((item) => item.length > 0)
     : [];
+}
+
+export async function fetchStackBackupContent(
+  name: string,
+  backup: string,
+  signal?: AbortSignal,
+): Promise<StackComposeResult> {
+  const payload = await requestApi<{
+    content?: string;
+    filename?: string;
+    error?: string;
+  }>(
+    `/api/stacks/${encodeURIComponent(name)}/backups/${encodeURIComponent(backup)}`,
+    { method: "GET", signal },
+  );
+  if (payload.error) {
+    throw new Error(payload.error);
+  }
+  return {
+    content: payload.content ?? "",
+    filename: toNullableString(payload.filename),
+  };
 }
 
 export async function restoreStackBackup(name: string, backup: string, signal?: AbortSignal): Promise<void> {

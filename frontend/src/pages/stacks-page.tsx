@@ -29,8 +29,8 @@ import {
   createStackOperation,
   deleteStack,
   fetchStackBackups,
-  fetchStackCompose,
-  fetchStackEnv,
+  fetchStackBackupContent,
+  fetchStackDetails,
   fetchStackLogs,
   fetchStacks,
   restoreStackBackup,
@@ -38,6 +38,7 @@ import {
   saveStackCompose,
   saveStackEnv,
   streamStackOperation,
+  validateStackCompose,
 } from "@/lib/stacks";
 import { ApiError } from "@/lib/api";
 import { formatClockTime } from "@/lib/format";
@@ -73,6 +74,7 @@ interface LogsModalState {
 
 type EditorTab = "compose" | "env";
 type SaveStatus = "idle" | "saving" | "saved" | "error";
+type ValidationStatus = "idle" | "validating" | "valid" | "error";
 
 interface EditorModalState {
   open: boolean;
@@ -83,8 +85,12 @@ interface EditorModalState {
   compose: string;
   composeFilename: string | null;
   env: string;
+  originalCompose: string;
+  originalEnv: string;
   saveStatus: SaveStatus;
   saveError: string | null;
+  validationStatus: ValidationStatus;
+  validationError: string | null;
 }
 
 interface BackupsModalState {
@@ -96,6 +102,10 @@ interface BackupsModalState {
   confirming: string | null;
   restoring: string | null;
   notice: string | null;
+  currentCompose: string;
+  previewBackup: string | null;
+  previewContent: string;
+  previewLoading: boolean;
 }
 
 interface DeleteModalState {
@@ -121,6 +131,34 @@ function getNoticeToneClass(tone: ActionNotice["tone"]): string {
     return "border-danger/30 text-danger";
   }
   return "border-info/30 text-info";
+}
+
+function DiffLines({
+  content,
+  compare,
+  tone,
+}: {
+  content: string;
+  compare: string;
+  tone: "removed" | "added";
+}) {
+  const lines = (content || "(empty)").split("\n");
+  const otherLines = (compare || "(empty)").split("\n");
+  return lines.map((line, index) => (
+    <span
+      className={cn(
+        "block min-h-4",
+        line !== otherLines[index]
+          ? tone === "added"
+            ? "bg-success/15 text-success"
+            : "bg-danger/15 text-danger"
+          : "",
+      )}
+      key={`${index}-${line}`}
+    >
+      {line || " "}
+    </span>
+  ));
 }
 
 export function StacksPage() {
@@ -160,8 +198,12 @@ export function StacksPage() {
     compose: "",
     composeFilename: null,
     env: "",
+    originalCompose: "",
+    originalEnv: "",
     saveStatus: "idle",
     saveError: null,
+    validationStatus: "idle",
+    validationError: null,
   });
   const [backupsModal, setBackupsModal] = useState<BackupsModalState>({
     open: false,
@@ -172,6 +214,10 @@ export function StacksPage() {
     confirming: null,
     restoring: null,
     notice: null,
+    currentCompose: "",
+    previewBackup: null,
+    previewContent: "",
+    previewLoading: false,
   });
   const [deleteModal, setDeleteModal] = useState<DeleteModalState>({
     open: false,
@@ -434,15 +480,16 @@ export function StacksPage() {
       compose: "",
       composeFilename: null,
       env: "",
+      originalCompose: "",
+      originalEnv: "",
       saveStatus: "idle",
       saveError: null,
+      validationStatus: "idle",
+      validationError: null,
     });
 
     try {
-      const [compose, env] = await Promise.all([
-        fetchStackCompose(stack.name),
-        fetchStackEnv(stack.name),
-      ]);
+      const details = await fetchStackDetails(stack.name);
       if (!isMountedRef.current) {
         return;
       }
@@ -451,9 +498,11 @@ export function StacksPage() {
           ? {
               ...current,
               status: "ready",
-              compose: compose.content,
-              composeFilename: compose.filename,
-              env: env.content,
+              compose: details.compose_content,
+              composeFilename: details.compose_file,
+              env: details.env_content,
+              originalCompose: details.compose_content,
+              originalEnv: details.env_content,
             }
           : current,
       );
@@ -474,7 +523,14 @@ export function StacksPage() {
   }, []);
 
   const closeEditor = useCallback(() => {
-    setEditorModal((current) => ({ ...current, open: false }));
+    setEditorModal((current) => {
+      const dirty =
+        current.compose !== current.originalCompose || current.env !== current.originalEnv;
+      if (dirty && !window.confirm("Discard unsaved stack changes?")) {
+        return current;
+      }
+      return { ...current, open: false };
+    });
   }, []);
 
   const onCreateStack = useCallback(
@@ -617,6 +673,9 @@ export function StacksPage() {
         ...current,
         saveStatus: "saved",
         saveError: null,
+        ...(tab === "compose"
+          ? { originalCompose: content }
+          : { originalEnv: content }),
       }));
       setActionNotice({ tone: "success", message: `Saved ${tab} for ${name}` });
     } catch (caughtError) {
@@ -631,6 +690,34 @@ export function StacksPage() {
     }
   }, [editorModal]);
 
+  const validateEditor = useCallback(async () => {
+    const name = editorModal.stackName;
+    const content = editorModal.compose;
+    setEditorModal((current) => ({
+      ...current,
+      validationStatus: "validating",
+      validationError: null,
+    }));
+    try {
+      await validateStackCompose(name, content);
+      if (isMountedRef.current) {
+        setEditorModal((current) => ({
+          ...current,
+          validationStatus: "valid",
+          validationError: null,
+        }));
+      }
+    } catch (caughtError) {
+      if (isMountedRef.current) {
+        setEditorModal((current) => ({
+          ...current,
+          validationStatus: "error",
+          validationError: getErrorMessage(caughtError),
+        }));
+      }
+    }
+  }, [editorModal.compose, editorModal.stackName]);
+
   const onBackups = useCallback(async (stack: StackSummary) => {
     setBackupsModal({
       open: true,
@@ -641,16 +728,28 @@ export function StacksPage() {
       confirming: null,
       restoring: null,
       notice: null,
+      currentCompose: "",
+      previewBackup: null,
+      previewContent: "",
+      previewLoading: false,
     });
 
     try {
-      const backups = await fetchStackBackups(stack.name);
+      const [backups, details] = await Promise.all([
+        fetchStackBackups(stack.name),
+        fetchStackDetails(stack.name),
+      ]);
       if (!isMountedRef.current) {
         return;
       }
       setBackupsModal((current) =>
         current.stackName === stack.name && current.open
-          ? { ...current, status: "ready", backups }
+          ? {
+              ...current,
+              status: "ready",
+              backups,
+              currentCompose: details.compose_content,
+            }
           : current,
       );
     } catch (caughtError) {
@@ -667,6 +766,38 @@ export function StacksPage() {
 
   const closeBackups = useCallback(() => {
     setBackupsModal((current) => ({ ...current, open: false }));
+  }, []);
+
+  const previewBackup = useCallback(async (stackName: string, backup: string) => {
+    setBackupsModal((current) => ({
+      ...current,
+      confirming: backup,
+      previewBackup: backup,
+      previewContent: "",
+      previewLoading: true,
+      notice: null,
+      error: null,
+    }));
+    try {
+      const result = await fetchStackBackupContent(stackName, backup);
+      if (isMountedRef.current) {
+        setBackupsModal((current) => ({
+          ...current,
+          previewContent: result.content,
+          previewLoading: false,
+        }));
+      }
+    } catch (caughtError) {
+      if (isMountedRef.current) {
+        setBackupsModal((current) => ({
+          ...current,
+          previewLoading: false,
+          confirming: null,
+          previewBackup: null,
+          error: getErrorMessage(caughtError),
+        }));
+      }
+    }
   }, []);
 
   const restoreBackup = useCallback(
@@ -686,6 +817,8 @@ export function StacksPage() {
           ...current,
           restoring: null,
           notice: `Restored ${backup}`,
+          previewBackup: null,
+          previewContent: "",
         }));
         setActionNotice({
           tone: "success",
@@ -1091,12 +1224,24 @@ export function StacksPage() {
                     data-editor-tab={tab}
                     key={tab}
                     onClick={() =>
-                      setEditorModal((current) => ({
-                        ...current,
-                        tab,
-                        saveStatus: "idle",
-                        saveError: null,
-                      }))
+                      setEditorModal((current) => {
+                        const activeDirty =
+                          current.tab === "compose"
+                            ? current.compose !== current.originalCompose
+                            : current.env !== current.originalEnv;
+                        if (
+                          activeDirty &&
+                          !window.confirm("Switch files and keep unsaved changes?")
+                        ) {
+                          return current;
+                        }
+                        return {
+                          ...current,
+                          tab,
+                          saveStatus: "idle",
+                          saveError: null,
+                        };
+                      })
                     }
                     size="sm"
                     variant={editorModal.tab === tab ? "default" : "outline"}
@@ -1127,6 +1272,8 @@ export function StacksPage() {
                         ...current,
                         saveStatus: "idle",
                         saveError: null,
+                        validationStatus: "idle",
+                        validationError: null,
                         ...(current.tab === "compose"
                           ? { compose: event.target.value }
                           : { env: event.target.value }),
@@ -1139,7 +1286,25 @@ export function StacksPage() {
                         : editorModal.env
                     }
                   />
+                  {editorModal.tab === "compose" &&
+                  editorModal.validationStatus === "error" ? (
+                    <p className="text-sm text-danger" role="alert">
+                      {editorModal.validationError || "Compose validation failed"}
+                    </p>
+                  ) : null}
                   <div className="flex flex-wrap items-center gap-3">
+                    {editorModal.tab === "compose" ? (
+                      <Button
+                        disabled={editorModal.validationStatus === "validating"}
+                        id="v2-stack-editor-validate"
+                        onClick={() => void validateEditor()}
+                        variant="outline"
+                      >
+                        {editorModal.validationStatus === "validating"
+                          ? "Validating..."
+                          : "Validate"}
+                      </Button>
+                    ) : null}
                     <Button
                       disabled={editorModal.saveStatus === "saving"}
                       id="v2-stack-editor-save"
@@ -1162,6 +1327,8 @@ export function StacksPage() {
                     >
                       {editorModal.saveStatus === "saved"
                         ? "Saved"
+                        : editorModal.validationStatus === "valid"
+                          ? "Compose is valid"
                         : editorModal.saveStatus === "error"
                           ? editorModal.saveError || "Save failed"
                           : ""}
@@ -1246,7 +1413,10 @@ export function StacksPage() {
                           <Button
                             className="border-danger/30 bg-danger/10 text-danger hover:bg-danger/15"
                             data-confirm-restore={backup}
-                            disabled={backupsModal.restoring === backup}
+                            disabled={
+                              backupsModal.restoring === backup ||
+                              backupsModal.previewLoading
+                            }
                             onClick={() =>
                               void restoreBackup(backupsModal.stackName, backup)
                             }
@@ -1262,6 +1432,8 @@ export function StacksPage() {
                               setBackupsModal((current) => ({
                                 ...current,
                                 confirming: null,
+                                previewBackup: null,
+                                previewContent: "",
                               }))
                             }
                             size="sm"
@@ -1275,12 +1447,7 @@ export function StacksPage() {
                           data-restore={backup}
                           disabled={Boolean(backupsModal.restoring)}
                           onClick={() =>
-                            setBackupsModal((current) => ({
-                              ...current,
-                              confirming: backup,
-                              notice: null,
-                              error: null,
-                            }))
+                            void previewBackup(backupsModal.stackName, backup)
                           }
                           size="sm"
                           variant="outline"
@@ -1292,6 +1459,45 @@ export function StacksPage() {
                   ))}
                 </ul>
               )}
+              {backupsModal.previewBackup ? (
+                <div className="space-y-2" id="v2-stack-restore-preview">
+                  <p className="text-sm font-medium">
+                    Restore preview: {backupsModal.previewBackup}
+                  </p>
+                  {backupsModal.previewLoading ? (
+                    <p className="text-sm text-muted-foreground">
+                      Loading backup content...
+                    </p>
+                  ) : (
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <div className="min-w-0">
+                        <p className="mb-1 text-xs font-medium text-muted-foreground">
+                          Current
+                        </p>
+                        <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-md border border-danger/20 bg-danger/5 p-3 text-xs">
+                          <DiffLines
+                            compare={backupsModal.previewContent}
+                            content={backupsModal.currentCompose}
+                            tone="removed"
+                          />
+                        </pre>
+                      </div>
+                      <div className="min-w-0">
+                        <p className="mb-1 text-xs font-medium text-muted-foreground">
+                          Backup
+                        </p>
+                        <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-md border border-success/20 bg-success/5 p-3 text-xs">
+                          <DiffLines
+                            compare={backupsModal.currentCompose}
+                            content={backupsModal.previewContent}
+                            tone="added"
+                          />
+                        </pre>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : null}
             </CardContent>
           </Card>
         </ModalOverlay>

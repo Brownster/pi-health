@@ -101,6 +101,10 @@ def test_v2_stacks_compose_env_editor(
     textarea = page.locator("#v2-stack-editor-textarea")
     expect(textarea).to_have_value("services:\n  web:\n    image: nginx:latest\n")
     textarea.fill("services:\n  web:\n    image: nginx:1.27\n")
+    page.click("#v2-stack-editor-validate")
+    expect(page.locator("#v2-stack-editor-status")).to_have_text(
+        "Compose is valid", timeout=10000
+    )
     page.click("#v2-stack-editor-save")
     expect(page.locator("#v2-stack-editor-status")).to_have_text("Saved", timeout=10000)
 
@@ -127,6 +131,9 @@ def test_v2_stacks_backups_restore_with_confirm(
     backup = "docker-compose.yml.20260101-000000.bak"
     # Restore requires an explicit confirm step (no destructive one-click).
     page.click(f"button[data-restore='{backup}']")
+    expect(page.locator("#v2-stack-restore-preview")).to_contain_text(
+        "nginx:1.26", timeout=10000
+    )
     page.click(f"button[data-confirm-restore='{backup}']")
     expect(page.locator("#v2-stack-backups-modal")).to_contain_text("Restored", timeout=10000)
 
