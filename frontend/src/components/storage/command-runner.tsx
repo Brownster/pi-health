@@ -24,6 +24,7 @@ interface RunState {
   errors: string[];
   summary: { success: boolean; message: string; data: Record<string, unknown> | null } | null;
   transportError: string | null;
+  forceAvailable: boolean;
 }
 
 const EMPTY_RUN: RunState = {
@@ -34,6 +35,7 @@ const EMPTY_RUN: RunState = {
   errors: [],
   summary: null,
   transportError: null,
+  forceAvailable: false,
 };
 
 function num(value: string, fallback: number | null): number | null {
@@ -108,11 +110,12 @@ export function CommandRunner({
       (param) => param.required && paramValue(command, param) === "",
     );
 
-  async function execute(command: PluginCommand) {
+  async function execute(command: PluginCommand, extra?: Record<string, unknown>) {
     setConfirming(false);
     setRun({ ...EMPTY_RUN, commandId: command.id, running: true });
     try {
-      await streamPluginCommand(pluginId, command.id, buildParams(command), (event) => {
+      const params = { ...buildParams(command), ...(extra ?? {}) };
+      await streamPluginCommand(pluginId, command.id, params, (event) => {
         setRun((current) => {
           if (event.type === "output" && typeof event.line === "string") {
             return { ...current, lines: [...current.lines, event.line] };
@@ -135,13 +138,15 @@ export function CommandRunner({
             return current;
           }
           if (event.type === "complete") {
+            const data = (event.data as Record<string, unknown>) ?? null;
             return {
               ...current,
               running: false,
+              forceAvailable: !event.success && data?.force_allowed === true,
               summary: {
                 success: Boolean(event.success),
                 message: String(event.message ?? ""),
-                data: (event.data as Record<string, unknown>) ?? null,
+                data,
               },
             };
           }
@@ -328,6 +333,33 @@ export function CommandRunner({
                     .map(([k, v]) => `${v} ${k}`)
                     .join(", ")})`
                 : ""}
+            </div>
+          ) : null}
+
+          {run.forceAvailable ? (
+            <div
+              className="space-y-2 rounded-md border border-danger/40 bg-danger/10 p-2 text-xs"
+              data-command-threshold
+            >
+              <p className="font-medium text-danger">
+                This exceeds the configured safety threshold (see the counts above). Run anyway?
+              </p>
+              <Button
+                data-command-force
+                onClick={() => {
+                  const command = commands.find((c) => c.id === run.commandId);
+                  if (command) {
+                    void execute(command, {
+                      force: true,
+                      force_reason: "operator confirmed threshold override",
+                    });
+                  }
+                }}
+                size="sm"
+                variant="danger"
+              >
+                Run anyway
+              </Button>
             </div>
           ) : null}
 

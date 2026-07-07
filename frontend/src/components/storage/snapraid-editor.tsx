@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Eye, HardDrive, Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { SnapraidSchedule, type ScheduleValue } from "@/components/storage/snapraid-schedule";
 import { fetchDiskInventory } from "@/lib/disks";
 import {
   applyPluginConfig,
@@ -54,6 +55,12 @@ export function SnapraidEditor({
   const [assignments, setAssignments] = useState<Record<string, Assignment>>({});
   const [percent, setPercent] = useState<string>("");
   const [ageDays, setAgeDays] = useState<string>("");
+  const [schedule, setSchedule] = useState<ScheduleValue>({
+    sync_enabled: false,
+    sync_cron: "0 3 * * *",
+    scrub_enabled: false,
+    scrub_cron: "0 4 * * 0",
+  });
   const [preview, setPreview] = useState<string | null>(null);
   const [busy, setBusy] = useState<"" | "preview" | "save" | "apply">("");
   const [errors, setErrors] = useState<string[]>([]);
@@ -64,6 +71,14 @@ export function SnapraidEditor({
     const scrub = (config.scrub as Record<string, unknown>) ?? {};
     setPercent(scrub.percent != null ? String(scrub.percent) : "");
     setAgeDays(scrub.age_days != null ? String(scrub.age_days) : "");
+
+    const sched = (config.schedule as Record<string, unknown>) ?? {};
+    setSchedule({
+      sync_enabled: sched.sync_enabled === true,
+      sync_cron: String(sched.sync_cron ?? "0 3 * * *"),
+      scrub_enabled: sched.scrub_enabled === true,
+      scrub_cron: String(sched.scrub_cron ?? "0 4 * * 0"),
+    });
 
     const existing: Record<string, Assignment> = {};
     for (const drive of (config.drives as Record<string, unknown>[]) ?? []) {
@@ -154,7 +169,7 @@ export function SnapraidEditor({
     const scrub = { ...((config.scrub as Record<string, unknown>) ?? {}) };
     if (percent.trim() !== "") scrub.percent = Number(percent);
     if (ageDays.trim() !== "") scrub.age_days = Number(ageDays);
-    return { ...config, enabled: true, drives, scrub };
+    return { ...config, enabled: true, drives, scrub, schedule };
   };
 
   const onPreview = async () => {
@@ -295,6 +310,8 @@ export function SnapraidEditor({
           />
         </label>
       </div>
+
+      <SnapraidSchedule onChange={setSchedule} value={schedule} />
 
       {errors.length ? (
         <ul className="space-y-1 rounded-md bg-danger/10 p-2" data-snapraid-errors>

@@ -79,7 +79,7 @@ v2 UI gaps (all in `frontend/src/pages/storage-page.tsx` + `frontend/src/lib/sto
 | 3 | PH4-003 Parameterized commands + confirm + live progress | PH4-001 | Yes | In progress |
 | 4 | PH4-004 SnapRAID guided config editor | PH4-001 | Yes | In progress |
 | 5 | PH4-005 MergerFS pool editor | PH4-001 | Yes | In progress |
-| 6 | PH4-006 Schedules + pre-sync safety gate | PH4-003, PH4-004 | No | Planned |
+| 6 | PH4-006 Schedules + pre-sync safety gate | PH4-003, PH4-004 | No | In progress |
 | 7 | PH4-007 E2E parity + release signoff | all | Yes | Planned |
 
 ---

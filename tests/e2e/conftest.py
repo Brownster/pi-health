@@ -649,6 +649,18 @@ def install_v2_storage_api_mocks():
             if path == "/api/storage/plugins/snapraid/config" and method == "POST":
                 _json_fulfill(route, {"status": "saved", "config": {"enabled": True, "drives": []}})
                 return
+            if path == "/api/storage/plugins/snapraid/commands/sync" and method == "POST":
+                body = route.request.post_data or "{}"
+                forced = '"force": true' in body or '"force":true' in body
+                if forced:
+                    sse = 'data: {"type": "complete", "success": true, "message": "sync done"}\n\n'
+                else:
+                    sse = (
+                        'data: {"type": "output", "line": "WARNING: 51 files removed (threshold: 50)"}\n\n'
+                        'data: {"type": "complete", "success": false, "data": {"force_allowed": true}}\n\n'
+                    )
+                route.fulfill(status=200, content_type="text/event-stream", body=sse)
+                return
             if path == "/api/disks" and method == "GET":
                 _json_fulfill(route, disks_inventory)
                 return

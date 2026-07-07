@@ -86,9 +86,34 @@ def test_v2_snapraid_guided_editor(
     page.get_by_role("button", name="Preview").click()
     expect(page.locator("[data-snapraid-preview]")).to_contain_text("parity", timeout=10000)
 
+    # Schedule section (PH4-006): enabling sync reveals the cron row.
+    expect(page.locator("[data-snapraid-schedule]")).to_be_visible()
+    page.check("input[data-schedule-enabled='sync']")
+    expect(page.locator("input[data-schedule-cron='sync']")).to_be_visible()
+
     # Advanced tab still exposes the raw JSON editor (fallback / third-party parity).
     page.click("button[data-config-view='advanced']")
     expect(page.locator("#v2-plugin-config-textarea")).to_be_visible()
+
+
+def test_v2_snapraid_pre_sync_threshold_gate(
+    page: Page,
+    v2_server,
+    v2_login,
+    install_v2_storage_api_mocks,
+):
+    base_url = v2_server["base_url"]
+    _open_v2_storage(page, base_url, "pools", v2_login, install_v2_storage_api_mocks)
+
+    # Open the SnapRAID detail and run Sync; the mock aborts over the delete threshold.
+    page.click("button[data-pool-action='details'][data-plugin='snapraid']")
+    page.click("button[data-plugin-command='sync']")
+    expect(page.locator("[data-command-threshold]")).to_be_visible(timeout=10000)
+    expect(page.locator("#v2-plugin-command-output")).to_contain_text("51 files removed")
+
+    # "Run anyway" retries with force and succeeds.
+    page.click("button[data-command-force]")
+    expect(page.locator("[data-command-summary]")).to_contain_text("Completed", timeout=10000)
 
 
 def test_v2_mergerfs_pool_editor(
