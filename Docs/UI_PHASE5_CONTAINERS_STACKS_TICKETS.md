@@ -59,7 +59,7 @@ Structural gaps:
 |---|---|---|---|---|
 | 1 | PH5-001 Backend additive surface (stack label, inspect, dry-run validate) | — | Yes | Complete (2026-07-07) |
 | 2 | PH5-002 Stack lifecycle UI: create / delete / scan | — | Yes | Complete (2026-07-07) |
-| 3 | PH5-003 Compose/env editor upgrades + restore preview | PH5-001 | Yes | Planned |
+| 3 | PH5-003 Compose/env editor upgrades + restore preview | PH5-001 | Yes | Complete (2026-07-07) |
 | 4 | PH5-004 Container detail drawer + healthcheck + logs QoL | PH5-001 | Yes | Planned |
 | 5 | PH5-005 Stack<->container linking + VPN-group awareness | PH5-001 | No | Planned |
 | 6 | PH5-006 Update workflow: check-all + provider-safe updates | PH5-005 | No | Planned |
@@ -169,6 +169,13 @@ Estimate: 1 day
 1. Invalid YAML/compose is flagged before saving; save still enforces server-side.
 2. Restore shows what will change before it happens.
 3. Dirty editors cannot be dismissed silently.
+
+Completed 2026-07-07 in `ea3f90b`. The editor now loads compose, environment, filename, and status
+through one stack-details request; Compose has an explicit dry-run Validate action with inline
+server errors; and dirty close or tab changes require confirmation. Backup restore fetches content
+first and renders current/backup panes with changed lines highlighted before the destructive
+confirmation. Validation: TypeScript and production build pass, initial JS is `111.24 kB` gzip,
+and the updated stacks E2E suite is `7 passed` across desktop, phone, and tablet.
 
 ---
 
