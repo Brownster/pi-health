@@ -111,8 +111,10 @@ def test_v2_snapraid_pre_sync_threshold_gate(
     expect(page.locator("[data-command-threshold]")).to_be_visible(timeout=10000)
     expect(page.locator("#v2-plugin-command-output")).to_contain_text("51 files removed")
 
-    # "Run anyway" retries with force and succeeds.
+    # "Run anyway" retries with force; the run:pos tag (string values) drives the
+    # progress bar — the regression that finding 1 fixed.
     page.click("button[data-command-force]")
+    expect(page.locator("[data-command-progress]")).to_contain_text("42%", timeout=10000)
     expect(page.locator("[data-command-summary]")).to_contain_text("Completed", timeout=10000)
 
 

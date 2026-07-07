@@ -74,12 +74,12 @@ v2 UI gaps (all in `frontend/src/pages/storage-page.tsx` + `frontend/src/lib/sto
 ## Execution Order and Dependencies
 | Order | Ticket | Depends On | Critical Path | Status |
 |---|---|---|---|---|
-| 1 | PH4-001 Backend surface: command param metadata + typed status | — | Yes | In progress |
-| 2 | PH4-002 Pools tab: SnapRAID + MergerFS status cards | PH4-001 | Yes | In progress |
-| 3 | PH4-003 Parameterized commands + confirm + live progress | PH4-001 | Yes | In progress |
-| 4 | PH4-004 SnapRAID guided config editor | PH4-001 | Yes | In progress |
-| 5 | PH4-005 MergerFS pool editor | PH4-001 | Yes | In progress |
-| 6 | PH4-006 Schedules + pre-sync safety gate | PH4-003, PH4-004 | No | In progress |
+| 1 | PH4-001 Backend surface: command param metadata + typed status | — | Yes | Complete |
+| 2 | PH4-002 Pools tab: SnapRAID + MergerFS status cards | PH4-001 | Yes | Complete |
+| 3 | PH4-003 Parameterized commands + confirm + live progress | PH4-001 | Yes | Complete |
+| 4 | PH4-004 SnapRAID guided config editor | PH4-001 | Yes | Complete |
+| 5 | PH4-005 MergerFS pool editor | PH4-001 | Yes | Complete |
+| 6 | PH4-006 Schedules + pre-sync safety gate | PH4-003, PH4-004 | No | Complete |
 | 7 | PH4-007 E2E parity + release signoff | all | Yes | Planned |
 
 ---
@@ -305,6 +305,31 @@ Estimate: 1 day
 2. Signoff doc records evidence and any deferred items.
 
 ---
+
+## Phase 4 review fixes (2026-07-07)
+
+Post-PH4-006 review found and fixed:
+1. **Live progress never rendered** — `run:pos` tag values arrive as strings, but the runner
+   required `typeof === "number"`. Now coerced with `Number()`. E2E now emits string-valued tag
+   events and asserts the progress percent.
+2. **SnapRAID editor dropped unmounted configured drives** — `buildConfig` built drives only from the
+   live `/mnt` inventory. Configured drives missing from the inventory are now kept as `missing`
+   rows and preserved on save.
+3. **Multi-parity was broken** — `parity_level` was hardcoded to `1`. Parity drives now get levels
+   `1..N` in assignment order.
+4. **Preview 500 on malformed input** — the `config-preview` route now wraps `preview_config` and
+   returns `400` (was an unguarded `KeyError` → 500).
+6. **Failed runs showed no reason** — the completion summary now reads `message || error` (the route
+   already streams `error`).
+- Minor: SnapRAID Apply gained a confirm step (parity with MergerFS), since it writes
+  `/etc/snapraid.conf`.
+
+Deferred to its own ticket (pre-existing, surfaced by the review):
+- **Helper 30s client timeout on the synchronous path.** On real hardware a `sync`/`scrub` longer
+  than ~30s raises `HelperError` in the UI while snapraid keeps running as root, and tags are only
+  parsed after completion on the helper path — so "live progress" is only realised on the dev
+  (non-helper) path. PH4-007 must include a real-hardware sync smoke test; the fix (per-command
+  timeout or routing long runs through the streaming path) is a separate ticket.
 
 ## Out of scope (deferred)
 - SnapRAID `fix -m`/`-e` recovery filters UI (roadmap §4) — revisit after PH4-003 ships the

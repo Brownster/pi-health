@@ -18,6 +18,7 @@ interface Candidate {
   name: string;
   sizeLabel: string | null;
   sizeGb: number | null;
+  missing?: boolean; // configured but not currently mounted
 }
 
 interface Assignment {
@@ -65,6 +66,7 @@ export function SnapraidEditor({
   const [busy, setBusy] = useState<"" | "preview" | "save" | "apply">("");
   const [errors, setErrors] = useState<string[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
+  const [confirmApply, setConfirmApply] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -109,6 +111,22 @@ export function SnapraidEditor({
               name: mountBasename(mount),
               sizeLabel: entry.size,
               sizeGb: parseSizeGb(entry.size),
+            });
+          }
+        }
+        // Keep configured drives that are not currently mounted so a dead/unmounted
+        // disk (the exact failure SnapRAID protects against) is preserved, not dropped.
+        const foundPaths = new Set(found.map((candidate) => candidate.path));
+        for (const drive of (config.drives as Record<string, unknown>[]) ?? []) {
+          const path = String(drive.path ?? "");
+          if (path && !foundPaths.has(path)) {
+            found.push({
+              path,
+              uuid: String(drive.uuid ?? ""),
+              name: String(drive.name ?? mountBasename(path)),
+              sizeLabel: null,
+              sizeGb: null,
+              missing: true,
             });
           }
         }
@@ -157,15 +175,22 @@ export function SnapraidEditor({
   }, [assignedDrives]);
 
   const buildConfig = (): Record<string, unknown> => {
-    const drives = assignedDrives.map((row) => ({
-      id: row.candidate.name,
-      name: row.candidate.name,
-      path: row.candidate.path,
-      uuid: row.candidate.uuid,
-      role: row.assignment.role,
-      content: row.assignment.content,
-      ...(row.assignment.role === "parity" ? { parity_level: 1 } : {}),
-    }));
+    let parityLevel = 0;
+    const drives = assignedDrives.map((row) => {
+      const base = {
+        id: row.candidate.name,
+        name: row.candidate.name,
+        path: row.candidate.path,
+        uuid: row.candidate.uuid,
+        role: row.assignment.role,
+        content: row.assignment.content,
+      };
+      if (row.assignment.role === "parity") {
+        parityLevel += 1; // 1..N so multiple parity drives don't collide
+        return { ...base, parity_level: parityLevel };
+      }
+      return base;
+    });
     const scrub = { ...((config.scrub as Record<string, unknown>) ?? {}) };
     if (percent.trim() !== "") scrub.percent = Number(percent);
     if (ageDays.trim() !== "") scrub.age_days = Number(ageDays);
@@ -199,6 +224,7 @@ export function SnapraidEditor({
   };
 
   const onApply = async () => {
+    setConfirmApply(false);
     setBusy("apply");
     setErrors([]);
     setNotice(null);
@@ -233,14 +259,21 @@ export function SnapraidEditor({
               const assignment = assignments[candidate.path] ?? { role: "none", content: false };
               return (
                 <li
-                  className="flex flex-wrap items-center gap-2 rounded-md border border-border/70 p-2 text-sm"
+                  className={`flex flex-wrap items-center gap-2 rounded-md border p-2 text-sm ${
+                    candidate.missing ? "border-warning/40 bg-warning/5" : "border-border/70"
+                  }`}
                   data-drive={candidate.path}
+                  data-drive-missing={candidate.missing ? "true" : undefined}
                   key={candidate.path}
                 >
                   <HardDrive aria-hidden="true" className="h-4 w-4 shrink-0 text-muted-foreground" />
                   <span className="min-w-0 flex-1 truncate">
                     {candidate.path}
-                    <span className="ml-2 text-xs text-muted-foreground">{candidate.sizeLabel ?? ""}</span>
+                    {candidate.missing ? (
+                      <span className="ml-2 text-xs font-medium text-warning">missing (not mounted)</span>
+                    ) : (
+                      <span className="ml-2 text-xs text-muted-foreground">{candidate.sizeLabel ?? ""}</span>
+                    )}
                   </span>
                   <select
                     aria-label={`Role for ${candidate.path}`}
@@ -340,13 +373,31 @@ export function SnapraidEditor({
         <Button
           data-snapraid-apply
           disabled={busy !== ""}
-          onClick={() => void onApply()}
+          onClick={() => setConfirmApply(true)}
           size="sm"
           variant="secondary"
         >
           {busy === "apply" ? "Applying..." : "Apply"}
         </Button>
       </div>
+
+      {confirmApply ? (
+        <div className="space-y-2 rounded-md border border-warning/40 bg-warning/10 p-3 text-xs" data-snapraid-apply-confirm>
+          <p className="flex items-center gap-1.5 font-medium text-warning">
+            <AlertTriangle aria-hidden="true" className="h-4 w-4" />
+            Apply writes /etc/snapraid.conf from the saved config. Save first if you have unsaved
+            changes. Continue?
+          </p>
+          <div className="flex gap-2">
+            <Button data-snapraid-apply-confirm-yes onClick={() => void onApply()} size="sm" variant="danger">
+              Apply
+            </Button>
+            <Button onClick={() => setConfirmApply(false)} size="sm" variant="outline">
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : null}
 
       {preview !== null ? (
         <div className="space-y-1" data-snapraid-preview>

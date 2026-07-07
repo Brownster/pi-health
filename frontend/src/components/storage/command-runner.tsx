@@ -122,14 +122,15 @@ export function CommandRunner({
           }
           if (event.type === "tag") {
             if (event.name === "run" && event.values?.[0] === "pos") {
+              // Tag values arrive as strings (from the log-tag parser); coerce.
+              const toNum = (x: unknown) => {
+                const n = Number(x);
+                return Number.isFinite(n) ? n : null;
+              };
               const v = event.values;
               return {
                 ...current,
-                progress: {
-                  percent: typeof v[4] === "number" ? v[4] : null,
-                  eta: typeof v[5] === "number" ? v[5] : null,
-                  speed: typeof v[6] === "number" ? v[6] : null,
-                },
+                progress: { percent: toNum(v[4]), eta: toNum(v[5]), speed: toNum(v[6]) },
               };
             }
             if (event.name === "msg" && (event.values?.[0] === "error" || event.values?.[0] === "fatal")) {
@@ -145,7 +146,7 @@ export function CommandRunner({
               forceAvailable: !event.success && data?.force_allowed === true,
               summary: {
                 success: Boolean(event.success),
-                message: String(event.message ?? ""),
+                message: String(event.message || event.error || ""),
                 data,
               },
             };

@@ -626,3 +626,18 @@ def test_snapraid_command_defaults_stream_tags_and_audit(authenticated_client, m
 
     assert recorded["params"]["stream_tags"] is True
     assert recorded["params"]["_audit_user"]
+
+
+def test_config_preview_malformed_returns_400(authenticated_client, monkeypatch):
+    plugin = Mock()
+    plugin.preview_config.side_effect = KeyError("path")
+    registry = Mock()
+    registry.get.return_value = plugin
+    monkeypatch.setattr("storage_plugins.get_registry", lambda: registry)
+
+    response = authenticated_client.post(
+        "/api/storage/plugins/snapraid/config-preview",
+        data=json.dumps({"drives": [{}]}),
+        content_type="application/json",
+    )
+    assert response.status_code == 400

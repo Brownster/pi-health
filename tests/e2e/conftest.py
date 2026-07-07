@@ -653,7 +653,13 @@ def install_v2_storage_api_mocks():
                 body = route.request.post_data or "{}"
                 forced = '"force": true' in body or '"force":true' in body
                 if forced:
-                    sse = 'data: {"type": "complete", "success": true, "message": "sync done"}\n\n'
+                    # run:pos tag values are strings in production (from the log-tag parser);
+                    # values[4]=percent, [5]=eta, [6]=speed.
+                    sse = (
+                        'data: {"type": "tag", "name": "run", "values": '
+                        '["pos", "0", "0", "0", "42", "120", "3.5", "0", "0"]}\n\n'
+                        'data: {"type": "complete", "success": true, "message": "sync done"}\n\n'
+                    )
                 else:
                     sse = (
                         'data: {"type": "output", "line": "WARNING: 51 files removed (threshold: 50)"}\n\n'

@@ -178,7 +178,11 @@ def preview_plugin_config(plugin_id: str):
         return jsonify({"error": f"Plugin not found: {plugin_id}"}), 404
 
     config = request.get_json() or {}
-    preview = plugin.preview_config(config)
+    try:
+        preview = plugin.preview_config(config)
+    except Exception as exc:
+        # Malformed candidate config (e.g. a drive without a path) must not 500.
+        return jsonify({"error": f"Invalid config: {exc}"}), 400
     if preview is None:
         return jsonify({"error": "Plugin does not support config preview"}), 400
 
