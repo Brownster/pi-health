@@ -91,6 +91,34 @@ def test_v2_snapraid_guided_editor(
     expect(page.locator("#v2-plugin-config-textarea")).to_be_visible()
 
 
+def test_v2_mergerfs_pool_editor(
+    page: Page,
+    v2_server,
+    v2_login,
+    install_v2_storage_api_mocks,
+):
+    base_url = v2_server["base_url"]
+    _open_v2_storage(page, base_url, "pools", v2_login, install_v2_storage_api_mocks)
+
+    # Unconfigured MergerFS -> Set up opens the modal on the guided pool editor.
+    page.click("button[data-pool-action='setup'][data-plugin='mergerfs']")
+    expect(page.locator("[data-mergerfs-editor]")).to_be_visible()
+
+    # Build a two-branch pool without JSON.
+    page.click("button[data-pool-add]")
+    page.locator("input[data-pool-name]").fill("media")
+    page.click("button[data-pool-branch-add$=':/mnt/disk1']")
+    page.click("button[data-pool-branch-add$=':/mnt/parity']")
+    page.click("button[data-mergerfs-save]")
+    expect(page.get_by_text("Saved.")).to_be_visible(timeout=10000)
+
+    # Apply warns about the fstab rewrite before proceeding.
+    page.click("button[data-mergerfs-apply]")
+    expect(page.locator("[data-apply-confirm]")).to_contain_text("fstab")
+    page.click("button[data-apply-confirm-yes]")
+    expect(page.get_by_text("Applied")).to_be_visible(timeout=10000)
+
+
 def test_v2_storage_tab_syncs_with_shell_nav(
     page: Page,
     v2_server,
@@ -175,6 +203,9 @@ def test_v2_storage_config_editor(
 
     page.click("button[data-plugin-action='details'][data-plugin='mergerfs']")
     expect(page.locator("#v2-plugin-detail-modal")).to_be_visible()
+
+    # Pool plugins default to the guided editor; the raw JSON editor is the Advanced tab.
+    page.click("button[data-config-view='advanced']")
 
     # Config editor is seeded with the plugin's JSON config and saves via /config.
     config_box = page.locator("#v2-plugin-config-textarea")

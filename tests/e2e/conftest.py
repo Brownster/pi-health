@@ -655,6 +655,9 @@ def install_v2_storage_api_mocks():
             if path.startswith("/api/storage/plugins/") and path.endswith("/toggle") and method == "POST":
                 _json_fulfill(route, {"status": "ok", "enabled": True})
                 return
+            if path.startswith("/api/storage/plugins/") and path.endswith("/apply") and method == "POST":
+                _json_fulfill(route, {"status": "applied", "message": "Applied"})
+                return
             if path.startswith("/api/storage/plugins/") and path.endswith("/remove") and method == "DELETE":
                 _json_fulfill(route, {"status": "removed"})
                 return

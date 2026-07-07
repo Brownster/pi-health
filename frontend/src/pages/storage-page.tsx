@@ -17,6 +17,7 @@ import {
 } from "@/components/storage/mergerfs-pool-card";
 import { CommandRunner } from "@/components/storage/command-runner";
 import { SnapraidEditor } from "@/components/storage/snapraid-editor";
+import { MergerfsEditor } from "@/components/storage/mergerfs-editor";
 import { mergerfsPools } from "@/lib/pools";
 import { Button } from "@/components/ui/button";
 import {
@@ -709,7 +710,7 @@ export function StoragePage() {
                   ) : null}
 
                   <div className="space-y-2" id="v2-plugin-config">
-                    {detailModal.detail.id === "snapraid" ? (
+                    {["snapraid", "mergerfs"].includes(detailModal.detail.id) ? (
                       <div className="flex flex-wrap gap-2">
                         <Button
                           data-config-view="guided"
@@ -730,12 +731,21 @@ export function StoragePage() {
                       </div>
                     ) : null}
 
-                    {detailModal.detail.id === "snapraid" && configView === "guided" ? (
-                      <SnapraidEditor
-                        config={detailModal.detail.config}
-                        onSaved={() => void loadPlugins("manual")}
-                        pluginId="snapraid"
-                      />
+                    {["snapraid", "mergerfs"].includes(detailModal.detail.id) &&
+                    configView === "guided" ? (
+                      detailModal.detail.id === "snapraid" ? (
+                        <SnapraidEditor
+                          config={detailModal.detail.config}
+                          onSaved={() => void loadPlugins("manual")}
+                          pluginId="snapraid"
+                        />
+                      ) : (
+                        <MergerfsEditor
+                          config={detailModal.detail.config}
+                          onSaved={() => void loadPlugins("manual")}
+                          pluginId="mergerfs"
+                        />
+                      )
                     ) : (
                     <>
                     <p className="text-xs uppercase tracking-wide text-muted-foreground">
