@@ -109,6 +109,42 @@ def test_v2_containers_lifecycle_action_feedback(
     assert_no_horizontal_overflow(page, f"v2 lifecycle feedback ({viewport_profile_name})")
 
 
+def test_v2_container_detail_health_and_env_reveal(
+    page: Page,
+    v2_server,
+    v2_login,
+    install_v2_containers_api_mocks,
+):
+    base_url = v2_server["base_url"]
+    _open_v2_containers(page, base_url, v2_login, install_v2_containers_api_mocks)
+
+    page.get_by_role("button", name="v2-mock-service").first.click()
+    detail = page.locator("#v2-container-detail")
+    expect(detail).to_be_visible()
+    expect(detail).to_contain_text("probe ok")
+    expect(detail).to_contain_text("TOKEN")
+    expect(detail).not_to_contain_text("secret-token")
+    detail.get_by_role("button", name="Reveal").first.click()
+    expect(detail).to_contain_text("secret-token", timeout=10000)
+
+
+def test_v2_container_logs_tail_refresh_controls(
+    page: Page,
+    v2_server,
+    v2_login,
+    install_v2_containers_api_mocks,
+):
+    base_url = v2_server["base_url"]
+    _open_v2_containers(page, base_url, v2_login, install_v2_containers_api_mocks)
+    page.locator("button[data-diagnostic-action='logs']:visible").first.click()
+
+    page.locator("#v2-logs-tail").select_option("1000")
+    expect(page.locator("#v2-logs-content")).to_contain_text("line 3", timeout=10000)
+    page.get_by_role("button", name="Auto-refresh off").click()
+    expect(page.get_by_role("button", name="Auto-refresh on")).to_be_visible()
+    expect(page.get_by_role("button", name="Download")).to_be_enabled()
+
+
 def test_v2_containers_stopped_filter_includes_exited(
     profiled_page: Page,
     viewport_profile_name: str,

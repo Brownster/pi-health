@@ -8,6 +8,8 @@ import {
 } from "lucide-react";
 
 import { StatusBadge } from "@/components/ui/badge";
+import { ContainerDetail } from "@/components/containers/container-detail";
+import { LogViewerModal } from "@/components/log-viewer-modal";
 import {
   ACTION_META,
   ContainerList,
@@ -53,15 +55,6 @@ type ActionNotice = {
   message: string;
   tone: "info" | "success" | "error";
 };
-
-interface LogsModalState {
-  open: boolean;
-  status: AsyncStatus;
-  containerId: string | null;
-  containerName: string;
-  logs: string;
-  error: string | null;
-}
 
 interface ContainerNetworkModalState {
   open: boolean;
@@ -157,14 +150,8 @@ export function ContainersPage() {
   const [pendingActions, setPendingActions] = useState<
     Record<string, ContainerAction>
   >({});
-  const [logsModal, setLogsModal] = useState<LogsModalState>({
-    open: false,
-    status: "idle",
-    containerId: null,
-    containerName: "",
-    logs: "",
-    error: null,
-  });
+  const [logsTarget, setLogsTarget] = useState<ContainerSummary | null>(null);
+  const [detailTarget, setDetailTarget] = useState<ContainerSummary | null>(null);
   const [containerNetworkModal, setContainerNetworkModal] =
     useState<ContainerNetworkModalState>({
       open: false,
@@ -388,49 +375,15 @@ export function ContainersPage() {
   );
 
   const closeLogsModal = useCallback(() => {
-    setLogsModal((current) => ({ ...current, open: false }));
+    setLogsTarget(null);
   }, []);
 
   const closeContainerNetworkModal = useCallback(() => {
     setContainerNetworkModal((current) => ({ ...current, open: false }));
   }, []);
 
-  const onOpenLogs = useCallback(async (container: ContainerSummary) => {
-    setLogsModal({
-      open: true,
-      status: "loading",
-      containerId: container.id,
-      containerName: container.name,
-      logs: "",
-      error: null,
-    });
-
-    try {
-      const result = await fetchContainerLogs(container.id);
-      if (!isMountedRef.current) {
-        return;
-      }
-      setLogsModal({
-        open: true,
-        status: "ready",
-        containerId: container.id,
-        containerName: result.container || container.name,
-        logs: result.logs || "No logs available.",
-        error: null,
-      });
-    } catch (caughtError) {
-      if (!isMountedRef.current) {
-        return;
-      }
-      setLogsModal({
-        open: true,
-        status: "error",
-        containerId: container.id,
-        containerName: container.name,
-        logs: "",
-        error: getErrorMessage(caughtError),
-      });
-    }
+  const onOpenLogs = useCallback((container: ContainerSummary) => {
+    setLogsTarget(container);
   }, []);
 
   const onOpenContainerNetworkTest = useCallback(
@@ -781,6 +734,7 @@ export function ContainersPage() {
             containers={filteredContainers}
             networkRates={networkRates}
             onAction={onContainerAction}
+            onOpenDetails={setDetailTarget}
             onOpenLogs={onOpenLogs}
             onOpenNetworkTest={onOpenContainerNetworkTest}
             pendingActions={pendingActions}
@@ -788,51 +742,20 @@ export function ContainersPage() {
         </>
       ) : null}
 
-      {logsModal.open ? (
-        <ModalOverlay onClose={closeLogsModal}>
-          <Card
-            aria-labelledby="v2-logs-modal-title"
-            aria-modal="true"
-            className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden"
-            id="v2-logs-modal"
-            role="dialog"
-          >
-            <CardHeader className="flex flex-row items-start justify-between gap-3 border-b border-border/70 p-4 sm:p-5">
-              <div className="space-y-1">
-                <CardTitle
-                  id="v2-logs-modal-title"
-                  className="text-base sm:text-lg"
-                >
-                  Container Logs: {logsModal.containerName}
-                </CardTitle>
-                <CardDescription>
-                  Tail output from `/api/containers/&lt;id&gt;/logs`.
-                </CardDescription>
-              </div>
-              <Button
-                id="v2-logs-modal-close"
-                onClick={closeLogsModal}
-                variant="outline"
-              >
-                Close
-              </Button>
-            </CardHeader>
-            <CardContent className="p-0">
-              <div className="max-h-[calc(90vh-6rem)] overflow-auto p-4">
-                <pre
-                  className="rounded-lg border border-border/70 bg-muted/25 p-3 whitespace-pre-wrap break-words text-xs sm:text-sm"
-                  id="v2-logs-content"
-                >
-                  {logsModal.status === "loading"
-                    ? "Loading logs..."
-                    : logsModal.status === "error"
-                      ? logsModal.error || "Failed to load logs"
-                      : logsModal.logs || "No logs available."}
-                </pre>
-              </div>
-            </CardContent>
-          </Card>
-        </ModalOverlay>
+      {logsTarget ? (
+        <LogViewerModal
+          closeId="v2-logs-modal-close"
+          description="Container log snapshot with optional five-second refresh."
+          filename={`${logsTarget.name}.log`}
+          idPrefix="v2-logs"
+          load={async (tail) => (await fetchContainerLogs(logsTarget.id, tail)).logs}
+          onClose={closeLogsModal}
+          title={`Container Logs: ${logsTarget.name}`}
+        />
+      ) : null}
+
+      {detailTarget ? (
+        <ContainerDetail container={detailTarget} onClose={() => setDetailTarget(null)} />
       ) : null}
 
       {containerNetworkModal.open ? (

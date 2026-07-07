@@ -154,6 +154,7 @@ type ListProps = {
   pendingActions: Record<string, ContainerAction>;
   onAction: (container: ContainerSummary, action: ContainerAction) => void;
   onOpenLogs: (container: ContainerSummary) => void;
+  onOpenDetails: (container: ContainerSummary) => void;
   onOpenNetworkTest: (container: ContainerSummary) => void;
 };
 
@@ -302,6 +303,7 @@ export function ContainerList(props: ListProps) {
     pendingActions,
     onAction,
     onOpenLogs,
+    onOpenDetails,
     onOpenNetworkTest,
   } = props;
   return (
@@ -340,9 +342,26 @@ export function ContainerList(props: ListProps) {
                   <tr key={container.id}>
                     <td className="px-4 py-3">
                       <div className="flex min-w-0 items-center gap-2">
-                        <span className="truncate font-medium">
+                        <button
+                          className="truncate font-medium text-primary hover:underline"
+                          onClick={() => onOpenDetails(container)}
+                        >
                           {container.name}
-                        </span>
+                        </button>
+                        {container.health ? (
+                          <span
+                            aria-label={`Health ${container.health}`}
+                            className={cn(
+                              "h-2.5 w-2.5 shrink-0 rounded-full",
+                              container.health === "healthy"
+                                ? "bg-success"
+                                : container.health === "unhealthy"
+                                  ? "bg-danger"
+                                  : "bg-warning",
+                            )}
+                            title={`Health: ${container.health}`}
+                          />
+                        ) : null}
                         {container.update_available ? (
                           <span
                             aria-label="Update available"
@@ -415,9 +434,12 @@ export function ContainerList(props: ListProps) {
               <CardContent className="space-y-3 p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold">
+                    <button
+                      className="truncate text-left text-sm font-semibold text-primary hover:underline"
+                      onClick={() => onOpenDetails(container)}
+                    >
                       {container.name}
-                    </p>
+                    </button>
                     <p className="line-clamp-2 break-all text-xs text-muted-foreground">
                       {container.image}
                     </p>

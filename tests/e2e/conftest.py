@@ -11,7 +11,7 @@ import os
 from pathlib import Path
 from urllib import error as urlerror
 from urllib import request as urlrequest
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 from playwright.sync_api import Page, expect
 
 # The full e2e run spawns a fresh app server per v2 test (viewport x mode matrix), so under
@@ -252,6 +252,8 @@ def install_v2_containers_api_mocks():
                 "name": "v2-mock-service",
                 "image": "linuxserver/mock:latest",
                 "status": "running",
+                "health": "healthy",
+                "stack": "media",
                 "cpu_percent": 7.5,
                 "memory_percent": 22.1,
                 "memory_used": 380000000,
@@ -287,6 +289,44 @@ def install_v2_containers_api_mocks():
                             "net_tx": 2345000,
                         }
                     },
+                )
+                return
+
+            if path == f"/api/containers/{V2_MOCK_CONTAINER_ID}" and method == "GET":
+                include_values = parse_qs(parsed.query).get("env") == ["full"]
+                environment = [{"key": "TOKEN"}, {"key": "TZ"}]
+                if include_values:
+                    environment = [
+                        {"key": "TOKEN", "value": "secret-token"},
+                        {"key": "TZ", "value": "Europe/London"},
+                    ]
+                _json_fulfill(
+                    route,
+                    {
+                        "id": V2_MOCK_CONTAINER_ID,
+                        "name": "v2-mock-service",
+                        "status": "running",
+                        "stack": "media",
+                        "image": "linuxserver/mock:latest",
+                        "image_id": "sha256:mock",
+                        "image_tags": ["linuxserver/mock:latest"],
+                        "image_digests": ["linuxserver/mock@sha256:digest"],
+                        "created": "2026-07-07T08:00:00Z",
+                        "started_at": "2026-07-07T09:00:00Z",
+                        "uptime_seconds": 3600,
+                        "restart_policy": {"Name": "unless-stopped"},
+                        "mounts": [{"type": "bind", "source": "/mnt/media", "destination": "/media", "mode": "rw", "rw": True}],
+                        "networks": [{"name": "media", "ip_address": "172.18.0.2", "gateway": "172.18.0.1", "mac_address": None, "aliases": []}],
+                        "command": ["serve"],
+                        "environment": environment,
+                    },
+                )
+                return
+
+            if path == f"/api/containers/{V2_MOCK_CONTAINER_ID}/health" and method == "GET":
+                _json_fulfill(
+                    route,
+                    {"status": "healthy", "failing_streak": 0, "last_output": "probe ok"},
                 )
                 return
 

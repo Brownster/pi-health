@@ -17,6 +17,7 @@ export interface ContainerSummary {
   status: string;
   image: string;
   stack: string | null;
+  health: string | null;
   update_available: boolean;
   ports: ContainerPortBinding[];
   cpu_percent: number | null;
@@ -67,6 +68,15 @@ export interface ContainerInspect {
   networks: ContainerNetwork[];
   command: string[];
   environment: ContainerEnvironmentVariable[];
+}
+
+export interface ContainerHealth {
+  status: string;
+  failing_streak: number;
+  last_output: string;
+  last_exit_code: number | null;
+  last_started_at: string | null;
+  last_finished_at: string | null;
 }
 
 interface FetchContainersOptions {
@@ -145,6 +155,7 @@ function normalizeContainer(
     status: String(container?.status ?? "unknown"),
     image: String(container?.image ?? "unknown"),
     stack: toNullableString(container?.stack),
+    health: toNullableString(container?.health),
     update_available: Boolean(container?.update_available),
     ports: Array.isArray(container?.ports)
       ? container.ports.map((port) => normalizePortBinding(port))
@@ -173,6 +184,35 @@ export async function fetchContainers(
   );
 
   return payload.map((item) => normalizeContainer(item));
+}
+
+export async function fetchContainerInspect(
+  containerId: string,
+  includeEnvValues = false,
+  signal?: AbortSignal,
+): Promise<ContainerInspect> {
+  return requestApi<ContainerInspect>(
+    `/api/containers/${encodeURIComponent(containerId)}${includeEnvValues ? "?env=full" : ""}`,
+    { method: "GET", signal },
+  );
+}
+
+export async function fetchContainerHealth(
+  containerId: string,
+  signal?: AbortSignal,
+): Promise<ContainerHealth> {
+  const payload = await requestApi<Partial<ContainerHealth>>(
+    `/api/containers/${encodeURIComponent(containerId)}/health`,
+    { method: "GET", signal },
+  );
+  return {
+    status: String(payload.status ?? "none"),
+    failing_streak: toNullableNumber(payload.failing_streak) ?? 0,
+    last_output: String(payload.last_output ?? ""),
+    last_exit_code: toNullableNumber(payload.last_exit_code),
+    last_started_at: toNullableString(payload.last_started_at),
+    last_finished_at: toNullableString(payload.last_finished_at),
+  };
 }
 
 export async function runContainerAction(

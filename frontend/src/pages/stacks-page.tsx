@@ -10,6 +10,7 @@ import {
 
 import { STACK_ACTION_META, StackCard } from "@/components/stacks/stack-card";
 import { StackCreateModal } from "@/components/stacks/stack-create-modal";
+import { LogViewerModal } from "@/components/log-viewer-modal";
 import { StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -61,14 +62,6 @@ interface ConsoleModalState {
   status: ConsoleStatus;
   lines: string[];
   returncode: number | null;
-  error: string | null;
-}
-
-interface LogsModalState {
-  open: boolean;
-  status: AsyncStatus;
-  stackName: string;
-  logs: string;
   error: string | null;
 }
 
@@ -182,13 +175,7 @@ export function StacksPage() {
     returncode: null,
     error: null,
   });
-  const [logsModal, setLogsModal] = useState<LogsModalState>({
-    open: false,
-    status: "idle",
-    stackName: "",
-    logs: "",
-    error: null,
-  });
+  const [logsTarget, setLogsTarget] = useState<string | null>(null);
   const [editorModal, setEditorModal] = useState<EditorModalState>({
     open: false,
     stackName: "",
@@ -432,42 +419,12 @@ export function StacksPage() {
     });
   }, [closeStackStream, setPendingAction]);
 
-  const onLogs = useCallback(async (stack: StackSummary) => {
-    setLogsModal({
-      open: true,
-      status: "loading",
-      stackName: stack.name,
-      logs: "",
-      error: null,
-    });
-    try {
-      const result = await fetchStackLogs(stack.name);
-      if (!isMountedRef.current) {
-        return;
-      }
-      setLogsModal({
-        open: true,
-        status: "ready",
-        stackName: stack.name,
-        logs: result.logs || "No logs available.",
-        error: null,
-      });
-    } catch (caughtError) {
-      if (!isMountedRef.current) {
-        return;
-      }
-      setLogsModal({
-        open: true,
-        status: "error",
-        stackName: stack.name,
-        logs: "",
-        error: getErrorMessage(caughtError),
-      });
-    }
+  const onLogs = useCallback((stack: StackSummary) => {
+    setLogsTarget(stack.name);
   }, []);
 
   const closeLogs = useCallback(() => {
-    setLogsModal((current) => ({ ...current, open: false }));
+    setLogsTarget(null);
   }, []);
 
   const onEdit = useCallback(async (stack: StackSummary) => {
@@ -1134,51 +1091,15 @@ export function StacksPage() {
         </ModalOverlay>
       ) : null}
 
-      {logsModal.open ? (
-        <ModalOverlay onClose={closeLogs}>
-          <Card
-            aria-labelledby="v2-stack-logs-title"
-            aria-modal="true"
-            className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden"
-            id="v2-stack-logs-modal"
-            role="dialog"
-          >
-            <CardHeader className="flex flex-row items-start justify-between gap-3 border-b border-border/70 p-4 sm:p-5">
-              <div className="space-y-1">
-                <CardTitle
-                  className="text-base sm:text-lg"
-                  id="v2-stack-logs-title"
-                >
-                  Stack Logs: {logsModal.stackName}
-                </CardTitle>
-                <CardDescription>
-                  Tail output from `/api/stacks/&lt;name&gt;/logs`.
-                </CardDescription>
-              </div>
-              <Button
-                id="v2-stack-logs-close"
-                onClick={closeLogs}
-                variant="outline"
-              >
-                Close
-              </Button>
-            </CardHeader>
-            <CardContent className="p-0">
-              <div className="max-h-[calc(90vh-6rem)] overflow-auto p-4">
-                <pre
-                  className="whitespace-pre-wrap break-words rounded-lg border border-border/70 bg-muted/25 p-3 text-xs sm:text-sm"
-                  id="v2-stack-logs-content"
-                >
-                  {logsModal.status === "loading"
-                    ? "Loading logs..."
-                    : logsModal.status === "error"
-                      ? logsModal.error || "Failed to load logs"
-                      : logsModal.logs || "No logs available."}
-                </pre>
-              </div>
-            </CardContent>
-          </Card>
-        </ModalOverlay>
+      {logsTarget ? (
+        <LogViewerModal
+          description="Compose log snapshot with optional five-second refresh."
+          filename={`${logsTarget}.log`}
+          idPrefix="v2-stack-logs"
+          load={async (tail) => (await fetchStackLogs(logsTarget, tail)).logs}
+          onClose={closeLogs}
+          title={`Stack Logs: ${logsTarget}`}
+        />
       ) : null}
 
       {editorModal.open ? (
