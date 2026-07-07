@@ -87,6 +87,11 @@ from stack_read_service import StackReadService
 from stack_mutation_service import StackMutationService
 from stack_operations_service import StackOperationsService
 from container_inventory_service import ContainerInventoryService
+from container_inventory_service import (
+    ContainerInspectError,
+    ContainerInspectNotFoundError,
+    ContainerInspectUnavailableError,
+)
 from container_operations_service import ContainerOperationsService
 from network_diagnostics_service import (  # noqa: F401  (several names re-exported for tests)
     ContainerNotFoundError,
@@ -690,6 +695,24 @@ def api_container_stats_batch():
                 'net_tx': stats.get('network', {}).get('tx'),
             }
     return jsonify(result)
+
+
+@core_api.route('/api/containers/<container_id>', methods=['GET'])
+@login_required
+def api_inspect_container(container_id):
+    """Inspect a container. Pass ?env=full to return secret environment values."""
+    include_env_values = request.args.get("env", "").lower() == "full"
+    service = current_app.extensions["container_inventory_service"]
+    try:
+        return jsonify(
+            service.inspect(container_id, include_env_values=include_env_values)
+        )
+    except ContainerInspectUnavailableError as exc:
+        return jsonify({"error": str(exc)}), 503
+    except ContainerInspectNotFoundError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except ContainerInspectError as exc:
+        return jsonify({"error": str(exc)}), 500
 
 
 @core_api.route('/api/containers/<container_id>/<action>', methods=['POST'])

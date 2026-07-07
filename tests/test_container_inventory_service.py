@@ -1,6 +1,13 @@
 from types import SimpleNamespace
+from datetime import datetime, timezone
 
-from container_inventory_service import ContainerInventoryService
+import pytest
+
+from container_inventory_service import (
+    ContainerInspectNotFoundError,
+    ContainerInspectUnavailableError,
+    ContainerInventoryService,
+)
 
 
 class FakeDocker:
@@ -16,7 +23,10 @@ class FakeDocker:
         return self._containers
 
     def get_container(self, container_id):
-        return next(container for container in self._containers if container.name == container_id)
+        for container in self._containers:
+            if container.name == container_id or container.id == container_id:
+                return container
+        raise KeyError(container_id)
 
 
 def make_container(
@@ -65,6 +75,7 @@ def test_inventory_composes_metadata_and_injected_state():
             "name": "media",
             "status": "running",
             "image": "example:latest",
+            "stack": None,
             "update_available": True,
             "ports": [],
             "health": None,
@@ -131,3 +142,95 @@ def test_inventory_maps_docker_list_failure():
 
     assert result[0]["id"] == "error-listing"
     assert result[0]["image"] == "daemon unavailable"
+
+
+def test_inventory_includes_compose_project_label():
+    container = make_container()
+    container.attrs["Config"]["Labels"]["com.docker.compose.project"] = "media"
+    service = ContainerInventoryService(
+        docker=FakeDocker([container]),
+        stats_reader=lambda _container_id: None,
+        update_reader=lambda _container_id: False,
+    )
+
+    assert service.list_containers(include_stats=False)[0]["stack"] == "media"
+
+
+def test_inspect_hides_env_values_and_composes_runtime_details():
+    container = make_container()
+    container.image.id = "sha256:image"
+    container.image.attrs = {"RepoDigests": ["example@sha256:digest"]}
+    container.attrs.update(
+        {
+            "Created": "2026-07-01T10:00:00Z",
+            "Mounts": [
+                {
+                    "Type": "bind",
+                    "Source": "/mnt/media",
+                    "Destination": "/media",
+                    "Mode": "ro",
+                    "RW": False,
+                }
+            ],
+        }
+    )
+    container.attrs["Config"].update(
+        {
+            "Image": "example:latest",
+            "Cmd": ["serve", "--port", "80"],
+            "Env": ["TOKEN=secret", "MODE=prod"],
+        }
+    )
+    container.attrs["HostConfig"]["RestartPolicy"] = {"Name": "unless-stopped"}
+    container.attrs["State"].update(
+        {"Running": True, "StartedAt": "2026-07-01T11:00:00Z"}
+    )
+    container.attrs["NetworkSettings"]["Networks"] = {
+        "frontend": {"IPAddress": "172.20.0.2", "Aliases": ["media"]}
+    }
+    service = ContainerInventoryService(
+        docker=FakeDocker([container]),
+        stats_reader=lambda _container_id: None,
+        update_reader=lambda _container_id: False,
+        now_provider=lambda: datetime(2026, 7, 1, 12, 0, tzinfo=timezone.utc),
+    )
+
+    result = service.inspect(container.id)
+
+    assert result["uptime_seconds"] == 3600
+    assert result["mounts"][0]["rw"] is False
+    assert result["networks"][0]["name"] == "frontend"
+    assert result["environment"] == [{"key": "TOKEN"}, {"key": "MODE"}]
+
+
+def test_inspect_returns_env_values_only_on_explicit_opt_in():
+    container = make_container()
+    container.attrs["Config"]["Env"] = ["TOKEN=secret", "EMPTY"]
+    service = ContainerInventoryService(
+        docker=FakeDocker([container]),
+        stats_reader=lambda _container_id: None,
+        update_reader=lambda _container_id: False,
+    )
+
+    assert service.inspect(container.id, include_env_values=True)["environment"] == [
+        {"key": "TOKEN", "value": "secret"},
+        {"key": "EMPTY", "value": ""},
+    ]
+
+
+def test_inspect_classifies_unavailable_and_missing_container():
+    unavailable = ContainerInventoryService(
+        docker=FakeDocker(available=False),
+        stats_reader=lambda _container_id: None,
+        update_reader=lambda _container_id: False,
+    )
+    with pytest.raises(ContainerInspectUnavailableError):
+        unavailable.inspect("missing")
+
+    missing = ContainerInventoryService(
+        docker=FakeDocker(),
+        stats_reader=lambda _container_id: None,
+        update_reader=lambda _container_id: False,
+    )
+    with pytest.raises(ContainerInspectNotFoundError):
+        missing.inspect("missing")

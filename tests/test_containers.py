@@ -67,6 +67,35 @@ class TestListContainers:
             assert 'image' in container
 
 
+class TestContainerInspect:
+    def test_inspect_requires_auth(self, client):
+        assert client.get('/api/containers/media').status_code == 401
+
+    def test_inspect_delegates_env_opt_in(self, authenticated_client):
+        service = Mock()
+        service.inspect.return_value = {"id": "media", "environment": []}
+        authenticated_client.application.extensions["container_inventory_service"] = service
+
+        response = authenticated_client.get('/api/containers/media?env=full')
+
+        assert response.status_code == 200
+        service.inspect.assert_called_once_with("media", include_env_values=True)
+
+    def test_inspect_maps_missing_container(self, authenticated_client):
+        from container_inventory_service import ContainerInspectNotFoundError
+
+        service = Mock()
+        service.inspect.side_effect = ContainerInspectNotFoundError(
+            "Container not found: missing"
+        )
+        authenticated_client.application.extensions["container_inventory_service"] = service
+
+        response = authenticated_client.get('/api/containers/missing')
+
+        assert response.status_code == 404
+        assert response.get_json()["error"] == "Container not found: missing"
+
+
 class TestContainerStatsBatch:
     """Test batch container stats endpoint."""
 

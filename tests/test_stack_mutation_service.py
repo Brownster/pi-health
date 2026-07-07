@@ -223,6 +223,24 @@ def test_save_compose_validates_before_lock(tmp_path):
     assert events == []
 
 
+def test_validate_compose_never_locks_or_writes(tmp_path):
+    events = []
+    service = make_service(tmp_path, events=events)
+
+    assert service.validate_compose("services: {}\n") == {"status": "valid"}
+    assert events == []
+
+
+def test_validate_compose_returns_same_validation_error_as_save(tmp_path):
+    service = make_service(
+        tmp_path,
+        validator=lambda _content: "line 2: invalid service",
+    )
+
+    with pytest.raises(StackComposeValidationError, match="line 2"):
+        service.validate_compose("invalid")
+
+
 def test_save_compose_locks_backs_up_and_writes_in_order(tmp_path):
     stack_dir = write_stack(tmp_path)
     events = []

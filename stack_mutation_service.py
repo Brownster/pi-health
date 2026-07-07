@@ -133,11 +133,7 @@ class StackMutationService:
         }
 
     def save_compose(self, name: str, content: str) -> dict:
-        validation_error = self._compose_validator(content)
-        if validation_error:
-            raise StackComposeValidationError(
-                f"Compose YAML invalid: {validation_error}"
-            )
+        self.validate_compose(content)
 
         stack_dir = os.path.join(self._stacks_path_provider(), name)
         with self._lock_provider(name):
@@ -150,6 +146,15 @@ class StackMutationService:
             except Exception as exc:
                 raise StackMutationError(str(exc)) from exc
         return {"status": "saved"}
+
+    def validate_compose(self, content: str) -> dict:
+        """Validate Compose content without reading or mutating stack files."""
+        validation_error = self._compose_validator(content)
+        if validation_error:
+            raise StackComposeValidationError(
+                f"Compose YAML invalid: {validation_error}"
+            )
+        return {"status": "valid"}
 
     def save_env(self, name: str, content: str) -> dict:
         stack_dir = os.path.join(self._stacks_path_provider(), name)

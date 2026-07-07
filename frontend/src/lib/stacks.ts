@@ -108,6 +108,10 @@ export interface StackEnvResult {
   exists: boolean;
 }
 
+export interface StackComposeValidationResult {
+  status: "valid";
+}
+
 export async function fetchStackCompose(name: string, signal?: AbortSignal): Promise<StackComposeResult> {
   const payload = await requestApi<{ content?: string; filename?: string; error?: string }>(
     `/api/stacks/${encodeURIComponent(name)}/compose`,

@@ -16,6 +16,7 @@ export interface ContainerSummary {
   name: string;
   status: string;
   image: string;
+  stack: string | null;
   update_available: boolean;
   ports: ContainerPortBinding[];
   cpu_percent: number | null;
@@ -26,6 +27,46 @@ export interface ContainerSummary {
   net_tx: number | null;
   web_url: string | null;
   web_scheme: "http" | "https" | null;
+}
+
+export interface ContainerMount {
+  type: string | null;
+  source: string | null;
+  destination: string | null;
+  mode: string | null;
+  rw: boolean;
+}
+
+export interface ContainerNetwork {
+  name: string;
+  ip_address: string | null;
+  gateway: string | null;
+  mac_address: string | null;
+  aliases: string[];
+}
+
+export interface ContainerEnvironmentVariable {
+  key: string;
+  value?: string;
+}
+
+export interface ContainerInspect {
+  id: string;
+  name: string;
+  status: string;
+  stack: string | null;
+  image: string;
+  image_id: string | null;
+  image_tags: string[];
+  image_digests: string[];
+  created: string | null;
+  started_at: string | null;
+  uptime_seconds: number | null;
+  restart_policy: Record<string, unknown>;
+  mounts: ContainerMount[];
+  networks: ContainerNetwork[];
+  command: string[];
+  environment: ContainerEnvironmentVariable[];
 }
 
 interface FetchContainersOptions {
@@ -103,6 +144,7 @@ function normalizeContainer(
     name: String(container?.name ?? "Unnamed"),
     status: String(container?.status ?? "unknown"),
     image: String(container?.image ?? "unknown"),
+    stack: toNullableString(container?.stack),
     update_available: Boolean(container?.update_available),
     ports: Array.isArray(container?.ports)
       ? container.ports.map((port) => normalizePortBinding(port))

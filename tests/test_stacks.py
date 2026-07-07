@@ -1190,6 +1190,21 @@ class TestStackAdditionalRoutes:
         assert response.status_code == 200
         service.save_compose.assert_called_once_with("alpha", "services: {}\n")
 
+    def test_compose_validate_only_does_not_save(self, authenticated_client):
+        service = MagicMock()
+        service.validate_compose.return_value = {"status": "valid"}
+        authenticated_client.application.extensions["stack_mutation_service"] = service
+
+        response = authenticated_client.post(
+            "/api/stacks/alpha/compose?validate_only=true",
+            json={"content": "services: {}\n"},
+        )
+
+        assert response.status_code == 200
+        assert response.get_json() == {"status": "valid"}
+        service.validate_compose.assert_called_once_with("services: {}\n")
+        service.save_compose.assert_not_called()
+
     def test_env_save_delegates_to_mutation_service(self, authenticated_client):
         service = MagicMock()
         service.save_env.return_value = {"status": "saved"}

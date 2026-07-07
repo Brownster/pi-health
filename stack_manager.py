@@ -398,7 +398,7 @@ def api_get_compose(name):
 @stack_manager.route('/api/stacks/<name>/compose', methods=['POST'])
 @login_required
 def api_save_compose(name):
-    """Save the compose file content for a stack."""
+    """Save compose content, or validate it without writing via ?validate_only=true."""
     valid, error = validate_stack_name(name)
     if not valid:
         return jsonify({'error': error}), 400
@@ -409,6 +409,10 @@ def api_save_compose(name):
 
     service = current_app.extensions["stack_mutation_service"]
     try:
+        if request.args.get("validate_only", "false").lower() == "true" or data.get(
+            "validate_only"
+        ) is True:
+            return jsonify(service.validate_compose(data['content']))
         return jsonify(service.save_compose(name, data['content']))
     except StackComposeValidationError as exc:
         return jsonify({'error': str(exc)}), 400
