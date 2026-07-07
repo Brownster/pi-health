@@ -148,10 +148,54 @@ function NetworkCell({
   );
 }
 
+export interface VpnRoleInfo {
+  kind: "provider" | "member" | "orphaned";
+  provider: string;
+}
+
+export type VpnRoleMap = Record<string, VpnRoleInfo>;
+
+function VpnBadge({ role }: { role: VpnRoleInfo }) {
+  if (role.kind === "provider") {
+    return (
+      <span
+        className="shrink-0 rounded-full bg-sky-500/15 px-2 py-0.5 text-[0.65rem] font-medium text-sky-300"
+        data-vpn-role="provider"
+        title="VPN network provider for one or more containers"
+      >
+        VPN provider
+      </span>
+    );
+  }
+  if (role.kind === "orphaned") {
+    // The recreate flow lives on the Network page; link there rather than duplicating it.
+    return (
+      <a
+        className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-danger/15 px-2 py-0.5 text-[0.65rem] font-medium text-danger hover:underline"
+        data-vpn-role="orphaned"
+        href="/v2/network"
+        title={`Orphaned from ${role.provider} — recreate the network group`}
+      >
+        ⚠ orphaned
+      </a>
+    );
+  }
+  return (
+    <span
+      className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[0.65rem] text-muted-foreground"
+      data-vpn-role="member"
+      title={`Routed via ${role.provider}`}
+    >
+      via {role.provider}
+    </span>
+  );
+}
+
 type ListProps = {
   containers: ContainerSummary[];
   networkRates: NetworkRateMap;
   pendingActions: Record<string, ContainerAction>;
+  vpnRoles?: VpnRoleMap;
   onAction: (container: ContainerSummary, action: ContainerAction) => void;
   onOpenLogs: (container: ContainerSummary) => void;
   onOpenDetails: (container: ContainerSummary) => void;
@@ -301,6 +345,7 @@ export function ContainerList(props: ListProps) {
     containers,
     networkRates,
     pendingActions,
+    vpnRoles,
     onAction,
     onOpenLogs,
     onOpenDetails,
@@ -371,6 +416,9 @@ export function ContainerList(props: ListProps) {
                           >
                             ↻
                           </span>
+                        ) : null}
+                        {vpnRoles?.[container.name] ? (
+                          <VpnBadge role={vpnRoles[container.name]} />
                         ) : null}
                       </div>
                     </td>
@@ -443,6 +491,11 @@ export function ContainerList(props: ListProps) {
                     <p className="line-clamp-2 break-all text-xs text-muted-foreground">
                       {container.image}
                     </p>
+                    {vpnRoles?.[container.name] ? (
+                      <div className="pt-1">
+                        <VpnBadge role={vpnRoles[container.name]} />
+                      </div>
+                    ) : null}
                   </div>
                   <StatusBadge
                     className="shrink-0"

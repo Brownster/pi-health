@@ -20,6 +20,29 @@ def _open_v2_containers(page, base_url, v2_login, install_v2_containers_api_mock
     expect(page.get_by_role("heading", name="docker_containers")).to_be_visible()
 
 
+def test_v2_containers_group_by_stack_and_vpn_badge(
+    page: Page,
+    v2_server,
+    v2_login,
+    install_v2_containers_api_mocks,
+):
+    base_url = v2_server["base_url"]
+    _open_v2_containers(page, base_url, v2_login, install_v2_containers_api_mocks)
+
+    # The mock flags v2-mock-service as orphaned from its VPN provider; the badge links
+    # to the Network page recreate flow (PH5-005).
+    orphaned = page.locator("[data-vpn-role='orphaned']").first
+    expect(orphaned).to_be_visible()
+    expect(orphaned).to_have_attribute("href", "/v2/network")
+
+    # Group by stack persists and renders the container's stack as a section header.
+    page.click("button[data-group-by-stack]")
+    expect(page.locator("[data-stack-group='media']")).to_be_visible()
+    page.reload()
+    expect(page.get_by_role("heading", name="docker_containers")).to_be_visible()
+    expect(page.locator("button[data-group-by-stack]")).to_have_attribute("aria-pressed", "true")
+
+
 def _focus_is_inside(page, modal_id: str) -> bool:
     return page.evaluate(
         """(id) => {

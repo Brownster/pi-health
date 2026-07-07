@@ -41,9 +41,12 @@ import {
   runHostNetworkTest,
 } from "@/lib/containers";
 import { formatClockTime } from "@/lib/format";
+import { fetchNetworkGroups, type NetworkGroup } from "@/lib/network";
+import type { VpnRoleMap } from "@/components/containers/container-list";
 import { cn } from "@/lib/utils";
 
 const POLL_INTERVAL_MS = 10_000;
+const GROUP_BY_STACK_KEY = "pihealth.containers.groupByStack";
 const FILTER_ITEMS: Array<{ key: ContainerFilter; label: string }> = [
   { key: "all", label: "All" },
   { key: "running", label: "Running" },
@@ -152,6 +155,11 @@ export function ContainersPage() {
   >({});
   const [logsTarget, setLogsTarget] = useState<ContainerSummary | null>(null);
   const [detailTarget, setDetailTarget] = useState<ContainerSummary | null>(null);
+  const [networkGroups, setNetworkGroups] = useState<NetworkGroup[]>([]);
+  const [groupByStack, setGroupByStack] = useState<boolean>(() => {
+    if (typeof localStorage === "undefined") return false;
+    return localStorage.getItem(GROUP_BY_STACK_KEY) === "true";
+  });
   const [containerNetworkModal, setContainerNetworkModal] =
     useState<ContainerNetworkModalState>({
       open: false,
@@ -504,6 +512,55 @@ export function ContainersPage() {
     [containers, filter],
   );
 
+  // Network groups drive the VPN provider/member/orphaned badges. Fetched once; refreshed
+  // alongside manual refreshes is unnecessary — group topology changes rarely.
+  useEffect(() => {
+    const controller = new AbortController();
+    fetchNetworkGroups(controller.signal)
+      .then((result) => setNetworkGroups(result.groups))
+      .catch(() => {
+        /* network groups are best-effort; absence just hides the badges */
+      });
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(GROUP_BY_STACK_KEY, groupByStack ? "true" : "false");
+    }
+  }, [groupByStack]);
+
+  const vpnRoles = useMemo<VpnRoleMap>(() => {
+    const map: VpnRoleMap = {};
+    for (const group of networkGroups) {
+      if (group.provider) map[group.provider] = { kind: "provider", provider: group.provider };
+      for (const member of group.members) {
+        map[member] = { kind: "member", provider: group.provider };
+      }
+      for (const orphan of group.orphaned_members) {
+        map[orphan] = { kind: "orphaned", provider: group.provider };
+      }
+    }
+    return map;
+  }, [networkGroups]);
+
+  const containerGroups = useMemo(() => {
+    if (!groupByStack) return null;
+    const groups = new Map<string, ContainerSummary[]>();
+    for (const container of filteredContainers) {
+      const key = container.stack ?? "Standalone";
+      const list = groups.get(key) ?? [];
+      list.push(container);
+      groups.set(key, list);
+    }
+    // Named stacks first (alpha), Standalone last.
+    return [...groups.entries()].sort(([a], [b]) => {
+      if (a === "Standalone") return 1;
+      if (b === "Standalone") return -1;
+      return a.localeCompare(b);
+    });
+  }, [groupByStack, filteredContainers]);
+
   const hostNetworkStatus = getNetworkStatus(
     hostNetworkPanel.status,
     hostNetworkPanel.result ? hostNetworkPanel.result.ping_success : null,
@@ -573,6 +630,16 @@ export function ContainersPage() {
             {item.label}
           </Button>
         ))}
+        <Button
+          aria-pressed={groupByStack}
+          className="ml-auto"
+          data-group-by-stack
+          onClick={() => setGroupByStack((value) => !value)}
+          size="sm"
+          variant={groupByStack ? "default" : "outline"}
+        >
+          Group by stack
+        </Button>
       </div>
 
       {hostNetworkPanel.visible ? (
@@ -729,7 +796,39 @@ export function ContainersPage() {
       ) : null}
 
       {!isLoading && filteredContainers.length ? (
-        <>
+        containerGroups ? (
+          <div className="space-y-6">
+            {containerGroups.map(([stackName, groupContainers]) => (
+              <section className="space-y-2" data-stack-group={stackName} key={stackName}>
+                <div className="flex items-center gap-2">
+                  {stackName === "Standalone" ? (
+                    <h3 className="text-sm font-semibold text-muted-foreground">Standalone</h3>
+                  ) : (
+                    <a
+                      className="text-sm font-semibold text-primary hover:underline"
+                      href="/v2/stacks"
+                    >
+                      {stackName}
+                    </a>
+                  )}
+                  <span className="text-xs text-muted-foreground">
+                    {groupContainers.length}
+                  </span>
+                </div>
+                <ContainerList
+                  containers={groupContainers}
+                  networkRates={networkRates}
+                  onAction={onContainerAction}
+                  onOpenDetails={setDetailTarget}
+                  onOpenLogs={onOpenLogs}
+                  onOpenNetworkTest={onOpenContainerNetworkTest}
+                  pendingActions={pendingActions}
+                  vpnRoles={vpnRoles}
+                />
+              </section>
+            ))}
+          </div>
+        ) : (
           <ContainerList
             containers={filteredContainers}
             networkRates={networkRates}
@@ -738,8 +837,9 @@ export function ContainersPage() {
             onOpenLogs={onOpenLogs}
             onOpenNetworkTest={onOpenContainerNetworkTest}
             pendingActions={pendingActions}
+            vpnRoles={vpnRoles}
           />
-        </>
+        )
       ) : null}
 
       {logsTarget ? (

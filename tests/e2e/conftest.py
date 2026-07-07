@@ -272,6 +272,15 @@ def install_v2_containers_api_mocks():
             path = parsed.path
             method = route.request.method
 
+            if path == "/api/network-groups" and method == "GET":
+                # v2-mock-service is orphaned from its VPN provider — the badge the
+                # containers page must surface (PH5-005).
+                _json_fulfill(route, {"groups": [{
+                    "provider": "gluetun", "provider_status": "running",
+                    "provider_health": None, "members": [],
+                    "orphaned_members": ["v2-mock-service"], "status": "degraded",
+                }]})
+                return
             if path == "/api/containers" and method == "GET":
                 _json_fulfill(route, container_payload)
                 return

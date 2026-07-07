@@ -41,6 +41,8 @@ import {
   streamStackOperation,
   validateStackCompose,
 } from "@/lib/stacks";
+import { fetchContainers } from "@/lib/containers";
+import type { StackContainerRef } from "@/components/stacks/stack-card";
 import { ApiError } from "@/lib/api";
 import { formatClockTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -156,6 +158,9 @@ function DiffLines({
 
 export function StacksPage() {
   const [stacks, setStacks] = useState<StackSummary[]>([]);
+  const [containersByStack, setContainersByStack] = useState<Map<string, StackContainerRef[]>>(
+    new Map(),
+  );
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
@@ -260,6 +265,23 @@ export function StacksPage() {
         setStacks(next);
         setError(null);
         setLastUpdated(formatClockTime(new Date()));
+
+        // One shared containers fetch per load groups containers under their stack card.
+        try {
+          const containers = await fetchContainers({ includeStats: false });
+          if (isMountedRef.current) {
+            const byStack = new Map<string, StackContainerRef[]>();
+            for (const container of containers) {
+              if (!container.stack) continue;
+              const list = byStack.get(container.stack) ?? [];
+              list.push({ id: container.id, name: container.name, status: container.status });
+              byStack.set(container.stack, list);
+            }
+            setContainersByStack(byStack);
+          }
+        } catch {
+          /* container grouping is best-effort; the cards still render without it */
+        }
       } catch (caughtError) {
         if (!isMountedRef.current) {
           return;
@@ -939,12 +961,16 @@ export function StacksPage() {
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {stacks.map((stack) => (
             <StackCard
+              containers={containersByStack.get(stack.name)}
               key={stack.name}
               onAction={onAction}
               onBackups={onBackups}
               onDelete={openDelete}
               onEdit={onEdit}
               onLogs={onLogs}
+              onOpenContainer={() => {
+                window.location.href = "/v2/containers";
+              }}
               pendingAction={pendingActions[stack.name]}
               stack={stack}
             />

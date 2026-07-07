@@ -66,22 +66,32 @@ function getStatusTone(status: string): BadgeProps["tone"] {
   return "neutral";
 }
 
+export interface StackContainerRef {
+  id: string;
+  name: string;
+  status: string;
+}
+
 export function StackCard({
   stack,
   pendingAction,
+  containers,
   onAction,
   onLogs,
   onEdit,
   onBackups,
   onDelete,
+  onOpenContainer,
 }: {
   stack: StackSummary;
   pendingAction?: StackAction;
+  containers?: StackContainerRef[];
   onAction: (stack: StackSummary, action: StackAction) => void;
   onLogs: (stack: StackSummary) => void;
   onEdit: (stack: StackSummary) => void;
   onBackups: (stack: StackSummary) => void;
   onDelete: (stack: StackSummary) => void;
+  onOpenContainer?: (container: StackContainerRef) => void;
 }) {
   const percent = getStackServicesPercent(stack);
   const barWidth = percent === null ? 0 : Math.max(0, Math.min(percent, 100));
@@ -115,6 +125,30 @@ export function StackCard({
             value={barWidth}
           />
         </div>
+        {containers && containers.length ? (
+          <ul className="space-y-1 rounded-md border border-border/70 bg-muted/20 p-2" data-stack-containers>
+            {containers.map((container) => (
+              <li className="flex items-center gap-2 text-xs" key={container.id}>
+                <span
+                  aria-hidden="true"
+                  className={cn(
+                    "h-2 w-2 shrink-0 rounded-full",
+                    container.status === "running" ? "bg-success" : "bg-muted-foreground/50",
+                  )}
+                />
+                <button
+                  className="truncate text-left text-primary hover:underline"
+                  data-stack-container={container.name}
+                  onClick={() => onOpenContainer?.(container)}
+                  type="button"
+                >
+                  {container.name}
+                </button>
+                <span className="ml-auto shrink-0 text-muted-foreground">{container.status}</span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
         <div className="flex flex-wrap gap-2">
           {STACK_ACTION_ORDER.map((action) => {
             const meta = STACK_ACTION_META[action];
