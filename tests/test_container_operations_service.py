@@ -26,16 +26,23 @@ class FakeDocker:
         return SimpleNamespace(id=self.pulled_id)
 
 
-def make_container(*, image_id="old-image", tags=None, image_ref="example:latest"):
+def make_container(*, image_id="old-image", tags=None, image_ref="example:latest", labels=None):
     container = Mock()
     container.id = "container-id-123456"
     container.name = "media"
-    container.attrs = {"Config": {"Image": image_ref}} if image_ref is not None else {"Config": {}}
+    config = {"Labels": labels or {}}
+    if image_ref is not None:
+        config["Image"] = image_ref
+    container.attrs = {"Config": config}
     container.image = SimpleNamespace(
         id=image_id,
         tags=["example:latest"] if tags is None else tags,
     )
     return container
+
+
+def _ok_compose_runner():
+    return Mock(return_value=SimpleNamespace(returncode=0, stderr=""))
 
 
 def make_service(docker, *, compose_runner=None, updates=None):
@@ -89,16 +96,53 @@ def test_check_update_pulls_tag_and_records_result():
 def test_update_pulls_recreates_and_clears_update_state():
     container = make_container()
     updates = []
-    compose_runner = Mock()
+    compose_runner = _ok_compose_runner()
     docker = FakeDocker(container)
     service = make_service(docker, compose_runner=compose_runner, updates=updates)
 
     assert service.update(container) == {"status": "Container updated"}
+    # No compose labels -> falls back to the container name, app cwd.
     compose_runner.assert_called_once_with(
         ["docker", "compose", "up", "-d", "media"],
         check=False,
+        cwd=None,
+        capture_output=True,
+        text=True,
     )
     assert updates == [("container-id", False)]
+
+
+def test_update_recreates_via_compose_labels():
+    container = make_container(labels={
+        "com.docker.compose.service": "jellyfin",
+        "com.docker.compose.project.working_dir": "/opt/stacks/media",
+        "com.docker.compose.project.config_files": "/opt/stacks/media/compose.yaml",
+    })
+    compose_runner = _ok_compose_runner()
+    docker = FakeDocker(container)
+    service = make_service(docker, compose_runner=compose_runner)
+
+    assert service.update(container) == {"status": "Container updated"}
+    compose_runner.assert_called_once_with(
+        ["docker", "compose", "-f", "/opt/stacks/media/compose.yaml", "up", "-d", "jellyfin"],
+        check=False,
+        cwd="/opt/stacks/media",
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_update_reports_error_when_recreate_fails():
+    container = make_container()
+    compose_runner = Mock(return_value=SimpleNamespace(returncode=1, stderr="no configuration file"))
+    docker = FakeDocker(container)
+    updates = []
+    service = make_service(docker, compose_runner=compose_runner, updates=updates)
+
+    result = service.update(container)
+    assert result["error"].startswith("Recreate failed")
+    assert "no configuration file" in result["error"]
+    assert updates == []  # update state not cleared on failure
 
 
 def test_update_rejects_image_without_any_reference():
@@ -117,7 +161,7 @@ def test_update_uses_configured_ref_when_running_image_is_dangling():
     # After a check_update pull, the running image is dangling (tags == []); the
     # configured Config.Image reference must still drive the pull.
     container = make_container(tags=[], image_ref="example/app:latest")
-    compose_runner = Mock()
+    compose_runner = _ok_compose_runner()
     docker = FakeDocker(container)
     service = make_service(docker, compose_runner=compose_runner)
 

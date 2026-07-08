@@ -70,16 +70,45 @@ class ContainerOperationsService:
         except Exception as exc:
             return {"error": str(exc)}
 
+    @staticmethod
+    def _compose_recreate_command(container) -> tuple[list[str], str | None]:
+        """Build the compose recreation command from the container's own compose
+        labels, so it runs in the right project directory against the right config
+        file and service — not the app's cwd with the container name as a service.
+        Falls back to the container name when the labels are absent (non-compose)."""
+        try:
+            labels = ((container.attrs or {}).get("Config") or {}).get("Labels") or {}
+        except Exception:
+            labels = {}
+        service = labels.get("com.docker.compose.service")
+        working_dir = labels.get("com.docker.compose.project.working_dir") or None
+        config_files = [
+            path
+            for path in (labels.get("com.docker.compose.project.config_files") or "").split(",")
+            if path
+        ]
+        command = ["docker", "compose"]
+        for config_file in config_files:
+            command += ["-f", config_file]
+        command += ["up", "-d", service or container.name]
+        return command, working_dir
+
     def update(self, container) -> dict:
         try:
             ref = self._image_ref(container)
             if not ref:
                 return {"error": "Container image has no tag"}
             self._docker.pull_image(ref)
-            self._compose_runner(
-                ["docker", "compose", "up", "-d", container.name],
-                check=False,
+            command, cwd = self._compose_recreate_command(container)
+            result = self._compose_runner(
+                command, check=False, cwd=cwd, capture_output=True, text=True
             )
+            # Don't report success if the recreate actually failed (e.g. compose file
+            # not found) — that was the "says updated but nothing changed" bug.
+            returncode = getattr(result, "returncode", 0)
+            if returncode:
+                stderr = (getattr(result, "stderr", "") or "").strip()
+                return {"error": f"Recreate failed: {stderr or f'compose exited {returncode}'}"}
             self._update_writer(container.id[:12], False)
             return {"status": "Container updated"}
         except Exception as exc:
