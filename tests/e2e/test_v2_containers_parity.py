@@ -43,6 +43,39 @@ def test_v2_containers_group_by_stack_and_vpn_badge(
     expect(page.locator("button[data-group-by-stack]")).to_have_attribute("aria-pressed", "true")
 
 
+def test_v2_containers_check_all_and_provider_update_guard(
+    page: Page,
+    v2_server,
+    v2_login,
+    install_v2_containers_api_mocks,
+):
+    base_url = v2_server["base_url"]
+    v2_login(page, base_url)
+    # gluetun is the VPN provider (matches the network-groups mock) and has an update.
+    install_v2_containers_api_mocks(page, extra_containers=[{
+        "id": "gluetun-id", "name": "gluetun", "image": "qmcgaw/gluetun:latest",
+        "status": "running", "health": None, "stack": None,
+        "cpu_percent": 1.0, "memory_percent": 5.0, "memory_used": 1, "memory_limit": 2,
+        "net_rx": 0, "net_tx": 0, "ports": [], "web_scheme": None, "update_available": True,
+    }])
+    page.goto(f"{base_url}/v2/containers")
+    expect(page.get_by_role("heading", name="docker_containers")).to_be_visible()
+
+    # gluetun carries the VPN provider badge; the Updates filter chip appears.
+    expect(page.locator("[data-vpn-role='provider']").first).to_be_visible()
+    expect(page.locator("button[data-filter='updates']")).to_be_visible()
+
+    # Updating the provider opens the safety modal rather than updating immediately.
+    page.locator("button[data-action='update'][data-container-id='gluetun-id']").first.click()
+    expect(page.locator("[data-provider-update-modal]")).to_be_visible()
+    page.click("button[data-provider-update-recreate]")
+    expect(page.get_by_text("recreated its network group")).to_be_visible(timeout=10000)
+
+    # Check-all surfaces updatable containers in a completion summary.
+    page.click("button[data-check-all-updates]")
+    expect(page.get_by_text("Updates available")).to_be_visible(timeout=10000)
+
+
 def _focus_is_inside(page, modal_id: str) -> bool:
     return page.evaluate(
         """(id) => {

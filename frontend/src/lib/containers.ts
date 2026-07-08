@@ -1,6 +1,6 @@
 import { requestApi, toNullableNumber, toNullableString } from "@/lib/api";
 
-export type ContainerFilter = "all" | "running" | "stopped";
+export type ContainerFilter = "all" | "running" | "stopped" | "updates";
 export type ContainerAction = "start" | "stop" | "restart" | "check_update" | "update";
 
 export interface ContainerPortBinding {
@@ -374,6 +374,9 @@ export function filterContainers(
     // Docker reports stopped containers as "exited"; treat both as stopped to
     // match isActionDisabled and the legacy lifecycle-state handling.
     return containers.filter((container) => STOPPED_STATUSES.has(container.status));
+  }
+  if (filter === "updates") {
+    return containers.filter((container) => container.update_available);
   }
   return containers.filter((container) => container.status === filter);
 }

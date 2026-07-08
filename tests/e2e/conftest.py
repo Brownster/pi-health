@@ -380,6 +380,21 @@ def install_v2_containers_api_mocks():
                     _json_fulfill(route, {"status": f"{action} accepted", "update_available": False})
                     return
 
+            # Generic action handler for extra_containers (PH5-006 check-all / provider update).
+            action_match = re.match(
+                r"^/api/containers/([^/]+)/(start|stop|restart|check_update|update)$", path
+            )
+            if action_match and method == "POST":
+                cid, action = action_match.group(1), action_match.group(2)
+                _json_fulfill(route, {
+                    "status": f"{action} accepted",
+                    "update_available": action == "check_update" and cid != V2_MOCK_CONTAINER_ID,
+                })
+                return
+            if re.match(r"^/api/network-groups/[^/]+/recreate$", path) and method == "POST":
+                _json_fulfill(route, {"status": "recreated"})
+                return
+
             route.continue_()
 
         page.route("**/api/**", _handler)

@@ -62,7 +62,7 @@ Structural gaps:
 | 3 | PH5-003 Compose/env editor upgrades + restore preview | PH5-001 | Yes | Complete (2026-07-07) |
 | 4 | PH5-004 Container detail drawer + healthcheck + logs QoL | PH5-001 | Yes | Complete (2026-07-07) |
 | 5 | PH5-005 Stack<->container linking + VPN-group awareness | PH5-001 | No | Complete (2026-07-07) |
-| 6 | PH5-006 Update workflow: check-all + provider-safe updates | PH5-005 | No | Planned |
+| 6 | PH5-006 Update workflow: check-all + provider-safe updates | PH5-005 | No | Complete (2026-07-07) |
 | 7 | PH5-007 E2E parity + release signoff | all | Yes | Planned |
 
 PH5-002 has no backend dependency and can start immediately alongside PH5-001.

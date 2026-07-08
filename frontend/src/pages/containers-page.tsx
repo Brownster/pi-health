@@ -41,7 +41,7 @@ import {
   runHostNetworkTest,
 } from "@/lib/containers";
 import { formatClockTime } from "@/lib/format";
-import { fetchNetworkGroups, type NetworkGroup } from "@/lib/network";
+import { fetchNetworkGroups, recreateNetworkGroup, type NetworkGroup } from "@/lib/network";
 import type { VpnRoleMap } from "@/components/containers/container-list";
 import { cn } from "@/lib/utils";
 
@@ -179,6 +179,9 @@ export function ContainersPage() {
   const isMountedRef = useRef(true);
   const pendingActionsRef = useRef<Record<string, ContainerAction>>({});
   const containersRef = useRef<ContainerSummary[]>([]);
+  const vpnRolesRef = useRef<VpnRoleMap>({});
+  const [providerUpdate, setProviderUpdate] = useState<ContainerSummary | null>(null);
+  const [checkAll, setCheckAll] = useState<{ done: number; total: number } | null>(null);
   const previousNetworkStatsRef = useRef<
     Map<string, { rx: number; tx: number }>
   >(new Map());
@@ -347,6 +350,13 @@ export function ContainersPage() {
         return;
       }
 
+      // Updating a VPN network provider orphans its members' netns; gate behind an
+      // explicit confirm that offers to recreate the group afterwards (PH5-006).
+      if (action === "update" && vpnRolesRef.current[container.name]?.kind === "provider") {
+        setProviderUpdate(container);
+        return;
+      }
+
       const meta = ACTION_META[action];
       setPendingAction(container.id, action);
       setActionNotice({
@@ -381,6 +391,84 @@ export function ContainersPage() {
     },
     [loadContainers, pollStats, setPendingAction],
   );
+
+  const runProviderUpdate = useCallback(
+    async (container: ContainerSummary, recreate: boolean) => {
+      setProviderUpdate(null);
+      setPendingAction(container.id, "update");
+      setActionNotice({ tone: "info", message: `Updating ${container.name}...` });
+      try {
+        await runContainerAction(container.id, "update");
+        if (recreate) {
+          await recreateNetworkGroup(container.name);
+        }
+        if (isMountedRef.current) {
+          setActionNotice({
+            tone: "success",
+            message: recreate
+              ? `Updated ${container.name} and recreated its network group`
+              : `Updated ${container.name} (members may need a manual group recreate)`,
+          });
+        }
+      } catch (caughtError) {
+        if (isMountedRef.current) {
+          setActionNotice({
+            tone: "error",
+            message: `Provider update failed for ${container.name}: ${getErrorMessage(caughtError)}`,
+          });
+        }
+      } finally {
+        const refreshed = await loadContainers("action");
+        if (refreshed) {
+          await pollStats(refreshed);
+        }
+        if (isMountedRef.current) {
+          setPendingAction(container.id, null);
+        }
+      }
+    },
+    [loadContainers, pollStats, setPendingAction],
+  );
+
+  const checkAllUpdates = useCallback(async () => {
+    const targets = containersRef.current.filter(
+      (container) => container.status === "running",
+    );
+    if (!targets.length) {
+      setActionNotice({ tone: "info", message: "No running containers to check." });
+      return;
+    }
+    setCheckAll({ done: 0, total: targets.length });
+    const updatable: string[] = [];
+    let index = 0;
+    let done = 0;
+    // Bounded concurrency — each check pulls remote image metadata.
+    const worker = async () => {
+      while (index < targets.length) {
+        const container = targets[index++];
+        try {
+          const result = await runContainerAction(container.id, "check_update");
+          if (result.update_available) updatable.push(container.name);
+        } catch {
+          /* skip individual failures; the summary reflects what we could check */
+        }
+        done += 1;
+        if (isMountedRef.current) setCheckAll({ done, total: targets.length });
+      }
+    };
+    await Promise.all([worker(), worker(), worker()]);
+    if (isMountedRef.current) {
+      setCheckAll(null);
+      setActionNotice({
+        tone: updatable.length ? "info" : "success",
+        message: updatable.length
+          ? `Updates available (${updatable.length}): ${updatable.join(", ")}`
+          : "All running containers are up to date.",
+      });
+      const refreshed = await loadContainers("action");
+      if (refreshed) await pollStats(refreshed);
+    }
+  }, [loadContainers, pollStats]);
 
   const closeLogsModal = useCallback(() => {
     setLogsTarget(null);
@@ -544,6 +632,10 @@ export function ContainersPage() {
     return map;
   }, [networkGroups]);
 
+  useEffect(() => {
+    vpnRolesRef.current = vpnRoles;
+  }, [vpnRoles]);
+
   const containerGroups = useMemo(() => {
     if (!groupByStack) return null;
     const groups = new Map<string, ContainerSummary[]>();
@@ -577,6 +669,19 @@ export function ContainersPage() {
       <PageHeader
         actions={
           <>
+            <Button
+              className="gap-2"
+              data-check-all-updates
+              disabled={checkAll !== null}
+              onClick={() => void checkAllUpdates()}
+              variant="secondary"
+            >
+              <RefreshCw
+                aria-hidden="true"
+                className={cn("h-4 w-4", checkAll !== null ? "animate-spin" : "")}
+              />
+              {checkAll !== null ? `checking ${checkAll.done}/${checkAll.total}` : "check all"}
+            </Button>
             <Button
               className="gap-2"
               id="v2-host-network-test-button"
@@ -630,6 +735,17 @@ export function ContainersPage() {
             {item.label}
           </Button>
         ))}
+        {containers.some((container) => container.update_available) ? (
+          <Button
+            aria-pressed={filter === "updates"}
+            data-filter="updates"
+            onClick={() => setFilter("updates")}
+            size="sm"
+            variant={filter === "updates" ? "default" : "outline"}
+          >
+            Updates ({containers.filter((container) => container.update_available).length})
+          </Button>
+        ) : null}
         <Button
           aria-pressed={groupByStack}
           className="ml-auto"
@@ -856,6 +972,39 @@ export function ContainersPage() {
 
       {detailTarget ? (
         <ContainerDetail container={detailTarget} onClose={() => setDetailTarget(null)} />
+      ) : null}
+
+      {providerUpdate ? (
+        <ModalOverlay onClose={() => setProviderUpdate(null)}>
+          <Card className="w-full max-w-md" data-provider-update-modal>
+            <CardHeader>
+              <CardTitle className="text-base">Update {providerUpdate.name}?</CardTitle>
+              <CardDescription>
+                {providerUpdate.name} is a VPN network provider. Updating it recreates its
+                container and orphans every member routed through it (
+                <span className="font-mono">network_mode: service:</span>) until the group is
+                recreated.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-wrap gap-2">
+              <Button
+                data-provider-update-recreate
+                onClick={() => void runProviderUpdate(providerUpdate, true)}
+              >
+                Update & recreate group
+              </Button>
+              <Button
+                onClick={() => void runProviderUpdate(providerUpdate, false)}
+                variant="outline"
+              >
+                Update only
+              </Button>
+              <Button onClick={() => setProviderUpdate(null)} variant="ghost">
+                Cancel
+              </Button>
+            </CardContent>
+          </Card>
+        </ModalOverlay>
       ) : null}
 
       {containerNetworkModal.open ? (
