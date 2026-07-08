@@ -76,6 +76,32 @@ def test_v2_containers_check_all_and_provider_update_guard(
     expect(page.get_by_text("Updates available")).to_be_visible(timeout=10000)
 
 
+def test_v2_containers_web_ui_defaults_to_http(
+    page: Page,
+    v2_server,
+    v2_login,
+    install_v2_containers_api_mocks,
+):
+    base_url = v2_server["base_url"]
+    v2_login(page, base_url)
+    # A container with a published web port but no explicit scheme (no
+    # limeos.web.scheme label / PIHEALTH_SERVICE_LINK_SCHEME) should still link over http.
+    install_v2_containers_api_mocks(page, extra_containers=[{
+        "id": "web-id", "name": "webapp", "image": "nginx:latest", "status": "running",
+        "health": None, "stack": None, "cpu_percent": 0.0, "memory_percent": 0.0,
+        "memory_used": 0, "memory_limit": 0, "net_rx": 0, "net_tx": 0,
+        "ports": [{"container_port": 80, "host_port": 8088, "protocol": "tcp"}],
+        "web_scheme": None, "update_available": False,
+    }])
+    page.goto(f"{base_url}/v2/containers")
+    expect(page.get_by_role("heading", name="docker_containers")).to_be_visible()
+
+    link = page.locator("a[aria-label='Open webapp web UI in a new tab']:visible").first
+    expect(link).to_have_attribute(
+        "href", f"http://{page.evaluate('window.location.hostname')}:8088"
+    )
+
+
 def _focus_is_inside(page, modal_id: str) -> bool:
     return page.evaluate(
         """(id) => {

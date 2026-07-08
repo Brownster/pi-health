@@ -429,11 +429,15 @@ export function getContainerWebUrl(
   }
 
   const port = getContainerWebPort(container);
-  if (!container.web_scheme || !port || !hostname) {
+  if (!port || !hostname) {
     return null;
   }
+  // A published web port gets an http link by default; an explicit scheme from a
+  // limeos.web.scheme/url label or PIHEALTH_SERVICE_LINK_SCHEME (surfaced as
+  // web_scheme) still overrides — e.g. to force https.
+  const scheme = container.web_scheme ?? "http";
   const formattedHostname = hostname.includes(":") && !hostname.startsWith("[")
     ? `[${hostname}]`
     : hostname;
-  return `${container.web_scheme}://${formattedHostname}:${port}`;
+  return `${scheme}://${formattedHostname}:${port}`;
 }
