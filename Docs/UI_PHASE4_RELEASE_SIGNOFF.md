@@ -67,7 +67,7 @@ confirm-gated; SnapRAID Apply now is too. Helper `cmd_snapraid` conf/log constra
    on the streaming (dev) path but **not yet verified on production hardware**. Before flipping this
    signoff to unconditional GO, run a real sync on the Pi and confirm progress + no premature
    timeout. The durable fix (per-command timeout, or routing long runs through the streaming path) is
-   tracked as its own ticket.
+   tracked in `Docs/HELPER_LONGRUN_STREAMING_TICKET.md`.
 2. "Suggest layout" for SnapRAID drive roles is a follow-up (new backend; the existing
    `/api/disks/suggested-mounts` does mount placement, not data/parity role assignment).
 3. Timer state (enabled/next-run) is not surfaced — the schedule UI is config-driven; a read-only
