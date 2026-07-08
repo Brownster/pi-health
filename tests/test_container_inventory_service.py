@@ -218,6 +218,36 @@ def test_inspect_returns_env_values_only_on_explicit_opt_in():
     ]
 
 
+def test_inspect_degrades_when_image_removed():
+    # A container whose image was removed (`docker rmi` while stopped): resolving
+    # container.image raises. inspect() must degrade, not 500.
+    class _RemovedImageContainer:
+        id = "removed-image-1"
+        name = "orphan"
+        status = "exited"
+        attrs = {
+            "Config": {"Image": "example:latest", "Env": [], "Labels": {}},
+            "HostConfig": {},
+            "State": {},
+            "Mounts": [],
+        }
+
+        @property
+        def image(self):
+            raise RuntimeError("404 Client Error: image not found")
+
+    service = ContainerInventoryService(
+        docker=FakeDocker([_RemovedImageContainer()]),
+        stats_reader=lambda _container_id: None,
+        update_reader=lambda _container_id: False,
+    )
+
+    result = service.inspect("removed-image-1")
+    assert result["image"] == "example:latest"  # fell back to the attrs reference
+    assert result["image_tags"] == []
+    assert result["image_id"] is None
+
+
 def test_inspect_classifies_unavailable_and_missing_container():
     unavailable = ContainerInventoryService(
         docker=FakeDocker(available=False),

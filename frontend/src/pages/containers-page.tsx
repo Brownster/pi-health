@@ -672,7 +672,7 @@ export function ContainersPage() {
             <Button
               className="gap-2"
               data-check-all-updates
-              disabled={checkAll !== null}
+              disabled={checkAll !== null || Object.keys(pendingActions).length > 0}
               onClick={() => void checkAllUpdates()}
               variant="secondary"
             >

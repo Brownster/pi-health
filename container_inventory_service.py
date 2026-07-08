@@ -147,7 +147,15 @@ class ContainerInventoryService:
         config = attrs.get("Config") or {}
         state = attrs.get("State") or {}
         host_config = attrs.get("HostConfig") or {}
-        image_attrs = getattr(container.image, "attrs", {}) or {}
+        # container.image is a lazy property that resolves the image via the Docker API; it
+        # raises if the image was removed (e.g. `docker rmi` while the container is stopped).
+        # Degrade gracefully to the image reference held in the container's own attrs.
+        try:
+            image = container.image
+        except Exception:
+            image = None
+        image_tags = list(getattr(image, "tags", []) or [])
+        image_attrs = getattr(image, "attrs", {}) or {}
         started_at = state.get("StartedAt") or None
         return {
             "id": container.id,
@@ -155,9 +163,9 @@ class ContainerInventoryService:
             "status": container.status,
             "stack": self._stack(container),
             "image": config.get("Image")
-            or (container.image.tags[0] if container.image.tags else "unknown"),
-            "image_id": getattr(container.image, "id", None),
-            "image_tags": list(getattr(container.image, "tags", []) or []),
+            or (image_tags[0] if image_tags else "unknown"),
+            "image_id": getattr(image, "id", None),
+            "image_tags": image_tags,
             "image_digests": list(image_attrs.get("RepoDigests") or []),
             "created": attrs.get("Created") or None,
             "started_at": started_at,

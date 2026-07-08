@@ -84,6 +84,12 @@ side. Whichever is chosen, keep the helper allowlist constraints from the securi
 4. Security review constraints (helper conf/log-target allowlist, mutation lock behaviour) unchanged;
    existing unit + e2e suites stay green.
 
+## Test rig
+The primary Pi currently has a single attached disk, which cannot form a real multi-parity SnapRAID
+array or drive a sync long enough to hit the 30s timeout. A second Pi with a 5-disk DAS is planned
+and is the intended rig for this ticket: it exercises multi-parity (validating Phase 4 fix 3) and a
+genuinely long-running sync (the 30s-timeout / live-progress scenario).
+
 ## Notes / risks
 - The dev (non-helper) path already streams; keep it as the behavioural reference for B.
 - Watch the M1 helper concurrency change: `snapraid` runs lock-free, so a long streaming read must
