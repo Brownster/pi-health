@@ -38,11 +38,32 @@ class ContainerOperationsService:
         except Exception as exc:
             return {"error": str(exc)}
 
+    @staticmethod
+    def _image_ref(container) -> str | None:
+        """The image reference to pull.
+
+        Prefer the container's configured image (``Config.Image``, e.g.
+        ``linuxserver/jellyfin:latest``) over ``container.image.tags``: after a
+        ``check_update`` pull the tag moves to the newly fetched image, leaving the
+        running container's image dangling with no tags — so ``image.tags`` would be
+        empty at ``update`` time even though the container has a perfectly valid ref.
+        """
+        try:
+            config = (container.attrs or {}).get("Config") or {}
+        except Exception:
+            config = {}
+        ref = config.get("Image")
+        if ref:
+            return ref
+        tags = list(getattr(container.image, "tags", None) or [])
+        return tags[0] if tags else None
+
     def check_update(self, container) -> dict:
         try:
-            if not container.image.tags:
+            ref = self._image_ref(container)
+            if not ref:
                 return {"error": "Container image has no tag"}
-            pulled = self._docker.pull_image(container.image.tags[0])
+            pulled = self._docker.pull_image(ref)
             update_available = pulled.id != container.image.id
             self._update_writer(container.id[:12], update_available)
             return {"update_available": update_available}
@@ -51,9 +72,10 @@ class ContainerOperationsService:
 
     def update(self, container) -> dict:
         try:
-            if not container.image.tags:
+            ref = self._image_ref(container)
+            if not ref:
                 return {"error": "Container image has no tag"}
-            self._docker.pull_image(container.image.tags[0])
+            self._docker.pull_image(ref)
             self._compose_runner(
                 ["docker", "compose", "up", "-d", container.name],
                 check=False,

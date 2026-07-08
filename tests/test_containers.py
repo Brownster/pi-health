@@ -230,6 +230,7 @@ class TestContainerActions:
     def test_check_container_update_no_tag(self):
         from app import check_container_update
         fake_container = Mock()
+        fake_container.attrs = {"Config": {}}
         fake_container.image.tags = []
         result = check_container_update(fake_container)
         assert "error" in result
@@ -237,9 +238,46 @@ class TestContainerActions:
     def test_update_container_no_tag(self):
         from app import update_container
         fake_container = Mock()
+        fake_container.attrs = {"Config": {}}
         fake_container.image.tags = []
         result = update_container(fake_container)
         assert "error" in result
+
+    def test_update_uses_configured_image_ref_when_running_image_is_dangling(self):
+        # Reproduces the real bug: check_update's pull moved the tag to the new image,
+        # so the running container's image is now dangling (tags == []). The configured
+        # Config.Image reference must still drive the pull instead of erroring "no tag".
+        from container_operations_service import ContainerOperationsService
+
+        pulled = []
+
+        class FakeDocker:
+            available = True
+
+            def get_container(self, _id):
+                return container
+
+            def pull_image(self, ref):
+                pulled.append(ref)
+                return Mock(id="sha256:new")
+
+        container = Mock()
+        container.id = "abcdef123456"
+        container.name = "yt-to-jellyfin"
+        container.attrs = {"Config": {"Image": "example/yt-to-jellyfin:latest"}}
+        container.image = Mock(id="sha256:old", tags=[])  # dangling
+
+        compose_calls = []
+        service = ContainerOperationsService(
+            docker=FakeDocker(),
+            update_writer=lambda *_a, **_k: None,
+            compose_runner=lambda command, **_k: compose_calls.append(command),
+        )
+
+        result = service.update(container)
+        assert result == {"status": "Container updated"}
+        assert pulled == ["example/yt-to-jellyfin:latest"]
+        assert compose_calls == [["docker", "compose", "up", "-d", "yt-to-jellyfin"]]
 
 
 class TestContainerNetworkTest:

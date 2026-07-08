@@ -96,11 +96,15 @@ class ContainerInventoryService:
         if include_stats and container.status == "running":
             stats = self._stats_reader(container.id)
 
+        # Prefer the configured image reference so a container running a superseded
+        # (now dangling, tag-less) image still shows its real name rather than "unknown".
+        config = (container.attrs or {}).get("Config") or {}
+        image_tags = list(getattr(container.image, "tags", None) or [])
         data = {
             "id": container.id[:12],
             "name": container.name,
             "status": container.status,
-            "image": container.image.tags[0] if container.image.tags else "unknown",
+            "image": config.get("Image") or (image_tags[0] if image_tags else "unknown"),
             "stack": self._stack(container),
             "update_available": self._update_reader(container.id[:12]),
             "ports": ports,
