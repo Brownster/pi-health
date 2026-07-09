@@ -22,6 +22,9 @@ Progress:
 - 2026-07-09: Phase 3C implemented. Added conservative local download-client config
   seeding for Transmission and SABnzbd path settings, skipping clients whose config
   files have not been created by their containers yet.
+- 2026-07-09: Phase 3D implemented. Added idempotent Jellyfin library seeding through
+  the Jellyfin virtual-folder API so canonical media folders are created once per
+  media library.
 
 ## Context — why we are doing this
 
