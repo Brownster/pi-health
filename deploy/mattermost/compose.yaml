@@ -1,0 +1,58 @@
+# Mattermost + Postgres — LAN-only, for the agent-investigate MVP (brick B1).
+# Runs on an ARM64 Pi (Pi 4/5). Drop into Dockge at /opt/stacks/mattermost.
+#
+# Resource note: this is the heaviest always-on piece of the agent MVP. On a media Pi that is
+# already busy, watch memory — the mem_limits below are conservative starting points.
+# Storage note: on a small USB disk (e.g. 8 GB), keep an eye on the postgres + mattermost
+# volumes; message/file history grows over time.
+#
+# Security note: LAN-only. Do NOT publish 8065 to the Internet without a TLS reverse proxy.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-mmuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-mattermost}
+    volumes:
+      - ./volumes/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mmuser} -d ${POSTGRES_DB:-mattermost}"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    mem_limit: 512m
+
+  mattermost:
+    image: mattermost/mattermost-team-edition:${MM_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8065:8065"
+    environment:
+      MM_SQLSETTINGS_DRIVERNAME: postgres
+      MM_SQLSETTINGS_DATASOURCE: >-
+        postgres://${POSTGRES_USER:-mmuser}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-mattermost}?sslmode=disable&connect_timeout=10
+      # Set to the Pi's LAN URL so links + webhooks resolve, e.g. http://192.168.0.45:8065
+      MM_SERVICESETTINGS_SITEURL: ${MM_SITE_URL:?set MM_SITE_URL in .env}
+      # Incoming webhooks power the alert notifier (brick B2); keep them enabled.
+      MM_SERVICESETTINGS_ENABLEINCOMINGWEBHOOKS: "true"
+      MM_SERVICESETTINGS_ENABLEOUTGOINGWEBHOOKS: "false"
+      TZ: ${TZ:-Europe/London}
+    volumes:
+      - ./volumes/mattermost/config:/mattermost/config
+      - ./volumes/mattermost/data:/mattermost/data
+      - ./volumes/mattermost/logs:/mattermost/logs
+      - ./volumes/mattermost/plugins:/mattermost/plugins
+      - ./volumes/mattermost/client-plugins:/mattermost/client/plugins
+      - ./volumes/mattermost/bleve-indexes:/mattermost/bleve-indexes
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8065/api/v4/system/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    mem_limit: 1g

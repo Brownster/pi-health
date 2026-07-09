@@ -1,0 +1,24 @@
+# Alert daemon as a sidecar next to a containerized pi-health (brick B2 deploy).
+# Add this service to your pi-health Dockge stack (or run it standalone). It reuses the
+# pi-health image and just overrides the command, so it runs OUTSIDE the API process.
+#
+# Container-down alerts work out of the box (via the docker socket). Mount / SMART / SnapRAID
+# signals need host access + the live readers that are still stubbed — those land with the DAS Pi.
+
+services:
+  limeos-alertd:
+    image: ${PIHEALTH_IMAGE:-pi-health:latest}   # use the same image as your pi-health service
+    restart: unless-stopped
+    command: ["python", "alert_daemon.py"]
+    environment:
+      # Paste the Mattermost incoming-webhook URL here (unset => dry run, logs only).
+      LIMEOS_ALERT_MATTERMOST_WEBHOOK: ${LIMEOS_ALERT_MATTERMOST_WEBHOOK:-}
+      LIMEOS_ALERT_POLL_SECONDS: ${LIMEOS_ALERT_POLL_SECONDS:-60}
+      LIMEOS_ALERT_FAIL_THRESHOLD: ${LIMEOS_ALERT_FAIL_THRESHOLD:-2}
+      # Comma-separated required mountpoints. Leave empty until the daemon runs with host
+      # mount visibility (see README); container alerts don't need it.
+      LIMEOS_ALERT_REQUIRED_MOUNTS: ${LIMEOS_ALERT_REQUIRED_MOUNTS:-}
+      LIMEOS_STATE_DIR: /var/lib/limeos
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro   # list host containers
+      - ./volumes/alertd-state:/var/lib/limeos           # persist alerts.json across restarts

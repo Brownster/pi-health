@@ -1,0 +1,29 @@
+# systemd unit for a HOST install of pi-health (not containerized).
+# Install: sudo cp this to /etc/systemd/system/limeos-alertd.service, edit paths + the env
+# file, then: sudo systemctl daemon-reload && sudo systemctl enable --now limeos-alertd
+#
+# Runs outside the API process so an API crash still pages.
+
+[Unit]
+Description=LimeOS alert daemon (native checks -> Mattermost)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Point these at your pi-health checkout + its virtualenv Python.
+WorkingDirectory=/opt/pi-health
+ExecStart=/opt/pi-health/.venv/bin/python /opt/pi-health/alert_daemon.py
+# Put LIMEOS_ALERT_MATTERMOST_WEBHOOK and friends here (chmod 600, owned by the service user).
+EnvironmentFile=/etc/limeos/alertd.env
+Restart=on-failure
+RestartSec=10
+# Least privilege: the daemon only reads status/logs; no shell, no writes beyond its state dir.
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/limeos
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
