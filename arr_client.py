@@ -97,6 +97,12 @@ class ArrClient:
     def add_download_client(self, client: Mapping[str, Any]) -> Any:
         return self.post("/downloadclient", client)
 
+    def list_applications(self) -> list[dict]:
+        return _as_list(self.get("/applications"))
+
+    def add_application(self, application: Mapping[str, Any]) -> Any:
+        return self.post("/applications", application)
+
     def set_quality_profile_default(self, profile_name: str) -> Any:
         profiles = _as_list(self.get("/qualityprofile"))
         for profile in profiles:

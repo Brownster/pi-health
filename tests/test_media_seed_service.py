@@ -38,6 +38,8 @@ class FakeArrClient:
         self.media_management_calls = []
         self.quality_profiles = []
         self.naming_presets = []
+        self.applications = []
+        self.added_applications = []
 
     def list_root_folders(self):
         return list(self.root_folders)
@@ -68,23 +70,34 @@ class FakeArrClient:
     def set_naming(self, preset):
         self.naming_presets.append(preset)
 
+    def list_applications(self):
+        return list(self.applications)
 
-def make_service(fake_client):
+    def add_application(self, application):
+        self.applications.append(application)
+        self.added_applications.append(application)
+
+
+def make_service(fake_client, *, services=None, api_key_reader=None):
+    if services is None:
+        services = {
+            "sonarr": {},
+            "transmission": {},
+            "sabnzbd": {},
+        }
+    if api_key_reader is None:
+        def api_key_reader(config_file):
+            return f"key-for:{config_file}"
+
     return MediaSeedService(
         catalog_dir_provider=lambda: str(CATALOG_DIR),
         stack_path_provider=lambda stack: f"/stacks/{stack}",
         load_stack_compose=lambda _path: (
-            {
-                "services": {
-                    "sonarr": {},
-                    "transmission": {},
-                    "sabnzbd": {},
-                }
-            },
+            {"services": services},
             "/stacks/media/compose.yaml",
         ),
         layout_provider=lambda: MediaLayout(),
-        api_key_reader=lambda config_file: f"key-for:{config_file}",
+        api_key_reader=api_key_reader,
         client_factory=lambda _service_id, _seed, _api_key: fake_client,
     )
 
@@ -124,6 +137,63 @@ def test_seed_stack_is_rerunnable_without_duplicate_roots_or_clients():
     assert second_events[-1]["changes"] == 0
     assert fake_client.added_roots == ["/tv"]
     assert len(fake_client.added_download_clients) == 2
+
+
+def test_seed_stack_adds_prowlarr_applications_for_installed_arr_services():
+    fake_client = FakeArrClient()
+    fake_client.root_folders = [
+        {"id": 1, "path": "/tv"},
+        {"id": 2, "path": "/movies"},
+    ]
+    api_keys = []
+
+    events = list(
+        make_service(
+            fake_client,
+            services={
+                "prowlarr": {},
+                "sonarr": {},
+                "radarr": {},
+            },
+            api_key_reader=lambda config_file: api_keys.append(config_file) or f"key:{config_file}",
+        ).seed_stack("media")
+    )
+
+    assert events[-1]["done"] is True
+    assert events[-1]["changes"] == 2
+    assert [
+        application["implementation"] for application in fake_client.added_applications
+    ] == ["Sonarr", "Radarr"]
+    assert fake_client.added_applications[0]["fields"][:2] == [
+        {"name": "baseUrl", "value": "http://127.0.0.1:8989"},
+        {"name": "apiKey", "value": "key:/home/pi/docker/sonarr/config.xml"},
+    ]
+    assert fake_client.added_applications[1]["fields"][:2] == [
+        {"name": "baseUrl", "value": "http://127.0.0.1:7878"},
+        {"name": "apiKey", "value": "key:/home/pi/docker/radarr/config.xml"},
+    ]
+    assert "/home/pi/docker/prowlarr/config.xml" in api_keys
+    assert "/home/pi/docker/sonarr/config.xml" in api_keys
+    assert "/home/pi/docker/radarr/config.xml" in api_keys
+
+
+def test_seed_stack_does_not_duplicate_prowlarr_applications():
+    fake_client = FakeArrClient()
+    fake_client.root_folders = [{"id": 1, "path": "/tv"}]
+    service = make_service(
+        fake_client,
+        services={
+            "prowlarr": {},
+            "sonarr": {},
+        },
+    )
+
+    first_events = list(service.seed_stack("media"))
+    second_events = list(service.seed_stack("media"))
+
+    assert first_events[-1]["changes"] == 1
+    assert second_events[-1]["changes"] == 0
+    assert len(fake_client.added_applications) == 1
 
 
 def _authed_client(media_seed_service):

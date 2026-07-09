@@ -92,7 +92,7 @@ class MediaSeedService:
         if kind == "arr":
             return self._seed_arr(service_id, seed, installed_services)
         if kind == "indexer":
-            return {"changes": 0, "lines": ["Indexer application seeding is pending"]}
+            return self._seed_indexer(service_id, seed, installed_services)
         if kind == "downloadclient":
             return {"changes": 0, "lines": ["Download client local seeding is pending"]}
         if kind == "mediaserver":
@@ -174,6 +174,45 @@ class MediaSeedService:
             lines.append("Already configured")
         return {"changes": changes, "lines": lines}
 
+    def _seed_indexer(
+        self,
+        service_id: str,
+        seed: Mapping[str, Any],
+        installed_services: set[str],
+    ) -> dict[str, Any]:
+        client = self._client_for(service_id, seed)
+        changes = 0
+        lines: list[str] = []
+
+        existing_apps = {
+            (
+                str(application.get("implementation", "")).lower(),
+                str(application.get("name", "")).lower(),
+            )
+            for application in client.list_applications()
+        }
+        for application in seed.get("applications", []):
+            if not isinstance(application, dict):
+                continue
+            app_service = str(application.get("service", "")).lower()
+            implementation = str(application.get("implementation", ""))
+            if app_service not in installed_services:
+                lines.append(f"Skipped {implementation}: service not installed")
+                continue
+            name = implementation or app_service
+            key = (implementation.lower(), name.lower())
+            if key in existing_apps:
+                continue
+            api_key = self._api_key_reader(str(application.get("config_file", "")))
+            client.add_application(_indexer_application_payload(application, api_key))
+            existing_apps.add(key)
+            changes += 1
+            lines.append(f"Added {implementation} application")
+
+        if not lines:
+            lines.append("Already configured")
+        return {"changes": changes, "lines": lines}
+
     def _client_for(self, service_id: str, seed: Mapping[str, Any]) -> Any:
         api = seed.get("api", {})
         if not isinstance(api, dict):
@@ -248,5 +287,28 @@ def _download_client_payload(client_config: Mapping[str, Any]) -> dict[str, Any]
         "removeFailedDownloads": bool(client_config.get("remove_failed", True)),
         "fields": [
             {"name": "category", "value": category},
+        ],
+    }
+
+
+def _indexer_application_payload(
+    application: Mapping[str, Any],
+    api_key: str,
+) -> dict[str, Any]:
+    implementation = str(application.get("implementation", ""))
+    service = str(application.get("service", "")).lower()
+    port = int(application.get("port", 0))
+    base_url = f"http://127.0.0.1:{port}" if port else f"http://{service}"
+    return {
+        "name": implementation or service,
+        "implementation": implementation,
+        "configContract": f"{implementation}Settings",
+        "syncLevel": "fullSync",
+        "tags": [],
+        "fields": [
+            {"name": "baseUrl", "value": base_url},
+            {"name": "apiKey", "value": api_key},
+            {"name": "syncCategories", "value": [5000, 5030, 5040]},
+            {"name": "animeSyncCategories", "value": [5070]},
         ],
     }
