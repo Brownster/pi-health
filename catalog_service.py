@@ -38,14 +38,18 @@ class CatalogComposeSectionError(ValueError):
 
 
 def _summarize_item(item: Mapping[str, Any]) -> dict:
-    return {
+    summary = {
         'id': item.get('id'),
         'name': item.get('name') or item.get('id'),
         'description': item.get('description', ''),
+        'kind': item.get('kind', 'app'),
         'requires': item.get('requires', []) or [],
         'disabled_by_default': bool(item.get('disabled_by_default', False)),
         'source': item.get('_source', ''),
     }
+    if item.get('kind') == 'bundle':
+        summary['members'] = item.get('members', []) or []
+    return summary
 
 
 def _render_template(service_dict, values):
@@ -217,21 +221,23 @@ class CatalogService:
         catalog_dir = os.path.abspath(self._catalog_dir_provider())
         if not self._is_dir(catalog_dir):
             return items
-        for filename in os.listdir(catalog_dir):
-            if not (filename.endswith('.yaml') or filename.endswith('.yml')):
-                continue
-            path = os.path.join(catalog_dir, filename)
-            try:
-                with open(path) as handle:
-                    data = yaml.safe_load(handle)
-            except Exception:
-                continue
-            if not isinstance(data, dict):
-                continue
-            if not data.get('id'):
-                continue
-            data['_source'] = filename
-            items.append(data)
+        for root, dirnames, filenames in os.walk(catalog_dir):
+            dirnames.sort()
+            for filename in sorted(filenames):
+                if not (filename.endswith('.yaml') or filename.endswith('.yml')):
+                    continue
+                path = os.path.join(root, filename)
+                try:
+                    with open(path) as handle:
+                        data = yaml.safe_load(handle)
+                except Exception:
+                    continue
+                if not isinstance(data, dict):
+                    continue
+                if not data.get('id'):
+                    continue
+                data['_source'] = os.path.relpath(path, catalog_dir)
+                items.append(data)
         return items
 
     def _get_catalog_item(self, item_id):
@@ -268,7 +274,6 @@ class CatalogService:
         item = self._get_catalog_item(item_id)
         if not item:
             raise CatalogError({'error': f'Catalog item not found: {item_id}'}, 404)
-
         target_stack = data.get('target_stack')
         installed_services = (
             self._list_stack_services(target_stack)
@@ -333,6 +338,14 @@ class CatalogService:
         item = self._get_catalog_item(item_id)
         if not item:
             raise CatalogError({'error': f'Catalog item not found: {item_id}'}, 404)
+        if item.get('kind') == 'bundle':
+            raise CatalogError(
+                {
+                    'error': 'Bundle install requires the media quickstart flow',
+                    'id': item_id,
+                },
+                400,
+            )
 
         target_stack = data.get('target_stack')
         lock_name = (

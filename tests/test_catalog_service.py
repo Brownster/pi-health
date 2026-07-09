@@ -111,6 +111,62 @@ def test_list_items_summarizes(tmp_path):
     assert result["items"][0]["name"] == "Sonarr"
 
 
+def test_list_items_includes_nested_bundle_metadata(tmp_path):
+    write_item(tmp_path, SAMPLE)
+    bundle_dir = tmp_path / "bundles"
+    write_item(
+        bundle_dir,
+        {
+            "id": "media-server",
+            "kind": "bundle",
+            "name": "Media Server",
+            "description": "Recommended media stack",
+            "members": [
+                {"id": "transmission", "order": 10},
+                {"id": "sonarr", "order": 20},
+            ],
+        },
+    )
+
+    result = make_service(tmp_path).list_items()
+    items = {item["id"]: item for item in result["items"]}
+
+    assert items["sonarr"]["kind"] == "app"
+    assert items["media-server"] == {
+        "id": "media-server",
+        "name": "Media Server",
+        "description": "Recommended media stack",
+        "kind": "bundle",
+        "requires": [],
+        "disabled_by_default": False,
+        "source": "bundles/media-server.yaml",
+        "members": [
+            {"id": "transmission", "order": 10},
+            {"id": "sonarr", "order": 20},
+        ],
+    }
+
+
+def test_get_item_loads_nested_bundle_definition(tmp_path):
+    bundle_dir = tmp_path / "bundles"
+    write_item(
+        bundle_dir,
+        {
+            "id": "media-server",
+            "kind": "bundle",
+            "name": "Media Server",
+            "target_stack": "media",
+            "members": [{"id": "jellyfin", "order": 70}],
+        },
+    )
+
+    result = make_service(tmp_path).get_item("media-server")
+
+    assert result["item"]["kind"] == "bundle"
+    assert result["item"]["target_stack"] == "media"
+    assert result["item"]["members"] == [{"id": "jellyfin", "order": 70}]
+
+
 def test_get_item_not_found_raises(tmp_path):
     tmp_path.mkdir(exist_ok=True)
     try:
@@ -222,6 +278,35 @@ def test_install_missing_id_raises_400(tmp_path):
         make_service(tmp_path).install({}, operation_registry=None, owner="o", username="u")
     except CatalogError as exc:
         assert exc.status_code == 400
+    else:
+        raise AssertionError("expected CatalogError")
+
+
+def test_install_rejects_bundle_until_quickstart_exists(tmp_path):
+    bundle_dir = tmp_path / "bundles"
+    write_item(
+        bundle_dir,
+        {
+            "id": "media-server",
+            "kind": "bundle",
+            "name": "Media Server",
+            "members": [{"id": "jellyfin", "order": 70}],
+        },
+    )
+
+    try:
+        make_service(tmp_path).install(
+            {"id": "media-server", "stack_name": "media"},
+            operation_registry=None,
+            owner="o",
+            username="u",
+        )
+    except CatalogError as exc:
+        assert exc.status_code == 400
+        assert exc.payload == {
+            "error": "Bundle install requires the media quickstart flow",
+            "id": "media-server",
+        }
     else:
         raise AssertionError("expected CatalogError")
 

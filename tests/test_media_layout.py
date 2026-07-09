@@ -116,6 +116,41 @@ def test_media_catalog_layout_defaults_are_valid():
             assert resolve_layout_default(layout, field["layout_default"]).startswith("/")
 
 
+def test_media_server_bundle_references_existing_apps_in_order():
+    bundle = yaml.safe_load((CATALOG_DIR / "bundles" / "media-server.yaml").read_text())
+    member_ids = [member["id"] for member in bundle["members"]]
+    member_orders = [member["order"] for member in bundle["members"]]
+
+    assert bundle["kind"] == "bundle"
+    assert bundle["target_stack"] == "media"
+    assert member_ids == [
+        "vpn",
+        "transmission",
+        "sabnzbd",
+        "prowlarr",
+        "sonarr",
+        "radarr",
+        "lidarr",
+        "jellyfin",
+    ]
+    assert member_orders == sorted(member_orders)
+    assert len(member_orders) == len(set(member_orders))
+    for item_id in member_ids:
+        assert (CATALOG_DIR / f"{item_id}.yaml").exists(), f"{item_id} is not in catalog"
+    assert bundle["choices"] == [
+        {
+            "key": "USE_VPN",
+            "label": "Use VPN gateway",
+            "type": "boolean",
+            "default": "true",
+        }
+    ]
+    assert bundle["shared_fields"]["USE_VPN"] == "true"
+    assert bundle["shared_fields"]["CONFIG_DIR"]["layout_default"] == "config_root"
+    assert bundle["shared_fields"]["DOWNLOADS_DIR"]["layout_default"] == "downloads_root"
+    assert bundle["shared_fields"]["STORAGE_DIR"]["layout_default"] == "storage_root"
+
+
 def test_arr_catalog_defaults_do_not_hardcode_library_or_download_paths():
     for item_id in ("sonarr", "radarr", "lidarr"):
         data = yaml.safe_load((CATALOG_DIR / f"{item_id}.yaml").read_text())

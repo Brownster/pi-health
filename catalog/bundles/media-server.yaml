@@ -1,0 +1,83 @@
+id: media-server
+kind: bundle
+name: Media Server
+description: Recommended media stack with downloads, indexers, automation, and Jellyfin
+disabled_by_default: false
+target_stack: media
+shared_fields:
+  USE_VPN: "true"
+  TZ: Europe/London
+  PUID: "1000"
+  PGID: "1000"
+  CONFIG_DIR:
+    layout_default: config_root
+  DOWNLOADS_DIR:
+    layout_default: downloads_root
+  STORAGE_DIR:
+    layout_default: storage_root
+choices:
+  - key: USE_VPN
+    label: Use VPN gateway
+    type: boolean
+    default: "true"
+members:
+  - id: vpn
+    order: 0
+    when:
+      field: USE_VPN
+      equals: "true"
+    values:
+      CONFIG_DIR: "{{CONFIG_DIR}}"
+      VPN_ENV_FILE: "{{CONFIG_DIR}}/vpn/.env"
+  - id: transmission
+    order: 10
+    values:
+      TZ: "{{TZ}}"
+      PUID: "{{PUID}}"
+      PGID: "{{PGID}}"
+      CONFIG_DIR: "{{CONFIG_DIR}}"
+      DOWNLOADS_DIR: "{{DOWNLOADS_DIR}}"
+  - id: sabnzbd
+    order: 20
+    values:
+      TZ: "{{TZ}}"
+      PUID: "{{PUID}}"
+      PGID: "{{PGID}}"
+      CONFIG_DIR: "{{CONFIG_DIR}}"
+      DOWNLOADS_DIR: "{{DOWNLOADS_DIR}}"
+  - id: prowlarr
+    order: 30
+    values:
+      TZ: "{{TZ}}"
+      PUID: "{{PUID}}"
+      PGID: "{{PGID}}"
+      CONFIG_DIR: "{{CONFIG_DIR}}"
+  - id: sonarr
+    order: 40
+    values:
+      TZ: "{{TZ}}"
+      PUID: "{{PUID}}"
+      PGID: "{{PGID}}"
+      CONFIG_DIR: "{{CONFIG_DIR}}"
+  - id: radarr
+    order: 50
+    values:
+      TZ: "{{TZ}}"
+      PUID: "{{PUID}}"
+      PGID: "{{PGID}}"
+      CONFIG_DIR: "{{CONFIG_DIR}}"
+  - id: lidarr
+    order: 60
+    values:
+      TZ: "{{TZ}}"
+      PUID: "{{PUID}}"
+      PGID: "{{PGID}}"
+      CONFIG_DIR: "{{CONFIG_DIR}}"
+  - id: jellyfin
+    order: 70
+    values:
+      TZ: "{{TZ}}"
+      PUID: "{{PUID}}"
+      PGID: "{{PGID}}"
+      CONFIG_DIR: "{{CONFIG_DIR}}"
+      STORAGE_DIR: "{{STORAGE_DIR}}"
