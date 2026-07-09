@@ -1,0 +1,33 @@
+id: mattermost-db
+name: Mattermost Database (Postgres)
+description: PostgreSQL database for Mattermost
+requires: []
+disabled_by_default: false
+fields:
+  - key: CONFIG_DIR
+    label: Config root directory
+    default: "/home/pi/docker"
+  - key: DB_NAME
+    label: Database name
+    default: "mattermost"
+  - key: DB_USER
+    label: Database user
+    default: "mmuser"
+  - key: DB_PASSWORD
+    label: Database password
+    default: "change-me-long-random"
+service:
+  image: docker.io/library/postgres:16-alpine
+  container_name: mattermost-db
+  environment:
+    - POSTGRES_DB={{DB_NAME}}
+    - POSTGRES_USER={{DB_USER}}
+    - POSTGRES_PASSWORD={{DB_PASSWORD}}
+  volumes:
+    - "{{CONFIG_DIR}}/mattermost-db:/var/lib/postgresql/data"
+  networks:
+    - mattermost
+  restart: unless-stopped
+networks:
+  mattermost:
+    driver: bridge

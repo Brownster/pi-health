@@ -1,0 +1,54 @@
+id: mattermost
+name: Mattermost
+description: Self-hosted team chat. Hosts the LimeOS alert incidents and (later) the @agent assistant. LAN-only — do not expose without a TLS reverse proxy. Create a channel + incoming webhook after first boot, then install LimeOS Alert Daemon.
+requires: ["mattermost-db"]
+disabled_by_default: false
+fields:
+  - key: CONFIG_DIR
+    label: Config root directory
+    default: "/home/pi/docker"
+  - key: WEB_PORT
+    label: Web UI port
+    default: "8065"
+  - key: SITE_URL
+    label: Site URL (this Pi's LAN address)
+    default: "http://192.168.0.45:8065"
+  - key: DB_NAME
+    label: Database name
+    default: "mattermost"
+  - key: DB_USER
+    label: Database user
+    default: "mmuser"
+  - key: DB_PASSWORD
+    label: Database password (match Mattermost Database)
+    default: "change-me-long-random"
+  - key: TZ
+    label: Timezone
+    default: "Europe/London"
+service:
+  image: mattermost/mattermost-team-edition:latest
+  container_name: mattermost
+  environment:
+    - "MM_SQLSETTINGS_DRIVERNAME=postgres"
+    - "MM_SQLSETTINGS_DATASOURCE=postgres://{{DB_USER}}:{{DB_PASSWORD}}@mattermost-db:5432/{{DB_NAME}}?sslmode=disable&connect_timeout=10"
+    - "MM_SERVICESETTINGS_SITEURL={{SITE_URL}}"
+    - "MM_SERVICESETTINGS_ENABLEINCOMINGWEBHOOKS=true"
+    - "MM_SERVICESETTINGS_ENABLEOUTGOINGWEBHOOKS=false"
+    - "TZ={{TZ}}"
+  volumes:
+    - "{{CONFIG_DIR}}/mattermost/config:/mattermost/config"
+    - "{{CONFIG_DIR}}/mattermost/data:/mattermost/data"
+    - "{{CONFIG_DIR}}/mattermost/logs:/mattermost/logs"
+    - "{{CONFIG_DIR}}/mattermost/plugins:/mattermost/plugins"
+    - "{{CONFIG_DIR}}/mattermost/client-plugins:/mattermost/client/plugins"
+    - "{{CONFIG_DIR}}/mattermost/bleve-indexes:/mattermost/bleve-indexes"
+  ports:
+    - "{{WEB_PORT}}:8065"
+  networks:
+    - mattermost
+  depends_on:
+    - mattermost-db
+  restart: unless-stopped
+networks:
+  mattermost:
+    driver: bridge

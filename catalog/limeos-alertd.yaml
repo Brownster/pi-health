@@ -1,0 +1,38 @@
+id: limeos-alertd
+name: LimeOS Alert Daemon
+description: Native health checks (container down/unhealthy, SMART, mount, SnapRAID) that post deduplicated incidents to Mattermost. No AI model — cheap, always-on. Needs a Mattermost incoming-webhook URL (create it in Mattermost first). Runs the pi-health image with the alert daemon command.
+requires: ["mattermost"]
+disabled_by_default: false
+fields:
+  - key: CONFIG_DIR
+    label: Config root directory
+    default: "/home/pi/docker"
+  - key: PIHEALTH_IMAGE
+    label: pi-health image (same image your pi-health container runs)
+    default: "pi-health-dashboard:latest"
+  - key: MATTERMOST_WEBHOOK
+    label: Mattermost incoming-webhook URL
+    default: ""
+  - key: POLL_SECONDS
+    label: Poll interval (seconds)
+    default: "60"
+  - key: FAIL_THRESHOLD
+    label: Consecutive failures before alerting
+    default: "2"
+  - key: REQUIRED_MOUNTS
+    label: Required mountpoints (comma-separated; leave empty in a container)
+    default: ""
+service:
+  image: "{{PIHEALTH_IMAGE}}"
+  container_name: limeos-alertd
+  command: ["python", "alert_daemon.py"]
+  environment:
+    - "LIMEOS_ALERT_MATTERMOST_WEBHOOK={{MATTERMOST_WEBHOOK}}"
+    - "LIMEOS_ALERT_POLL_SECONDS={{POLL_SECONDS}}"
+    - "LIMEOS_ALERT_FAIL_THRESHOLD={{FAIL_THRESHOLD}}"
+    - "LIMEOS_ALERT_REQUIRED_MOUNTS={{REQUIRED_MOUNTS}}"
+    - "LIMEOS_STATE_DIR=/var/lib/limeos"
+  volumes:
+    - "/var/run/docker.sock:/var/run/docker.sock:ro"
+    - "{{CONFIG_DIR}}/limeos-alertd:/var/lib/limeos"
+  restart: unless-stopped

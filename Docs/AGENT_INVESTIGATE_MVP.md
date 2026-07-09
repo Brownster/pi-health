@@ -73,11 +73,21 @@ up. B1 is host infra on the DAS Pi. B4 needs B1+B3.
   opens is logged, not retried); a delivery queue is a follow-up.
 
 ### B1 status (2026-07-09)
-Deploy artifacts landed under `deploy/`: `deploy/mattermost/` (LAN-only Mattermost + Postgres
-compose, ARM64, + first-run/webhook guide) and `deploy/alertd/` (compose sidecar + systemd unit +
-smoke test). **Temporary home is Holly's Pi** (`192.168.0.45`) while the DAS Pi (Pi 4, awaiting a
-micro-HDMI cable) is down. Because Holly's Pi runs real containers, the container-down → incident →
-Mattermost path is a full end-to-end smoke there even before the storage signals are wired.
+**Primary install path is the catalog** (one-click from the pi-health UI): `catalog/mattermost-db.yaml`,
+`catalog/mattermost.yaml` (`requires: mattermost-db`), and `catalog/limeos-alertd.yaml`
+(`requires: mattermost`) — mirroring the proven gitea/gitea-db pattern, with our defaults as editable
+fields. The catalog's `requires` enforces the dependency chain (alertd won't install without
+Mattermost). `deploy/mattermost/` + `deploy/alertd/` remain as the manual/reference equivalents and
+hold the first-run + webhook + smoke-test guides.
+
+Chosen approach **A**: the catalog installs the apps with defaults, but the channel + incoming
+webhook is still a one-time manual step (paste the webhook URL into the alertd field). Approach **B**
+(a pi-health "Connect alerts to Mattermost" action that auto-creates the channel + webhook via the
+admin API) is a planned long-term follow-up, not a catalog change.
+
+**Temporary home is Holly's Pi** (`192.168.0.45`) while the DAS Pi (Pi 4, awaiting a micro-HDMI cable)
+is down. Because Holly's Pi runs real containers, the container-down → incident → Mattermost path is a
+full end-to-end smoke there even before the storage signals are wired.
 
 ## Relationship to the full LA sprint
 This MVP is a deliberate subset and does **not** require the full sprint's entry gates (notably v1 UI
