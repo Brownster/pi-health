@@ -6,6 +6,7 @@ import configparser
 import json
 import os
 import tempfile
+import urllib.parse
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -21,6 +22,7 @@ class MediaSeedError(Exception):
 
 
 ClientFactory = Callable[[str, Mapping[str, Any], str], Any]
+MediaServerClientFactory = Callable[[str, Mapping[str, Any], str | None], Any]
 ApiKeyReader = Callable[[str], str]
 TextReader = Callable[[str], str]
 TextWriter = Callable[[str, str], None]
@@ -38,6 +40,7 @@ class MediaSeedService:
         layout_provider: Callable[[], MediaLayout],
         api_key_reader: ApiKeyReader = read_api_key,
         client_factory: ClientFactory | None = None,
+        media_server_client_factory: MediaServerClientFactory | None = None,
         text_reader: TextReader | None = None,
         text_writer: TextWriter | None = None,
         path_exists: Callable[[str], bool] = os.path.exists,
@@ -48,6 +51,9 @@ class MediaSeedService:
         self._layout_provider = layout_provider
         self._api_key_reader = api_key_reader
         self._client_factory = client_factory or _default_client_factory
+        self._media_server_client_factory = (
+            media_server_client_factory or _default_media_server_client_factory
+        )
         self._text_reader = text_reader or _read_text
         self._text_writer = text_writer or _write_text_atomic
         self._path_exists = path_exists
@@ -107,7 +113,7 @@ class MediaSeedService:
         if kind == "downloadclient":
             return self._seed_download_client(service_id, seed)
         if kind == "mediaserver":
-            return {"changes": 0, "lines": ["Media server library seeding is pending"]}
+            return self._seed_media_server(service_id, seed)
         return {"changes": 0, "lines": [f"Unsupported seed kind: {kind}"]}
 
     def _seed_arr(
@@ -307,6 +313,52 @@ class MediaSeedService:
             "lines": [f"Updated SABnzbd local config {config_file}"],
         }
 
+    def _seed_media_server(
+        self,
+        service_id: str,
+        seed: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        client = self._media_server_client_for(service_id, seed)
+        changes = 0
+        lines: list[str] = []
+
+        existing_libraries = {
+            (
+                str(library.get("name", "")).lower(),
+                str(library.get("collection_type", "")).lower(),
+            ): {
+                str(path).rstrip("/")
+                for path in library.get("paths", [])
+            }
+            for library in client.list_libraries()
+            if isinstance(library, dict)
+        }
+        for library in seed.get("libraries", []):
+            if not isinstance(library, dict):
+                continue
+            name = str(library.get("name", "")).strip()
+            collection_type = str(library.get("kind", "")).strip()
+            path = str(library.get("path", "")).rstrip("/")
+            if not name or not collection_type or not path:
+                continue
+            if _path_is_under(path, "/downloads"):
+                raise MediaSeedError(f"{service_id} library may not be under {path}")
+            key = (name.lower(), collection_type.lower())
+            if path in existing_libraries.get(key, set()):
+                continue
+            client.create_library(
+                name=name,
+                collection_type=collection_type,
+                paths=[path],
+            )
+            existing_libraries.setdefault(key, set()).add(path)
+            changes += 1
+            lines.append(f"Added Jellyfin {name} library at {path}")
+
+        if not lines:
+            lines.append("Jellyfin libraries already seeded")
+        return {"changes": changes, "lines": lines}
+
     def _client_for(self, service_id: str, seed: Mapping[str, Any]) -> Any:
         api = seed.get("api", {})
         if not isinstance(api, dict):
@@ -314,6 +366,16 @@ class MediaSeedService:
         config_file = str(api.get("config_file", ""))
         api_key = self._api_key_reader(config_file)
         return self._client_factory(service_id, seed, api_key)
+
+    def _media_server_client_for(self, service_id: str, seed: Mapping[str, Any]) -> Any:
+        api = seed.get("api", {})
+        if not isinstance(api, dict):
+            raise MediaSeedError(f"{service_id} seed is missing api settings")
+        api_key = None
+        api_key_file = str(api.get("api_key_file", "") or api.get("config_file", ""))
+        if api_key_file:
+            api_key = self._api_key_reader(api_key_file)
+        return self._media_server_client_factory(service_id, seed, api_key)
 
     def _catalog_items_by_id(self) -> dict[str, dict]:
         items = {}
@@ -361,6 +423,17 @@ class MediaSeedService:
 def _default_client_factory(service_id: str, seed: Mapping[str, Any], api_key: str) -> ArrClient:
     api = seed.get("api", {})
     return ArrClient(port=int(api["port"]), api_key=api_key)
+
+
+def _default_media_server_client_factory(
+    service_id: str,
+    seed: Mapping[str, Any],
+    api_key: str | None,
+) -> "JellyfinClient":
+    api = seed.get("api", {})
+    if service_id != "jellyfin":
+        raise MediaSeedError(f"{service_id} media server seeding is unsupported")
+    return JellyfinClient(port=int(api["port"]), api_key=api_key)
 
 
 def _read_text(path: str) -> str:
@@ -448,3 +521,89 @@ def _indexer_application_payload(
             {"name": "animeSyncCategories", "value": [5070]},
         ],
     }
+
+
+class JellyfinClient:
+    """Small wrapper over the Jellyfin library API."""
+
+    def __init__(
+        self,
+        *,
+        port: int,
+        api_key: str | None = None,
+        host: str = "127.0.0.1",
+        transport: Callable[[str, str, Mapping[str, str], bytes | None], Any] | None = None,
+    ) -> None:
+        self._base_url = f"http://{host}:{port}"
+        self._headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        }
+        if api_key:
+            self._headers["X-Emby-Token"] = api_key
+        self._transport = transport or _jellyfin_urllib_transport
+
+    def list_libraries(self) -> list[dict[str, Any]]:
+        libraries = self._request("GET", "/Library/VirtualFolders")
+        normalized = []
+        for library in libraries if isinstance(libraries, list) else []:
+            if not isinstance(library, dict):
+                continue
+            normalized.append(
+                {
+                    "name": library.get("Name") or library.get("name"),
+                    "collection_type": (
+                        library.get("CollectionType")
+                        or library.get("collectionType")
+                        or library.get("collection_type")
+                    ),
+                    "paths": (
+                        library.get("Locations")
+                        or library.get("locations")
+                        or library.get("paths")
+                        or []
+                    ),
+                }
+            )
+        return normalized
+
+    def create_library(
+        self,
+        *,
+        name: str,
+        collection_type: str,
+        paths: list[str],
+    ) -> Any:
+        query = urllib.parse.urlencode(
+            {
+                "name": name,
+                "collectionType": collection_type,
+                "paths": paths,
+                "refreshLibrary": "false",
+            },
+            doseq=True,
+        )
+        return self._request("POST", f"/Library/VirtualFolders?{query}")
+
+    def _request(
+        self,
+        method: str,
+        path: str,
+        payload: Mapping[str, Any] | None = None,
+    ) -> Any:
+        body = None
+        if payload is not None:
+            body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        normalized = path if path.startswith("/") else f"/{path}"
+        return self._transport(method, f"{self._base_url}{normalized}", self._headers, body)
+
+
+def _jellyfin_urllib_transport(
+    method: str,
+    url: str,
+    headers: Mapping[str, str],
+    body: bytes | None,
+) -> Any:
+    from arr_client import urllib_transport
+
+    return urllib_transport(method, url, headers, body)

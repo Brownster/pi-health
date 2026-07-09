@@ -10,7 +10,7 @@ from arr_client import read_api_key
 from app import AppDependencies, create_app
 from auth_utils import LoginRateLimiter
 from media_layout import MediaLayout
-from media_seed_service import MediaSeedService
+from media_seed_service import JellyfinClient, MediaSeedService
 from operation_manager import OperationRegistry
 
 
@@ -78,6 +78,30 @@ class FakeArrClient:
         self.added_applications.append(application)
 
 
+class FakeJellyfinClient:
+    def __init__(self):
+        self.libraries = [
+            {
+                "name": "Movies",
+                "collection_type": "movies",
+                "paths": ["/media/movies"],
+            }
+        ]
+        self.added_libraries = []
+
+    def list_libraries(self):
+        return list(self.libraries)
+
+    def create_library(self, *, name, collection_type, paths):
+        library = {
+            "name": name,
+            "collection_type": collection_type,
+            "paths": list(paths),
+        }
+        self.libraries.append(library)
+        self.added_libraries.append(library)
+
+
 def make_service(fake_client, *, services=None, api_key_reader=None):
     if services is None:
         services = {
@@ -122,6 +146,22 @@ def make_file_seed_service(*, services, files):
         text_reader=read_text,
         text_writer=write_text,
         path_exists=lambda path: path in files,
+    )
+
+
+def make_media_server_seed_service(fake_client, *, services=None):
+    if services is None:
+        services = {"jellyfin": {}}
+    return MediaSeedService(
+        catalog_dir_provider=lambda: str(CATALOG_DIR),
+        stack_path_provider=lambda stack: f"/stacks/{stack}",
+        load_stack_compose=lambda _path: (
+            {"services": services},
+            "/stacks/media/compose.yaml",
+        ),
+        layout_provider=lambda: MediaLayout(),
+        api_key_reader=lambda config_file: f"key-for:{config_file}",
+        media_server_client_factory=lambda _service_id, _seed, _api_key: fake_client,
     )
 
 
@@ -272,6 +312,105 @@ def test_seed_stack_skips_download_client_without_local_config_file():
     assert events[-1]["done"] is True
     assert events[-1]["changes"] == 0
     assert any("no local config file" in event.get("line", "") for event in events)
+
+
+def test_seed_stack_adds_jellyfin_libraries_for_canonical_media_paths():
+    fake_client = FakeJellyfinClient()
+    service = make_media_server_seed_service(fake_client)
+
+    first_events = list(service.seed_stack("media"))
+    second_events = list(service.seed_stack("media"))
+
+    assert first_events[-1]["done"] is True
+    assert first_events[-1]["changes"] == 4
+    assert second_events[-1]["changes"] == 0
+    assert fake_client.added_libraries == [
+        {"name": "TV", "collection_type": "tv", "paths": ["/media/tv"]},
+        {"name": "Music", "collection_type": "music", "paths": ["/media/music"]},
+        {"name": "Books", "collection_type": "books", "paths": ["/media/books"]},
+        {
+            "name": "Audiobooks",
+            "collection_type": "audiobooks",
+            "paths": ["/media/audiobooks"],
+        },
+    ]
+
+
+def test_seed_stack_rejects_jellyfin_libraries_under_downloads():
+    fake_client = FakeJellyfinClient()
+    service = MediaSeedService(
+        catalog_dir_provider=lambda: str(CATALOG_DIR),
+        stack_path_provider=lambda stack: f"/stacks/{stack}",
+        load_stack_compose=lambda _path: (
+            {"services": {"jellyfin": {}}},
+            "/stacks/media/compose.yaml",
+        ),
+        layout_provider=lambda: MediaLayout(),
+        media_server_client_factory=lambda _service_id, _seed, _api_key: fake_client,
+    )
+    original_catalog_items = service._catalog_items_by_id
+    service._catalog_items_by_id = lambda: {
+        **original_catalog_items(),
+        "jellyfin": {
+            "id": "jellyfin",
+            "seed": {
+                "kind": "mediaserver",
+                "api": {"port": 8096},
+                "libraries": [
+                    {"name": "Bad", "kind": "movies", "path": "/downloads/movies"},
+                ],
+            },
+        },
+    }
+
+    events = list(service.seed_stack("media"))
+
+    assert events[-1]["step"] == "error"
+    assert "library may not be under /downloads/movies" in events[-1]["error"]
+    assert fake_client.added_libraries == []
+
+
+def test_jellyfin_client_lists_and_creates_virtual_folders():
+    calls = []
+
+    def transport(method, url, headers, body):
+        calls.append((method, url, dict(headers), body))
+        if method == "GET":
+            return [
+                {
+                    "Name": "Movies",
+                    "CollectionType": "movies",
+                    "Locations": ["/media/movies"],
+                }
+            ]
+        return None
+
+    client = JellyfinClient(port=8096, api_key="jf-key", transport=transport)
+
+    assert client.list_libraries() == [
+        {
+            "name": "Movies",
+            "collection_type": "movies",
+            "paths": ["/media/movies"],
+        }
+    ]
+    client.create_library(name="TV", collection_type="tv", paths=["/media/tv"])
+
+    assert calls[0] == (
+        "GET",
+        "http://127.0.0.1:8096/Library/VirtualFolders",
+        {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "X-Emby-Token": "jf-key",
+        },
+        None,
+    )
+    assert calls[1][0] == "POST"
+    assert calls[1][1] == (
+        "http://127.0.0.1:8096/Library/VirtualFolders"
+        "?name=TV&collectionType=tv&paths=%2Fmedia%2Ftv&refreshLibrary=false"
+    )
 
 
 def _authed_client(media_seed_service):
