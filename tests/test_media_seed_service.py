@@ -102,6 +102,29 @@ def make_service(fake_client, *, services=None, api_key_reader=None):
     )
 
 
+def make_file_seed_service(*, services, files):
+    def read_text(path):
+        return files[path]
+
+    def write_text(path, content):
+        files[path] = content
+
+    return MediaSeedService(
+        catalog_dir_provider=lambda: str(CATALOG_DIR),
+        stack_path_provider=lambda stack: f"/stacks/{stack}",
+        load_stack_compose=lambda _path: (
+            {"services": services},
+            "/stacks/media/compose.yaml",
+        ),
+        layout_provider=lambda: MediaLayout(),
+        api_key_reader=lambda config_file: f"key-for:{config_file}",
+        client_factory=lambda _service_id, _seed, _api_key: FakeArrClient(),
+        text_reader=read_text,
+        text_writer=write_text,
+        path_exists=lambda path: path in files,
+    )
+
+
 def test_seed_stack_removes_download_root_and_adds_canonical_root_and_clients():
     fake_client = FakeArrClient()
 
@@ -194,6 +217,61 @@ def test_seed_stack_does_not_duplicate_prowlarr_applications():
     assert first_events[-1]["changes"] == 1
     assert second_events[-1]["changes"] == 0
     assert len(fake_client.added_applications) == 1
+
+
+def test_seed_stack_updates_transmission_local_config():
+    files = {
+        "/home/pi/docker/transmission/settings.json": json.dumps(
+            {
+                "download-dir": "/downloads",
+                "rpc-enabled": True,
+            }
+        )
+    }
+    service = make_file_seed_service(services={"transmission": {}}, files=files)
+
+    first_events = list(service.seed_stack("media"))
+    second_events = list(service.seed_stack("media"))
+
+    assert first_events[-1]["changes"] == 3
+    assert second_events[-1]["changes"] == 0
+    config = json.loads(files["/home/pi/docker/transmission/settings.json"])
+    assert config["download-dir"] == "/downloads/complete"
+    assert config["incomplete-dir"] == "/downloads/incomplete"
+    assert config["incomplete-dir-enabled"] is True
+    assert config["rpc-enabled"] is True
+
+
+def test_seed_stack_updates_sabnzbd_local_config():
+    files = {
+        "/home/pi/docker/sabnzbd/config/sabnzbd.ini": (
+            "[misc]\n"
+            "complete_dir = /old/complete\n"
+            "download_dir = /old/incomplete\n"
+            "host = 0.0.0.0\n"
+        )
+    }
+    service = make_file_seed_service(services={"sabnzbd": {}}, files=files)
+
+    first_events = list(service.seed_stack("media"))
+    second_events = list(service.seed_stack("media"))
+
+    assert first_events[-1]["changes"] == 2
+    assert second_events[-1]["changes"] == 0
+    updated = files["/home/pi/docker/sabnzbd/config/sabnzbd.ini"]
+    assert "complete_dir = /downloads/complete" in updated
+    assert "download_dir = /downloads/incomplete" in updated
+    assert "host = 0.0.0.0" in updated
+
+
+def test_seed_stack_skips_download_client_without_local_config_file():
+    service = make_file_seed_service(services={"rdtclient": {}}, files={})
+
+    events = list(service.seed_stack("media"))
+
+    assert events[-1]["done"] is True
+    assert events[-1]["changes"] == 0
+    assert any("no local config file" in event.get("line", "") for event in events)
 
 
 def _authed_client(media_seed_service):

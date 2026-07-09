@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import configparser
+import json
 import os
+import tempfile
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -19,6 +22,8 @@ class MediaSeedError(Exception):
 
 ClientFactory = Callable[[str, Mapping[str, Any], str], Any]
 ApiKeyReader = Callable[[str], str]
+TextReader = Callable[[str], str]
+TextWriter = Callable[[str, str], None]
 
 
 class MediaSeedService:
@@ -33,6 +38,9 @@ class MediaSeedService:
         layout_provider: Callable[[], MediaLayout],
         api_key_reader: ApiKeyReader = read_api_key,
         client_factory: ClientFactory | None = None,
+        text_reader: TextReader | None = None,
+        text_writer: TextWriter | None = None,
+        path_exists: Callable[[str], bool] = os.path.exists,
     ) -> None:
         self._catalog_dir_provider = catalog_dir_provider
         self._stack_path_provider = stack_path_provider
@@ -40,6 +48,9 @@ class MediaSeedService:
         self._layout_provider = layout_provider
         self._api_key_reader = api_key_reader
         self._client_factory = client_factory or _default_client_factory
+        self._text_reader = text_reader or _read_text
+        self._text_writer = text_writer or _write_text_atomic
+        self._path_exists = path_exists
 
     def seed_stack(self, stack_name: str = "media") -> Any:
         """Yield replayable operation events while applying media seed metadata."""
@@ -94,7 +105,7 @@ class MediaSeedService:
         if kind == "indexer":
             return self._seed_indexer(service_id, seed, installed_services)
         if kind == "downloadclient":
-            return {"changes": 0, "lines": ["Download client local seeding is pending"]}
+            return self._seed_download_client(service_id, seed)
         if kind == "mediaserver":
             return {"changes": 0, "lines": ["Media server library seeding is pending"]}
         return {"changes": 0, "lines": [f"Unsupported seed kind: {kind}"]}
@@ -213,6 +224,89 @@ class MediaSeedService:
             lines.append("Already configured")
         return {"changes": changes, "lines": lines}
 
+    def _seed_download_client(
+        self,
+        service_id: str,
+        seed: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        implementation = str(seed.get("implementation", ""))
+        api = seed.get("api", {})
+        config_file = str(api.get("config_file", "")) if isinstance(api, dict) else ""
+        if not config_file:
+            return {"changes": 0, "lines": [f"Skipped {implementation}: no local config file"]}
+        if not self._path_exists(config_file):
+            return {"changes": 0, "lines": [f"Skipped {implementation}: config file not found"]}
+        if implementation.lower() == "transmission":
+            return self._seed_transmission_config(config_file, seed)
+        if implementation.lower() == "sabnzbd":
+            return self._seed_sabnzbd_config(config_file, seed)
+        return {"changes": 0, "lines": [f"Skipped {service_id}: local seeding unsupported"]}
+
+    def _seed_transmission_config(
+        self,
+        config_file: str,
+        seed: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        config = self._read_json_config(config_file)
+        downloads = seed.get("downloads", {})
+        if not isinstance(downloads, dict):
+            downloads = {}
+        desired = {
+            "download-dir": str(downloads.get("complete_dir", "/downloads/complete")),
+        }
+        if downloads.get("incomplete_dir"):
+            desired["incomplete-dir"] = str(downloads["incomplete_dir"])
+            desired["incomplete-dir-enabled"] = True
+
+        changes = _apply_mapping_updates(config, desired)
+        if not changes:
+            return {"changes": 0, "lines": ["Transmission local config already seeded"]}
+        self._text_writer(config_file, json.dumps(config, indent=2, sort_keys=True) + "\n")
+        return {
+            "changes": changes,
+            "lines": [f"Updated Transmission local config {config_file}"],
+        }
+
+    def _seed_sabnzbd_config(
+        self,
+        config_file: str,
+        seed: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        parser = configparser.ConfigParser(interpolation=None)
+        parser.optionxform = str
+        if self._path_exists(config_file):
+            parser.read_string(self._text_reader(config_file))
+        if not parser.has_section("misc"):
+            parser.add_section("misc")
+
+        downloads = seed.get("downloads", {})
+        if not isinstance(downloads, dict):
+            downloads = {}
+        desired = {
+            "complete_dir": str(downloads.get("complete_dir", "/downloads/complete")),
+        }
+        if downloads.get("incomplete_dir"):
+            desired["download_dir"] = str(downloads["incomplete_dir"])
+
+        changes = 0
+        for key, value in desired.items():
+            if parser.get("misc", key, fallback=None) == value:
+                continue
+            parser.set("misc", key, value)
+            changes += 1
+
+        if not changes:
+            return {"changes": 0, "lines": ["SABnzbd local config already seeded"]}
+        from io import StringIO
+
+        output = StringIO()
+        parser.write(output)
+        self._text_writer(config_file, output.getvalue())
+        return {
+            "changes": changes,
+            "lines": [f"Updated SABnzbd local config {config_file}"],
+        }
+
     def _client_for(self, service_id: str, seed: Mapping[str, Any]) -> Any:
         api = seed.get("api", {})
         if not isinstance(api, dict):
@@ -252,10 +346,52 @@ class MediaSeedService:
                 values[key] = str(field.get("default", ""))
         return values
 
+    def _read_json_config(self, config_file: str) -> dict[str, Any]:
+        if not self._path_exists(config_file):
+            return {}
+        try:
+            data = json.loads(self._text_reader(config_file))
+        except json.JSONDecodeError as exc:
+            raise MediaSeedError(f"Invalid JSON config {config_file}: {exc}") from exc
+        if not isinstance(data, dict):
+            raise MediaSeedError(f"JSON config must be an object: {config_file}")
+        return data
+
 
 def _default_client_factory(service_id: str, seed: Mapping[str, Any], api_key: str) -> ArrClient:
     api = seed.get("api", {})
     return ArrClient(port=int(api["port"]), api_key=api_key)
+
+
+def _read_text(path: str) -> str:
+    with open(path, encoding="utf-8") as handle:
+        return handle.read()
+
+
+def _write_text_atomic(path: str, content: str) -> None:
+    directory = os.path.dirname(os.path.abspath(path))
+    os.makedirs(directory, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=directory, prefix=f".{os.path.basename(path)}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
+
+
+def _apply_mapping_updates(target: dict[str, Any], desired: Mapping[str, Any]) -> int:
+    changes = 0
+    for key, value in desired.items():
+        if target.get(key) == value:
+            continue
+        target[key] = value
+        changes += 1
+    return changes
 
 
 def _path_is_under(path: str, prefix: str) -> bool:
