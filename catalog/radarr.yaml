@@ -15,13 +15,16 @@ fields:
     default: "1000"
   - key: CONFIG_DIR
     label: Config root directory
-    default: "/home/pi/docker"
+    default: ""
+    layout_default: config_root
   - key: MEDIA_DIR
     label: Media directory (Movies)
-    default: "/mnt/storage/movies"
+    default: ""
+    layout_default: library:movies
   - key: DOWNLOADS_DIR
     label: Downloads directory
-    default: "/mnt/downloads"
+    default: ""
+    layout_default: downloads_root
 service:
   image: linuxserver/radarr:latest
   container_name: radarr

@@ -15,16 +15,20 @@ fields:
     default: "1000"
   - key: CONFIG_DIR
     label: Config root directory
-    default: "/home/pi/docker"
+    default: ""
+    layout_default: config_root
   - key: MEDIA_DIR
     label: Media directory (TV shows)
-    default: "/mnt/storage/tv"
+    default: ""
+    layout_default: library:tv
   - key: DOWNLOADS_DIR
     label: Downloads directory
-    default: "/mnt/downloads"
+    default: ""
+    layout_default: downloads_root
   - key: IPLAYER_DIR
     label: iPlayer completed directory
-    default: "/mnt/downloads/completed/transmission/iplayar"
+    default: ""
+    layout_default: download_complete:get_iplayer
 service:
   image: linuxserver/sonarr:latest
   container_name: sonarr

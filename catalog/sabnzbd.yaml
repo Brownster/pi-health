@@ -15,13 +15,16 @@ fields:
     default: "1000"
   - key: CONFIG_DIR
     label: Config root directory
-    default: "/home/pi/docker"
+    default: ""
+    layout_default: config_root
   - key: DOWNLOADS_DIR
     label: Downloads directory
-    default: "/mnt/downloads"
+    default: ""
+    layout_default: downloads_root
   - key: INCOMPLETE_DIR
     label: Incomplete downloads dir
-    default: "/mnt/downloads/sabdnzbd.incomplete"
+    default: ""
+    layout_default: download_incomplete
 service:
   image: lscr.io/linuxserver/sabnzbd:latest
   container_name: sabnzbd

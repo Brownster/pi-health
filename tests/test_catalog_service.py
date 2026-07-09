@@ -9,7 +9,7 @@ from werkzeug.security import generate_password_hash
 
 from app import AppDependencies, create_app
 from auth_utils import LoginRateLimiter
-from catalog_service import CatalogError, CatalogService
+from catalog_service import CatalogError, CatalogService, _apply_layout_defaults
 from operation_manager import OperationRegistry
 
 
@@ -126,6 +126,74 @@ def test_get_item_applies_media_paths(tmp_path):
     write_item(tmp_path, item)
     result = make_service(tmp_path).get_item("sonarr", apply_media_paths=True)
     assert result["item"]["fields"][0]["default"] == "/cfg"
+
+
+def test_get_item_applies_explicit_media_layout_defaults(tmp_path):
+    item = dict(
+        SAMPLE,
+        fields=[
+            {"key": "CONFIG_DIR", "default": "", "layout_default": "config_root"},
+            {"key": "MEDIA_DIR", "default": "", "layout_default": "library:tv"},
+            {"key": "DOWNLOADS_DIR", "default": "", "layout_default": "downloads_root"},
+            {
+                "key": "COMPLETE_DIR",
+                "default": "",
+                "layout_default": "download_complete:sonarr",
+            },
+        ],
+    )
+    write_item(tmp_path, item)
+
+    result = make_service(tmp_path).get_item("sonarr", apply_media_paths=True)
+    fields = {field["key"]: field["default"] for field in result["item"]["fields"]}
+
+    assert fields == {
+        "CONFIG_DIR": "/cfg",
+        "MEDIA_DIR": "/st/tv",
+        "DOWNLOADS_DIR": "/dl",
+        "COMPLETE_DIR": "/dl/complete/sonarr",
+    }
+
+
+def test_install_uses_layout_defaults_before_rendering(tmp_path):
+    item = dict(
+        SAMPLE,
+        fields=[
+            {"key": "MEDIA_DIR", "default": "", "layout_default": "library:movies"},
+            {"key": "DOWNLOADS_DIR", "default": "", "layout_default": "downloads_root"},
+        ],
+        service={
+            "image": "example:latest",
+            "volumes": ["{{MEDIA_DIR}}:/movies", "{{DOWNLOADS_DIR}}:/downloads"],
+        },
+    )
+    write_item(tmp_path, item)
+    rec = Recorder()
+
+    result, status = make_service(tmp_path, recorder=rec, path_exists=lambda p: False).install(
+        {"id": "sonarr", "stack_name": "media"},
+        operation_registry=None,
+        owner="o",
+        username="u",
+    )
+
+    assert status == 200
+    assert result["status"] == "installed"
+    assert rec.saved[-1][1]["services"]["sonarr"]["volumes"] == [
+        "/st/movies:/movies",
+        "/dl:/downloads",
+    ]
+
+
+def test_apply_layout_defaults_rejects_unknown_tokens():
+    item = {"id": "bad", "fields": [{"key": "PATH", "layout_default": "library:TV"}]}
+
+    try:
+        _apply_layout_defaults(item, {})
+    except ValueError as exc:
+        assert "Unknown media library kind" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")
 
 
 def test_status_lists_services_and_stacks(tmp_path):

@@ -14,6 +14,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from compose_yaml import ComposeYamlError
+from media_layout import MediaLayout, resolve_layout_default
 from operation_manager import parse_sse_payload
 
 TEMPLATE_VAR_PATTERN = re.compile(r'\{\{(\w+)\}\}')
@@ -129,6 +130,41 @@ def _validate_install_request(item, values):
     return True, None
 
 
+def _field_default_from_layout(field: Mapping[str, Any], layout: MediaLayout) -> str | None:
+    token = field.get("layout_default")
+    if token:
+        return resolve_layout_default(layout, str(token))
+
+    legacy_mapping = {
+        'CONFIG_DIR': 'config_root',
+        'DOWNLOADS_DIR': 'downloads_root',
+        'MEDIA_DIR': 'storage_root',
+        'STORAGE_DIR': 'storage_root',
+        'BACKUP_DIR': 'backup_root',
+    }
+    key = field.get('key', '')
+    mapped = legacy_mapping.get(key)
+    if mapped:
+        return resolve_layout_default(layout, mapped)
+    return None
+
+
+def _apply_layout_defaults(item: Mapping[str, Any], media_paths: Mapping[str, Any]) -> dict:
+    """Return an item copy with field defaults derived from the media layout."""
+    layout = MediaLayout.from_media_paths(media_paths)
+    item_copy = dict(item)
+    if 'fields' not in item_copy:
+        return item_copy
+    item_copy['fields'] = []
+    for field in item.get('fields', []):
+        field_copy = dict(field)
+        default = _field_default_from_layout(field_copy, layout)
+        if default is not None:
+            field_copy['default'] = default
+        item_copy['fields'].append(field_copy)
+    return item_copy
+
+
 def _check_dependencies(item, installed_services):
     """Return (satisfied, missing_deps) for an item against installed services."""
     requires = item.get('requires', []) or []
@@ -213,23 +249,7 @@ class CatalogService:
             raise CatalogError({'error': 'Catalog item not found'}, 404)
 
         if apply_media_paths:
-            media_paths = self._media_paths_loader()
-            path_mapping = {
-                'CONFIG_DIR': 'config',
-                'DOWNLOADS_DIR': 'downloads',
-                'MEDIA_DIR': 'storage',
-                'STORAGE_DIR': 'storage',
-                'BACKUP_DIR': 'backup',
-            }
-            item = dict(item)
-            if 'fields' in item:
-                item['fields'] = []
-                for field in self._get_catalog_item(item_id).get('fields', []):
-                    field_copy = dict(field)
-                    key = field_copy.get('key', '')
-                    if key in path_mapping and path_mapping[key] in media_paths:
-                        field_copy['default'] = media_paths[path_mapping[key]]
-                    item['fields'].append(field_copy)
+            item = _apply_layout_defaults(item, self._media_paths_loader())
 
         return {'item': item}
 
@@ -333,6 +353,7 @@ class CatalogService:
     def _install_locked(self, data, item, *, operation_registry, owner, username):
         item_id = data.get('id')
         values = dict(data.get('values', {}))
+        item = _apply_layout_defaults(item, self._media_paths_loader())
 
         valid, error = _validate_install_request(item, values)
         if not valid:

@@ -15,10 +15,12 @@ fields:
     default: "1000"
   - key: CONFIG_DIR
     label: Config root directory
-    default: "/home/pi/docker"
+    default: ""
+    layout_default: config_root
   - key: STORAGE_DIR
     label: Storage mount
-    default: "/mnt/storage"
+    default: ""
+    layout_default: storage_root
   - key: PORT
     label: Web UI port
     default: "4533"

@@ -37,6 +37,7 @@ from catalog_service import (  # noqa: F401  (re-exported for compatibility)
     _summarize_item,
     _validate_install_request,
 )
+from media_layout import MediaLayout
 
 catalog_manager = Blueprint('catalog_manager', __name__)
 
@@ -49,12 +50,7 @@ STACKS_PATH = os.getenv('STACKS_PATH', '/opt/stacks')
 
 def _load_media_paths():
     """Load configured media paths for template defaults."""
-    defaults = {
-        'downloads': '/mnt/downloads',
-        'storage': '/mnt/storage',
-        'backup': '/mnt/backup',
-        'config': '/home/pi/docker',
-    }
+    defaults = MediaLayout().legacy_media_paths()
     try:
         if os.path.exists(MEDIA_PATHS_CONFIG):
             with open(MEDIA_PATHS_CONFIG) as f:

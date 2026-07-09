@@ -15,10 +15,12 @@ fields:
     default: "1000"
   - key: CONFIG_DIR
     label: Config root directory
-    default: "/home/pi/docker"
+    default: ""
+    layout_default: config_root
   - key: DOWNLOADS_DIR
     label: Downloads directory
-    default: "/mnt/downloads"
+    default: ""
+    layout_default: downloads_root
 service:
   image: rogerfar/rdtclient
   container_name: rdtclient

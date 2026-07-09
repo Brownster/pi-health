@@ -15,16 +15,20 @@ fields:
     default: "1000"
   - key: CONFIG_DIR
     label: Config root directory
-    default: "/home/pi/docker"
+    default: ""
+    layout_default: config_root
   - key: STORAGE_DIR
     label: Storage mount
-    default: "/mnt/storage"
+    default: ""
+    layout_default: storage_root
   - key: DOWNLOADS_DIR
     label: Downloads mount
-    default: "/mnt/downloads"
+    default: ""
+    layout_default: downloads_root
   - key: BACKUP_DIR
     label: Backup mount
-    default: "/mnt/backup"
+    default: ""
+    layout_default: backup_root
   - key: PORT
     label: HTTP port
     default: "8085"

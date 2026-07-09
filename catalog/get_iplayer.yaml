@@ -15,13 +15,16 @@ fields:
     default: "1000"
   - key: CONFIG_DIR
     label: Config root directory
-    default: "/home/pi/docker"
+    default: ""
+    layout_default: config_root
   - key: INCOMPLETE_DIR
     label: Incomplete downloads directory
-    default: "/mnt/downloads/getiplayer"
+    default: ""
+    layout_default: download_incomplete
   - key: COMPLETE_DIR
     label: Completed iPlayer directory
-    default: "/mnt/downloads/completed/transmission/iplayar"
+    default: ""
+    layout_default: download_complete:get_iplayer
   - key: PORT
     label: Web UI port
     default: "1935"

@@ -15,7 +15,8 @@ fields:
     default: "1000"
   - key: CONFIG_DIR
     label: Config root directory
-    default: "/home/pi/docker"
+    default: ""
+    layout_default: config_root
 service:
   image: linuxserver/prowlarr:latest
   container_name: prowlarr
