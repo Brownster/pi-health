@@ -31,3 +31,21 @@ service:
   depends_on:
     vpn:
       condition: service_healthy
+seed:
+  kind: indexer
+  api:
+    port: 9696
+    config_file: "{{CONFIG_DIR}}/prowlarr/config.xml"
+  applications:
+    - implementation: Sonarr
+      service: sonarr
+      port: 8989
+      config_file: "{{CONFIG_DIR}}/sonarr/config.xml"
+    - implementation: Radarr
+      service: radarr
+      port: 7878
+      config_file: "{{CONFIG_DIR}}/radarr/config.xml"
+    - implementation: Lidarr
+      service: lidarr
+      port: 8686
+      config_file: "{{CONFIG_DIR}}/lidarr/config.xml"

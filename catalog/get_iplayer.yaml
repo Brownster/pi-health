@@ -41,7 +41,7 @@ service:
   volumes:
     - "{{CONFIG_DIR}}/get_iplayer/config:/config"
     - "{{INCOMPLETE_DIR}}:/downloads/incomplete"
-    - "{{COMPLETE_DIR}}:/downloads/iplayar"
+    - "{{COMPLETE_DIR}}:/downloads/complete/get_iplayer"
   ports:
     - "{{PORT}}:1935"
   restart: unless-stopped

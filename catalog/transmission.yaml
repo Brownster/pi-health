@@ -36,3 +36,19 @@ service:
   depends_on:
     vpn:
       condition: service_healthy
+seed:
+  kind: downloadclient
+  implementation: Transmission
+  api:
+    port: 9091
+    config_file: "{{CONFIG_DIR}}/transmission/settings.json"
+  downloads:
+    incomplete_dir: /downloads/incomplete
+    complete_dir: /downloads/complete
+  categories:
+    - sonarr
+    - radarr
+    - lidarr
+    - readarr
+  remove_completed: true
+  remove_failed: true

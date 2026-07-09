@@ -42,3 +42,26 @@ service:
     - "{{PORT}}:8096"
     - "{{HTTPS_PORT}}:8920"
   restart: unless-stopped
+seed:
+  kind: mediaserver
+  api:
+    port: 8096
+    config_dir: "{{CONFIG_DIR}}/jellyfin"
+  libraries:
+    - name: Movies
+      kind: movies
+      path: /media/movies
+    - name: TV
+      kind: tv
+      path: /media/tv
+    - name: Music
+      kind: music
+      path: /media/music
+    - name: Books
+      kind: books
+      path: /media/books
+    - name: Audiobooks
+      kind: audiobooks
+      path: /media/audiobooks
+  analytics: false
+  authentication: true

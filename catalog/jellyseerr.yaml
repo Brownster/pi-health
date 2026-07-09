@@ -9,7 +9,8 @@ fields:
     default: "Europe/London"
   - key: CONFIG_DIR
     label: Config root directory
-    default: "/home/pi/docker"
+    default: ""
+    layout_default: config_root
   - key: PORT
     label: Web UI port
     default: "5055"

@@ -41,3 +41,26 @@ service:
   depends_on:
     vpn:
       condition: service_healthy
+seed:
+  kind: arr
+  api:
+    port: 7878
+    config_file: "{{CONFIG_DIR}}/radarr/config.xml"
+  root_folders:
+    - /movies
+  forbid_root_under:
+    - /downloads
+  download_clients:
+    - implementation: Transmission
+      category: radarr
+      remove_completed: true
+      remove_failed: true
+    - implementation: Sabnzbd
+      category: radarr
+      remove_completed: true
+      remove_failed: true
+  import_mode: move
+  completed_download_handling: true
+  quality_profile: HD-1080p
+  naming: standard
+  recycle_bin: /movies/.recycle
