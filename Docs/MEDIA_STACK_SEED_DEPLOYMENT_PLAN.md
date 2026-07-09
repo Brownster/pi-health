@@ -34,6 +34,9 @@ Progress:
 - 2026-07-09: Phase 4.3 UI implemented. Added the media quickstart card to the
   V2 app catalog with stack-name confirmation, streamed progress output, and
   E2E coverage for the quickstart API contract.
+- 2026-07-10: Phase 5.1 implemented. Quickstart now persists a portable
+  `media_profile.json`, and primary backups explicitly include both
+  `media_layout.json` and `media_profile.json` alongside runtime config/state.
 
 ## Context — why we are doing this
 
