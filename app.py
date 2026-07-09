@@ -39,6 +39,7 @@ from auth_utils import (
 )
 from catalog_manager import CATALOG_DIR, _load_stack_compose, catalog_manager, default_catalog_service
 from catalog_service import CatalogService
+from media_profile_service import MediaProfileService
 from media_quickstart_service import MediaQuickstartService
 from media_seed_service import MediaSeedService
 from tools_manager import tools_manager, default_tools_service
@@ -150,6 +151,7 @@ STORAGE_PLUGIN_CONFIG_DIR = str(RUNTIME_STORAGE_PLUGIN_CONFIG_DIR)
 
 PIHEALTH_UPDATE_CONFIG = str(RUNTIME_CONFIG_DIR / "pihealth_update.json")
 MEDIA_LAYOUT_CONFIG = str(RUNTIME_CONFIG_DIR / "media_layout.json")
+MEDIA_PROFILE_CONFIG = str(RUNTIME_CONFIG_DIR / "media_profile.json")
 DEFAULT_PIHEALTH_UPDATE_CONFIG = {
     "repo_path": f"/home/{os.getenv('USER', 'pi')}/pi-health",
     "service_name": "pi-health"
@@ -196,6 +198,7 @@ class AppDependencies:
     disk_mount_service: DiskMountService | None = None
     media_paths_service: MediaPathsService | None = None
     media_layout_service: MediaLayoutService | None = None
+    media_profile_service: MediaProfileService | None = None
     media_seed_service: MediaSeedService | None = None
     media_quickstart_service: MediaQuickstartService | None = None
     seedbox_service: SeedboxService | None = None
@@ -232,6 +235,13 @@ def _default_media_layout_service(helper, repository):
     )
 
 
+def _default_media_profile_service(repository):
+    return MediaProfileService(
+        repository=repository,
+        profile_path_provider=lambda: MEDIA_PROFILE_CONFIG,
+    )
+
+
 def _default_media_seed_service(media_layout_service):
     from stack_manager import get_stack_path
 
@@ -248,12 +258,14 @@ def _default_media_quickstart_service(
     catalog_service,
     stack_operations_service,
     media_seed_service,
+    media_profile_service,
 ):
     return MediaQuickstartService(
         media_layout_service=media_layout_service,
         catalog_service=catalog_service,
         stack_operations_service=stack_operations_service,
         media_seed_service=media_seed_service,
+        media_profile_service=media_profile_service,
     )
 
 
@@ -853,6 +865,10 @@ def _media_seed_service():
     return current_app.extensions["media_seed_service"]
 
 
+def _media_profile_service():
+    return current_app.extensions["media_profile_service"]
+
+
 def _media_quickstart_service():
     return current_app.extensions["media_quickstart_service"]
 
@@ -1211,6 +1227,10 @@ def create_app(config=None, dependencies=None):
             application.extensions["helper"], application.extensions["config_repo"]
         )
     )
+    application.extensions["media_profile_service"] = (
+        resolved.media_profile_service
+        or _default_media_profile_service(application.extensions["config_repo"])
+    )
     application.extensions["media_seed_service"] = (
         resolved.media_seed_service
         or _default_media_seed_service(application.extensions["media_layout_service"])
@@ -1251,6 +1271,7 @@ def create_app(config=None, dependencies=None):
             application.extensions["catalog_service"],
             application.extensions["stack_operations_service"],
             application.extensions["media_seed_service"],
+            application.extensions["media_profile_service"],
         )
     )
     application.extensions["tools_service"] = (

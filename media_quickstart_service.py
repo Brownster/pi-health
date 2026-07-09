@@ -24,12 +24,14 @@ class MediaQuickstartService:
         catalog_service: Any,
         stack_operations_service: Any,
         media_seed_service: Any,
+        media_profile_service: Any | None = None,
         bundle_id: str = "media-server",
     ) -> None:
         self._media_layout_service = media_layout_service
         self._catalog_service = catalog_service
         self._stack_operations_service = stack_operations_service
         self._media_seed_service = media_seed_service
+        self._media_profile_service = media_profile_service
         self._bundle_id = bundle_id
 
     def stream_quickstart(
@@ -126,6 +128,19 @@ class MediaQuickstartService:
                     }
                     continue
                 yield {"step": "seed", "line": event.get("line", str(event))}
+
+            if self._media_profile_service is not None:
+                self._media_profile_service.save(
+                    {
+                        "version": 1,
+                        "stack_name": stack_name,
+                        "bundle_id": self._bundle_id,
+                        "values": dict(resolved),
+                        "layout": self._media_layout_service.layout().as_dict(),
+                        "members": [str(member["id"]) for member in active_members],
+                    }
+                )
+                yield {"step": "profile", "line": "Saved media profile"}
 
             yield {
                 "step": "complete",

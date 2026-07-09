@@ -92,13 +92,18 @@ class TestBackupConfig:
         assert '/opt/stacks' in sources
         assert str(backup_scheduler.RUNTIME_CONFIG_DIR) in sources
         assert str(backup_scheduler.RUNTIME_STATE_DIR) in sources
+        assert str(backup_scheduler.MEDIA_LAYOUT_CONFIG) in sources
+        assert str(backup_scheduler.MEDIA_PROFILE_CONFIG) in sources
         assert str(backup_scheduler.CREDENTIALS_FILE) in sources
 
         config['include_env'] = False
         sources = backup_scheduler._get_sources(config)
         assert str(backup_scheduler.RUNTIME_CONFIG_DIR) in sources
         assert str(backup_scheduler.RUNTIME_STATE_DIR) in sources
+        assert str(backup_scheduler.MEDIA_LAYOUT_CONFIG) in sources
+        assert str(backup_scheduler.MEDIA_PROFILE_CONFIG) in sources
         assert str(backup_scheduler.CREDENTIALS_FILE) not in sources
+        assert len(sources) == len(set(sources))
 
     def test_list_backups_filters_and_sorts(self, temp_config_dir):
         import backup_scheduler

@@ -39,6 +39,8 @@ backup_scheduler = Blueprint('backup_scheduler', __name__)
 
 CONFIG_DIR = str(RUNTIME_STATE_DIR)
 CONFIG_FILE = str(RUNTIME_STATE_DIR / 'backup_config.json')
+MEDIA_LAYOUT_CONFIG = RUNTIME_CONFIG_DIR / "media_layout.json"
+MEDIA_PROFILE_CONFIG = RUNTIME_CONFIG_DIR / "media_profile.json"
 
 # Dedicated background scheduler for backup jobs (separate from other schedulers).
 scheduler = BackgroundScheduler(daemon=True)
@@ -67,9 +69,10 @@ def _get_sources(config):
     if stacks_path:
         sources.append(stacks_path)
     sources.extend([str(RUNTIME_CONFIG_DIR), str(RUNTIME_STATE_DIR)])
+    sources.extend([str(MEDIA_LAYOUT_CONFIG), str(MEDIA_PROFILE_CONFIG)])
     if config.get('include_env', True):
         sources.append(str(CREDENTIALS_FILE))
-    return sources
+    return list(dict.fromkeys(sources))
 
 
 def _plugin_sources():

@@ -134,12 +134,22 @@ class FakeSeedService:
         yield from self.events
 
 
-def make_service(*, catalog=None, stack_ops=None, seed=None, layout=None):
+class FakeProfileService:
+    def __init__(self):
+        self.saved = []
+
+    def save(self, profile):
+        self.saved.append(profile)
+        return profile
+
+
+def make_service(*, catalog=None, stack_ops=None, seed=None, layout=None, profile=None):
     return MediaQuickstartService(
         media_layout_service=layout or FakeLayoutService(),
         catalog_service=catalog or FakeCatalogService(),
         stack_operations_service=stack_ops or FakeStackOperationsService(),
         media_seed_service=seed or FakeSeedService(),
+        media_profile_service=profile,
     )
 
 
@@ -174,6 +184,43 @@ def test_quickstart_provisions_installs_starts_and_seeds_bundle():
     assert stack_ops.calls == [("media", "up")]
     assert seed.calls == ["media"]
     assert not any(event.get("done") for event in events[:-1])
+
+
+def test_quickstart_persists_resolved_media_profile_before_completion():
+    profile = FakeProfileService()
+
+    events = list(
+        make_service(profile=profile).stream_quickstart(
+            stack_name="family-media",
+            values={"PUID": "1005"},
+        )
+    )
+
+    assert events[-2] == {"step": "profile", "line": "Saved media profile"}
+    assert events[-1]["done"] is True
+    assert profile.saved == [
+        {
+            "version": 1,
+            "stack_name": "family-media",
+            "bundle_id": "media-server",
+            "values": {
+                "USE_VPN": "true",
+                "TZ": "Europe/London",
+                "PUID": "1005",
+                "PGID": "1000",
+                "CONFIG_DIR": "/home/pi/docker",
+                "DOWNLOADS_DIR": "/mnt/downloads",
+                "STORAGE_DIR": "/mnt/storage",
+            },
+            "layout": {
+                "storage_root": "/mnt/storage",
+                "downloads_root": "/mnt/downloads",
+                "config_root": "/home/pi/docker",
+                "backup_root": "/mnt/backup",
+            },
+            "members": ["vpn", "transmission", "jellyfin"],
+        }
+    ]
 
 
 def test_quickstart_skips_already_installed_members():
