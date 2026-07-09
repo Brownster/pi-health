@@ -37,8 +37,9 @@ from auth_utils import (
     rotate_csrf_token,
     verify_credentials as verify_password,
 )
-from catalog_manager import catalog_manager, default_catalog_service
+from catalog_manager import CATALOG_DIR, _load_stack_compose, catalog_manager, default_catalog_service
 from catalog_service import CatalogService
+from media_seed_service import MediaSeedService
 from tools_manager import tools_manager, default_tools_service
 from tools_service import ToolsService
 from storage_plugins import default_storage_read_service, storage_bp
@@ -194,6 +195,7 @@ class AppDependencies:
     disk_mount_service: DiskMountService | None = None
     media_paths_service: MediaPathsService | None = None
     media_layout_service: MediaLayoutService | None = None
+    media_seed_service: MediaSeedService | None = None
     seedbox_service: SeedboxService | None = None
     disk_suggestion_service: DiskSuggestionService | None = None
     smart_service: SmartService | None = None
@@ -225,6 +227,17 @@ def _default_media_layout_service(helper, repository):
         helper=helper,
         repository=repository,
         config_path_provider=lambda: MEDIA_LAYOUT_CONFIG,
+    )
+
+
+def _default_media_seed_service(media_layout_service):
+    from stack_manager import get_stack_path
+
+    return MediaSeedService(
+        catalog_dir_provider=lambda: CATALOG_DIR,
+        stack_path_provider=get_stack_path,
+        load_stack_compose=lambda stack_dir: _load_stack_compose(stack_dir),
+        layout_provider=media_layout_service.layout,
     )
 
 
@@ -820,6 +833,10 @@ def _media_layout_service():
     return current_app.extensions["media_layout_service"]
 
 
+def _media_seed_service():
+    return current_app.extensions["media_seed_service"]
+
+
 @core_api.route('/api/media/layout', methods=['GET'])
 @login_required
 def api_media_layout():
@@ -867,6 +884,52 @@ def api_media_layout_provision():
     except MediaLayoutProvisionError as exc:
         return jsonify({"error": str(exc)}), 503
     return jsonify(result)
+
+
+@core_api.route('/api/media/seed', methods=['POST'])
+@login_required
+@csrf_protect
+def api_media_seed():
+    """Start a streamed media seed operation."""
+    data = request.get_json() or {}
+    stack_name = str(data.get("stack") or "media")
+    from stack_manager import validate_stack_name
+
+    valid, error = validate_stack_name(stack_name)
+    if not valid:
+        return jsonify({"error": error}), 400
+
+    def produce_events():
+        yield from _media_seed_service().seed_stack(stack_name)
+
+    try:
+        operation = current_app.extensions["operation_registry"].create(
+            owner=session['csrf_token'],
+            username=session.get('username', 'unknown'),
+            kind='media_seed',
+            target=stack_name,
+            producer=produce_events,
+        )
+    except OperationCapacityError as exc:
+        return jsonify({'error': str(exc)}), 429
+    except RuntimeError as exc:
+        return jsonify({'error': f'Unable to start media seed: {exc}'}), 500
+
+    return jsonify({
+        'operation_id': operation.operation_id,
+        'stream_url': f'/api/media/seed/operations/{operation.operation_id}/stream',
+    }), 202
+
+
+@core_api.route('/api/media/seed/operations/<operation_id>/stream', methods=['GET'])
+@login_required
+def api_stream_media_seed(operation_id):
+    """Replay and follow one media seed operation."""
+    return stream_operation_response(
+        current_app.extensions["operation_registry"],
+        operation_id,
+        expected_kind='media_seed',
+    )
 
 
 @core_api.route('/api/pihealth/update/config', methods=['GET'])
@@ -1071,6 +1134,10 @@ def create_app(config=None, dependencies=None):
         or _default_media_layout_service(
             application.extensions["helper"], application.extensions["config_repo"]
         )
+    )
+    application.extensions["media_seed_service"] = (
+        resolved.media_seed_service
+        or _default_media_seed_service(application.extensions["media_layout_service"])
     )
     application.extensions["seedbox_service"] = (
         resolved.seedbox_service
