@@ -1206,6 +1206,27 @@ def install_v2_catalog_api_mocks():
             if path == "/api/catalog/remove" and method == "POST":
                 _json_fulfill(route, {"status": "removed"})
                 return
+            if path == "/api/media/quickstart" and method == "POST":
+                _json_fulfill(
+                    route,
+                    {
+                        "operation_id": "mock-media-quickstart",
+                        "stream_url": "/api/media/quickstart/operations/mock-media-quickstart/stream",
+                    },
+                    status=202,
+                )
+                return
+            if path == "/api/media/quickstart/operations/mock-media-quickstart/stream" and method == "GET":
+                route.fulfill(
+                    status=200,
+                    content_type="text/event-stream",
+                    body=(
+                        'id: 0\ndata: {"step":"layout","line":"Provisioned media folders"}\n\n'
+                        'id: 1\ndata: {"step":"install","line":"Installed Jellyfin"}\n\n'
+                        'id: 2\ndata: {"step":"complete","line":"Media quickstart complete","done":true}\n\n'
+                    ),
+                )
+                return
 
             route.continue_()
 

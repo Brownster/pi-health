@@ -9,6 +9,9 @@ export interface OperationEvent {
   step?: string;
   restarting?: boolean;
   new_commit?: string;
+  installed?: string[];
+  skipped?: string[];
+  summary?: unknown;
 }
 
 export interface OperationCreated {

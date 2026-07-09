@@ -94,6 +94,43 @@ def test_v2_catalog_install_into_named_new_stack(
     assert install_request.post_data_json["stack_name"] == "jellyfin-kids"
 
 
+def test_v2_catalog_media_quickstart_streams_progress(
+    page: Page,
+    v2_server,
+    v2_login,
+    install_v2_catalog_api_mocks,
+):
+    base_url = v2_server["base_url"]
+    requests = []
+    page.on("request", lambda request: requests.append(request))
+    _open_v2_catalog(page, base_url, v2_login, install_v2_catalog_api_mocks)
+
+    page.click("button[data-media-quickstart-open]")
+    expect(page.locator("#v2-media-quickstart-modal")).to_be_visible()
+    expect(page.locator("input[data-media-quickstart-stack]")).to_have_value("media")
+    page.click("button[data-media-quickstart-start]")
+
+    expect(page.locator("[data-media-quickstart-log]")).to_contain_text("Provisioned media folders")
+    expect(page.locator("[data-media-quickstart-log]")).to_contain_text("Installed Jellyfin")
+    expect(page.locator("#v2-media-quickstart-modal")).to_contain_text(
+        "Media quickstart completed for media"
+    )
+
+    quickstart_request = next(
+        request for request in requests
+        if request.method == "POST" and request.url.endswith("/api/media/quickstart")
+    )
+    assert quickstart_request.post_data_json == {
+        "stack": "media",
+        "values": {"USE_VPN": "true"},
+    }
+    assert any(
+        request.method == "GET"
+        and request.url.endswith("/api/media/quickstart/operations/mock-media-quickstart/stream")
+        for request in requests
+    )
+
+
 def test_v2_catalog_install_keeps_focus_while_typing(
     page: Page,
     v2_server,
