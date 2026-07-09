@@ -31,6 +31,9 @@ Progress:
 - 2026-07-09: Phase 4.2 backend implemented. Added streamed media quickstart
   orchestration that provisions folders, installs the bundle, starts the stack,
   and runs the seed engine as one operation.
+- 2026-07-09: Phase 4.3 UI implemented. Added the media quickstart card to the
+  V2 app catalog with stack-name confirmation, streamed progress output, and
+  E2E coverage for the quickstart API contract.
 
 ## Context — why we are doing this
 
