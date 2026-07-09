@@ -307,6 +307,61 @@ class TestHelperConcurrency:
         })
         assert result["success"] is False
 
+    def test_cmd_media_layout_provision_rejects_non_mnt_roots(self):
+        result = helper.cmd_media_layout_provision({
+            "storage_root": "/srv/storage",
+            "downloads_root": "/mnt/downloads",
+            "puid": "1000",
+            "pgid": "1000",
+        })
+        assert result["success"] is False
+        assert result["error"] == "Invalid storage_root"
+
+    def test_cmd_media_layout_provision_rejects_invalid_uid(self):
+        result = helper.cmd_media_layout_provision({
+            "storage_root": "/mnt/storage",
+            "downloads_root": "/mnt/downloads",
+            "puid": "root",
+            "pgid": "1000",
+        })
+        assert result["success"] is False
+        assert result["error"] == "Invalid puid"
+
+    def test_cmd_media_layout_provision_is_idempotent(self, monkeypatch):
+        existing = {"/mnt/storage/tv"}
+        made = []
+        chowned = []
+        chmodded = []
+
+        def fake_isdir(path):
+            return path in existing
+
+        def fake_makedirs(path, exist_ok=False):
+            made.append((path, exist_ok))
+            existing.add(path)
+
+        monkeypatch.setattr(helper.os.path, "isdir", fake_isdir)
+        monkeypatch.setattr(helper.os, "makedirs", fake_makedirs)
+        monkeypatch.setattr(helper.os, "walk", lambda path: [])
+        monkeypatch.setattr(helper.os, "chown", lambda path, uid, gid: chowned.append((path, uid, gid)))
+        monkeypatch.setattr(helper.os, "chmod", lambda path, mode: chmodded.append((path, mode)))
+
+        result = helper.cmd_media_layout_provision({
+            "storage_root": "/mnt/storage",
+            "downloads_root": "/mnt/downloads",
+            "puid": "1001",
+            "pgid": "1002",
+        })
+
+        assert result["success"] is True
+        assert "/mnt/storage/tv" in result["existing"]
+        assert "/mnt/storage/movies" in result["created"]
+        assert "/mnt/downloads/complete/radarr" in result["created"]
+        assert ("/mnt/storage/movies", True) in made
+        assert ("/mnt/storage/tv", 1001, 1002) in chowned
+        assert ("/mnt/storage/tv", 0o775) in chmodded
+        assert len(result["created"]) + len(result["existing"]) == 16
+
     def test_cmd_preview_startup_service(self):
         with patch("pihealth_helper.os.path.exists", return_value=False):
             result = helper.cmd_preview_startup_service({

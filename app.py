@@ -59,7 +59,13 @@ from disk_manager import (
 )
 from disk_inventory_service import DiskInventoryService
 from disk_mount_service import DiskMountService
+from media_layout import DOWNLOAD_CATEGORIES, LIBRARY_KINDS
 from media_paths_service import MediaPathsService
+from media_layout_service import (
+    MediaLayoutProvisionError,
+    MediaLayoutService,
+    MediaLayoutValidationError,
+)
 from seedbox_service import SeedboxService
 from disk_suggestion_service import DiskSuggestionService
 from smart_service import SmartService
@@ -141,6 +147,7 @@ core_api = Blueprint("core_api", __name__)
 STORAGE_PLUGIN_CONFIG_DIR = str(RUNTIME_STORAGE_PLUGIN_CONFIG_DIR)
 
 PIHEALTH_UPDATE_CONFIG = str(RUNTIME_CONFIG_DIR / "pihealth_update.json")
+MEDIA_LAYOUT_CONFIG = str(RUNTIME_CONFIG_DIR / "media_layout.json")
 DEFAULT_PIHEALTH_UPDATE_CONFIG = {
     "repo_path": f"/home/{os.getenv('USER', 'pi')}/pi-health",
     "service_name": "pi-health"
@@ -186,6 +193,7 @@ class AppDependencies:
     disk_inventory_service: DiskInventoryService | None = None
     disk_mount_service: DiskMountService | None = None
     media_paths_service: MediaPathsService | None = None
+    media_layout_service: MediaLayoutService | None = None
     seedbox_service: SeedboxService | None = None
     disk_suggestion_service: DiskSuggestionService | None = None
     smart_service: SmartService | None = None
@@ -209,6 +217,14 @@ def _default_container_inventory_service(docker_port):
         docker=docker_port,
         stats_reader=get_container_stats_cached,
         update_reader=lambda container_id: container_updates.get(container_id, False),
+    )
+
+
+def _default_media_layout_service(helper, repository):
+    return MediaLayoutService(
+        helper=helper,
+        repository=repository,
+        config_path_provider=lambda: MEDIA_LAYOUT_CONFIG,
     )
 
 
@@ -800,6 +816,59 @@ def api_recreate_network_group(provider):
         return jsonify({"error": str(exc)}), 503
 
 
+def _media_layout_service():
+    return current_app.extensions["media_layout_service"]
+
+
+@core_api.route('/api/media/layout', methods=['GET'])
+@login_required
+def api_media_layout():
+    """Return the canonical media layout roots and derived directories."""
+    layout = _media_layout_service().layout()
+    return jsonify({
+        "layout": layout.as_dict(),
+        "libraries": {
+            kind: layout.library_path(kind)
+            for kind in LIBRARY_KINDS
+        },
+        "downloads": {
+            "incomplete": layout.download_incomplete_path(),
+            "complete": {
+                category: layout.download_complete_path(category)
+                for category in DOWNLOAD_CATEGORIES
+            },
+        },
+    })
+
+
+@core_api.route('/api/media/layout', methods=['POST'])
+@login_required
+@csrf_protect
+def api_media_layout_save():
+    """Persist canonical media layout roots."""
+    try:
+        layout = _media_layout_service().save(request.get_json() or {})
+    except MediaLayoutValidationError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"status": "saved", "layout": layout.as_dict()})
+
+
+@core_api.route('/api/media/layout/provision', methods=['POST'])
+@login_required
+@csrf_protect
+def api_media_layout_provision():
+    """Create canonical library/download folders through the helper."""
+    data = request.get_json() or {}
+    try:
+        result = _media_layout_service().provision(
+            puid=data.get("puid", "1000"),
+            pgid=data.get("pgid", "1000"),
+        )
+    except MediaLayoutProvisionError as exc:
+        return jsonify({"error": str(exc)}), 503
+    return jsonify(result)
+
+
 @core_api.route('/api/pihealth/update/config', methods=['GET'])
 @login_required
 def api_pihealth_update_config():
@@ -994,6 +1063,12 @@ def create_app(config=None, dependencies=None):
     application.extensions["media_paths_service"] = (
         resolved.media_paths_service
         or default_media_paths_service(
+            application.extensions["helper"], application.extensions["config_repo"]
+        )
+    )
+    application.extensions["media_layout_service"] = (
+        resolved.media_layout_service
+        or _default_media_layout_service(
             application.extensions["helper"], application.extensions["config_repo"]
         )
     )

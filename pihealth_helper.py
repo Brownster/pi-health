@@ -79,6 +79,18 @@ RCLONE_MOUNTS_CONFIG = '/etc/rclone/mounts.json'
 STARTUP_SCRIPT_PATH = '/usr/local/bin/check_mount_and_start.sh'
 STARTUP_SERVICE_PATH = '/etc/systemd/system/docker-compose-start.service'
 SNAPRAID_JOB_TYPES = {'sync', 'scrub'}
+MEDIA_LIBRARY_DIRS = ('movies', 'tv', 'music', 'books', 'audiobooks', 'podcasts')
+MEDIA_DOWNLOAD_CATEGORIES = (
+    'sonarr',
+    'radarr',
+    'lidarr',
+    'readarr',
+    'sabnzbd',
+    'transmission',
+    'rdtclient',
+    'jackett',
+    'get_iplayer',
+)
 
 # SSHFS multi-mount configuration
 SSHFS_CONFIG_DIR = '/etc/sshfs'
@@ -815,6 +827,77 @@ def _startup_file_state(script, service):
     result['script']['changed'] = result['script']['current'] != script
     result['service']['changed'] = result['service']['current'] != service
     return result
+
+
+def _validate_media_root(value):
+    if not isinstance(value, str) or not MOUNT_POINT_PATTERN.match(value):
+        return None
+    return value.rstrip('/')
+
+
+def _validate_uid_gid(value):
+    if isinstance(value, int):
+        value = str(value)
+    if not isinstance(value, str) or not re.fullmatch(r'[0-9]{1,10}', value):
+        return None
+    number = int(value)
+    if number < 0 or number > 60000:
+        return None
+    return number
+
+
+def _chown_chmod_tree(path, uid, gid):
+    os.chown(path, uid, gid)
+    os.chmod(path, 0o775)
+    for root, dirs, files in os.walk(path):
+        for name in dirs:
+            target = os.path.join(root, name)
+            if os.path.islink(target):
+                continue
+            os.chown(target, uid, gid)
+            os.chmod(target, 0o775)
+        for name in files:
+            target = os.path.join(root, name)
+            if os.path.islink(target):
+                continue
+            os.chown(target, uid, gid)
+
+
+def cmd_media_layout_provision(params):
+    storage_root = _validate_media_root(params.get('storage_root'))
+    downloads_root = _validate_media_root(params.get('downloads_root'))
+    puid = _validate_uid_gid(params.get('puid'))
+    pgid = _validate_uid_gid(params.get('pgid'))
+    if storage_root is None:
+        return {'success': False, 'error': 'Invalid storage_root'}
+    if downloads_root is None:
+        return {'success': False, 'error': 'Invalid downloads_root'}
+    if puid is None:
+        return {'success': False, 'error': 'Invalid puid'}
+    if pgid is None:
+        return {'success': False, 'error': 'Invalid pgid'}
+
+    directories = [os.path.join(storage_root, kind) for kind in MEDIA_LIBRARY_DIRS]
+    directories.append(os.path.join(downloads_root, 'incomplete'))
+    directories.extend(
+        os.path.join(downloads_root, 'complete', category)
+        for category in MEDIA_DOWNLOAD_CATEGORIES
+    )
+
+    created = []
+    existing = []
+    try:
+        for path in directories:
+            if os.path.isdir(path):
+                existing.append(path)
+            else:
+                os.makedirs(path, exist_ok=True)
+                created.append(path)
+            _chown_chmod_tree(path, puid, pgid)
+    except Exception as exc:
+        return {'success': False, 'error': str(exc)}
+
+    return {'success': True, 'created': created, 'existing': existing}
 
 
 def cmd_preview_startup_service(params):
@@ -2474,6 +2557,7 @@ COMMANDS = {
     'mergerfs_mount': cmd_mergerfs_mount,
     'mergerfs_umount': cmd_mergerfs_umount,
     'write_snapraid_conf': cmd_write_snapraid_conf,
+    'media_layout_provision': cmd_media_layout_provision,
     'configure_startup_service': cmd_configure_startup_service,
     'preview_startup_service': cmd_preview_startup_service,
     'configure_snapraid_schedule': cmd_configure_snapraid_schedule,
@@ -2516,7 +2600,8 @@ _MUTATING_COMMANDS = frozenset({
     'fstab_add', 'fstab_remove', 'fstab_set_section',
     'mount', 'umount',
     'mergerfs_mount', 'mergerfs_umount',
-    'write_snapraid_conf', 'configure_startup_service', 'configure_snapraid_schedule',
+    'write_snapraid_conf', 'media_layout_provision',
+    'configure_startup_service', 'configure_snapraid_schedule',
     'systemctl', 'docker_network_create', 'write_vpn_env',
     'seedbox_configure', 'seedbox_disable',
     'sshfs_configure', 'sshfs_remove', 'sshfs_mount', 'sshfs_unmount',
