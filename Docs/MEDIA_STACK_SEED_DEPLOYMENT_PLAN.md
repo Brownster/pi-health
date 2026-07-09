@@ -28,6 +28,9 @@ Progress:
 - 2026-07-09: Phase 4.1 implemented. Added a data-driven media-server bundle
   definition and recursive catalog bundle discovery, with direct bundle installs
   held for the quickstart orchestrator.
+- 2026-07-09: Phase 4.2 backend implemented. Added streamed media quickstart
+  orchestration that provisions folders, installs the bundle, starts the stack,
+  and runs the seed engine as one operation.
 
 ## Context — why we are doing this
 
