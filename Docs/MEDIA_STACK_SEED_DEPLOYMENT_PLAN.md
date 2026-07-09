@@ -10,6 +10,9 @@ Progress:
   catalog reads.
 - 2026-07-09: Phase 1 implemented. Added helper-backed canonical folder provisioning plus
   `/api/media/layout` read/save and `/api/media/layout/provision` routes.
+- 2026-07-09: Phase 2 implemented for the core media stack. Normalised download/container path
+  contracts and added declarative `seed:` metadata for *arr apps, Prowlarr, download clients,
+  Jackett, and Jellyfin.
 
 ## Context — why we are doing this
 
