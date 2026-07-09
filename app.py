@@ -39,6 +39,7 @@ from auth_utils import (
 )
 from catalog_manager import CATALOG_DIR, _load_stack_compose, catalog_manager, default_catalog_service
 from catalog_service import CatalogService
+from media_quickstart_service import MediaQuickstartService
 from media_seed_service import MediaSeedService
 from tools_manager import tools_manager, default_tools_service
 from tools_service import ToolsService
@@ -196,6 +197,7 @@ class AppDependencies:
     media_paths_service: MediaPathsService | None = None
     media_layout_service: MediaLayoutService | None = None
     media_seed_service: MediaSeedService | None = None
+    media_quickstart_service: MediaQuickstartService | None = None
     seedbox_service: SeedboxService | None = None
     disk_suggestion_service: DiskSuggestionService | None = None
     smart_service: SmartService | None = None
@@ -238,6 +240,20 @@ def _default_media_seed_service(media_layout_service):
         stack_path_provider=get_stack_path,
         load_stack_compose=lambda stack_dir: _load_stack_compose(stack_dir),
         layout_provider=media_layout_service.layout,
+    )
+
+
+def _default_media_quickstart_service(
+    media_layout_service,
+    catalog_service,
+    stack_operations_service,
+    media_seed_service,
+):
+    return MediaQuickstartService(
+        media_layout_service=media_layout_service,
+        catalog_service=catalog_service,
+        stack_operations_service=stack_operations_service,
+        media_seed_service=media_seed_service,
     )
 
 
@@ -837,6 +853,10 @@ def _media_seed_service():
     return current_app.extensions["media_seed_service"]
 
 
+def _media_quickstart_service():
+    return current_app.extensions["media_quickstart_service"]
+
+
 @core_api.route('/api/media/layout', methods=['GET'])
 @login_required
 def api_media_layout():
@@ -929,6 +949,62 @@ def api_stream_media_seed(operation_id):
         current_app.extensions["operation_registry"],
         operation_id,
         expected_kind='media_seed',
+    )
+
+
+@core_api.route('/api/media/quickstart', methods=['POST'])
+@login_required
+@csrf_protect
+def api_media_quickstart():
+    """Start the one-shot media stack quickstart operation."""
+    data = request.get_json() or {}
+    stack_name = str(data.get("stack") or "media")
+    from stack_manager import validate_stack_name
+
+    valid, error = validate_stack_name(stack_name)
+    if not valid:
+        return jsonify({"error": error}), 400
+
+    values = data.get("values", {})
+    if not isinstance(values, dict):
+        return jsonify({"error": "values must be an object"}), 400
+
+    username = session.get('username', 'unknown')
+
+    def produce_events():
+        yield from _media_quickstart_service().stream_quickstart(
+            stack_name=stack_name,
+            values=values,
+            username=username,
+        )
+
+    try:
+        operation = current_app.extensions["operation_registry"].create(
+            owner=session['csrf_token'],
+            username=username,
+            kind='media_quickstart',
+            target=stack_name,
+            producer=produce_events,
+        )
+    except OperationCapacityError as exc:
+        return jsonify({'error': str(exc)}), 429
+    except RuntimeError as exc:
+        return jsonify({'error': f'Unable to start media quickstart: {exc}'}), 500
+
+    return jsonify({
+        'operation_id': operation.operation_id,
+        'stream_url': f'/api/media/quickstart/operations/{operation.operation_id}/stream',
+    }), 202
+
+
+@core_api.route('/api/media/quickstart/operations/<operation_id>/stream', methods=['GET'])
+@login_required
+def api_stream_media_quickstart(operation_id):
+    """Replay and follow one media quickstart operation."""
+    return stream_operation_response(
+        current_app.extensions["operation_registry"],
+        operation_id,
+        expected_kind='media_quickstart',
     )
 
 
@@ -1167,6 +1243,15 @@ def create_app(config=None, dependencies=None):
     )
     application.extensions["catalog_service"] = (
         resolved.catalog_service or default_catalog_service()
+    )
+    application.extensions["media_quickstart_service"] = (
+        resolved.media_quickstart_service
+        or _default_media_quickstart_service(
+            application.extensions["media_layout_service"],
+            application.extensions["catalog_service"],
+            application.extensions["stack_operations_service"],
+            application.extensions["media_seed_service"],
+        )
     )
     application.extensions["tools_service"] = (
         resolved.tools_service
