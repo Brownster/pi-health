@@ -13,6 +13,9 @@ Progress:
 - 2026-07-09: Phase 2 implemented for the core media stack. Normalised download/container path
   contracts and added declarative `seed:` metadata for *arr apps, Prowlarr, download clients,
   Jackett, and Jellyfin.
+- 2026-07-09: Phase 3A implemented. Added the Servarr client, streamed `/api/media/seed`
+  backend, and idempotent *arr root/download-client seeding that removes forbidden
+  `/downloads/...` root folders before adding canonical library roots.
 
 ## Context — why we are doing this
 
