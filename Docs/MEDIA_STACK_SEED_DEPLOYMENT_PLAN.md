@@ -16,6 +16,9 @@ Progress:
 - 2026-07-09: Phase 3A implemented. Added the Servarr client, streamed `/api/media/seed`
   backend, and idempotent *arr root/download-client seeding that removes forbidden
   `/downloads/...` root folders before adding canonical library roots.
+- 2026-07-09: Phase 3B implemented. Added Prowlarr application seeding so installed
+  Sonarr/Radarr/Lidarr services are registered from catalog metadata without duplicate
+  application entries.
 
 ## Context — why we are doing this
 
