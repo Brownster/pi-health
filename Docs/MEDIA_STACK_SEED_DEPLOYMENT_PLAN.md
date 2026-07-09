@@ -8,6 +8,8 @@ Progress:
 - 2026-07-09: Phase 0 implemented. Added the pure canonical `media_layout.py` model and
   layout-backed catalog defaults for media apps; installs now resolve the same layout defaults as
   catalog reads.
+- 2026-07-09: Phase 1 implemented. Added helper-backed canonical folder provisioning plus
+  `/api/media/layout` read/save and `/api/media/layout/provision` routes.
 
 ## Context — why we are doing this
 
