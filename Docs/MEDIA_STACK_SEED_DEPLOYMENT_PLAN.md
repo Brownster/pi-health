@@ -25,6 +25,9 @@ Progress:
 - 2026-07-09: Phase 3D implemented. Added idempotent Jellyfin library seeding through
   the Jellyfin virtual-folder API so canonical media folders are created once per
   media library.
+- 2026-07-09: Phase 4.1 implemented. Added a data-driven media-server bundle
+  definition and recursive catalog bundle discovery, with direct bundle installs
+  held for the quickstart orchestrator.
 
 ## Context — why we are doing this
 
