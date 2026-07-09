@@ -61,6 +61,17 @@ short-lived orchestrator per turn.
 B2 and B3 are model-free, low-risk, and can start **in this repo now**, before the DAS Pi is fully
 up. B1 is host infra on the DAS Pi. B4 needs B1+B3.
 
+### B2 status (2026-07-09)
+- **Core** (`alert_evaluator.py`, `alert_notifier.py`) — done: streak-gating, dedup, one-shot
+  recovery, atomic-persisted state, Mattermost webhook sink. Tested.
+- **Providers + daemon** (`alert_signals.py`, `alert_daemon.py`) — done: container (long-running
+  only), SMART, mount, and SnapRAID signal providers; env config; best-effort per-subsystem
+  collection; the tick loop. Container + mount readers are wired; **SMART and SnapRAID live readers
+  are stubbed pending Pi deployment** (they need the privileged helper / plugin config) and a
+  **systemd unit** — both land with B1 on the DAS Pi.
+- Known MVP limitation: notification delivery is best-effort (a webhook outage when an incident
+  opens is logged, not retried); a delivery queue is a follow-up.
+
 ## Relationship to the full LA sprint
 This MVP is a deliberate subset and does **not** require the full sprint's entry gates (notably v1 UI
 removal) because it is read-only with no mutation boundary. It reuses the sprint's principles
