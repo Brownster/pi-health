@@ -39,6 +39,8 @@ from auth_utils import (
 )
 from catalog_manager import CATALOG_DIR, _load_stack_compose, catalog_manager, default_catalog_service
 from catalog_service import CatalogService
+from integrations_manager import integrations_manager
+from mattermost_integration_service import MattermostIntegrationService
 from media_profile_service import MediaProfileService
 from media_quickstart_service import MediaQuickstartService
 from media_seed_service import MediaSeedService
@@ -129,6 +131,8 @@ from container_helpers import (  # noqa: F401  (several names re-exported for te
 )
 from runtime_paths import (
     CONFIG_DIR as RUNTIME_CONFIG_DIR,
+    INTEGRATIONS_CONFIG_DIR as RUNTIME_INTEGRATIONS_CONFIG_DIR,
+    INTEGRATIONS_STATE_DIR as RUNTIME_INTEGRATIONS_STATE_DIR,
     STORAGE_PLUGIN_CONFIG_DIR as RUNTIME_STORAGE_PLUGIN_CONFIG_DIR,
 )
 from system_stats import (  # noqa: F401  (several names re-exported for tests)
@@ -209,6 +213,7 @@ class AppDependencies:
     backup_service: BackupService | None = None
     catalog_service: CatalogService | None = None
     tools_service: ToolsService | None = None
+    mattermost_integration_service: MattermostIntegrationService | None = None
 
 
 def _default_system_service():
@@ -266,6 +271,31 @@ def _default_media_quickstart_service(
         stack_operations_service=stack_operations_service,
         media_seed_service=media_seed_service,
         media_profile_service=media_profile_service,
+    )
+
+
+def _default_mattermost_integration_service(repository, docker_port):
+    from stack_manager import atomic_write_text, get_stack_path
+
+    def container_status(name):
+        if not docker_port.available:
+            return None
+        container = docker_port.get_container(name)
+        if container is None:
+            return None
+        attrs = getattr(container, "attrs", {}) or {}
+        health = ((attrs.get("State") or {}).get("Health") or {}).get("Status")
+        return {"state": getattr(container, "status", "unknown"), "health": health}
+
+    return MattermostIntegrationService(
+        config_path=RUNTIME_INTEGRATIONS_CONFIG_DIR / "mattermost.json",
+        secrets_path=RUNTIME_INTEGRATIONS_CONFIG_DIR / "mattermost.env",
+        status_path=RUNTIME_INTEGRATIONS_STATE_DIR / "mattermost-status.json",
+        stack_path_provider=get_stack_path,
+        config_repository=repository,
+        atomic_writer=atomic_write_text,
+        pihealth_image=os.getenv("PIHEALTH_IMAGE", "pi-health-dashboard:latest"),
+        container_status_provider=container_status,
     )
 
 
@@ -1278,11 +1308,18 @@ def create_app(config=None, dependencies=None):
         resolved.tools_service
         or default_tools_service(application.extensions["config_repo"])
     )
+    application.extensions["mattermost_integration_service"] = (
+        resolved.mattermost_integration_service
+        or _default_mattermost_integration_service(
+            application.extensions["config_repo"], application.extensions["docker"]
+        )
+    )
 
     application.register_blueprint(core_api)
     application.register_blueprint(stack_manager)
     application.register_blueprint(catalog_manager)
     application.register_blueprint(tools_manager)
+    application.register_blueprint(integrations_manager)
     application.register_blueprint(storage_bp)
     application.register_blueprint(update_scheduler)
     application.register_blueprint(backup_scheduler)

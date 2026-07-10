@@ -628,6 +628,28 @@ def cmd_smart_all_devices(params):
     return {'success': True, 'devices': results}
 
 
+def cmd_alert_health_snapshot(params):
+    """Return read-only host health inputs used by the alert daemon."""
+    smart = cmd_smart_all_devices({})
+    mounts = cmd_mounts_read({})
+    try:
+        from storage_plugins.snapraid_plugin import SnapRAIDPlugin
+
+        config_dir = os.path.join(
+            os.getenv('LIMEOS_CONFIG_DIR', '/etc/limeos'),
+            'storage_plugins',
+        )
+        snapraid = SnapRAIDPlugin(config_dir).get_status()
+    except Exception as exc:
+        snapraid = {'status': 'unavailable', 'message': str(exc), 'details': {}}
+    return {
+        'success': True,
+        'smart': smart,
+        'mounts': mounts,
+        'snapraid': snapraid,
+    }
+
+
 def cmd_df(params):
     """Get disk space usage."""
     result = run_command(['df', '-B1', '--output=source,target,fstype,size,used,avail,pcent'])
@@ -2552,6 +2574,7 @@ COMMANDS = {
     'smart_info': cmd_smart_info,
     'smart_test': cmd_smart_test,
     'smart_all_devices': cmd_smart_all_devices,
+    'alert_health_snapshot': cmd_alert_health_snapshot,
     'df': cmd_df,
     'snapraid': cmd_snapraid,
     'mergerfs_mount': cmd_mergerfs_mount,

@@ -14,14 +14,16 @@ Config (environment):
 from __future__ import annotations
 
 import logging
+import json
 import os
 import time
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from alert_evaluator import AlertEvaluator, AlertEvaluatorConfig, Notification, Signal
 from alert_notifier import Notifier
+from alert_policy import AlertPolicy, default_alert_policy
 from alert_signals import (
     ContainerRecord,
     DiskHealth,
@@ -43,6 +45,8 @@ class DaemonConfig:
     fail_threshold: int
     required_mounts: tuple[str, ...]
     state_path: Path
+    policy_path: Path | None = None
+    status_path: Path | None = None
 
 
 def config_from_env(environ: dict | None = None) -> DaemonConfig:
@@ -60,12 +64,17 @@ def config_from_env(environ: dict | None = None) -> DaemonConfig:
         for path in (environ.get("LIMEOS_ALERT_REQUIRED_MOUNTS", "") or "").split(",")
         if path.strip()
     )
+    state_dir = Path(STATE_DIR)
+    policy_value = (environ.get("LIMEOS_ALERT_POLICY_PATH") or "").strip()
+    status_value = (environ.get("LIMEOS_ALERT_STATUS_PATH") or "").strip()
     return DaemonConfig(
         webhook_url=(environ.get("LIMEOS_ALERT_MATTERMOST_WEBHOOK") or "").strip() or None,
         poll_seconds=_int("LIMEOS_ALERT_POLL_SECONDS", 60),
         fail_threshold=_int("LIMEOS_ALERT_FAIL_THRESHOLD", 2),
         required_mounts=mounts,
-        state_path=Path(STATE_DIR) / "alerts.json",
+        state_path=state_dir / "alerts.json",
+        policy_path=Path(policy_value) if policy_value else None,
+        status_path=Path(status_value) if status_value else state_dir / "alert-status.json",
     )
 
 
@@ -82,14 +91,28 @@ def collect_signals(sources: Iterable[SignalSource]) -> list[Signal]:
 
 
 def run_once(
-    provider: SignalSource, evaluator: AlertEvaluator, notifier: Notifier
+    provider: SignalSource,
+    evaluator: AlertEvaluator,
+    notifier: Notifier,
+    *,
+    should_notify: Callable[[Signal, str], bool] | None = None,
+    on_signals: Callable[[list[Signal]], None] | None = None,
+    on_delivery: Callable[[Notification, Exception | None], None] | None = None,
 ) -> list[Notification]:
-    notifications = evaluator.evaluate(provider())
+    signals = provider()
+    if on_signals is not None:
+        on_signals(signals)
+    notifications = evaluator.evaluate(signals, should_notify=should_notify)
     for notification in notifications:
         try:
             notifier.send(notification)
-        except Exception:  # noqa: BLE001 - delivery is best-effort; recovery still fires later
+            if on_delivery is not None:
+                on_delivery(notification, None)
+        except Exception as exc:  # noqa: BLE001 - delivery is best-effort; recovery still fires later
             logger.exception("failed to deliver notification for %s", notification.key)
+            evaluator.mark_delivery_failed(notification)
+            if on_delivery is not None:
+                on_delivery(notification, exc)
     return notifications
 
 
@@ -100,6 +123,9 @@ def smart_passed(data: dict) -> bool | None:
         value = data.get(key)
         if isinstance(value, bool):
             return value
+    nested_status = data.get("smart_status")
+    if isinstance(nested_status, dict) and isinstance(nested_status.get("passed"), bool):
+        return nested_status["passed"]
     assessment = str(
         data.get("smart_status") or data.get("assessment") or data.get("overall_health") or ""
     ).strip().upper()
@@ -146,7 +172,7 @@ def build_live_provider(
     smart_devices: Callable[[], dict],
     snapraid_status: Callable[[], dict],
     read_proc_mounts: Callable[[], str],
-    required_mounts: Iterable[str],
+    required_mounts: Iterable[str] | Callable[[], Iterable[str]],
 ) -> SignalSource:
     """Assemble one signal provider from injected live readers (best-effort per subsystem)."""
 
@@ -167,7 +193,8 @@ def build_live_provider(
         return smart_signals(disks)
 
     def _mounts() -> list[Signal]:
-        return mount_signals(mounts_present(read_proc_mounts()), required_mounts)
+        mounts = required_mounts() if callable(required_mounts) else required_mounts
+        return mount_signals(mounts_present(read_proc_mounts()), mounts)
 
     def _snapraid() -> list[Signal]:
         return snapraid_signals(snapraid_status())
@@ -197,24 +224,57 @@ def main() -> int:  # pragma: no cover - integration entrypoint, validated on th
         config=AlertEvaluatorConfig(fail_threshold=config.fail_threshold),
     )
 
-    provider = _build_live_provider_from_environment(config)
+    policy_holder = [_load_policy(config)]
+    provider = _build_live_provider_from_environment(
+        config,
+        required_mounts_provider=lambda: policy_holder[0].required_mounts,
+    )
+    latest_signals: list[Signal] = []
+    delivery_status: dict = {}
+
+    def record_signals(signals: list[Signal]) -> None:
+        latest_signals[:] = signals
+
+    def record_delivery(notification: Notification, error: Exception | None) -> None:
+        delivery_status.clear()
+        delivery_status.update(
+            {
+                "at": notification.at,
+                "ok": error is None,
+                "error": str(error) if error else None,
+            }
+        )
 
     logger.info("limeos alertd started (interval=%ss, mounts=%s)", config.poll_seconds, config.required_mounts)
     while True:
         try:
-            for note in run_once(provider, evaluator, notifier):
+            policy_holder[0] = _load_policy(config)
+            for note in run_once(
+                provider,
+                evaluator,
+                notifier,
+                should_notify=lambda signal, _event: policy_holder[0].allows(
+                    signal.kind, signal.key
+                ),
+                on_signals=record_signals,
+                on_delivery=record_delivery,
+            ):
                 logger.info("%s %s: %s", note.event, note.key, note.summary)
+            _write_status(config, evaluator, latest_signals, delivery_status)
         except Exception:
             logger.exception("evaluation tick failed")
         time.sleep(config.poll_seconds)
 
 
-def _build_live_provider_from_environment(config: DaemonConfig) -> SignalSource:  # pragma: no cover
+def _build_live_provider_from_environment(
+    config: DaemonConfig,
+    *,
+    required_mounts_provider: Callable[[], Iterable[str]] | None = None,
+) -> SignalSource:  # pragma: no cover
     """Wire the live services lazily so the module imports cleanly for tests.
 
-    Container + mount signals work out of the box; SMART and SnapRAID readers are wired to
-    their services during Pi deployment (they need the privileged helper / plugin config) and
-    default to empty here, which the evaluator simply treats as "no signal".
+    Container signals use the read-only Docker socket. Host SMART, mount, and
+    SnapRAID inputs use the helper's read-only health snapshot command.
     """
     try:
         import docker as docker_sdk
@@ -226,13 +286,39 @@ def _build_live_provider_from_environment(config: DaemonConfig) -> SignalSource:
     def list_containers():
         return client.containers.list(all=True) if client is not None else []
 
+    snapshot_cache: dict = {"read_at": 0.0, "value": {}}
+
+    def health_snapshot():
+        now = time.monotonic()
+        if now - snapshot_cache["read_at"] < 1:
+            return snapshot_cache["value"]
+        try:
+            from helper_client import helper_call
+
+            result = helper_call("alert_health_snapshot", {})
+            value = result if result.get("success") else {}
+        except Exception:
+            value = {}
+        snapshot_cache.update({"read_at": now, "value": value})
+        return value
+
     def smart_devices():
-        return {}  # TODO(pi-deploy): wire to SmartService.all_devices()
+        snapshot = health_snapshot()
+        smart = snapshot.get("smart") or {}
+        return {"disks": smart.get("devices", [])}
 
     def snapraid_status():
-        return {}  # TODO(pi-deploy): wire to SnapRAIDPlugin.get_status()
+        return (health_snapshot().get("snapraid") or {})
 
     def read_proc_mounts():
+        snapshot = health_snapshot()
+        mounts = (snapshot.get("mounts") or {}).get("data")
+        if isinstance(mounts, list):
+            return "\n".join(
+                f"{entry.get('device', '?')} {entry.get('mountpoint', '?')}"
+                for entry in mounts
+                if isinstance(entry, dict)
+            )
         try:
             return Path("/proc/self/mounts").read_text()
         except OSError:
@@ -243,8 +329,43 @@ def _build_live_provider_from_environment(config: DaemonConfig) -> SignalSource:
         smart_devices=smart_devices,
         snapraid_status=snapraid_status,
         read_proc_mounts=read_proc_mounts,
-        required_mounts=config.required_mounts,
+        required_mounts=required_mounts_provider or config.required_mounts,
     )
+
+
+def _load_policy(config: DaemonConfig) -> AlertPolicy:
+    raw = None
+    if config.policy_path is not None:
+        try:
+            raw = json.loads(config.policy_path.read_text())
+            if isinstance(raw, dict) and isinstance(raw.get("policy"), dict):
+                raw = raw["policy"]
+        except (FileNotFoundError, OSError, ValueError):
+            raw = None
+    if raw is None:
+        raw = default_alert_policy()
+        raw["required_mounts"] = list(config.required_mounts)
+    return AlertPolicy.from_mapping(raw)
+
+
+def _write_status(
+    config: DaemonConfig,
+    evaluator: AlertEvaluator,
+    signals: list[Signal],
+    delivery: dict,
+) -> None:
+    if config.status_path is None:
+        return
+    config.status_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "updated_at": time.time(),
+        "resources": [asdict(signal) for signal in signals],
+        "incidents": [asdict(incident) for incident in evaluator.active_incidents],
+        "delivery": dict(delivery),
+    }
+    temporary = config.status_path.with_suffix(config.status_path.suffix + ".tmp")
+    temporary.write_text(json.dumps(payload, indent=2) + "\n")
+    os.replace(temporary, config.status_path)
 
 
 if __name__ == "__main__":  # pragma: no cover

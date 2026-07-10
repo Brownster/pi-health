@@ -44,6 +44,7 @@ class Incident:
     summary: str
     opened_at: str
     updated_at: str
+    delivered_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -86,11 +87,15 @@ class AlertEvaluator:
             raw = json.loads(self._state_path.read_text())
         except (FileNotFoundError, ValueError, OSError):
             return _State()
-        incidents = {
-            key: Incident(**value)
-            for key, value in (raw.get("incidents") or {}).items()
-            if isinstance(value, dict)
-        }
+        incidents = {}
+        for key, value in (raw.get("incidents") or {}).items():
+            if not isinstance(value, dict):
+                continue
+            incident = dict(value)
+            # State written before policy support represents incidents that were
+            # already sent when they opened.
+            incident.setdefault("delivered_at", incident.get("opened_at"))
+            incidents[key] = Incident(**incident)
         streaks = {
             key: int(value)
             for key, value in (raw.get("streaks") or {}).items()
@@ -121,7 +126,22 @@ class AlertEvaluator:
     def active_incidents(self) -> list[Incident]:
         return list(self._state.incidents.values())
 
-    def evaluate(self, signals: Iterable[Signal]) -> list[Notification]:
+    def mark_delivery_failed(self, notification: Notification) -> None:
+        """Return a failed incident delivery to pending state for the next tick."""
+        if notification.event != "incident":
+            return
+        incident = self._state.incidents.get(notification.key)
+        if incident is None:
+            return
+        incident.delivered_at = None
+        self._persist()
+
+    def evaluate(
+        self,
+        signals: Iterable[Signal],
+        *,
+        should_notify: Callable[[Signal, str], bool] | None = None,
+    ) -> list[Notification]:
         """Fold one round of signals into incident state; return what to notify.
 
         Signals whose key is absent this round are left untouched — only an explicit
@@ -131,12 +151,17 @@ class AlertEvaluator:
         now = self._clock()
         stamp = now.isoformat()
         notifications: list[Notification] = []
+        should_notify = should_notify or (lambda _signal, _event: True)
 
         for signal in signals:
             if signal.ok:
                 self._state.streaks.pop(signal.key, None)
                 incident = self._state.incidents.pop(signal.key, None)
-                if incident is not None:
+                if (
+                    incident is not None
+                    and incident.delivered_at is not None
+                    and should_notify(signal, "recovery")
+                ):
                     notifications.append(
                         Notification(
                             event="recovery",
@@ -154,6 +179,18 @@ class AlertEvaluator:
                 existing.summary = signal.summary
                 existing.severity = signal.severity
                 existing.updated_at = stamp
+                if existing.delivered_at is None and should_notify(signal, "incident"):
+                    existing.delivered_at = stamp
+                    notifications.append(
+                        Notification(
+                            event="incident",
+                            key=signal.key,
+                            kind=signal.kind,
+                            severity=signal.severity,
+                            summary=signal.summary,
+                            at=stamp,
+                        )
+                    )
                 continue
 
             streak = self._state.streaks.get(signal.key, 0) + 1
@@ -162,7 +199,7 @@ class AlertEvaluator:
                 continue
 
             self._state.streaks.pop(signal.key, None)
-            self._state.incidents[signal.key] = Incident(
+            incident = Incident(
                 key=signal.key,
                 kind=signal.kind,
                 severity=signal.severity,
@@ -170,16 +207,19 @@ class AlertEvaluator:
                 opened_at=stamp,
                 updated_at=stamp,
             )
-            notifications.append(
-                Notification(
-                    event="incident",
-                    key=signal.key,
-                    kind=signal.kind,
-                    severity=signal.severity,
-                    summary=signal.summary,
-                    at=stamp,
+            self._state.incidents[signal.key] = incident
+            if should_notify(signal, "incident"):
+                incident.delivered_at = stamp
+                notifications.append(
+                    Notification(
+                        event="incident",
+                        key=signal.key,
+                        kind=signal.kind,
+                        severity=signal.severity,
+                        summary=signal.summary,
+                        at=stamp,
+                    )
                 )
-            )
 
         self._persist()
         return notifications
