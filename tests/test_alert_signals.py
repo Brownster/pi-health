@@ -72,6 +72,7 @@ def test_smart_passed_reads_bool_and_string_assessments():
     assert smart_passed({"passed": True}) is True
     assert smart_passed({"smart_status": "PASSED"}) is True
     assert smart_passed({"assessment": "FAILED"}) is False
+    assert smart_passed({"smart_status": {"passed": True}}) is True
     assert smart_passed({"error_message": "no data"}) is None
     assert smart_passed({}) is None
 
@@ -119,6 +120,26 @@ def test_run_once_evaluates_and_delivers(tmp_path):
     notifications = run_once(provider, evaluator, notifier)
     assert [n.event for n in notifications] == ["incident"]
     assert [n.key for n in notifier.sent] == ["mount:/mnt/parity"]
+
+
+def test_run_once_retries_failed_incident_delivery_on_next_tick(tmp_path):
+    evaluator = AlertEvaluator(
+        state_path=tmp_path / "alerts.json",
+        config=AlertEvaluatorConfig(fail_threshold=1),
+    )
+
+    class FailingNotifier:
+        def send(self, _notification):
+            raise RuntimeError("Mattermost unavailable")
+
+    provider = lambda: mount_signals(set(), ["/mnt/parity"])
+    run_once(provider, evaluator, FailingNotifier())
+    recorder = RecordingNotifier()
+
+    notifications = run_once(provider, evaluator, recorder)
+
+    assert [note.key for note in notifications] == ["mount:/mnt/parity"]
+    assert [note.key for note in recorder.sent] == ["mount:/mnt/parity"]
 
 
 def test_config_from_env_parses_and_defaults():

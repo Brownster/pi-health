@@ -468,6 +468,9 @@ class TestRequestHandling:
         result = helper.handle_request('{"command":"ping"}')
         assert result["success"] is True
 
+    def test_alert_health_snapshot_is_exposed(self):
+        assert "alert_health_snapshot" in helper.COMMANDS
+
     def test_raw_file_write_commands_are_not_exposed(self):
         for command in ("write_systemd_unit", "write_startup_script"):
             request = json.dumps({"command": command, "params": {"content": "#!/bin/sh"}})

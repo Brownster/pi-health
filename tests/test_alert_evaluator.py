@@ -107,6 +107,31 @@ def test_independent_keys_tracked_separately(tmp_path):
     assert {n.severity for n in notifications} == {"warning", "critical"}
 
 
+def test_silenced_incident_is_delivered_once_when_policy_allows(tmp_path):
+    evaluator = _evaluator(tmp_path, threshold=1)
+    signal = _fail()
+
+    assert evaluator.evaluate([signal], should_notify=lambda _signal, _event: False) == []
+    notifications = evaluator.evaluate(
+        [signal], should_notify=lambda _signal, _event: True
+    )
+    assert [(note.event, note.key) for note in notifications] == [
+        ("incident", "container:jellyfin")
+    ]
+    assert evaluator.evaluate(
+        [signal], should_notify=lambda _signal, _event: True
+    ) == []
+
+
+def test_disabled_category_suppresses_recovery(tmp_path):
+    evaluator = _evaluator(tmp_path, threshold=1)
+    evaluator.evaluate([_fail()])
+
+    assert evaluator.evaluate(
+        [_ok()], should_notify=lambda _signal, _event: False
+    ) == []
+
+
 def test_mattermost_notifier_posts_rendered_payload():
     from alert_evaluator import Notification
 

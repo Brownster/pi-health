@@ -1236,6 +1236,108 @@ def install_v2_catalog_api_mocks():
 
 
 @pytest.fixture(scope="function")
+def install_v2_integrations_api_mocks():
+    """Install deterministic Mattermost integration mocks."""
+
+    def _install(page: Page, *, installed: bool = True) -> None:
+        state = {
+            "installed": installed,
+            "policy": {
+                "version": 1,
+                "categories": {
+                    "container": {"enabled": True},
+                    "smart": {"enabled": True},
+                    "mount": {"enabled": True},
+                    "snapraid": {"enabled": True},
+                },
+                "required_mounts": ["/mnt/media"],
+                "silences": [],
+            },
+        }
+
+        def _payload():
+            return {
+                "state": "connected" if state["installed"] else "not_installed",
+                "installed": state["installed"],
+                "site_url": "http://mattermost.test:8065" if state["installed"] else None,
+                "stack_name": "mattermost",
+                "team": "limeos",
+                "channel": "limeos-alerts",
+                "webhook_configured": state["installed"],
+                "policy": state["policy"],
+                "resources": [
+                    {
+                        "key": "container:jellyfin",
+                        "kind": "container",
+                        "ok": True,
+                        "severity": "warning",
+                        "summary": "jellyfin is healthy",
+                    },
+                    {
+                        "key": "smart:/dev/sda",
+                        "kind": "smart",
+                        "ok": True,
+                        "severity": "critical",
+                        "summary": "/dev/sda SMART OK",
+                    },
+                ],
+                "incidents": [],
+                "delivery": {"at": "2026-07-10T12:00:00Z", "ok": True},
+                "updated_at": 1783684800,
+            }
+
+        def _handler(route):
+            path = urlparse(route.request.url).path
+            method = route.request.method
+            if path == "/api/integrations/mattermost" and method == "GET":
+                route.fulfill(status=200, content_type="application/json", body=json.dumps(_payload()))
+                return
+            if path == "/api/integrations/mattermost/policy" and method == "PUT":
+                state["policy"] = route.request.post_data_json
+                route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps({"policy": state["policy"]}),
+                )
+                return
+            if path == "/api/integrations/mattermost/test" and method == "POST":
+                route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps({"status": "sent", "at": "2026-07-10T12:01:00Z"}),
+                )
+                return
+            if path == "/api/integrations/mattermost/install" and method == "POST":
+                state["installed"] = True
+                route.fulfill(
+                    status=202,
+                    content_type="application/json",
+                    body=json.dumps(
+                        {
+                            "operation_id": "mock-mattermost-install",
+                            "stream_url": "/api/integrations/mattermost/operations/mock-mattermost-install/stream",
+                        }
+                    ),
+                )
+                return
+            if path.endswith("/mock-mattermost-install/stream") and method == "GET":
+                route.fulfill(
+                    status=200,
+                    content_type="text/event-stream",
+                    body=(
+                        'id: 0\ndata: {"step":"services","line":"Starting Postgres and Mattermost"}\n\n'
+                        'id: 1\ndata: {"step":"complete","line":"Mattermost and LimeOS alerts are ready","done":true}\n\n'
+                    ),
+                )
+                return
+            route.continue_()
+
+        page.route("**/api/**", _handler)
+
+    return _install
+
+
+@pytest.fixture(scope="function")
 def install_v2_network_api_mocks():
     """Returns a callable(page) installing deterministic network mocks."""
 
