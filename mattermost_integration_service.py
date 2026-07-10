@@ -370,7 +370,7 @@ class MattermostIntegrationService:
             "services": {
                 "postgres": {
                     "image": "docker.io/library/postgres:16-alpine",
-                    "container_name": "mattermost-db",
+                    "container_name": "limeos-mattermost-db",
                     "env_file": [secrets_file],
                     "volumes": ["mattermost-postgres:/var/lib/postgresql/data"],
                     "healthcheck": {
@@ -383,7 +383,7 @@ class MattermostIntegrationService:
                 },
                 "mattermost": {
                     "image": "mattermost/mattermost-team-edition:latest",
-                    "container_name": "mattermost",
+                    "container_name": "limeos-mattermost",
                     "env_file": [secrets_file],
                     "environment": {
                         "MM_SERVICESETTINGS_SITEURL": setup["site_url"],
@@ -503,7 +503,7 @@ class MattermostIntegrationService:
         if self._container_status_provider is None:
             return {}
         statuses = {}
-        for name in ("mattermost-db", "mattermost", "limeos-alertd"):
+        for name in ("limeos-mattermost-db", "limeos-mattermost", "limeos-alertd"):
             try:
                 value = self._container_status_provider(name)
             except Exception:

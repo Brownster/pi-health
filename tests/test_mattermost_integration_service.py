@@ -1,4 +1,5 @@
 import json
+import threading
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -101,6 +102,8 @@ def test_install_builds_stack_bootstraps_and_redacts_admin_password(tmp_path):
     assert "postgres:" in compose
     assert "mattermost:" in compose
     assert "limeos-alertd:" in compose
+    assert "container_name: limeos-mattermost-db" in compose
+    assert "container_name: limeos-mattermost\n" in compose
 
 
 def test_install_retry_reuses_database_password(tmp_path):
@@ -138,14 +141,14 @@ def test_status_reports_disconnected_service(tmp_path):
     service, _api, _sent = make_service(tmp_path)
     list(service.stream_install(SETUP))
     service._container_status_provider = lambda name: {
-        "state": "exited" if name == "mattermost" else "running",
+        "state": "exited" if name == "limeos-mattermost" else "running",
         "health": None,
     }
 
     result = service.status()
 
     assert result["state"] == "disconnected"
-    assert result["services"]["mattermost"]["state"] == "exited"
+    assert result["services"]["limeos-mattermost"]["state"] == "exited"
 
 
 class ImmediateThread:
@@ -157,12 +160,12 @@ class ImmediateThread:
         self.target(*self.args)
 
 
-def _authed_client(service):
+def _authed_client(service, *, thread_factory=ImmediateThread):
     dependencies = AppDependencies(
         users={"testuser": generate_password_hash("pw", method="pbkdf2:sha256:600000")},
         login_rate_limiter=LoginRateLimiter(),
         docker_client=None,
-        operation_registry=OperationRegistry(thread_factory=ImmediateThread),
+        operation_registry=OperationRegistry(thread_factory=thread_factory),
         mattermost_integration_service=service,
     )
     application = create_app(
@@ -202,3 +205,17 @@ def test_integration_routes_delegate_and_stream():
         "/api/integrations/mattermost/policy", json={"categories": {}}
     ).status_code == 200
     assert client.post("/api/integrations/mattermost/test").status_code == 200
+
+
+def test_install_route_resolves_service_before_background_thread_runs():
+    service = Mock()
+    service.stream_install.return_value = iter(
+        [{"step": "complete", "line": "Mattermost ready", "done": True}]
+    )
+    client = _authed_client(service, thread_factory=threading.Thread)
+
+    install = client.post("/api/integrations/mattermost/install", json=SETUP)
+    stream = client.get(install.get_json()["stream_url"])
+
+    assert "Mattermost ready" in stream.get_data(as_text=True)
+    service.stream_install.assert_called_once_with(SETUP)

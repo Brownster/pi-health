@@ -30,9 +30,10 @@ def install_mattermost():
     values = request.get_json(silent=True)
     if not isinstance(values, dict):
         return jsonify({"error": "Setup values must be an object"}), 400
+    service = _service()
 
     def produce_events():
-        yield from _service().stream_install(values)
+        yield from service.stream_install(values)
 
     try:
         operation = current_app.extensions["operation_registry"].create(
