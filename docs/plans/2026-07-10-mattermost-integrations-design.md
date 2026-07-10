@@ -30,8 +30,8 @@ and webhook secret. A Mattermost quickstart service performs these steps:
 
 1. Create one Compose stack with Postgres, Mattermost, and `limeos-alertd`.
 2. Start Postgres and Mattermost and wait for their health checks.
-3. Run `mmctl --local` in the Mattermost container to create or find the admin,
-   `limeos` team, and `limeos-alerts` channel.
+3. Use Mattermost's v4 API to create or find the admin, `limeos` team, and
+   `limeos-alerts` channel.
 4. Create or find the incoming webhook and write it to the alert daemon
    environment.
 5. Start the alert daemon and send a test notification.
@@ -41,11 +41,12 @@ The workflow is idempotent. A retry discovers completed resources and resumes
 at the failed stage.
 
 Store non-secret metadata and policy in
-`/etc/limeos/integrations/mattermost.json`. Store the database password,
-bootstrap password, and webhook URL in
-`/etc/limeos/integrations/mattermost.env` with mode `0600`. API responses never
-return stored secrets. Password inputs are write-only; the UI reports only
-whether required credentials exist.
+`/etc/limeos/integrations/mattermost.json`. Store the database password and
+webhook URL in
+`/etc/limeos/integrations/mattermost.env` with mode `0600`. The setup workflow
+uses the admin password without persisting it. API responses never return
+stored secrets. Password inputs are write-only; the UI reports only whether
+required credentials exist.
 
 ## Alert Policy
 
@@ -126,4 +127,3 @@ and streamed progress. Frontend tests cover initial setup, install progress,
 connected and degraded states, category and resource controls, silence dialogs,
 responsive layout, and keyboard access. Existing catalog and evaluator tests
 remain compatibility coverage.
-
