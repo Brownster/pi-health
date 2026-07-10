@@ -20,6 +20,8 @@ from compose_yaml import dump_compose_yaml
 
 
 INTEGRATION_VERSION = 1
+MATTERMOST_VERSION = "11.8.3"
+MATTERMOST_ARM64_SHA256 = "c784ca5d34cfe3793a31a6a7d17d209e0d916bb744a50df776c78aa318d5b98f"
 SLUG_PATTERN = re.compile(r"^[a-z][a-z0-9-]{1,62}$")
 USERNAME_PATTERN = re.compile(r"^[a-z0-9._-]{3,64}$")
 
@@ -279,6 +281,11 @@ class MattermostIntegrationService:
                 dump_compose_yaml(self._compose(setup)),
                 mode=0o600,
             )
+            self._atomic_writer(
+                stack_dir / "Dockerfile.mattermost",
+                self._mattermost_dockerfile(),
+                mode=0o600,
+            )
 
             yield {"step": "services", "line": "Starting Postgres and Mattermost"}
             self._run_compose(stack_dir, "up", "-d", "postgres", "mattermost")
@@ -382,7 +389,11 @@ class MattermostIntegrationService:
                     "restart": "unless-stopped",
                 },
                 "mattermost": {
-                    "image": "mattermost/mattermost-team-edition:latest",
+                    "image": f"limeos/mattermost-team:{MATTERMOST_VERSION}-arm64",
+                    "build": {
+                        "context": ".",
+                        "dockerfile": "Dockerfile.mattermost",
+                    },
                     "container_name": "limeos-mattermost",
                     "env_file": [secrets_file],
                     "environment": {
@@ -438,7 +449,7 @@ class MattermostIntegrationService:
                 cwd=stack_dir,
                 capture_output=True,
                 text=True,
-                timeout=600,
+                timeout=1200,
             )
         except (subprocess.TimeoutExpired, OSError) as exc:
             raise MattermostIntegrationError("Docker Compose could not start Mattermost") from exc
@@ -510,6 +521,41 @@ class MattermostIntegrationService:
                 value = None
             statuses[name] = value or {"state": "missing", "health": None}
         return statuses
+
+    @staticmethod
+    def _mattermost_dockerfile() -> str:
+        return f"""FROM ubuntu:24.04
+
+ARG MM_VERSION={MATTERMOST_VERSION}
+ARG MM_SHA256={MATTERMOST_ARM64_SHA256}
+
+RUN apt-get update \\
+    && DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y \\
+        ca-certificates curl media-types mailcap poppler-utils tidy tzdata unrtf wv \\
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl --fail --location --show-error \\
+        "https://releases.mattermost.com/${{MM_VERSION}}/mattermost-team-${{MM_VERSION}}-linux-arm64.tar.gz" \\
+        --output /tmp/mattermost.tar.gz \\
+    && echo "${{MM_SHA256}}  /tmp/mattermost.tar.gz" | sha256sum --check - \\
+    && tar -xzf /tmp/mattermost.tar.gz -C / \\
+    && rm /tmp/mattermost.tar.gz \\
+    && groupadd --gid 2000 mattermost \\
+    && useradd --uid 2000 --gid 2000 --home-dir /mattermost mattermost \\
+    && mkdir -p /mattermost/data /mattermost/logs /mattermost/plugins /mattermost/client/plugins \\
+    && chown -R mattermost:mattermost /mattermost
+
+ENV PATH="/mattermost/bin:${{PATH}}" \\
+    MM_SERVICESETTINGS_ENABLELOCALMODE="true" \\
+    MM_INSTALL_TYPE="docker"
+
+USER mattermost
+WORKDIR /mattermost
+HEALTHCHECK --interval=30s --timeout=10s \\
+    CMD ["/mattermost/bin/mmctl", "system", "status", "--local"]
+CMD ["/mattermost/bin/mattermost"]
+EXPOSE 8065 8067 8074
+"""
 
     @staticmethod
     def _policy(config: Mapping[str, Any]) -> dict[str, Any]:

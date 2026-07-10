@@ -99,11 +99,18 @@ def test_install_builds_stack_bootstraps_and_redacts_admin_password(tmp_path):
         tmp_path / "config" / "mattermost.env"
     ).read_text()
     compose = (tmp_path / "stacks" / "mattermost" / "compose.yaml").read_text()
+    dockerfile = (
+        tmp_path / "stacks" / "mattermost" / "Dockerfile.mattermost"
+    ).read_text()
     assert "postgres:" in compose
     assert "mattermost:" in compose
     assert "limeos-alertd:" in compose
     assert "container_name: limeos-mattermost-db" in compose
     assert "container_name: limeos-mattermost\n" in compose
+    assert "build:" in compose
+    assert "mattermost-team-edition:latest" not in compose
+    assert "mattermost-team-${MM_VERSION}-linux-arm64.tar.gz" in dockerfile
+    assert "ARG MM_VERSION=11.8.3" in dockerfile
 
 
 def test_install_retry_reuses_database_password(tmp_path):
