@@ -1,6 +1,7 @@
 id: mattermost-db
 name: Mattermost Database (Postgres)
 description: PostgreSQL database for Mattermost
+managed_by: integrations
 requires: []
 disabled_by_default: false
 fields:

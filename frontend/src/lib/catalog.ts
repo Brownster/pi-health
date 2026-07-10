@@ -8,6 +8,7 @@ export interface CatalogItem {
   description: string;
   requires: string[];
   installedStacks: string[];
+  managedBy: string | null;
 }
 
 export interface CatalogSnapshot {
@@ -40,6 +41,7 @@ function normalizeItem(
     description: String(raw?.description ?? ""),
     requires: Array.isArray(raw?.requires) ? raw.requires.map((r) => String(r)) : [],
     installedStacks: normalizeStackNames(serviceStacks[id]),
+    managedBy: raw?.managed_by ? String(raw.managed_by) : null,
   };
 }
 

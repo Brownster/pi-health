@@ -7,6 +7,7 @@ import {
   Gauge,
   HardDrive,
   LogOut,
+  PlugZap,
   Menu,
   PackageOpen,
   Settings,
@@ -34,6 +35,7 @@ const routeIcons: Record<string, ComponentType<LucideProps>> = {
   "/pools": Database,
   "/mounts": FolderTree,
   "/shares": Share2,
+  "/integrations": PlugZap,
   "/settings": Settings,
 };
 

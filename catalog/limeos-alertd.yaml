@@ -1,6 +1,7 @@
 id: limeos-alertd
 name: LimeOS Alert Daemon
-description: Native health checks (container down/unhealthy, SMART, mount, SnapRAID) that post deduplicated incidents to Mattermost. No AI model — cheap, always-on. Needs a Mattermost incoming-webhook URL (create it in Mattermost first). Runs the pi-health image with the alert daemon command.
+description: Native container, SMART, mount, and SnapRAID incidents delivered to Mattermost. Use Integrations to install and configure alert policy without handling webhook secrets manually.
+managed_by: integrations
 requires: ["mattermost"]
 disabled_by_default: false
 fields:

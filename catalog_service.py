@@ -47,6 +47,8 @@ def _summarize_item(item: Mapping[str, Any]) -> dict:
         'disabled_by_default': bool(item.get('disabled_by_default', False)),
         'source': item.get('_source', ''),
     }
+    if item.get('managed_by'):
+        summary['managed_by'] = item['managed_by']
     if item.get('kind') == 'bundle':
         summary['members'] = item.get('members', []) or []
     return summary

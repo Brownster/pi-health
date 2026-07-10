@@ -5,6 +5,7 @@ import { ContainersPage } from "@/pages/containers-page";
 import { DashboardHomePage } from "@/pages/dashboard-home";
 import { DisksPage } from "@/pages/disks-page";
 import { MountsPage } from "@/pages/mounts-page";
+import { IntegrationsPage } from "@/pages/integrations-page";
 import { NetworkPage } from "@/pages/network-page";
 import { SettingsPage } from "@/pages/settings-page";
 import { SharesPage } from "@/pages/shares-page";
@@ -109,6 +110,14 @@ export const appRoutes: AppRoute[] = [
     requiresAuth: true,
     showInNav: true,
     component: NetworkPage,
+  },
+  {
+    path: "/integrations",
+    label: "Integrations",
+    navGroup: "System",
+    requiresAuth: true,
+    showInNav: true,
+    component: IntegrationsPage,
   },
   {
     path: "/settings",

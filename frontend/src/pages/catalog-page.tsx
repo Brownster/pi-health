@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   Activity,
   CheckCircle2,
@@ -12,7 +13,7 @@ import {
 } from "lucide-react";
 
 import { Badge, StatusBadge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ModalOverlay } from "@/components/ui/modal-overlay";
 import { PageHeader } from "@/components/ui/page-header";
@@ -478,7 +479,14 @@ export function CatalogPage() {
                   </div>
                 ) : null}
                 <div className="mt-auto flex flex-wrap gap-2">
-                  <Button
+                  {item.managedBy === "integrations" ? (
+                    <Link
+                      className={buttonVariants({ size: "sm", variant: "info" })}
+                      to="/integrations"
+                    >
+                      Manage in Integrations
+                    </Link>
+                  ) : <Button
                     className="px-3 text-xs sm:text-sm"
                     data-catalog-action="install"
                     data-item={item.id}
@@ -487,6 +495,7 @@ export function CatalogPage() {
                   >
                     Install
                   </Button>
+                  }
                 </div>
               </CardContent>
             </Card>

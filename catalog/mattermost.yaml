@@ -1,6 +1,7 @@
 id: mattermost
 name: Mattermost
-description: Self-hosted team chat. Hosts the LimeOS alert incidents and (later) the @agent assistant. LAN-only — do not expose without a TLS reverse proxy. Create a channel + incoming webhook after first boot, then install LimeOS Alert Daemon.
+description: Self-hosted team chat for LimeOS alerts and the planned AI agent. Use Integrations to install the database, Mattermost, channel, webhook, and alert daemon together.
+managed_by: integrations
 requires: ["mattermost-db"]
 disabled_by_default: false
 fields:
