@@ -75,7 +75,16 @@ export async function installMattermost(
     { ...setup },
     signal,
   );
-  await streamOperation(operation.stream_url, onEvent, signal);
+  await streamOperation(
+    operation.stream_url,
+    (event) => {
+      onEvent(event);
+      if (event.error) {
+        throw new Error(event.error);
+      }
+    },
+    signal,
+  );
 }
 
 export async function updateMattermostPolicy(policy: AlertPolicy): Promise<AlertPolicy> {

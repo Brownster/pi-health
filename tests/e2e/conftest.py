@@ -1239,7 +1239,7 @@ def install_v2_catalog_api_mocks():
 def install_v2_integrations_api_mocks():
     """Install deterministic Mattermost integration mocks."""
 
-    def _install(page: Page, *, installed: bool = True) -> None:
+    def _install(page: Page, *, installed: bool = True, install_error: bool = False) -> None:
         state = {
             "installed": installed,
             "policy": {
@@ -1308,7 +1308,7 @@ def install_v2_integrations_api_mocks():
                 )
                 return
             if path == "/api/integrations/mattermost/install" and method == "POST":
-                state["installed"] = True
+                state["installed"] = not install_error
                 route.fulfill(
                     status=202,
                     content_type="application/json",
@@ -1321,6 +1321,16 @@ def install_v2_integrations_api_mocks():
                 )
                 return
             if path.endswith("/mock-mattermost-install/stream") and method == "GET":
+                if install_error:
+                    route.fulfill(
+                        status=200,
+                        content_type="text/event-stream",
+                        body=(
+                            'id: 0\ndata: {"step":"services","line":"Starting Postgres and Mattermost"}\n\n'
+                            'id: 1\ndata: {"step":"error","error":"no matching ARM64 manifest"}\n\n'
+                        ),
+                    )
+                    return
                 route.fulfill(
                     status=200,
                     content_type="text/event-stream",
