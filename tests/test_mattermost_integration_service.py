@@ -129,6 +129,16 @@ def test_install_builds_stack_bootstraps_and_redacts_admin_password(tmp_path):
         "build",
         "limeos-alertd",
     ] in compose_calls
+    assert [
+        "docker",
+        "compose",
+        "-f",
+        "compose.yaml",
+        "up",
+        "-d",
+        "--no-deps",
+        "limeos-alertd",
+    ] in compose_calls
 
 
 def test_install_retry_reuses_database_password(tmp_path):
@@ -141,6 +151,22 @@ def test_install_retry_reuses_database_password(tmp_path):
     second = (tmp_path / "config" / "mattermost.env").read_text()
     first_password = next(line for line in first.splitlines() if line.startswith("POSTGRES_PASSWORD="))
     assert first_password in second
+
+
+def test_install_stays_uninstalled_when_test_delivery_fails(tmp_path):
+    service, _api, _sent, _compose_calls = make_service(tmp_path)
+
+    class FailingNotifier:
+        def send(self, _notification):
+            raise OSError("Mattermost test delivery failed")
+
+    service._notifier_factory = lambda _url: FailingNotifier()
+
+    events = list(service.stream_install(SETUP))
+
+    config = json.loads((tmp_path / "config" / "mattermost.json").read_text())
+    assert events[-1] == {"step": "error", "error": "Mattermost test delivery failed"}
+    assert config["installed"] is False
 
 
 def test_policy_status_and_test_delivery(tmp_path):

@@ -337,9 +337,9 @@ class MattermostIntegrationService:
             yield {"step": "alertd-image", "line": "Building LimeOS alert service"}
             self._run_compose(stack_dir, "build", "limeos-alertd")
             yield {"step": "alertd", "line": "Starting LimeOS alerts"}
-            self._run_compose(stack_dir, "up", "-d", "--remove-orphans")
-            self._write_config(setup, installed=True)
+            self._run_compose(stack_dir, "up", "-d", "--no-deps", "limeos-alertd")
             self.send_test()
+            self._write_config(setup, installed=True)
             yield {"step": "test", "line": "Test alert delivered"}
             yield {
                 "step": "complete",
