@@ -1,0 +1,15 @@
+{
+  "schema_version": "1",
+  "enabled": false,
+  "mattermost": {
+    "site_url": "http://127.0.0.1:8065",
+    "bot_username": "limeos",
+    "bot_user_id": "replace-after-bot-setup",
+    "allowed_channels": []
+  },
+  "limits": {
+    "turn_timeout_seconds": 300,
+    "tool_rounds_per_turn": 6,
+    "invocations_per_day": 20
+  }
+}
