@@ -224,7 +224,7 @@ deduplication.
 | ID | Package | Depends on | Parallel group | Deliverable |
 | --- | --- | --- | --- | --- |
 | AA-000 | Re-baseline and contracts | Mattermost live | Complete | Accepted in `Docs/LIMEOS_AI_AGENTS_AA000_BASELINE.md` |
-| AA-001 | `limeops` envelope and policy | AA-000 | Core | CLI entry point, JSON schema, errors, identity, limits, audit, and contract tests |
+| AA-001 | `limeops` envelope and policy | AA-000 | Complete | Implemented in `Docs/LIMEOS_AI_AGENTS_AA001_LIMEOPS_CONTRACT.md` |
 | AA-002 | Read-only diagnostic operations | AA-001 | Core | Initial system, container, stack, storage, network, and installation operations |
 | AA-003 | Gateway domain and persistence | AA-000 | Gateway | Provider interface, conversation store, locks, limits, cancellation, usage, and audit correlation |
 | AA-004 | Claude Code adapter and sandbox | AA-001, AA-003 | Provider | Dedicated identity, guided authentication, headless turns, process controls, and health checks |
