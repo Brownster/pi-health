@@ -283,5 +283,7 @@ def main(argv=None, *, operation_factory=lambda: {}) -> int:
     return 0
 
 
-if __name__ == "__main__":
-    raise SystemExit(main())
+if __name__ == "__main__":  # pragma: no cover - target entrypoint
+    from limeops.wiring import default_operation_factory
+
+    raise SystemExit(main(operation_factory=default_operation_factory))

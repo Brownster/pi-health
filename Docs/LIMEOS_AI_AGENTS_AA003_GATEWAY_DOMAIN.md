@@ -23,9 +23,13 @@ no listener changes, exactly as the baseline's mocked-contract plan intended.
   credential material.
 - **Tool loop**: the gateway validates each `ToolCall` (operation name pattern plus a
   read-only allowlist mirroring the AA-001 default policy) and executes it through an
-  injected `limeops` executor with the Mattermost actor and a per-turn correlation id;
-  the bounded envelope summary (16 KiB cap) is appended to the conversation and the
-  provider is invoked again, up to 6 rounds. Disallowed operations are refused without
+  injected `limeops` executor with the broker's frozen actor shape
+  (`{type: mattermost, id, username}`); the per-turn correlation id and the broker
+  `audit_id` returned by each tool call are recorded together in the usage ledger, so
+  AA-006 can join gateway turns to broker audit records. The bounded envelope summary
+  (16 KiB cap) is appended to the conversation and the provider is invoked again, up to
+  6 rounds. *(Corrected during AA-002 integration: the original actor shape carried
+  `kind`/`correlation_id` fields the broker rejects.)* Disallowed operations are refused without
   reaching the broker; broker failures become bounded tool results, never prompt-visible
   internals. The broker's policy remains authoritative — the gateway allowlist is
   defence in depth.

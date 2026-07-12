@@ -84,6 +84,7 @@ class GatewayConfig:
 class _TurnTrace:
     rounds: int = 0
     tool_operations: list[str] = field(default_factory=list)
+    tool_audit_ids: list[str] = field(default_factory=list)
 
 
 class AgentGateway:
@@ -167,6 +168,7 @@ class AgentGateway:
                 rounds=trace.rounds,
                 duration_seconds=self._clock() - started,
                 tool_operations=trace.tool_operations,
+                tool_audit_ids=trace.tool_audit_ids,
             )
 
     def _tool_loop(
@@ -179,10 +181,13 @@ class AgentGateway:
         messages = self._conversations.append(
             request.conversation_id, Message(role="user", text=request.text)
         )
+        # The broker's frozen actor contract is {type, id, username?}; the per-turn
+        # correlation id stays in the gateway's usage records, alongside the broker
+        # audit ids captured per tool call.
         actor = {
-            "kind": "mattermost",
+            "type": "mattermost",
+            "id": request.actor_username,
             "username": request.actor_username,
-            "correlation_id": correlation_id,
         }
 
         for _round in range(self._config.tool_rounds_per_turn):
@@ -212,7 +217,7 @@ class AgentGateway:
 
             if isinstance(reply, ToolCall):
                 trace.tool_operations.append(reply.operation)
-                tool_text = self._run_tool(reply, actor)
+                tool_text = self._run_tool(reply, actor, trace)
                 messages = self._conversations.append(
                     request.conversation_id,
                     Message(role="tool", text=f"{reply.operation}: {tool_text}"),
@@ -223,7 +228,7 @@ class AgentGateway:
 
         raise TurnError()  # tool rounds exhausted without a final answer
 
-    def _run_tool(self, call: ToolCall, actor: dict) -> str:
+    def _run_tool(self, call: ToolCall, actor: dict, trace: _TurnTrace) -> str:
         if (
             not _OPERATION_RE.match(call.operation or "")
             or call.operation not in self._config.allowed_operations
@@ -235,6 +240,9 @@ class AgentGateway:
         except Exception:  # noqa: BLE001 - broker failure is a bounded tool result
             logger.exception("limeops execution failed for %s", call.operation)
             return json.dumps({"ok": False, "error": {"code": "unavailable_dependency"}})
+        audit_id = envelope.get("audit_id")
+        if isinstance(audit_id, str) and audit_id:
+            trace.tool_audit_ids.append(audit_id)
         summary = {
             "ok": envelope.get("ok"),
             "data": envelope.get("data"),

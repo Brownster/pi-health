@@ -76,6 +76,7 @@ class UsageLedger:
         rounds: int,
         duration_seconds: float,
         tool_operations: list[str],
+        tool_audit_ids: list[str] | None = None,
     ) -> None:
         self._counters["total_turns"] = int(self._counters.get("total_turns", 0)) + 1
         self._persist()
@@ -87,6 +88,7 @@ class UsageLedger:
             "rounds": rounds,
             "duration_seconds": round(duration_seconds, 3),
             "tool_operations": tool_operations,
+            "tool_audit_ids": tool_audit_ids or [],
         }
         self._records_path.parent.mkdir(parents=True, exist_ok=True)
         with open(self._records_path, "a") as handle:

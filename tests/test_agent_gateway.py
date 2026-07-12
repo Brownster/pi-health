@@ -154,8 +154,14 @@ def test_tool_loop_executes_limeops_and_feeds_result_back(tmp_path):
     assert result.text == "jellyfin is stopped."
     operation, params, actor = executor.calls[0]
     assert operation == "container.status" and params == {"name": "jellyfin"}
-    assert actor["kind"] == "mattermost" and actor["username"] == "marc"
-    assert actor["correlation_id"]  # audit correlation flows to the broker
+    # The broker's frozen actor contract: {type, id, username?}.
+    assert actor == {"type": "mattermost", "id": "marc", "username": "marc"}
+    # The broker audit id is captured for the usage/audit views.
+    records = [
+        json.loads(line)
+        for line in (tmp_path / "usage-records.jsonl").read_text().splitlines()
+    ]
+    assert records[0]["tool_audit_ids"] == ["audit-1"]
     # The bounded tool result was appended for the second invocation.
     second_context = provider.calls[1][0]
     tool_messages = [m for m in second_context.messages if m.role == "tool"]
