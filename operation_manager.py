@@ -63,6 +63,10 @@ class BackgroundOperation:
 
     def finish(self):
         with self.condition:
+            self.events = [
+                {"expired": True} if payload.get("_ephemeral") else payload
+                for payload in self.events
+            ]
             self.complete = True
             self.condition.notify_all()
 
@@ -136,7 +140,7 @@ class OperationRegistry:
             operation = self._operations.get(operation_id)
         return bool(
             operation
-            and operation.kind == expected_kind
+            and _kind_matches(operation.kind, expected_kind)
             and isinstance(owner, str)
             and hmac.compare_digest(operation.owner, owner)
         )
@@ -156,7 +160,7 @@ class OperationRegistry:
             operation = self._operations.get(operation_id)
         if not (
             operation
-            and operation.kind == expected_kind
+            and _kind_matches(operation.kind, expected_kind)
             and isinstance(owner, str)
             and hmac.compare_digest(operation.owner, owner)
         ):
@@ -233,3 +237,9 @@ def parse_sse_payload(frame):
             return None
         return payload if isinstance(payload, dict) else None
     return None
+
+
+def _kind_matches(actual, expected):
+    if isinstance(expected, (tuple, list, frozenset)):
+        return actual in expected
+    return actual == expected

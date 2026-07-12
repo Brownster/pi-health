@@ -22,8 +22,11 @@ DEFAULT_CONFIG_PATH = "/etc/limeos/integrations/agents.json"
 DEFAULT_STATE_DIR = "/var/lib/limeos/integrations/agents"
 _SAFE_ID = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 _ROOT_FIELDS = frozenset({"schema_version", "enabled", "mattermost", "limits"})
-_MATTERMOST_FIELDS = frozenset(
+_MATTERMOST_REQUIRED_FIELDS = frozenset(
     {"site_url", "bot_username", "bot_user_id", "allowed_channels"}
+)
+_MATTERMOST_FIELDS = _MATTERMOST_REQUIRED_FIELDS | frozenset(
+    {"team_id", "channel_id", "bot_token_id"}
 )
 _LIMIT_FIELDS = frozenset(
     {"turn_timeout_seconds", "tool_rounds_per_turn", "invocations_per_day"}
@@ -43,6 +46,9 @@ class AgentRuntimeConfig:
     bot_username: str
     bot_user_id: str
     allowed_channels: tuple[str, ...]
+    team_id: str | None = None
+    channel_id: str | None = None
+    bot_token_id: str | None = None
     turn_timeout_seconds: float = 300
     tool_rounds_per_turn: int = 6
     invocations_per_day: int = 20
@@ -59,12 +65,20 @@ def load_config(path: Path | str = DEFAULT_CONFIG_PATH) -> AgentRuntimeConfig:
         raw = json.loads(Path(path).read_text())
     except (OSError, ValueError) as exc:
         raise RuntimeConfigError("Agent settings are unavailable") from exc
+    return parse_config(raw)
+
+
+def parse_config(raw) -> AgentRuntimeConfig:
     if not isinstance(raw, dict) or set(raw) - _ROOT_FIELDS:
         raise RuntimeConfigError("Invalid agent settings")
     if raw.get("schema_version") != "1" or not isinstance(raw.get("enabled"), bool):
         raise RuntimeConfigError("Unsupported agent settings")
     mattermost = raw.get("mattermost")
-    if not isinstance(mattermost, dict) or set(mattermost) != _MATTERMOST_FIELDS:
+    if (
+        not isinstance(mattermost, dict)
+        or set(mattermost) - _MATTERMOST_FIELDS
+        or not _MATTERMOST_REQUIRED_FIELDS <= set(mattermost)
+    ):
         raise RuntimeConfigError("Invalid Mattermost settings")
     site_url = mattermost.get("site_url")
     if not isinstance(site_url, str):
@@ -83,6 +97,10 @@ def load_config(path: Path | str = DEFAULT_CONFIG_PATH) -> AgentRuntimeConfig:
     if not isinstance(allowed_channels, list) or len(allowed_channels) > 32:
         raise RuntimeConfigError("Invalid Mattermost channel allowlist")
     channel_ids = tuple(_safe_id(item, "channel id") for item in allowed_channels)
+    metadata = {}
+    for field in ("team_id", "channel_id", "bot_token_id"):
+        value = mattermost.get(field)
+        metadata[field] = _safe_id(value, field) if value is not None else None
 
     limits = raw.get("limits", {})
     if not isinstance(limits, dict) or set(limits) - _LIMIT_FIELDS:
@@ -102,6 +120,7 @@ def load_config(path: Path | str = DEFAULT_CONFIG_PATH) -> AgentRuntimeConfig:
         bot_username=_safe_id(mattermost.get("bot_username"), "bot username"),
         bot_user_id=_safe_id(mattermost.get("bot_user_id"), "bot user id"),
         allowed_channels=channel_ids,
+        **metadata,
         turn_timeout_seconds=float(timeout),
         tool_rounds_per_turn=rounds,
         invocations_per_day=daily,

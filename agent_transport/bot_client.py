@@ -46,6 +46,16 @@ class MattermostBotApi:
         user, _headers = self._request("GET", "/api/v4/users/me")
         return user
 
+    def team_id(self, name: str) -> str:
+        team, _headers = self._request("GET", f"/api/v4/teams/name/{name}")
+        return str(team["id"])
+
+    def channel_id(self, team_id: str, name: str) -> str:
+        channel, _headers = self._request(
+            "GET", f"/api/v4/teams/{team_id}/channels/name/{name}"
+        )
+        return str(channel["id"])
+
     # -- admin bootstrap -------------------------------------------------------
     def enable_bot_settings(self) -> None:
         """Enable bot-account creation and user access tokens (admin session)."""

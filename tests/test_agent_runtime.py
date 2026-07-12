@@ -43,6 +43,21 @@ def test_runtime_config_is_strict_and_non_secret(tmp_path):
         load_config(path)
 
 
+def test_runtime_config_accepts_non_secret_bot_metadata(tmp_path):
+    raw = _settings()
+    raw["mattermost"].update(
+        team_id="team-1", channel_id="channel-1", bot_token_id="token-1"
+    )
+    path = tmp_path / "agents.json"
+    path.write_text(json.dumps(raw))
+    config = load_config(path)
+    assert (config.team_id, config.channel_id, config.bot_token_id) == (
+        "team-1",
+        "channel-1",
+        "token-1",
+    )
+
+
 @pytest.mark.parametrize(
     "mattermost",
     [

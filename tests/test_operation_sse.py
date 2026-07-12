@@ -103,6 +103,29 @@ def test_streams_events_as_sse_frames_and_completes():
     assert 'data: {"line": "hello"}' in body
 
 
+def test_stream_hides_ephemeral_control_marker():
+    registry = FakeRegistry(
+        batches=[
+            _batch(
+                [
+                    _event(
+                        1,
+                        {
+                            "authorization_url": "https://claude.ai/login",
+                            "_ephemeral": True,
+                        },
+                    )
+                ],
+                next_cursor=2,
+                complete=True,
+            )
+        ]
+    )
+    body = _client(registry).get("/stream").get_data(as_text=True)
+    assert "https://claude.ai/login" in body
+    assert "_ephemeral" not in body
+
+
 def test_sets_no_buffering_headers():
     registry = FakeRegistry(batches=[_batch([], next_cursor=0, complete=True)])
     response = _client(registry).get("/stream")

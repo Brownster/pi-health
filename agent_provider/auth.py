@@ -135,6 +135,10 @@ class GuidedAuthManager:
             self._remove_authorization_urls()
         self._terminate(process)
 
+    def current_state(self) -> str:
+        with self._lock:
+            return self._state
+
     def _read_process(self, operation_id: str, process) -> None:
         assert process.stdout is not None
         try:

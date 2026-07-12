@@ -37,7 +37,10 @@ def stream_operation_response(registry, operation_id, expected_kind):
                 yield ": keep-alive\n\n"
                 continue
             for event in batch.events:
-                yield f"id: {event.event_id}\ndata: {json.dumps(event.payload)}\n\n"
+                payload = {
+                    key: value for key, value in event.payload.items() if key != "_ephemeral"
+                }
+                yield f"id: {event.event_id}\ndata: {json.dumps(payload)}\n\n"
             cursor = batch.next_cursor
             if batch.complete:
                 break

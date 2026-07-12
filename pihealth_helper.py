@@ -26,7 +26,7 @@ import shutil
 import struct
 import threading
 import tempfile
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 import urllib.request
 import urllib.error
@@ -2787,6 +2787,34 @@ def cmd_agent_runtime_status(params):
         'runuser', '-u', 'lime-agent', '--', '/usr/bin/claude', '--version'
     ], timeout=10)
     version_match = re.search(r'(?<!\d)\d+\.\d+\.\d+(?!\d)', version_result.get('stdout') or '')
+    version_tuple = (
+        tuple(int(part) for part in version_match.group(0).split('.'))
+        if version_match else ()
+    )
+    auth_result = run_command([
+        'runuser', '-u', 'lime-agent', '--', 'env', '-i',
+        'HOME=/var/lib/lime-agent', 'USER=lime-agent', 'LOGNAME=lime-agent',
+        'PATH=/usr/local/bin:/usr/bin:/bin', 'LANG=C.UTF-8',
+        f'CLAUDE_CONFIG_DIR={CLAUDE_CONFIG_DIR}',
+        '/usr/bin/claude', 'auth', 'status',
+    ], timeout=10)
+    try:
+        auth = json.loads(auth_result.get('stdout') or '{}')
+    except ValueError:
+        auth = {}
+    try:
+        with open(AGENT_CONFIG_PATH) as handle:
+            settings = json.load(handle)
+        from agent_runtime.service import parse_config
+        parsed_settings = parse_config(settings)
+        configured = bool(
+            parsed_settings.team_id
+            and parsed_settings.channel_id
+            and parsed_settings.bot_token_id
+            and parsed_settings.allowed_channels
+        )
+    except (OSError, ValueError):
+        settings, parsed_settings, configured = {}, None, False
     return {
         'success': True,
         'runtime_installed': os.path.isfile(AGENT_UNIT_PATH) and os.path.isfile(LIMEOPS_UNIT_PATH),
@@ -2794,9 +2822,21 @@ def cmd_agent_runtime_status(params):
         'broker_active': _unit_state('limeopsd.service', 'is-active'),
         'claude_installed': version_result.get('returncode') == 0,
         'claude_version': version_match.group(0) if version_match else None,
+        'claude_compatible': bool(version_tuple and version_tuple >= (2, 1, 205)),
         'claude_credentials_present': os.path.isfile(
             os.path.join(CLAUDE_CONFIG_DIR, '.credentials.json')
         ),
+        'claude_authenticated': bool(
+            auth_result.get('returncode') == 0
+            and isinstance(auth, dict)
+            and auth.get('loggedIn') is True
+        ),
+        'configured': configured,
+        'enabled': bool(parsed_settings.enabled) if parsed_settings else False,
+        'team_id': parsed_settings.team_id if parsed_settings else None,
+        'channel_id': parsed_settings.channel_id if parsed_settings else None,
+        'bot_token_id': parsed_settings.bot_token_id if parsed_settings else None,
+        'auth_state': _agent_auth_manager.current_state(),
     }
 
 
@@ -2805,6 +2845,20 @@ def cmd_agent_runtime_disable(params):
     rejected = _agent_reject_params(params)
     if rejected:
         return rejected
+    try:
+        with open(AGENT_CONFIG_PATH) as handle:
+            settings = json.load(handle)
+        if isinstance(settings, dict):
+            settings['enabled'] = False
+            written = _write_managed_file(
+                AGENT_CONFIG_PATH, json.dumps(settings, indent=2) + '\n', 0o640
+            )
+            if not written.get('success'):
+                return {'success': False, 'error': 'Failed to disable the agent runtime'}
+            if run_command(['chown', 'root:limeops', AGENT_CONFIG_PATH]).get('returncode') != 0:
+                return {'success': False, 'error': 'Failed to disable the agent runtime'}
+    except (OSError, ValueError):
+        pass
     result = run_command(['systemctl', 'disable', '--now', 'limeos-agent.service'], timeout=60)
     if result.get('returncode') != 0:
         return {'success': False, 'error': 'Failed to disable the agent runtime'}
@@ -2945,6 +2999,181 @@ def cmd_agent_provider_auth_cancel(params):
         return {'success': False, 'error': 'Claude authentication operation was not found'}
 
 
+def cmd_agent_bot_secret_write(params):
+    if not isinstance(params, dict) or set(params) != {'token'}:
+        return {'success': False, 'error': 'Invalid Mattermost bot credential request'}
+    return write_agent_bot_secret(params.get('token'))
+
+
+def cmd_agent_configure(params):
+    if not isinstance(params, dict) or set(params) != {'settings', 'policy'}:
+        return {'success': False, 'error': 'Invalid agent configuration request'}
+    settings, policy = params.get('settings'), params.get('policy')
+    try:
+        from agent_runtime.service import parse_config
+        from limeops.policy import LimeOpsPolicy
+
+        parse_config(settings)
+        LimeOpsPolicy.from_mapping(policy)
+        with open(os.path.join(_agent_repo_dir(), 'config', 'agent-policy.default.json')) as handle:
+            default_policy = json.load(handle)
+        if set(policy.get('operations', {})) != set(default_policy.get('operations', {})):
+            return {'success': False, 'error': 'Agent policy operations do not match the fixed profile'}
+    except Exception:
+        return {'success': False, 'error': 'Invalid agent configuration'}
+    files = (
+        (AGENT_POLICY_PATH, policy, 'root:limeops'),
+        (AGENT_CONFIG_PATH, settings, 'root:limeops'),
+    )
+    for path, payload, ownership in files:
+        written = _write_managed_file(
+            path, json.dumps(payload, indent=2, sort_keys=True) + '\n', 0o640
+        )
+        if not written.get('success'):
+            return {'success': False, 'error': 'Failed to write agent configuration'}
+        if run_command(['chown', ownership, path]).get('returncode') != 0:
+            return {'success': False, 'error': 'Failed to secure agent configuration'}
+    return {'success': True, 'configured': True}
+
+
+def cmd_agent_runtime_start(params):
+    rejected = _agent_reject_params(params)
+    if rejected:
+        return rejected
+    status = cmd_agent_runtime_status({})
+    if not status.get('configured') or not status.get('claude_authenticated'):
+        return {'success': False, 'error': 'Agent setup or Claude authentication is required'}
+    try:
+        with open(AGENT_CONFIG_PATH) as handle:
+            settings = json.load(handle)
+        settings['enabled'] = True
+        written = _write_managed_file(
+            AGENT_CONFIG_PATH, json.dumps(settings, indent=2) + '\n', 0o640
+        )
+        if not written.get('success'):
+            return {'success': False, 'error': 'Failed to enable the agent runtime'}
+        if run_command(['chown', 'root:limeops', AGENT_CONFIG_PATH]).get('returncode') != 0:
+            return {'success': False, 'error': 'Failed to enable the agent runtime'}
+    except (OSError, TypeError, ValueError):
+        return {'success': False, 'error': 'Failed to enable the agent runtime'}
+    result = run_command(['systemctl', 'enable', '--now', 'limeos-agent.service'], timeout=60)
+    if result.get('returncode') != 0:
+        return {'success': False, 'error': 'Failed to start the agent runtime'}
+    return {'success': True, 'started': True}
+
+
+def _agent_read_json_lines(path, limit, allowed_fields):
+    try:
+        with open(path, 'rb') as handle:
+            handle.seek(0, os.SEEK_END)
+            size = handle.tell()
+            start = max(0, size - 512 * 1024)
+            handle.seek(start)
+            data = handle.read(512 * 1024)
+    except OSError:
+        return []
+    lines = data.splitlines()
+    if start and lines:
+        lines = lines[1:]
+    lines = lines[-limit:]
+    records = []
+    output_bytes = 0
+    for line in reversed(lines):
+        try:
+            record = json.loads(line.decode('utf-8'))
+        except ValueError:
+            continue
+        if isinstance(record, dict):
+            public = {key: record.get(key) for key in allowed_fields if key in record}
+            size = len(json.dumps(public, separators=(',', ':')).encode('utf-8'))
+            if output_bytes + size > 48 * 1024:
+                break
+            records.append(public)
+            output_bytes += size
+    records.reverse()
+    return records
+
+
+def _agent_limit_params(params):
+    if not isinstance(params, dict) or set(params) != {'limit'}:
+        return None
+    limit = params.get('limit')
+    return limit if isinstance(limit, int) and not isinstance(limit, bool) and 1 <= limit <= 200 else None
+
+
+def cmd_agent_usage_read(params):
+    limit = _agent_limit_params(params)
+    if limit is None:
+        return {'success': False, 'error': 'Invalid agent usage limit'}
+    counters_path = os.path.join(AGENT_STATE_DIR, 'usage-counters.json')
+    try:
+        with open(counters_path) as handle:
+            counters = json.load(handle)
+    except (OSError, ValueError):
+        counters = {}
+    today = datetime.now(timezone.utc).date().isoformat()
+    def safe_count(value):
+        return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
+
+    totals = {
+        'total_turns': safe_count(counters.get('total_turns', 0)),
+        'total_invocations': safe_count(counters.get('total_invocations', 0)),
+        'invocations_today': (
+            safe_count(counters.get('invocations', 0))
+            if counters.get('invocation_date') == today else 0
+        ),
+    }
+    fields = (
+        'at', 'conversation_id', 'correlation_id', 'outcome', 'rounds',
+        'duration_seconds', 'tool_operations', 'tool_audit_ids',
+    )
+    records = _agent_read_json_lines(
+        os.path.join(AGENT_STATE_DIR, 'usage-records.jsonl'), limit, fields
+    )
+    return {'success': True, 'totals': totals, 'records': records}
+
+
+def cmd_agent_audit_read(params):
+    limit = _agent_limit_params(params)
+    if limit is None:
+        return {'success': False, 'error': 'Invalid agent audit limit'}
+    fields = (
+        'ts', 'phase', 'request_id', 'audit_id', 'operation', 'actor_type',
+        'actor_id', 'actor_username', 'ok', 'error_code', 'duration_ms', 'output_bytes',
+    )
+    return {
+        'success': True,
+        'records': _agent_read_json_lines(LIMEOPS_AUDIT_PATH, limit, fields),
+    }
+
+
+def cmd_agent_delivery_test(params):
+    rejected = _agent_reject_params(params)
+    if rejected:
+        return rejected
+    try:
+        from agent_runtime.service import parse_config
+        from agent_transport.bot_client import MattermostBotApi
+        from agent_transport.bot_setup import verify_threaded_delivery
+
+        with open(AGENT_CONFIG_PATH) as handle:
+            settings = parse_config(json.load(handle))
+        token = None
+        with open(AGENT_ENV_PATH) as handle:
+            for line in handle:
+                if line.startswith('MATTERMOST_BOT_TOKEN='):
+                    token = line.partition('=')[2].strip()
+                    break
+        if not token or not settings.channel_id:
+            return {'success': False, 'error': 'Agent delivery is not configured'}
+        api = MattermostBotApi(settings.site_url)
+        api.use_token(token)
+        delivered = verify_threaded_delivery(api, channel_id=settings.channel_id)
+        return {'success': bool(delivered), 'delivered': bool(delivered)}
+    except Exception:
+        return {'success': False, 'error': 'Agent delivery test failed'}
+
+
 # Command whitelist
 COMMANDS = {
     'lsblk': cmd_lsblk,
@@ -3005,6 +3234,12 @@ COMMANDS = {
     'agent_provider_auth_status': cmd_agent_provider_auth_status,
     'agent_provider_auth_submit': cmd_agent_provider_auth_submit,
     'agent_provider_auth_cancel': cmd_agent_provider_auth_cancel,
+    'agent_bot_secret_write': cmd_agent_bot_secret_write,
+    'agent_configure': cmd_agent_configure,
+    'agent_runtime_start': cmd_agent_runtime_start,
+    'agent_usage_read': cmd_agent_usage_read,
+    'agent_audit_read': cmd_agent_audit_read,
+    'agent_delivery_test': cmd_agent_delivery_test,
     'ping': lambda p: {'success': True, 'message': 'pong'}
 }
 
@@ -3025,6 +3260,7 @@ _MUTATING_COMMANDS = frozenset({
     'copyparty_configure',
     'agent_runtime_install', 'agent_runtime_disable', 'agent_provider_install',
     'agent_provider_auth_start', 'agent_provider_auth_submit', 'agent_provider_auth_cancel',
+    'agent_bot_secret_write', 'agent_configure', 'agent_runtime_start',
 })
 
 _mutation_lock = threading.Lock()

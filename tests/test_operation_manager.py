@@ -153,3 +153,25 @@ def test_registry_records_terminal_error(producer, expected_error):
 
     assert batch.complete is True
     assert expected_error in batch.events[-1].payload["error"]
+
+
+def test_ephemeral_events_are_redacted_when_operation_finishes():
+    registry = immediate_registry()
+    operation = registry.create(
+        owner="owner",
+        username="admin",
+        kind="agent-auth",
+        target="claude",
+        producer=lambda: iter(
+            [
+                {"authorization_url": "https://claude.ai/secret", "_ephemeral": True},
+                {"done": True},
+            ]
+        ),
+    )
+    batch = registry.events_since(
+        operation.operation_id,
+        expected_kind="agent-auth",
+        owner="owner",
+    )
+    assert batch.events[0].payload == {"expired": True}

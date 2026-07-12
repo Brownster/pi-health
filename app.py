@@ -41,6 +41,7 @@ from catalog_manager import CATALOG_DIR, _load_stack_compose, catalog_manager, d
 from catalog_service import CatalogService
 from integrations_manager import integrations_manager
 from mattermost_integration_service import MattermostIntegrationService
+from agent_integration_service import AgentIntegrationService
 from media_profile_service import MediaProfileService
 from media_quickstart_service import MediaQuickstartService
 from media_seed_service import MediaSeedService
@@ -214,6 +215,7 @@ class AppDependencies:
     catalog_service: CatalogService | None = None
     tools_service: ToolsService | None = None
     mattermost_integration_service: MattermostIntegrationService | None = None
+    agent_integration_service: AgentIntegrationService | None = None
 
 
 def _default_system_service():
@@ -295,6 +297,34 @@ def _default_mattermost_integration_service(repository, docker_port):
         config_repository=repository,
         atomic_writer=atomic_write_text,
         container_status_provider=container_status,
+    )
+
+
+def _default_agent_integration_service(mattermost_service, docker_port, stack_read_service):
+    from helper_client import helper_call
+
+    def resources():
+        containers = []
+        if docker_port.available:
+            try:
+                containers = [
+                    getattr(container, "name", "")
+                    for container in docker_port.list_containers(all=True)
+                ]
+            except Exception:
+                containers = []
+        stacks = []
+        try:
+            listed, _error = stack_read_service.list_stacks()
+            stacks = [item.get("name", "") for item in listed if isinstance(item, dict)]
+        except Exception:
+            pass
+        return {"containers": containers, "stacks": stacks}
+
+    return AgentIntegrationService(
+        helper_call=helper_call,
+        mattermost_status=mattermost_service.status,
+        resource_provider=resources,
     )
 
 
@@ -1311,6 +1341,14 @@ def create_app(config=None, dependencies=None):
         resolved.mattermost_integration_service
         or _default_mattermost_integration_service(
             application.extensions["config_repo"], application.extensions["docker"]
+        )
+    )
+    application.extensions["agent_integration_service"] = (
+        resolved.agent_integration_service
+        or _default_agent_integration_service(
+            application.extensions["mattermost_integration_service"],
+            application.extensions["docker"],
+            application.extensions["stack_read_service"],
         )
     )
 

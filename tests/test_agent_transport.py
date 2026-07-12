@@ -188,6 +188,22 @@ def test_bot_client_raises_typed_error_with_status():
     assert excinfo.value.status == 401
 
 
+def test_bot_client_resolves_team_and_channel_ids():
+    opener = FakeOpener(
+        {
+            ("GET", "/api/v4/teams/name/limeos"): (200, {"id": "team-1"}, {}),
+            (
+                "GET",
+                "/api/v4/teams/team-1/channels/name/limeos-alerts",
+            ): (200, {"id": "channel-1"}, {}),
+        }
+    )
+    api = MattermostBotApi("http://mm:8065", opener=opener)
+    api.use_token("admin-token")
+    assert api.team_id("limeos") == "team-1"
+    assert api.channel_id("team-1", "limeos-alerts") == "channel-1"
+
+
 # -- listener --------------------------------------------------------------------
 class FakeGateway:
     def __init__(self, result_text="All healthy.", raises=None):

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import stat
+from pathlib import Path
 from unittest.mock import patch
 
 import pihealth_helper as helper
@@ -72,6 +74,12 @@ def test_helper_exposes_only_fixed_agent_operations():
         "agent_provider_auth_status",
         "agent_provider_auth_submit",
         "agent_provider_auth_cancel",
+        "agent_bot_secret_write",
+        "agent_configure",
+        "agent_runtime_start",
+        "agent_usage_read",
+        "agent_audit_read",
+        "agent_delivery_test",
     } <= helper.COMMANDS.keys()
     assert "agent_write_unit" not in helper.COMMANDS
     assert "agent_run_command" not in helper.COMMANDS
@@ -184,3 +192,68 @@ def test_runtime_repair_preserves_existing_agent_configuration(tmp_path):
         assert helper._ensure_agent_file(str(path), "defaults", 0o640, "root:limeops")
     assert path.read_text() == '{"enabled":true}'
     write_file.assert_not_called()
+
+
+def test_agent_configure_validates_both_settings_and_fixed_policy(tmp_path):
+    repo = Path(helper._agent_repo_dir())
+    settings = json.loads((repo / "config/agents.default.json").read_text())
+    settings["enabled"] = True
+    settings["mattermost"].update(
+        team_id="team-1", channel_id="channel-1", bot_token_id="token-1"
+    )
+    policy = json.loads((repo / "config/agent-policy.default.json").read_text())
+    written = []
+    with (
+        patch.object(
+            helper,
+            "_write_managed_file",
+            side_effect=lambda path, content, mode: written.append((path, content, mode))
+            or {"success": True},
+        ),
+        patch.object(helper, "run_command", return_value={"returncode": 0}),
+    ):
+        result = helper.cmd_agent_configure({"settings": settings, "policy": policy})
+    assert result == {"success": True, "configured": True}
+    assert {item[0] for item in written} == {
+        "/etc/limeos/agent-policy.json",
+        "/etc/limeos/integrations/agents.json",
+    }
+    policy["operations"]["shell.execute"] = {"enabled": True}
+    assert helper.cmd_agent_configure({"settings": settings, "policy": policy})[
+        "success"
+    ] is False
+
+
+def test_agent_usage_and_audit_reads_are_bounded_and_field_allowlisted(tmp_path):
+    state = tmp_path / "state"
+    state.mkdir()
+    (state / "usage-counters.json").write_text(
+        json.dumps({"total_turns": 2, "total_invocations": 3, "secret": "NO"})
+    )
+    (state / "usage-records.jsonl").write_text(
+        json.dumps({"at": "now", "outcome": "ok", "secret": "NO"}) + "\n"
+    )
+    audit = tmp_path / "audit.jsonl"
+    audit.write_text(
+        json.dumps({"operation": "system.status", "audit_id": "a1", "params": "NO"})
+        + "\n"
+    )
+    with (
+        patch.object(helper, "AGENT_STATE_DIR", str(state)),
+        patch.object(helper, "LIMEOPS_AUDIT_PATH", str(audit)),
+    ):
+        usage = helper.cmd_agent_usage_read({"limit": 10})
+        records = helper.cmd_agent_audit_read({"limit": 10})
+    assert usage["totals"]["total_turns"] == 2
+    assert usage["records"] == [{"at": "now", "outcome": "ok"}]
+    assert records["records"] == [{"audit_id": "a1", "operation": "system.status"}]
+    assert "NO" not in json.dumps({"usage": usage, "audit": records})
+
+
+def test_agent_bot_secret_command_accepts_only_fixed_token_field():
+    with patch.object(helper, "write_agent_bot_secret", return_value={"success": True}) as writer:
+        assert helper.cmd_agent_bot_secret_write({"token": "abc"})["success"] is True
+    writer.assert_called_once_with("abc")
+    assert helper.cmd_agent_bot_secret_write({"token": "abc", "path": "/tmp/x"})[
+        "success"
+    ] is False
