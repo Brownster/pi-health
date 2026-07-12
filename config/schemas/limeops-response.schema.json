@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://limeos.local/schemas/limeops-response-v1.json",
+  "title": "LimeOps response v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "request_id",
+    "ok",
+    "operation",
+    "data",
+    "warnings",
+    "error",
+    "audit_id"
+  ],
+  "properties": {
+    "schema_version": {"const": "1"},
+    "request_id": {"type": "string", "minLength": 1},
+    "ok": {"type": "boolean"},
+    "operation": {"type": "string", "minLength": 1},
+    "data": {},
+    "warnings": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "error": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["code", "message"],
+          "properties": {
+            "code": {
+              "enum": [
+                "invalid_input",
+                "denied_operation",
+                "missing_resource",
+                "unavailable_dependency",
+                "timeout",
+                "output_limit",
+                "upstream_failure",
+                "audit_failure",
+                "invalid_frame",
+                "invalid_encoding",
+                "invalid_json",
+                "invalid_request",
+                "invalid_response"
+              ]
+            },
+            "message": {"type": "string", "minLength": 1}
+          }
+        }
+      ]
+    },
+    "audit_id": {"type": "string", "minLength": 1}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"ok": {"const": true}}},
+      "then": {"properties": {"error": {"type": "null"}}}
+    },
+    {
+      "if": {"properties": {"ok": {"const": false}}},
+      "then": {"properties": {"error": {"type": "object"}}}
+    }
+  ]
+}

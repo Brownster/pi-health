@@ -1,0 +1,50 @@
+{
+  "schema_version": "1",
+  "defaults": {
+    "timeout_seconds": 30,
+    "max_output_bytes": 262144
+  },
+  "operations": {
+    "context": {"enabled": true},
+    "system.status": {"enabled": true},
+    "container.list": {"enabled": true},
+    "container.status": {"enabled": true, "resources": []},
+    "container.logs": {
+      "enabled": true,
+      "max_output_bytes": 131072,
+      "resources": []
+    },
+    "stack.list": {"enabled": true},
+    "stack.status": {"enabled": true, "resources": []},
+    "stack.inspect": {"enabled": true, "resources": []},
+    "service.status": {
+      "enabled": true,
+      "resources": [
+        "docker",
+        "pi-health",
+        "pihealth-helper",
+        "limeos-alertd",
+        "limeos-mattermost"
+      ]
+    },
+    "service.logs": {
+      "enabled": true,
+      "max_output_bytes": 131072,
+      "resources": [
+        "docker",
+        "pi-health",
+        "pihealth-helper",
+        "limeos-alertd",
+        "limeos-mattermost"
+      ]
+    },
+    "disk.health": {"enabled": true},
+    "mount.status": {"enabled": true},
+    "snapraid.status": {"enabled": true},
+    "network.check": {
+      "enabled": true,
+      "resources": ["gateway", "internet", "mattermost"]
+    },
+    "installation.inventory": {"enabled": true}
+  }
+}

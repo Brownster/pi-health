@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://limeos.local/schemas/limeops-request-v1.json",
+  "title": "LimeOps request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "request_id", "operation", "params", "actor"],
+  "properties": {
+    "schema_version": {"const": "1"},
+    "request_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+    },
+    "operation": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z][a-z0-9]*)*$"
+    },
+    "params": {
+      "type": "object",
+      "maxProperties": 32
+    },
+    "actor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "id"],
+      "properties": {
+        "type": {"enum": ["local", "mattermost", "system"]},
+        "id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "username": {"type": "string", "minLength": 1, "maxLength": 128}
+      }
+    }
+  }
+}
