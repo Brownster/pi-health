@@ -225,10 +225,10 @@ deduplication.
 | --- | --- | --- | --- | --- |
 | AA-000 | Re-baseline and contracts | Mattermost live | Complete | Accepted in `Docs/LIMEOS_AI_AGENTS_AA000_BASELINE.md` |
 | AA-001 | `limeops` envelope and policy | AA-000 | Complete | Implemented in `Docs/LIMEOS_AI_AGENTS_AA001_LIMEOPS_CONTRACT.md` |
-| AA-002 | Read-only diagnostic operations | AA-001 | Core | Initial system, container, stack, storage, network, and installation operations |
-| AA-003 | Gateway domain and persistence | AA-000 | Gateway | Provider interface, conversation store, locks, limits, cancellation, usage, and audit correlation |
-| AA-004 | Claude Code adapter and sandbox | AA-001, AA-003 | Provider | Dedicated identity, guided authentication, headless turns, process controls, and health checks |
-| AA-005 | Mattermost bot and listener | AA-003 | Transport | Bot bootstrap, mentions, thread mapping, deduplication, reconnect, and reply delivery |
+| AA-002 | Read-only diagnostic operations | AA-001 | Complete | Implemented in `Docs/LIMEOS_AI_AGENTS_AA002_DIAGNOSTIC_OPERATIONS.md` |
+| AA-003 | Gateway domain and persistence | AA-000 | Complete | Implemented in `Docs/LIMEOS_AI_AGENTS_AA003_GATEWAY_DOMAIN.md` |
+| AA-004 | Claude Code adapter and sandbox | AA-001, AA-003 | Complete | Implemented in `Docs/LIMEOS_AI_AGENTS_AA004_CLAUDE_ADAPTER.md` |
+| AA-005 | Mattermost bot and listener | AA-003 | Complete | Implemented in `Docs/LIMEOS_AI_AGENTS_AA005_MATTERMOST_TRANSPORT.md` |
 | AA-006 | AI Agents integration service/API | AA-003..AA-005 | Product | Status, setup, disable, repair, providers, permissions, usage, and audit endpoints |
 | AA-007 | AI Agents frontend | AA-006 contract | Product | Top-level card and Overview, Providers, Permissions, Usage, and Audit views |
 | AA-008 | Security and recovery suite | AA-001..AA-007 | Verification | Injection, redaction, isolation, timeout, duplicate, reconnect, restart, and failure tests |
