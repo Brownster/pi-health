@@ -48,6 +48,20 @@ class TestHelperCall:
                 with pytest.raises(HelperError):
                     helper_client.helper_call("ping")
 
+    def test_helper_call_accepts_bounded_setup_timeout(self):
+        mock_sock = MagicMock()
+        payload = b'{"success": true}'
+        mock_sock.recv.side_effect = [struct.pack('!I', len(payload)), payload]
+        with patch("helper_client.os.path.exists", return_value=True):
+            with patch("helper_client.socket.socket", return_value=mock_sock):
+                helper_client.helper_call("agent_provider_install", timeout=1200)
+        mock_sock.settimeout.assert_called_once_with(1200)
+
+    @pytest.mark.parametrize("timeout", [0, 1801, True, "30"])
+    def test_helper_call_rejects_invalid_timeout(self, timeout):
+        with pytest.raises(HelperError, match="Invalid helper timeout"):
+            helper_client.helper_call("ping", timeout=timeout)
+
     def test_helper_call_invalid_json(self):
         mock_sock = MagicMock()
         mock_sock.recv.side_effect = [struct.pack('!I', 7), b"invalid"]

@@ -195,6 +195,7 @@ usermod -aG pihealth "$RUN_USER"
 
 # Create directories required by helper service (ReadWritePaths needs them to exist)
 mkdir -p /backups /run/pihealth /etc/sshfs /mnt
+touch /etc/.pwd.lock
 install -d -m 0750 -o "${RUN_USER}" -g pihealth \
   "${LIMEOS_CONFIG_DIR}" "${LIMEOS_CONFIG_DIR}/storage_plugins" \
   "${LIMEOS_STATE_DIR}" "${LIMEOS_STATE_DIR}/storage_plugins" \
@@ -238,6 +239,11 @@ ProtectSystem=strict
 ProtectHome=read-only
 ReadWritePaths=/etc/fstab /etc/systemd/system /etc/sshfs /mnt /run/pihealth ${LIMEOS_LOG_DIR}
 ReadWritePaths=/backups
+# Fixed AI-agent provisioning creates dedicated identities, installs Anthropic's
+# signed apt package, and owns only the paths compiled into the helper command.
+ReadWritePaths=/etc/.pwd.lock /etc/passwd /etc/group /etc/shadow /etc/gshadow /etc/apt
+ReadWritePaths=/usr /var/lib/apt /var/lib/dpkg /var/cache/apt
+ReadWritePaths=-/var/lib/lime-agent -/var/lib/limeops -/run/limeos
 # Self-update writes to the checkout (git pull, venv pip, npm build) and the
 # LimeOS runtime dirs (migration); ProtectHome/ProtectSystem block these
 # without explicit write paths.

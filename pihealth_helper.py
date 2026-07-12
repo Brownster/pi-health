@@ -25,6 +25,7 @@ import signal
 import shutil
 import struct
 import threading
+import tempfile
 from datetime import datetime
 from typing import Optional
 import urllib.request
@@ -32,6 +33,27 @@ import urllib.error
 import shlex
 from helper_templates import cron_to_oncalendar, render_snapraid_schedule, render_startup_files
 from fstab_presets import get_fstab_preset, normalize_fstype
+from agent_provider.provisioning import (
+    AGENT_CONFIG_PATH,
+    AGENT_ENV_PATH,
+    AGENT_LIB_DIR,
+    AGENT_POLICY_PATH,
+    AGENT_STATE_DIR,
+    AGENT_UNIT_PATH,
+    AGENT_VENV_DIR,
+    CLAUDE_CONFIG_DIR,
+    LIMEOPS_AUDIT_PATH,
+    LIMEOPS_SOCKET_DIR,
+    LIMEOPS_UNIT_PATH,
+    render_agent_unit,
+    render_limeops_unit,
+)
+from agent_provider.auth import (
+    AuthBusyError,
+    AuthInputError,
+    AuthNotFoundError,
+    GuidedAuthManager,
+)
 
 # Configuration
 SOCKET_PATH = '/run/pihealth/helper.sock'
@@ -98,6 +120,30 @@ SSHFS_MOUNTS_CONFIG = '/etc/sshfs/mounts.json'
 PLUGIN_DIR = os.getenv("PIHEALTH_PLUGIN_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "plugins"))
 PIHEALTH_REPO_DIR = os.getenv("PIHEALTH_REPO_DIR")
 PIHEALTH_SERVICE_NAME = os.getenv("PIHEALTH_SERVICE_NAME", "pi-health")
+
+CLAUDE_APT_KEY_URL = 'https://downloads.claude.ai/keys/claude-code.asc'
+CLAUDE_APT_KEY_PATH = '/etc/apt/keyrings/claude-code.asc'
+CLAUDE_APT_SOURCE_PATH = '/etc/apt/sources.list.d/claude-code.list'
+CLAUDE_APT_SOURCE = (
+    'deb [signed-by=/etc/apt/keyrings/claude-code.asc] '
+    'https://downloads.claude.ai/claude-code/apt/stable stable main\n'
+)
+CLAUDE_SIGNING_FINGERPRINT = '31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE'
+
+_agent_auth_manager = GuidedAuthManager(
+    [
+        'runuser', '-u', 'lime-agent', '--', 'env', '-i',
+        'HOME=/var/lib/lime-agent',
+        'USER=lime-agent',
+        'LOGNAME=lime-agent',
+        'PATH=/usr/local/bin:/usr/bin:/bin',
+        'LANG=C.UTF-8',
+        f'CLAUDE_CONFIG_DIR={CLAUDE_CONFIG_DIR}',
+        '/usr/bin/claude', 'auth', 'login',
+    ],
+    cwd=AGENT_STATE_DIR,
+    credential_path=os.path.join(CLAUDE_CONFIG_DIR, '.credentials.json'),
+)
 
 PLUGIN_ID_PATTERN = re.compile(r'^[a-zA-Z0-9._-]+$')
 COMPOSE_FILE_NAMES = {'compose.yml', 'compose.yaml', 'docker-compose.yml', 'docker-compose.yaml'}
@@ -2560,6 +2606,345 @@ def cmd_plugin_remove(params):
     return {'success': False, 'error': 'Unsupported plugin type'}
 
 
+def _agent_params_are_empty(params):
+    return isinstance(params, dict) and not params
+
+
+def _agent_reject_params(params):
+    if _agent_params_are_empty(params):
+        return None
+    return {'success': False, 'error': 'Agent operation does not accept parameters'}
+
+
+def _agent_repo_dir():
+    repo_dir = PIHEALTH_REPO_DIR or os.path.dirname(os.path.abspath(__file__))
+    repo_dir = os.path.realpath(repo_dir)
+    if not os.path.isabs(repo_dir) or not os.path.isfile(
+        os.path.join(repo_dir, 'config', 'agent-policy.default.json')
+    ):
+        return None
+    return repo_dir
+
+
+def _ensure_system_group(name):
+    if run_command(['getent', 'group', name]).get('returncode') == 0:
+        return True
+    return run_command(['groupadd', '--system', name]).get('returncode') == 0
+
+
+def _ensure_system_user(name, group, home):
+    if run_command(['getent', 'passwd', name]).get('returncode') == 0:
+        return True
+    return run_command([
+        'useradd', '--system', '--gid', group, '--home-dir', home,
+        '--create-home', '--shell', '/usr/sbin/nologin', name,
+    ]).get('returncode') == 0
+
+
+def _agent_install_directory(path, mode, owner, group):
+    result = run_command([
+        'install', '-d', '-m', format(mode, '04o'), '-o', owner, '-g', group, path,
+    ])
+    return result.get('returncode') == 0
+
+
+def _ensure_agent_file(path, content, mode, ownership):
+    """Create one fixed agent file once; preserve configured content on repair."""
+    if os.path.lexists(path):
+        if os.path.islink(path) or not os.path.isfile(path):
+            return False
+    else:
+        written = _write_managed_file(path, content, mode)
+        if not written.get('success'):
+            return False
+    if run_command(['chmod', format(mode, '04o'), path]).get('returncode') != 0:
+        return False
+    return run_command(['chown', ownership, path]).get('returncode') == 0
+
+
+def cmd_agent_runtime_install(params):
+    """Create the fixed LimeOps/agent identities, paths, policy, and units."""
+    rejected = _agent_reject_params(params)
+    if rejected:
+        return rejected
+    repo_dir = _agent_repo_dir()
+    if not repo_dir:
+        return {'success': False, 'error': 'LimeOS repository is unavailable'}
+
+    for group in ('limeops', 'lime-agent', 'limeops-client'):
+        if not _ensure_system_group(group):
+            return {'success': False, 'error': 'Failed to create agent identities'}
+    if not _ensure_system_user('limeops', 'limeops', '/var/lib/limeops'):
+        return {'success': False, 'error': 'Failed to create agent identities'}
+    if not _ensure_system_user('lime-agent', 'lime-agent', '/var/lib/lime-agent'):
+        return {'success': False, 'error': 'Failed to create agent identities'}
+
+    if run_command(['usermod', '-a', '-G', 'limeops-client', 'lime-agent']).get('returncode') != 0:
+        return {'success': False, 'error': 'Failed to authorize the agent client'}
+    privileged_groups = ('docker', 'pihealth')
+    if any(
+        run_command(['getent', 'group', group]).get('returncode') != 0
+        for group in privileged_groups
+    ):
+        return {'success': False, 'error': 'Required LimeOps groups are unavailable'}
+    result = run_command(['usermod', '-a', '-G', ','.join(privileged_groups), 'limeops'])
+    if result.get('returncode') != 0:
+        return {'success': False, 'error': 'Failed to authorize the LimeOps broker'}
+
+    directories = (
+        ('/etc/limeos/integrations', 0o750, 'root', 'lime-agent'),
+        (AGENT_STATE_DIR, 0o750, 'lime-agent', 'lime-agent'),
+        ('/var/lib/lime-agent', 0o700, 'lime-agent', 'lime-agent'),
+        (CLAUDE_CONFIG_DIR, 0o700, 'lime-agent', 'lime-agent'),
+        (LIMEOPS_SOCKET_DIR, 0o750, 'limeops', 'limeops-client'),
+    )
+    if not all(_agent_install_directory(*item) for item in directories):
+        return {'success': False, 'error': 'Failed to create agent runtime directories'}
+
+    python_bin = os.path.join(repo_dir, '.venv', 'bin', 'python')
+    if not os.path.isfile(python_bin):
+        return {'success': False, 'error': 'LimeOS virtual environment is unavailable'}
+    if not _agent_install_directory(AGENT_LIB_DIR, 0o755, 'root', 'root'):
+        return {'success': False, 'error': 'Failed to create the agent runtime library'}
+    for package in ('agent_gateway', 'agent_provider', 'agent_runtime', 'agent_transport', 'limeops'):
+        source = os.path.join(repo_dir, package)
+        destination = os.path.join(AGENT_LIB_DIR, package)
+        if not os.path.isdir(source):
+            return {'success': False, 'error': 'Agent runtime package is unavailable'}
+        try:
+            shutil.copytree(source, destination, dirs_exist_ok=True)
+        except OSError:
+            return {'success': False, 'error': 'Failed to install the agent runtime package'}
+    for argv, timeout in (
+        (['python3', '-m', 'venv', AGENT_VENV_DIR], 120),
+        ([os.path.join(AGENT_VENV_DIR, 'bin', 'pip'), 'install', 'websocket-client>=1.8,<2'], 300),
+        (['chown', '-R', 'root:root', AGENT_LIB_DIR], 60),
+        (['chown', '-R', 'lime-agent:lime-agent', AGENT_VENV_DIR], 60),
+    ):
+        if run_command(argv, timeout=timeout).get('returncode') != 0:
+            return {'success': False, 'error': 'Failed to prepare the isolated agent runtime'}
+    policy_source = os.path.join(repo_dir, 'config', 'agent-policy.default.json')
+    settings_source = os.path.join(repo_dir, 'config', 'agents.default.json')
+    try:
+        with open(policy_source) as handle:
+            policy = handle.read()
+        with open(settings_source) as handle:
+            settings = handle.read()
+    except OSError:
+        return {'success': False, 'error': 'Default agent configuration is unavailable'}
+
+    preserved_files = (
+        (AGENT_POLICY_PATH, policy, 0o640, 'root:limeops'),
+        (AGENT_CONFIG_PATH, settings, 0o640, 'root:limeops'),
+        (AGENT_ENV_PATH, '', 0o640, 'root:lime-agent'),
+    )
+    if not all(_ensure_agent_file(*item) for item in preserved_files):
+        return {'success': False, 'error': 'Failed to secure agent configuration files'}
+
+    managed_files = (
+        (LIMEOPS_UNIT_PATH, render_limeops_unit(repo_dir, python_bin), 0o644, 'root:root'),
+        (AGENT_UNIT_PATH, render_agent_unit(repo_dir, python_bin), 0o644, 'root:root'),
+    )
+    for path, content, mode, ownership in managed_files:
+        written = _write_managed_file(path, content, mode)
+        if not written.get('success'):
+            return {'success': False, 'error': 'Failed to write agent runtime files'}
+        if run_command(['chown', ownership, path]).get('returncode') != 0:
+            return {'success': False, 'error': 'Failed to secure agent runtime files'}
+
+    if not os.path.exists(LIMEOPS_AUDIT_PATH):
+        audit = _write_managed_file(LIMEOPS_AUDIT_PATH, '', 0o640)
+        if not audit.get('success'):
+            return {'success': False, 'error': 'Failed to create the agent audit log'}
+    for argv in (
+        ['chown', 'limeops:limeops', LIMEOPS_AUDIT_PATH],
+        ['chmod', '0640', LIMEOPS_AUDIT_PATH],
+    ):
+        if run_command(argv).get('returncode') != 0:
+            return {'success': False, 'error': 'Failed to secure the agent audit log'}
+
+    for argv in (
+        ['systemctl', 'daemon-reload'],
+        ['systemctl', 'enable', '--now', 'limeopsd.service'],
+        ['systemctl', 'enable', 'limeos-agent.service'],
+    ):
+        if run_command(argv, timeout=60).get('returncode') != 0:
+            return {'success': False, 'error': 'Failed to activate agent runtime units'}
+    return {'success': True, 'runtime_installed': True}
+
+
+def _unit_state(unit, action):
+    result = run_command(['systemctl', action, unit], timeout=10)
+    return (result.get('stdout') or '').strip() or 'unknown'
+
+
+def cmd_agent_runtime_status(params):
+    """Return a non-secret status snapshot for AA-006."""
+    rejected = _agent_reject_params(params)
+    if rejected:
+        return rejected
+    version_result = run_command([
+        'runuser', '-u', 'lime-agent', '--', '/usr/bin/claude', '--version'
+    ], timeout=10)
+    version_match = re.search(r'(?<!\d)\d+\.\d+\.\d+(?!\d)', version_result.get('stdout') or '')
+    return {
+        'success': True,
+        'runtime_installed': os.path.isfile(AGENT_UNIT_PATH) and os.path.isfile(LIMEOPS_UNIT_PATH),
+        'agent_active': _unit_state('limeos-agent.service', 'is-active'),
+        'broker_active': _unit_state('limeopsd.service', 'is-active'),
+        'claude_installed': version_result.get('returncode') == 0,
+        'claude_version': version_match.group(0) if version_match else None,
+        'claude_credentials_present': os.path.isfile(
+            os.path.join(CLAUDE_CONFIG_DIR, '.credentials.json')
+        ),
+    }
+
+
+def cmd_agent_runtime_disable(params):
+    """Stop the assistant without changing Mattermost, alerts, or retained state."""
+    rejected = _agent_reject_params(params)
+    if rejected:
+        return rejected
+    result = run_command(['systemctl', 'disable', '--now', 'limeos-agent.service'], timeout=60)
+    if result.get('returncode') != 0:
+        return {'success': False, 'error': 'Failed to disable the agent runtime'}
+    return {'success': True, 'disabled': True}
+
+
+def _install_claude_apt_repository():
+    """Install Anthropic's fixed apt key after checking its published fingerprint."""
+    try:
+        with urllib.request.urlopen(CLAUDE_APT_KEY_URL, timeout=30) as response:
+            key_data = response.read(256 * 1024 + 1)
+    except (OSError, urllib.error.URLError):
+        return {'success': False, 'error': 'Failed to download Claude signing key'}
+    if not key_data or len(key_data) > 256 * 1024:
+        return {'success': False, 'error': 'Invalid Claude signing key'}
+    fd, temp_path = tempfile.mkstemp(prefix='claude-code-key-', suffix='.asc')
+    try:
+        with os.fdopen(fd, 'wb') as handle:
+            handle.write(key_data)
+        checked = run_command(['gpg', '--show-keys', '--with-colons', temp_path], timeout=30)
+        fingerprints = [
+            line.split(':')[9].upper() for line in (checked.get('stdout') or '').splitlines()
+            if line.startswith('fpr:') and len(line.split(':')) > 9
+        ]
+        if checked.get('returncode') != 0 or CLAUDE_SIGNING_FINGERPRINT not in fingerprints:
+            return {'success': False, 'error': 'Claude signing key verification failed'}
+        if run_command(['install', '-d', '-m', '0755', '/etc/apt/keyrings']).get('returncode') != 0:
+            return {'success': False, 'error': 'Failed to create apt key directory'}
+        key_text = key_data.decode('ascii')
+        key_result = _write_managed_file(CLAUDE_APT_KEY_PATH, key_text, 0o644)
+        source_result = _write_managed_file(CLAUDE_APT_SOURCE_PATH, CLAUDE_APT_SOURCE, 0o644)
+        if not key_result.get('success') or not source_result.get('success'):
+            return {'success': False, 'error': 'Failed to configure Claude apt repository'}
+        return {'success': True}
+    except (OSError, UnicodeDecodeError):
+        return {'success': False, 'error': 'Failed to configure Claude apt repository'}
+    finally:
+        try:
+            os.unlink(temp_path)
+        except OSError:
+            pass
+
+
+def cmd_agent_provider_install(params):
+    """Install Claude Code from the fixed stable signed apt repository."""
+    rejected = _agent_reject_params(params)
+    if rejected:
+        return rejected
+    repository = _install_claude_apt_repository()
+    if not repository.get('success'):
+        return repository
+    for argv, timeout in (
+        (['apt-get', 'update'], 300),
+        (['apt-get', 'install', '-y', 'claude-code'], 600),
+    ):
+        result = run_command(argv, timeout=timeout)
+        if result.get('returncode') != 0:
+            return {'success': False, 'error': 'Failed to install Claude Code'}
+    version = run_command(['/usr/bin/claude', '--version'], timeout=10)
+    if version.get('returncode') != 0:
+        return {'success': False, 'error': 'Claude Code verification failed'}
+    match = re.search(r'(?<!\d)\d+\.\d+\.\d+(?!\d)', version.get('stdout') or '')
+    if not match or tuple(int(part) for part in match.group(0).split('.')) < (2, 1, 205):
+        return {'success': False, 'error': 'Installed Claude Code version is unsupported'}
+    return {'success': True, 'installed': True, 'version': match.group(0) if match else None}
+
+
+def write_agent_bot_secret(token):
+    """Write only the fixed Mattermost bot token destination; never return the token."""
+    if (
+        not isinstance(token, str)
+        or not re.fullmatch(r'[A-Za-z0-9._-]{1,512}', token)
+    ):
+        return {'success': False, 'error': 'Invalid Mattermost bot token'}
+    if os.path.lexists(AGENT_ENV_PATH) and (
+        os.path.islink(AGENT_ENV_PATH) or not os.path.isfile(AGENT_ENV_PATH)
+    ):
+        return {'success': False, 'error': 'Failed to store Mattermost bot token'}
+    directory = os.path.dirname(AGENT_ENV_PATH)
+    try:
+        fd, temp_path = tempfile.mkstemp(dir=directory, prefix='.agents.env.', suffix='.tmp')
+        with os.fdopen(fd, 'w') as handle:
+            handle.write(f'MATTERMOST_BOT_TOKEN={token}\n')
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temp_path, 0o640)
+        os.replace(temp_path, AGENT_ENV_PATH)
+    except OSError:
+        try:
+            if 'temp_path' in locals() and os.path.exists(temp_path):
+                os.unlink(temp_path)
+        except OSError:
+            pass
+        return {'success': False, 'error': 'Failed to store Mattermost bot token'}
+    if run_command(['chown', 'root:lime-agent', AGENT_ENV_PATH]).get('returncode') != 0:
+        return {'success': False, 'error': 'Failed to secure Mattermost bot token'}
+    return {'success': True, 'stored': True}
+
+
+def cmd_agent_provider_auth_start(params):
+    rejected = _agent_reject_params(params)
+    if rejected:
+        return rejected
+    try:
+        operation_id = _agent_auth_manager.start()
+        return {'success': True, 'operation_id': operation_id}
+    except (AuthBusyError, OSError):
+        return {'success': False, 'error': 'Claude authentication is already running or unavailable'}
+
+
+def cmd_agent_provider_auth_status(params):
+    if not isinstance(params, dict) or set(params) != {'operation_id', 'cursor'}:
+        return {'success': False, 'error': 'Invalid Claude authentication status request'}
+    try:
+        status = _agent_auth_manager.status(params['operation_id'], cursor=params['cursor'])
+        return {'success': True, **status}
+    except (AuthNotFoundError, AuthInputError):
+        return {'success': False, 'error': 'Claude authentication operation was not found'}
+
+
+def cmd_agent_provider_auth_submit(params):
+    if not isinstance(params, dict) or set(params) != {'operation_id', 'code'}:
+        return {'success': False, 'error': 'Invalid Claude authentication response'}
+    try:
+        _agent_auth_manager.submit(params['operation_id'], params['code'])
+        return {'success': True, 'accepted': True}
+    except (AuthNotFoundError, AuthInputError):
+        return {'success': False, 'error': 'Claude authentication response was rejected'}
+
+
+def cmd_agent_provider_auth_cancel(params):
+    if not isinstance(params, dict) or set(params) != {'operation_id'}:
+        return {'success': False, 'error': 'Invalid Claude authentication cancellation'}
+    try:
+        _agent_auth_manager.cancel(params['operation_id'])
+        return {'success': True, 'cancelled': True}
+    except AuthNotFoundError:
+        return {'success': False, 'error': 'Claude authentication operation was not found'}
+
+
 # Command whitelist
 COMMANDS = {
     'lsblk': cmd_lsblk,
@@ -2612,6 +2997,14 @@ COMMANDS = {
     'pihealth_update': cmd_pihealth_update,
     'plugin_install': cmd_plugin_install,
     'plugin_remove': cmd_plugin_remove,
+    'agent_runtime_install': cmd_agent_runtime_install,
+    'agent_runtime_status': cmd_agent_runtime_status,
+    'agent_runtime_disable': cmd_agent_runtime_disable,
+    'agent_provider_install': cmd_agent_provider_install,
+    'agent_provider_auth_start': cmd_agent_provider_auth_start,
+    'agent_provider_auth_status': cmd_agent_provider_auth_status,
+    'agent_provider_auth_submit': cmd_agent_provider_auth_submit,
+    'agent_provider_auth_cancel': cmd_agent_provider_auth_cancel,
     'ping': lambda p: {'success': True, 'message': 'pong'}
 }
 
@@ -2630,6 +3023,8 @@ _MUTATING_COMMANDS = frozenset({
     'sshfs_configure', 'sshfs_remove', 'sshfs_mount', 'sshfs_unmount',
     'rclone_configure', 'rclone_remove', 'rclone_mount', 'rclone_unmount',
     'copyparty_configure',
+    'agent_runtime_install', 'agent_runtime_disable', 'agent_provider_install',
+    'agent_provider_auth_start', 'agent_provider_auth_submit', 'agent_provider_auth_cancel',
 })
 
 _mutation_lock = threading.Lock()

@@ -24,7 +24,9 @@
         "pi-health",
         "pihealth-helper",
         "limeos-alertd",
-        "limeos-mattermost"
+        "limeos-mattermost",
+        "limeopsd",
+        "limeos-agent"
       ]
     },
     "service.logs": {
@@ -35,7 +37,9 @@
         "pi-health",
         "pihealth-helper",
         "limeos-alertd",
-        "limeos-mattermost"
+        "limeos-mattermost",
+        "limeopsd",
+        "limeos-agent"
       ]
     },
     "disk.health": {"enabled": true},

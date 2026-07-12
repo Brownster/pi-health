@@ -26,6 +26,8 @@ _SERVICE_UNITS = {
     "pihealth-helper": "pihealth-helper.service",
     "limeos-alertd": "limeos-alertd.service",
     "limeos-mattermost": "limeos-mattermost.service",
+    "limeopsd": "limeopsd.service",
+    "limeos-agent": "limeos-agent.service",
 }
 _NETWORK_TARGETS = {
     "internet": ("8.8.8.8", 53),

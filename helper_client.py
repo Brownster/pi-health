@@ -37,13 +37,14 @@ def _recv_frame(sock):
     return _recv_exact(sock, message_size)
 
 
-def helper_call(command, params=None):
+def helper_call(command, params=None, *, timeout=30):
     """
     Call the privileged helper service.
 
     Args:
         command: Command name (must be whitelisted in helper)
         params: Optional dict of parameters
+        timeout: Socket deadline in seconds (1..1800 for bounded setup operations)
 
     Returns:
         Response dict from helper
@@ -51,6 +52,12 @@ def helper_call(command, params=None):
     Raises:
         HelperError: If communication fails
     """
+    if (
+        not isinstance(timeout, (int, float))
+        or isinstance(timeout, bool)
+        or not 1 <= timeout <= 1800
+    ):
+        raise HelperError('Invalid helper timeout')
     if not os.path.exists(HELPER_SOCKET):
         raise HelperError('Helper service not running (socket not found)')
 
@@ -61,7 +68,7 @@ def helper_call(command, params=None):
 
     try:
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        sock.settimeout(30)
+        sock.settimeout(timeout)
         sock.connect(HELPER_SOCKET)
         payload = json.dumps(request_data, separators=(',', ':')).encode('utf-8')
         if len(payload) > MAX_MESSAGE_SIZE:
