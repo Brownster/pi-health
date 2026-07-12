@@ -294,7 +294,6 @@ def _default_mattermost_integration_service(repository, docker_port):
         stack_path_provider=get_stack_path,
         config_repository=repository,
         atomic_writer=atomic_write_text,
-        pihealth_image=os.getenv("PIHEALTH_IMAGE", "pi-health-dashboard:latest"),
         container_status_provider=container_status,
     )
 

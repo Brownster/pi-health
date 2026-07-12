@@ -52,8 +52,10 @@ class RecordingNotifier:
 def make_service(tmp_path):
     api = FakeMattermostApi()
     sent = []
+    compose_calls = []
 
-    def runner(*_args, **_kwargs):
+    def runner(*args, **_kwargs):
+        compose_calls.append(args[0])
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     service = MattermostIntegrationService(
@@ -69,7 +71,7 @@ def make_service(tmp_path):
         sleep=lambda _seconds: None,
         clock=lambda: 1_784_275_200,
     )
-    return service, api, sent
+    return service, api, sent, compose_calls
 
 
 SETUP = {
@@ -84,7 +86,7 @@ SETUP = {
 
 
 def test_install_builds_stack_bootstraps_and_redacts_admin_password(tmp_path):
-    service, api, sent = make_service(tmp_path)
+    service, api, sent, compose_calls = make_service(tmp_path)
 
     events = list(service.stream_install(SETUP))
 
@@ -102,6 +104,9 @@ def test_install_builds_stack_bootstraps_and_redacts_admin_password(tmp_path):
     dockerfile = (
         tmp_path / "stacks" / "mattermost" / "Dockerfile.mattermost"
     ).read_text()
+    alertd_dockerfile = (
+        tmp_path / "stacks" / "mattermost" / "Dockerfile.alertd"
+    ).read_text()
     assert "postgres:" in compose
     assert "mattermost:" in compose
     assert "limeos-alertd:" in compose
@@ -111,10 +116,23 @@ def test_install_builds_stack_bootstraps_and_redacts_admin_password(tmp_path):
     assert "mattermost-team-edition:latest" not in compose
     assert "mattermost-team-${MM_VERSION}-linux-arm64.tar.gz" in dockerfile
     assert "ARG MM_VERSION=11.8.3" in dockerfile
+    assert "image: limeos/alertd:local" in compose
+    assert "dockerfile: Dockerfile.alertd" in compose
+    assert "pi-health-dashboard:latest" not in compose
+    assert "COPY alert_daemon.py" in alertd_dockerfile
+    assert (tmp_path / "stacks" / "mattermost" / "alert_daemon.py").is_file()
+    assert [
+        "docker",
+        "compose",
+        "-f",
+        "compose.yaml",
+        "build",
+        "limeos-alertd",
+    ] in compose_calls
 
 
 def test_install_retry_reuses_database_password(tmp_path):
-    service, _api, _sent = make_service(tmp_path)
+    service, _api, _sent, _compose_calls = make_service(tmp_path)
     list(service.stream_install(SETUP))
     first = (tmp_path / "config" / "mattermost.env").read_text()
 
@@ -126,7 +144,7 @@ def test_install_retry_reuses_database_password(tmp_path):
 
 
 def test_policy_status_and_test_delivery(tmp_path):
-    service, _api, sent = make_service(tmp_path)
+    service, _api, sent, _compose_calls = make_service(tmp_path)
     list(service.stream_install(SETUP))
 
     policy = service.update_policy(
@@ -145,7 +163,7 @@ def test_policy_status_and_test_delivery(tmp_path):
 
 
 def test_status_reports_disconnected_service(tmp_path):
-    service, _api, _sent = make_service(tmp_path)
+    service, _api, _sent, _compose_calls = make_service(tmp_path)
     list(service.stream_install(SETUP))
     service._container_status_provider = lambda name: {
         "state": "exited" if name == "limeos-mattermost" else "running",

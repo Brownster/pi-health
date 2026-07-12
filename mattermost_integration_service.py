@@ -22,6 +22,15 @@ from compose_yaml import dump_compose_yaml
 INTEGRATION_VERSION = 1
 MATTERMOST_VERSION = "11.8.3"
 MATTERMOST_ARM64_SHA256 = "c784ca5d34cfe3793a31a6a7d17d209e0d916bb744a50df776c78aa318d5b98f"
+ALERTD_SOURCE_FILES = (
+    "alert_daemon.py",
+    "alert_evaluator.py",
+    "alert_notifier.py",
+    "alert_policy.py",
+    "alert_signals.py",
+    "helper_client.py",
+    "runtime_paths.py",
+)
 SLUG_PATTERN = re.compile(r"^[a-z][a-z0-9-]{1,62}$")
 USERNAME_PATTERN = re.compile(r"^[a-z0-9._-]{3,64}$")
 
@@ -198,7 +207,6 @@ class MattermostIntegrationService:
         notifier_factory: Callable[[str], Any] = MattermostWebhookNotifier,
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.time,
-        pihealth_image: str = "pi-health-dashboard:latest",
         container_status_provider: Callable[[str], Mapping[str, Any] | None] | None = None,
     ) -> None:
         self._config_path = Path(config_path)
@@ -212,7 +220,6 @@ class MattermostIntegrationService:
         self._notifier_factory = notifier_factory
         self._sleep = sleep
         self._clock = clock
-        self._pihealth_image = pihealth_image
         self._container_status_provider = container_status_provider
 
     def status(self) -> dict[str, Any]:
@@ -286,6 +293,18 @@ class MattermostIntegrationService:
                 self._mattermost_dockerfile(),
                 mode=0o600,
             )
+            self._atomic_writer(
+                stack_dir / "Dockerfile.alertd",
+                self._alertd_dockerfile(),
+                mode=0o600,
+            )
+            source_dir = Path(__file__).resolve().parent
+            for filename in ALERTD_SOURCE_FILES:
+                self._atomic_writer(
+                    stack_dir / filename,
+                    (source_dir / filename).read_text(),
+                    mode=0o600,
+                )
 
             yield {"step": "services", "line": "Starting Postgres and Mattermost"}
             self._run_compose(stack_dir, "up", "-d", "postgres", "mattermost")
@@ -315,6 +334,8 @@ class MattermostIntegrationService:
             )
             self._write_secrets(database_password=database_password, webhook_url=webhook)
 
+            yield {"step": "alertd-image", "line": "Building LimeOS alert service"}
+            self._run_compose(stack_dir, "build", "limeos-alertd")
             yield {"step": "alertd", "line": "Starting LimeOS alerts"}
             self._run_compose(stack_dir, "up", "-d", "--remove-orphans")
             self._write_config(setup, installed=True)
@@ -412,7 +433,12 @@ class MattermostIntegrationService:
                     "restart": "unless-stopped",
                 },
                 "limeos-alertd": {
-                    "image": self._pihealth_image,
+                    "image": "limeos/alertd:local",
+                    "build": {
+                        "context": ".",
+                        "dockerfile": "Dockerfile.alertd",
+                    },
+                    "pull_policy": "never",
                     "container_name": "limeos-alertd",
                     "command": ["python", "alert_daemon.py"],
                     "env_file": [secrets_file],
@@ -555,6 +581,18 @@ HEALTHCHECK --interval=30s --timeout=10s \\
     CMD ["/mattermost/bin/mmctl", "system", "status", "--local"]
 CMD ["/mattermost/bin/mattermost"]
 EXPOSE 8065 8067 8074
+"""
+
+    @staticmethod
+    def _alertd_dockerfile() -> str:
+        sources = " ".join(ALERTD_SOURCE_FILES)
+        return f"""FROM python:3.12-slim-bookworm
+
+WORKDIR /app
+RUN pip install --no-cache-dir "docker>=7,<8" "requests>=2.31,<3"
+COPY {sources} /app/
+
+CMD ["python", "alert_daemon.py"]
 """
 
     @staticmethod
