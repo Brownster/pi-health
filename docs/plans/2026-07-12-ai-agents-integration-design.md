@@ -231,7 +231,7 @@ deduplication.
 | AA-005 | Mattermost bot and listener | AA-003 | Complete | Implemented in `Docs/LIMEOS_AI_AGENTS_AA005_MATTERMOST_TRANSPORT.md` |
 | AA-006 | AI Agents integration service/API | AA-003..AA-005 | Complete | Implemented in `Docs/LIMEOS_AI_AGENTS_AA006_INTEGRATION_API.md` |
 | AA-007 | AI Agents frontend | AA-006 contract | Complete | Implemented in `Docs/LIMEOS_AI_AGENTS_AA007_FRONTEND.md` |
-| AA-008 | Security and recovery suite | AA-001..AA-007 | Verification | Injection, redaction, isolation, timeout, duplicate, reconnect, restart, and failure tests |
+| AA-008 | Security and recovery suite | AA-001..AA-007 | Complete | Verified in `Docs/LIMEOS_AI_AGENTS_AA008_SECURITY_RECOVERY.md` |
 | AA-009 | Target-Pi signoff | AA-008 | Release | Install, authenticate, mention, alert-thread investigation, disable, repair, and rollback evidence |
 
 ### Suggested Assignment
