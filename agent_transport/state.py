@@ -3,7 +3,7 @@
 Duplicate websocket delivery and gateway restarts must not duplicate replies (baseline:
 "Restarting the gateway preserves thread mappings and event deduplication"). Both stores
 persist as atomically-replaced JSON under the agent state directory
-(`/var/lib/limeos/integrations/agents/` on the target; injected in tests).
+(`/var/lib/lime-agent/state/` on the target; injected in tests).
 """
 
 from __future__ import annotations

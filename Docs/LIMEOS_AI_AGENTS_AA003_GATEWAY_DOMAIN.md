@@ -56,7 +56,7 @@ no listener changes, exactly as the baseline's mocked-contract plan intended.
 | `agent_gateway/usage.py` | Turn and invocation counters, daily rollover, JSONL turn records |
 | `agent_gateway/gateway.py` | `TurnHandler` implementation: locks, tool loop, limits, disable switch, error mapping, `limeops_client_executor` adapter |
 
-Wiring on the target: `AgentGateway(state_dir=/var/lib/limeos/integrations/agents,
+Wiring on the target: `AgentGateway(state_dir=/var/lib/lime-agent/state,
 provider=<AA-004 adapter>, limeops_executor=limeops_client_executor(LimeOpsClient()))`
 handed to the AA-005 `MentionListener` as its gateway.
 

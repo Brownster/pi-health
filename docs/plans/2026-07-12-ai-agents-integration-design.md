@@ -163,7 +163,7 @@ Use the existing LimeOS runtime ownership contract:
 | --- | --- | --- |
 | `/etc/limeos/integrations/agents.json` | Non-secret settings and policy | Service-readable |
 | `/etc/limeos/integrations/agents.env` | Mattermost bot secret and provider references | `0600` |
-| `/var/lib/limeos/integrations/agents/` | Thread mapping, deduplication, summaries, usage | `lime-agent` writable |
+| `/var/lib/lime-agent/state/` | Thread mapping, deduplication, summaries, usage | `lime-agent` writable |
 | `/var/log/limeos/agent-audit.jsonl` | Actor, provider, tools, policy, result, duration | Append-only service log |
 | Dedicated agent home | Claude authentication and provider state | `lime-agent` only |
 

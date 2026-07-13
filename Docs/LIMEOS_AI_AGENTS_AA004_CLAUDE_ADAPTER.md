@@ -110,7 +110,7 @@ locations:
 | `/usr/lib/limeos-agent/` | `root:root`, read-only | Installed gateway, provider, transport, and LimeOps client packages |
 | `/var/lib/lime-agent/venv/` | `lime-agent:lime-agent` | Minimal Python runtime with `websocket-client` |
 | `/var/lib/lime-agent/.claude/` | `lime-agent:lime-agent`, `0700` | Claude settings and credentials |
-| `/var/lib/limeos/integrations/agents/` | `lime-agent:lime-agent`, `0750` | Conversations, usage, deduplication, and thread mapping |
+| `/var/lib/lime-agent/state/` | `lime-agent:lime-agent`, `0750` | Conversations, usage, deduplication, and thread mapping |
 
 The source checkout, Docker socket, privileged-helper socket, root home, and global LimeOS
 credential file are inaccessible in the agent unit. The service loads non-secret settings

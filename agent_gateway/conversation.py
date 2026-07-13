@@ -1,7 +1,7 @@
 """Persistent, bounded, provider-neutral conversation store.
 
 One JSON file per conversation under the agent state directory
-(`/var/lib/limeos/integrations/agents/conversations/` on the target; injected in tests).
+(`/var/lib/lime-agent/state/conversations/` on the target; injected in tests).
 Provider-native session files are disposable — this store is the source of truth, so
 switching provider preserves understandable context (design: "Provider-native session
 files are disposable implementation details").

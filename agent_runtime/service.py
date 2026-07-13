@@ -19,7 +19,7 @@ from agent_transport.state import EventDedup, ThreadMap
 from limeops.client import LimeOpsClient
 
 DEFAULT_CONFIG_PATH = "/etc/limeos/integrations/agents.json"
-DEFAULT_STATE_DIR = "/var/lib/limeos/integrations/agents"
+DEFAULT_STATE_DIR = "/var/lib/lime-agent/state"
 _SAFE_ID = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 _ROOT_FIELDS = frozenset({"schema_version", "enabled", "mattermost", "limits"})
 _MATTERMOST_REQUIRED_FIELDS = frozenset(

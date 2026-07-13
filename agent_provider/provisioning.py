@@ -5,7 +5,7 @@ from __future__ import annotations
 AGENT_CONFIG_PATH = "/etc/limeos/integrations/agents.json"
 AGENT_ENV_PATH = "/etc/limeos/integrations/agents.env"
 AGENT_POLICY_PATH = "/etc/limeos/agent-policy.json"
-AGENT_STATE_DIR = "/var/lib/limeos/integrations/agents"
+AGENT_STATE_DIR = "/var/lib/lime-agent/state"
 CLAUDE_CONFIG_DIR = "/var/lib/lime-agent/.claude"
 AGENT_LIB_DIR = "/usr/lib/limeos-agent"
 AGENT_VENV_DIR = "/var/lib/lime-agent/venv"

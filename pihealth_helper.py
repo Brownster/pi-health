@@ -2729,8 +2729,11 @@ def cmd_agent_runtime_install(params):
     if result.get('returncode') != 0:
         return {'success': False, 'error': 'Failed to authorize the LimeOps broker'}
 
+    integrations_config_dir = os.path.dirname(AGENT_CONFIG_PATH)
+    if os.path.islink(integrations_config_dir) or not os.path.isdir(integrations_config_dir):
+        return {'success': False, 'error': 'LimeOS integrations directory is unavailable'}
+
     directories = (
-        ('/etc/limeos/integrations', 0o750, 'root', 'lime-agent'),
         (AGENT_STATE_DIR, 0o750, 'lime-agent', 'lime-agent'),
         ('/var/lib/lime-agent', 0o700, 'lime-agent', 'lime-agent'),
         (CLAUDE_CONFIG_DIR, 0o700, 'lime-agent', 'lime-agent'),

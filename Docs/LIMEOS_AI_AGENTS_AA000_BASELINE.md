@@ -141,7 +141,7 @@ registered with the broker.
 | `/etc/limeos/integrations/agents.json` | `root:limeops`, `0640` | Non-secret product settings |
 | `/etc/limeos/integrations/agents.env` | `root:lime-agent`, `0640` | Mattermost bot secret references only |
 | `/etc/limeos/agent-policy.json` | `root:limeops`, `0640` | Operation, resource, argument, and output limits |
-| `/var/lib/limeos/integrations/agents/` | `lime-agent:lime-agent`, `0750` | Conversations, deduplication, summaries, usage |
+| `/var/lib/lime-agent/state/` | `lime-agent:lime-agent`, `0750` | Conversations, deduplication, summaries, usage |
 | `/var/lib/lime-agent/.claude/` | `lime-agent:lime-agent`, `0700` | Claude configuration and mode-`0600` credentials |
 | `/var/log/limeos/agent-audit.jsonl` | `limeops:limeops`, `0640` | Broker decisions and tool results |
 | `/run/limeos/limeops.sock` | `limeops:limeops-client`, `0660` | Local typed broker transport |

@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 import pihealth_helper as helper
 
+from agent_provider.claude import ClaudeCodeConfig
 from agent_provider.provisioning import (
     AGENT_ENV_PATH,
     AGENT_LIB_DIR,
@@ -18,10 +19,14 @@ from agent_provider.provisioning import (
     render_agent_unit,
     render_limeops_unit,
 )
+from agent_runtime.service import DEFAULT_STATE_DIR
 
 
 def test_agent_unit_has_no_privileged_sockets_or_source_access():
     unit = render_agent_unit("/opt/pi-health", "/opt/pi-health/.venv/bin/python")
+    assert AGENT_STATE_DIR == "/var/lib/lime-agent/state"
+    assert DEFAULT_STATE_DIR == AGENT_STATE_DIR
+    assert ClaudeCodeConfig().work_dir == Path(AGENT_STATE_DIR)
     assert "User=lime-agent" in unit
     assert "Group=lime-agent" in unit
     assert "SupplementaryGroups=limeops-client" in unit
@@ -187,6 +192,7 @@ def test_runtime_install_creates_fixed_identities_paths_and_units(tmp_path):
     }
     install_dirs = [command for command in commands if command[:2] == ["install", "-d"]]
     assert any(AGENT_STATE_DIR in command for command in install_dirs)
+    assert not any("/etc/limeos/integrations" in command for command in install_dirs)
     assert any(CLAUDE_CONFIG_DIR in command for command in install_dirs)
     assert any(LIMEOPS_STATE_DIR in command for command in install_dirs)
     assert ["chmod", "-R", "u=rwX,go=rX", AGENT_LIB_DIR] in commands

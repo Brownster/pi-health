@@ -227,7 +227,7 @@ class BoundedProcessRunner:
 class ClaudeCodeConfig:
     binary: str = "/usr/bin/claude"
     config_dir: Path = Path("/var/lib/lime-agent/.claude")
-    work_dir: Path = Path("/var/lib/limeos/integrations/agents")
+    work_dir: Path = Path("/var/lib/lime-agent/state")
     max_prompt_bytes: int = DEFAULT_MAX_PROMPT_BYTES
     minimum_version: tuple[int, int, int] = MINIMUM_VERSION
 
