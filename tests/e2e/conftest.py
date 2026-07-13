@@ -1237,11 +1237,21 @@ def install_v2_catalog_api_mocks():
 
 @pytest.fixture(scope="function")
 def install_v2_integrations_api_mocks():
-    """Install deterministic Mattermost integration mocks."""
+    """Install deterministic Mattermost and AI Agents integration mocks."""
 
-    def _install(page: Page, *, installed: bool = True, install_error: bool = False) -> None:
+    def _install(
+        page: Page,
+        *,
+        installed: bool = True,
+        install_error: bool = False,
+        agent_installed: bool = True,
+        agent_authenticated: bool = True,
+    ) -> None:
         state = {
             "installed": installed,
+            "agent_installed": agent_installed and installed,
+            "agent_authenticated": agent_authenticated and agent_installed and installed,
+            "agent_enabled": agent_installed and installed,
             "policy": {
                 "version": 1,
                 "categories": {
@@ -1289,6 +1299,217 @@ def install_v2_integrations_api_mocks():
         def _handler(route):
             path = urlparse(route.request.url).path
             method = route.request.method
+            if path == "/api/integrations/agents" and method == "GET":
+                if not state["installed"]:
+                    agent_state = "setup_required"
+                elif not state["agent_installed"]:
+                    agent_state = "not_installed"
+                elif not state["agent_enabled"]:
+                    agent_state = "disabled"
+                elif not state["agent_authenticated"]:
+                    agent_state = "setup_required"
+                else:
+                    agent_state = "connected"
+                route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps(
+                        {
+                            "state": agent_state,
+                            "installed": state["agent_installed"],
+                            "enabled": state["agent_enabled"],
+                            "mattermost": {
+                                "state": "connected" if state["installed"] else "not_installed",
+                                "site_url": (
+                                    "http://mattermost.test:8065" if state["installed"] else None
+                                ),
+                                "team": "limeos" if state["installed"] else None,
+                                "channel": "limeos-alerts" if state["installed"] else None,
+                            },
+                            "gateway": {
+                                "state": "active" if agent_state == "connected" else "inactive",
+                                "broker_state": (
+                                    "active" if agent_state == "connected" else "inactive"
+                                ),
+                            },
+                            "provider": {
+                                "id": "claude",
+                                "installed": state["agent_installed"],
+                                "version": "2.1.205" if state["agent_installed"] else None,
+                                "compatible": state["agent_installed"],
+                                "authenticated": state["agent_authenticated"],
+                            },
+                            "last_successful_turn": (
+                                {
+                                    "at": "2026-07-12T21:14:00+00:00",
+                                    "outcome": "ok",
+                                    "rounds": 2,
+                                }
+                                if agent_state == "connected"
+                                else None
+                            ),
+                        }
+                    ),
+                )
+                return
+            if path == "/api/integrations/agents/providers" and method == "GET":
+                route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps(
+                        {
+                            "providers": [
+                                {
+                                    "id": "claude",
+                                    "name": "Claude Code",
+                                    "installed": state["agent_installed"],
+                                    "version": "2.1.205",
+                                    "authenticated": state["agent_authenticated"],
+                                    "compatible": True,
+                                    "state": "connected",
+                                }
+                            ]
+                        }
+                    ),
+                )
+                return
+            if path == "/api/integrations/agents/permissions" and method == "GET":
+                route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps(
+                        {
+                            "profile": "read_only",
+                            "allowed_operations": [
+                                "system.status",
+                                "container.logs",
+                                "stack.inspect",
+                            ],
+                            "resources": {
+                                "container.logs": ["jellyfin", "limeos-mattermost"],
+                                "stack.inspect": ["mattermost", "media"],
+                            },
+                            "denied_capabilities": [
+                                "container.restart",
+                                "file.read",
+                                "shell.execute",
+                            ],
+                        }
+                    ),
+                )
+                return
+            if path == "/api/integrations/agents/usage" and method == "GET":
+                route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps(
+                        {
+                            "totals": {
+                                "total_turns": 12,
+                                "total_invocations": 29,
+                                "invocations_today": 3,
+                            },
+                            "records": [
+                                {
+                                    "at": "2026-07-12T21:14:00+00:00",
+                                    "conversation_id": "thread-1",
+                                    "correlation_id": "turn-1",
+                                    "outcome": "ok",
+                                    "rounds": 2,
+                                    "duration_seconds": 4.2,
+                                    "tool_operations": ["system.status", "container.logs"],
+                                }
+                            ],
+                        }
+                    ),
+                )
+                return
+            if path == "/api/integrations/agents/audit" and method == "GET":
+                route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps(
+                        {
+                            "records": [
+                                {
+                                    "ts": "2026-07-12T21:13:59+00:00",
+                                    "phase": "execute",
+                                    "request_id": "request-1",
+                                    "audit_id": "audit-1",
+                                    "operation": "container.logs",
+                                    "actor_type": "mattermost",
+                                    "actor_id": "user-1",
+                                    "actor_username": "holly",
+                                    "ok": True,
+                                    "duration_ms": 84,
+                                    "output_bytes": 2048,
+                                }
+                            ]
+                        }
+                    ),
+                )
+                return
+            if path == "/api/integrations/agents/install" and method == "POST":
+                state["agent_installed"] = True
+                state["agent_enabled"] = True
+                state["agent_authenticated"] = False
+                route.fulfill(
+                    status=202,
+                    content_type="application/json",
+                    body=json.dumps(
+                        {
+                            "operation_id": "mock-agent-install",
+                            "stream_url": "/api/integrations/agents/operations/mock-agent-install/stream",
+                        }
+                    ),
+                )
+                return
+            if path.endswith("/mock-agent-install/stream") and method == "GET":
+                route.fulfill(
+                    status=200,
+                    content_type="text/event-stream",
+                    body=(
+                        'id: 0\ndata: {"step":"provider","line":"Installing Claude Code"}\n\n'
+                        'id: 1\ndata: {"step":"runtime","line":"Preparing isolated agent runtime"}\n\n'
+                        'id: 2\ndata: {"step":"complete","line":"AI Agents is installed and requires Claude authentication","requires_auth":true,"done":true}\n\n'
+                    ),
+                )
+                return
+            if path == "/api/integrations/agents/repair" and method == "POST":
+                state["agent_enabled"] = True
+                route.fulfill(
+                    status=202,
+                    content_type="application/json",
+                    body=json.dumps(
+                        {
+                            "operation_id": "mock-agent-repair",
+                            "stream_url": "/api/integrations/agents/operations/mock-agent-repair/stream",
+                        }
+                    ),
+                )
+                return
+            if path.endswith("/mock-agent-repair/stream") and method == "GET":
+                route.fulfill(
+                    status=200,
+                    content_type="text/event-stream",
+                    body='id: 0\ndata: {"step":"complete","line":"AI Agents repair completed","done":true}\n\n',
+                )
+                return
+            if path == "/api/integrations/agents/disable" and method == "POST":
+                state["agent_enabled"] = False
+                route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps({"state": "disabled"}),
+                )
+                return
+            if path == "/api/integrations/agents/test" and method == "POST":
+                route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps({"status": "sent"}),
+                )
+                return
             if path == "/api/integrations/mattermost" and method == "GET":
                 route.fulfill(status=200, content_type="application/json", body=json.dumps(_payload()))
                 return

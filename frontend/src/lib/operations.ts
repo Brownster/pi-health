@@ -12,6 +12,10 @@ export interface OperationEvent {
   installed?: string[];
   skipped?: string[];
   summary?: unknown;
+  operation_id?: string;
+  authorization_url?: string;
+  requires_auth?: boolean;
+  expired?: boolean;
 }
 
 export interface OperationCreated {

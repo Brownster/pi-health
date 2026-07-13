@@ -5,9 +5,21 @@ from playwright.sync_api import Page, expect
 pytestmark = pytest.mark.e2e
 
 
-def _open(page, base_url, v2_login, install_v2_integrations_api_mocks, *, installed=True):
+def _open(
+    page,
+    base_url,
+    v2_login,
+    install_v2_integrations_api_mocks,
+    *,
+    installed=True,
+    agent_installed=True,
+):
     v2_login(page, base_url)
-    install_v2_integrations_api_mocks(page, installed=installed)
+    install_v2_integrations_api_mocks(
+        page,
+        installed=installed,
+        agent_installed=agent_installed,
+    )
     page.goto(f"{base_url}/v2/integrations")
     expect(page.get_by_role("heading", name="integrations")).to_be_visible()
 
@@ -76,3 +88,74 @@ def test_integrations_setup_reports_stream_error_without_success(
     expect(page.get_by_text("Setup failed")).to_be_visible()
     expect(page.get_by_text("Mattermost and LimeOS alerts are connected.")).not_to_be_visible()
     expect(page.get_by_text("no matching ARM64 manifest").first).to_be_visible()
+
+
+def test_agent_integration_views_are_separate_and_operational(
+    profiled_page: Page,
+    viewport_profile_name,
+    assert_no_horizontal_overflow,
+    v2_server,
+    v2_login,
+    install_v2_integrations_api_mocks,
+):
+    page = profiled_page
+    _open(page, v2_server["base_url"], v2_login, install_v2_integrations_api_mocks)
+
+    agent = page.locator("[data-agent-integration]")
+    expect(agent.get_by_role("heading", name="AI Agents")).to_be_visible()
+    expect(agent.get_by_text("@limeos", exact=True)).to_be_visible()
+    agent.get_by_role("tab", name="Providers").click()
+    expect(agent.get_by_text("Claude Code", exact=True)).to_be_visible()
+    expect(agent.get_by_text("Authenticated", exact=True)).to_be_visible()
+    agent.get_by_role("tab", name="Permissions").click()
+    expect(agent.get_by_text("container / logs", exact=True)).to_be_visible()
+    expect(agent.get_by_text("shell.execute", exact=True)).to_be_visible()
+    agent.get_by_role("tab", name="Usage").click()
+    expect(agent.get_by_text("29", exact=True)).to_be_visible()
+    expect(agent.get_by_text("system.status, container.logs", exact=True)).to_be_visible()
+    agent.get_by_role("tab", name="Audit").click()
+    expect(agent.get_by_text("holly", exact=True)).to_be_visible()
+    expect(agent.get_by_text("84 ms", exact=True)).to_be_visible()
+    assert_no_horizontal_overflow(page, f"agent integrations ({viewport_profile_name})")
+
+
+def test_agent_setup_streams_progress_then_requests_claude_authentication(
+    page: Page,
+    v2_server,
+    v2_login,
+    install_v2_integrations_api_mocks,
+):
+    _open(
+        page,
+        v2_server["base_url"],
+        v2_login,
+        install_v2_integrations_api_mocks,
+        agent_installed=False,
+    )
+
+    page.locator("button[data-agent-setup]").click()
+    page.get_by_label("Mattermost admin password").fill("long-test-password")
+    page.locator("button[data-agent-install]").click()
+    log = page.locator("[data-agent-operation-log]")
+    expect(log).to_contain_text("Installing Claude Code")
+    expect(log).to_contain_text("Preparing isolated agent runtime")
+    expect(
+        page.get_by_role("dialog", name="Set up AI Agents").get_by_role(
+            "button", name="Authenticate Claude"
+        )
+    ).to_be_visible()
+
+
+def test_disabling_agent_leaves_mattermost_connected(
+    page: Page,
+    v2_server,
+    v2_login,
+    install_v2_integrations_api_mocks,
+):
+    _open(page, v2_server["base_url"], v2_login, install_v2_integrations_api_mocks)
+
+    page.get_by_role("button", name="Disable", exact=True).click()
+    page.get_by_role("button", name="Disable assistant").click()
+    expect(page.get_by_text("AI Agents is disabled. Mattermost and alert delivery remain active.")).to_be_visible()
+    expect(page.locator("[data-agent-integration]").get_by_text("disabled", exact=True)).to_be_visible()
+    expect(page.get_by_text("connected", exact=True).first).to_be_visible()
