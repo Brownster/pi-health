@@ -184,9 +184,10 @@ class LimeOpsUnixServer:
             connection.close()
 
     def secure_socket_paths(self, socket_dir: Path, socket_path: Path) -> None:
-        os.chown(socket_dir, 0, self._allowed_gid)
+        owner_uid = os.getuid()
+        os.chown(socket_dir, owner_uid, self._allowed_gid)
         os.chmod(socket_dir, 0o750)
-        os.chown(socket_path, 0, self._allowed_gid)
+        os.chown(socket_path, owner_uid, self._allowed_gid)
         os.chmod(socket_path, 0o660)
 
     def serve_forever(self) -> None:

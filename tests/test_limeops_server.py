@@ -4,7 +4,7 @@ import socket
 import stat
 import struct
 import threading
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import MagicMock, Mock, call, patch
 
 from limeops.broker import PeerIdentity
 from limeops.client import LimeOpsClient
@@ -146,11 +146,14 @@ def test_server_secures_socket_directory_and_file(tmp_path):
     socket_path = socket_dir / "limeops.sock"
     socket_path.touch()
     server, _broker, _audit = make_server()
-    with patch("limeops.server.os.chown") as chown:
+    with (
+        patch("limeops.server.os.chown") as chown,
+        patch("limeops.server.os.getuid", return_value=1234),
+    ):
         server.secure_socket_paths(socket_dir, socket_path)
     assert stat.S_IMODE(socket_dir.stat().st_mode) == 0o750
     assert stat.S_IMODE(socket_path.stat().st_mode) == 0o660
-    assert chown.call_count == 2
+    assert chown.call_args_list == [call(socket_dir, 1234, 2000), call(socket_path, 1234, 2000)]
 
 
 def test_server_connection_wrapper_sets_timeout_and_closes():

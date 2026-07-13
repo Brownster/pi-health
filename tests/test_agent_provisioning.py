@@ -14,6 +14,7 @@ from agent_provider.provisioning import (
     AGENT_LIB_DIR,
     AGENT_STATE_DIR,
     CLAUDE_CONFIG_DIR,
+    LIMEOPS_STATE_DIR,
     render_agent_unit,
     render_limeops_unit,
 )
@@ -46,12 +47,18 @@ def test_agent_unit_has_no_privileged_sockets_or_source_access():
 
 
 def test_limeops_unit_owns_privileged_read_boundary():
-    unit = render_limeops_unit("/opt/pi-health", "/opt/pi-health/.venv/bin/python")
+    unit = render_limeops_unit("/opt/pi-health")
     assert "User=limeops" in unit
     assert "Group=limeops" in unit
-    assert "SupplementaryGroups=docker pihealth" in unit
+    assert "SupplementaryGroups=docker pihealth limeops-client" in unit
     assert "UMask=0007" in unit
     assert "ProtectSystem=strict" in unit
+    assert "WorkingDirectory=/var/lib/limeops" in unit
+    assert f"Environment=PYTHONPATH={AGENT_LIB_DIR}" in unit
+    assert "ExecStart=/usr/bin/python3 -m limeops.server" in unit
+    assert "ReadOnlyPaths=/usr/lib/limeos-agent" in unit
+    assert "InaccessiblePaths=/root /opt/pi-health" in unit
+    assert "/opt/pi-health/.venv/bin/python" not in unit
     assert "ReadWritePaths=/run/limeos /var/log/limeos" in unit
     assert "agent-policy.json" in unit
 
@@ -138,6 +145,13 @@ def test_runtime_install_creates_fixed_identities_paths_and_units(tmp_path):
     assert result["success"] is True
     flat = [item for command in commands for item in command]
     assert "lime-agent" in flat and "limeops" in flat and "limeops-client" in flat
+    account_commands = [
+        command
+        for command in commands
+        if any(tool in command for tool in ("/usr/sbin/groupadd", "/usr/sbin/useradd", "/usr/sbin/usermod"))
+    ]
+    assert account_commands
+    assert all(command[0] == "systemd-run" for command in account_commands)
     assert "/etc/systemd/system/limeos-agent.service" in written
     assert "/etc/systemd/system/limeopsd.service" in written
     preserved_paths = {call.args[0] for call in ensure_file.call_args_list}
@@ -149,6 +163,25 @@ def test_runtime_install_creates_fixed_identities_paths_and_units(tmp_path):
     install_dirs = [command for command in commands if command[:2] == ["install", "-d"]]
     assert any(AGENT_STATE_DIR in command for command in install_dirs)
     assert any(CLAUDE_CONFIG_DIR in command for command in install_dirs)
+    assert any(LIMEOPS_STATE_DIR in command for command in install_dirs)
+    assert ["chmod", "-R", "u=rwX,go=rX", AGENT_LIB_DIR] in commands
+
+
+def test_agent_repo_dir_resolves_helper_symlink(tmp_path):
+    repo = tmp_path / "repo"
+    (repo / "config").mkdir(parents=True)
+    (repo / "config" / "agent-policy.default.json").write_text("{}")
+    helper_source = repo / "pihealth_helper.py"
+    helper_source.touch()
+    helper_link = tmp_path / "bin" / "pihealth_helper.py"
+    helper_link.parent.mkdir()
+    helper_link.symlink_to(helper_source)
+
+    with (
+        patch.object(helper, "PIHEALTH_REPO_DIR", None),
+        patch.object(helper, "__file__", str(helper_link)),
+    ):
+        assert helper._agent_repo_dir() == str(repo)
 
 
 def test_provider_install_uses_only_signed_apt_repository_commands():
@@ -170,6 +203,13 @@ def test_provider_install_uses_only_signed_apt_repository_commands():
     assert any(command[:2] == ["apt-get", "update"] for command in commands)
     assert any(command[:4] == ["apt-get", "install", "-y", "claude-code"] for command in commands)
     assert all("curl" not in command and "bash" not in command for command in commands)
+
+
+def test_claude_repository_tracks_compatible_signed_channel():
+    assert helper.CLAUDE_APT_SOURCE == (
+        "deb [signed-by=/etc/apt/keyrings/claude-code.asc] "
+        "https://downloads.claude.ai/claude-code/apt/latest latest main\n"
+    )
 
 
 def test_claude_signing_key_verification_uses_private_temporary_gpg_home():

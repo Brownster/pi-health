@@ -229,6 +229,7 @@ PartOf=pi-health.service
 
 [Service]
 Type=simple
+Environment=PIHEALTH_REPO_DIR=${REPO_DIR}
 ExecStart=/usr/bin/python3 ${HELPER_LINK}
 ExecReload=/bin/kill -HUP \$MAINPID
 Restart=on-failure
@@ -240,11 +241,14 @@ ProtectSystem=strict
 ProtectHome=read-only
 ReadWritePaths=/etc/fstab /etc/systemd/system /etc/sshfs /mnt /run/pihealth ${LIMEOS_LOG_DIR}
 ReadWritePaths=/backups
-# Fixed AI-agent provisioning creates dedicated identities, installs Anthropic's
-# signed apt package, and owns only the paths compiled into the helper command.
-ReadWritePaths=/etc/.pwd.lock /etc/passwd /etc/group /etc/shadow /etc/gshadow /etc/apt
+# Fixed AI-agent provisioning installs Anthropic's signed apt package and owns
+# only the runtime paths compiled into the helper command. Account tools run as
+# fixed transient units because shadow-utils requires temporary files in /etc.
+ReadWritePaths=/etc/apt
 ReadWritePaths=/usr /var/lib/apt /var/lib/dpkg /var/cache/apt
 ReadWritePaths=-/var/lib/lime-agent -/var/lib/limeops -/run/limeos
+StateDirectory=lime-agent limeops
+StateDirectoryMode=0750
 # Self-update writes to the checkout (git pull, venv pip, npm build) and the
 # LimeOS runtime dirs (migration); ProtectHome/ProtectSystem block these
 # without explicit write paths.
@@ -253,6 +257,7 @@ PrivateTmp=true
 
 # Socket permissions
 RuntimeDirectory=pihealth
+RuntimeDirectory=limeos
 RuntimeDirectoryMode=0750
 UMask=0007
 

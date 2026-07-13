@@ -10,6 +10,7 @@ CLAUDE_CONFIG_DIR = "/var/lib/lime-agent/.claude"
 AGENT_LIB_DIR = "/usr/lib/limeos-agent"
 AGENT_VENV_DIR = "/var/lib/lime-agent/venv"
 LIMEOPS_SOCKET_DIR = "/run/limeos"
+LIMEOPS_STATE_DIR = "/var/lib/limeops"
 LIMEOPS_AUDIT_PATH = "/var/log/limeos/agent-audit.jsonl"
 AGENT_UNIT_PATH = "/etc/systemd/system/limeos-agent.service"
 LIMEOPS_UNIT_PATH = "/etc/systemd/system/limeopsd.service"
@@ -61,7 +62,7 @@ WantedBy=multi-user.target
 """
 
 
-def render_limeops_unit(repo_dir: str, python_bin: str) -> str:
+def render_limeops_unit(repo_dir: str) -> str:
     return f"""[Unit]
 Description=LimeOS read-only operations broker
 After=docker.service pihealth-helper.service
@@ -70,12 +71,12 @@ After=docker.service pihealth-helper.service
 Type=simple
 User=limeops
 Group=limeops
-SupplementaryGroups=docker pihealth
+SupplementaryGroups=docker pihealth limeops-client
 RuntimeDirectory=limeos
 RuntimeDirectoryMode=0750
-WorkingDirectory={repo_dir}
-Environment=PYTHONPATH={repo_dir}
-ExecStart={python_bin} -m limeops.server --policy {AGENT_POLICY_PATH} --audit {LIMEOPS_AUDIT_PATH} --group limeops-client
+WorkingDirectory={LIMEOPS_STATE_DIR}
+Environment=PYTHONPATH={AGENT_LIB_DIR}
+ExecStart=/usr/bin/python3 -m limeops.server --policy {AGENT_POLICY_PATH} --audit {LIMEOPS_AUDIT_PATH} --group limeops-client
 Restart=on-failure
 RestartSec=5
 UMask=0007
@@ -91,8 +92,9 @@ RestrictSUIDSGID=true
 RestrictRealtime=true
 LockPersonality=true
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
-ReadOnlyPaths={repo_dir} {AGENT_POLICY_PATH}
+ReadOnlyPaths={AGENT_LIB_DIR} {AGENT_POLICY_PATH}
 ReadWritePaths={LIMEOPS_SOCKET_DIR} /var/log/limeos
+InaccessiblePaths=/root {repo_dir} /run/pihealth /etc/limeos/credentials.env
 CapabilityBoundingSet=
 
 [Install]

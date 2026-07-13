@@ -44,6 +44,7 @@ from agent_provider.provisioning import (
     CLAUDE_CONFIG_DIR,
     LIMEOPS_AUDIT_PATH,
     LIMEOPS_SOCKET_DIR,
+    LIMEOPS_STATE_DIR,
     LIMEOPS_UNIT_PATH,
     render_agent_unit,
     render_limeops_unit,
@@ -127,7 +128,7 @@ CLAUDE_APT_KEY_PATH = '/etc/apt/keyrings/claude-code.asc'
 CLAUDE_APT_SOURCE_PATH = '/etc/apt/sources.list.d/claude-code.list'
 CLAUDE_APT_SOURCE = (
     'deb [signed-by=/etc/apt/keyrings/claude-code.asc] '
-    'https://downloads.claude.ai/claude-code/apt/stable stable main\n'
+    'https://downloads.claude.ai/claude-code/apt/latest latest main\n'
 )
 CLAUDE_SIGNING_FINGERPRINT = '31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE'
 
@@ -2620,7 +2621,7 @@ def _agent_reject_params(params):
 
 
 def _agent_repo_dir():
-    repo_dir = PIHEALTH_REPO_DIR or os.path.dirname(os.path.abspath(__file__))
+    repo_dir = PIHEALTH_REPO_DIR or os.path.dirname(os.path.realpath(__file__))
     repo_dir = os.path.realpath(repo_dir)
     if not os.path.isabs(repo_dir) or not os.path.isfile(
         os.path.join(repo_dir, 'config', 'agent-policy.default.json')
@@ -2632,16 +2633,27 @@ def _agent_repo_dir():
 def _ensure_system_group(name):
     if run_command(['getent', 'group', name]).get('returncode') == 0:
         return True
-    return run_command(['groupadd', '--system', name]).get('returncode') == 0
+    return _run_account_command(['/usr/sbin/groupadd', '--system', name]).get('returncode') == 0
 
 
 def _ensure_system_user(name, group, home):
     if run_command(['getent', 'passwd', name]).get('returncode') == 0:
         return True
-    return run_command([
-        'useradd', '--system', '--gid', group, '--home-dir', home,
+    return _run_account_command([
+        '/usr/sbin/useradd', '--system', '--gid', group, '--home-dir', home,
         '--create-home', '--shell', '/usr/sbin/nologin', name,
     ]).get('returncode') == 0
+
+
+def _run_account_command(argv):
+    """Run one fixed shadow-utils command outside the helper mount sandbox."""
+    return run_command(
+        [
+            'systemd-run', '--quiet', '--wait', '--pipe', '--collect',
+            '--service-type=exec', *argv,
+        ],
+        timeout=60,
+    )
 
 
 def _agent_install_directory(path, mode, owner, group):
@@ -2682,7 +2694,9 @@ def cmd_agent_runtime_install(params):
     if not _ensure_system_user('lime-agent', 'lime-agent', '/var/lib/lime-agent'):
         return {'success': False, 'error': 'Failed to create agent identities'}
 
-    if run_command(['usermod', '-a', '-G', 'limeops-client', 'lime-agent']).get('returncode') != 0:
+    if _run_account_command([
+        '/usr/sbin/usermod', '-a', '-G', 'limeops-client', 'lime-agent'
+    ]).get('returncode') != 0:
         return {'success': False, 'error': 'Failed to authorize the agent client'}
     privileged_groups = ('docker', 'pihealth')
     if any(
@@ -2690,7 +2704,9 @@ def cmd_agent_runtime_install(params):
         for group in privileged_groups
     ):
         return {'success': False, 'error': 'Required LimeOps groups are unavailable'}
-    result = run_command(['usermod', '-a', '-G', ','.join(privileged_groups), 'limeops'])
+    result = _run_account_command([
+        '/usr/sbin/usermod', '-a', '-G', ','.join(privileged_groups), 'limeops'
+    ])
     if result.get('returncode') != 0:
         return {'success': False, 'error': 'Failed to authorize the LimeOps broker'}
 
@@ -2699,6 +2715,7 @@ def cmd_agent_runtime_install(params):
         (AGENT_STATE_DIR, 0o750, 'lime-agent', 'lime-agent'),
         ('/var/lib/lime-agent', 0o700, 'lime-agent', 'lime-agent'),
         (CLAUDE_CONFIG_DIR, 0o700, 'lime-agent', 'lime-agent'),
+        (LIMEOPS_STATE_DIR, 0o750, 'limeops', 'limeops'),
         (LIMEOPS_SOCKET_DIR, 0o750, 'limeops', 'limeops-client'),
     )
     if not all(_agent_install_directory(*item) for item in directories):
@@ -2721,6 +2738,7 @@ def cmd_agent_runtime_install(params):
     for argv, timeout in (
         (['python3', '-m', 'venv', AGENT_VENV_DIR], 120),
         ([os.path.join(AGENT_VENV_DIR, 'bin', 'pip'), 'install', 'websocket-client>=1.8,<2'], 300),
+        (['chmod', '-R', 'u=rwX,go=rX', AGENT_LIB_DIR], 60),
         (['chown', '-R', 'root:root', AGENT_LIB_DIR], 60),
         (['chown', '-R', 'lime-agent:lime-agent', AGENT_VENV_DIR], 60),
     ):
@@ -2745,7 +2763,7 @@ def cmd_agent_runtime_install(params):
         return {'success': False, 'error': 'Failed to secure agent configuration files'}
 
     managed_files = (
-        (LIMEOPS_UNIT_PATH, render_limeops_unit(repo_dir, python_bin), 0o644, 'root:root'),
+        (LIMEOPS_UNIT_PATH, render_limeops_unit(repo_dir), 0o644, 'root:root'),
         (AGENT_UNIT_PATH, render_agent_unit(repo_dir, python_bin), 0o644, 'root:root'),
     )
     for path, content, mode, ownership in managed_files:
