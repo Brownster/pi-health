@@ -63,18 +63,36 @@ A fixed helper command `cmd_packages_reconcile(mode)` with `mode ∈ {check, app
 Exposed read-only through `limeops` as `packages.status` so the assistant can answer
 "are we on the expected versions?" without any mutation authority.
 
-## Nightly job
-A `limeos-package-reconcile.timer` (systemd, daily, randomized) runs `reconcile apply` in
-the configured mode. On drift it could not auto-correct, or any failure, it posts a
-LimeOS incident via the existing webhook. Controlled OS updates = `unattended-upgrades`
-scoped to the security pocket, with `apt-mark hold` on every `critical` manifest entry so
-distro upgrades cannot move them.
+## Nightly job (policy decided 2026-07-13)
+A `limeos-package-reconcile.timer` (systemd, daily, randomized) runs each night:
+1. **Auto-apply non-critical security updates** immediately (scoped `unattended-upgrades`,
+   security pocket only), with `apt-mark hold` on every `critical` entry so distro
+   upgrades cannot move them.
+2. **Discover pending updates for held/critical packages** and post them to the
+   **#limeos-events (updates)** channel — versions available vs. current. The user can
+   ask `@limeos` about them (read-only), then **approve** specific updates.
+3. **Approved updates apply on the next nightly run** — approval is recorded as a bounded,
+   actor-bound token (same single-use/payload-bound contract as other mutations); the
+   next reconcile consumes it, bumps the manifest pin, applies, and reports the result.
+   Nothing critical moves without an explicit approval + a recorded manifest change.
+
+Drift it cannot auto-correct, or any failure, posts a LimeOS incident via the existing
+webhook.
 
 ## Release flow
 - Version bumps to a `pinned` package happen by editing the manifest in a branch, testing
   on Holly, then releasing. The nightly job then converges every host to the new pin.
 - The installer runs `reconcile apply` as its final step, so a fresh install matches the
   baseline (this subsumes the tactical psutil/hold fixes).
+
+## Deployment path (decided 2026-07-13)
+LimeOS code — including the agent packages under `/usr/lib/limeos-agent` — deploys via
+the app's existing **self-update-from-repo** function, not manual file copies. The update
+flow pulls the pushed repo and then re-runs the agent install/reconcile so
+`/usr/lib/limeos-agent`, the systemd unit templates, and the package baseline all
+converge to the release. This replaces the ad-hoc `scp` hotfixes used during the AA-009
+demo and closes the unit-divergence gap (defect 3) at the same time: a deploy always
+re-renders units from `provisioning.py`.
 
 ## Unit reconciliation (defect 3)
 Fold a `check` of the deployed `limeopsd`/`limeos-agent` unit content against the
@@ -91,7 +109,8 @@ host's units can't silently diverge from the release.
 | PB-005 | Target signoff on Holly (pin holds across an apt upgrade; drift detected + reported) | Evidence |
 
 ## Open decisions
-1. Nightly `apply` scope: security-only (recommended) vs. all non-critical vs. report-only.
+1. ~~Nightly apply scope~~ — decided: auto-apply non-critical security updates; held/critical
+   updates are posted to the updates channel and applied on the next run after approval.
 2. Managers beyond apt for MVP (pip/npm) — defer unless a critical pip/npm dep appears.
 3. Whether `packages.status` drift should auto-open an incident or only answer on request.
 
