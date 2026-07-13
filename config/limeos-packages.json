@@ -1,0 +1,25 @@
+{
+  "schema_version": "1",
+  "packages": [
+    {
+      "name": "claude-code",
+      "manager": "apt",
+      "policy": "pinned",
+      "version": "2.1.207",
+      "critical": true,
+      "disable_self_update": true
+    },
+    {
+      "name": "python3-psutil",
+      "manager": "apt",
+      "policy": "present",
+      "critical": true
+    },
+    {
+      "name": "unattended-upgrades",
+      "manager": "apt",
+      "policy": "present",
+      "critical": false
+    }
+  ]
+}
