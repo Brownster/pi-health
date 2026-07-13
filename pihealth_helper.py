@@ -23,6 +23,7 @@ import re
 import logging
 import signal
 import shutil
+import stat
 import struct
 import threading
 import tempfile
@@ -44,6 +45,7 @@ from agent_provider.provisioning import (
     CLAUDE_CONFIG_DIR,
     LIMEOPS_AUDIT_PATH,
     LIMEOPS_SOCKET_DIR,
+    LIMEOPS_SOCKET_PATH,
     LIMEOPS_STATE_DIR,
     LIMEOPS_UNIT_PATH,
     render_agent_unit,
@@ -2808,7 +2810,8 @@ def cmd_agent_runtime_install(params):
 
     for argv in (
         ['systemctl', 'daemon-reload'],
-        ['systemctl', 'enable', '--now', 'limeopsd.service'],
+        ['systemctl', 'enable', 'limeopsd.service'],
+        ['systemctl', 'restart', 'limeopsd.service'],
         ['systemctl', 'enable', 'limeos-agent.service'],
     ):
         if run_command(argv, timeout=60).get('returncode') != 0:
@@ -2819,6 +2822,17 @@ def cmd_agent_runtime_install(params):
 def _unit_state(unit, action):
     result = run_command(['systemctl', action, unit], timeout=10)
     return (result.get('stdout') or '').strip() or 'unknown'
+
+
+def _agent_broker_state():
+    state = _unit_state('limeopsd.service', 'is-active')
+    if state != 'active':
+        return state
+    try:
+        socket_mode = os.stat(LIMEOPS_SOCKET_PATH, follow_symlinks=False).st_mode
+    except OSError:
+        return 'failed'
+    return 'active' if stat.S_ISSOCK(socket_mode) else 'failed'
 
 
 def cmd_agent_runtime_status(params):
@@ -2862,7 +2876,7 @@ def cmd_agent_runtime_status(params):
         'success': True,
         'runtime_installed': os.path.isfile(AGENT_UNIT_PATH) and os.path.isfile(LIMEOPS_UNIT_PATH),
         'agent_active': _unit_state('limeos-agent.service', 'is-active'),
-        'broker_active': _unit_state('limeopsd.service', 'is-active'),
+        'broker_active': _agent_broker_state(),
         'claude_installed': version_result.get('returncode') == 0,
         'claude_version': version_match.group(0) if version_match else None,
         'claude_compatible': bool(version_tuple and version_tuple >= (2, 1, 205)),
@@ -3095,6 +3109,8 @@ def cmd_agent_runtime_start(params):
     status = cmd_agent_runtime_status({})
     if not status.get('configured') or not status.get('claude_authenticated'):
         return {'success': False, 'error': 'Agent setup or Claude authentication is required'}
+    if status.get('broker_active') != 'active':
+        return {'success': False, 'error': 'LimeOps broker is unavailable'}
     try:
         with open(AGENT_CONFIG_PATH) as handle:
             settings = json.load(handle)

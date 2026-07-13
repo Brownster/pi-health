@@ -196,6 +196,37 @@ def test_runtime_install_creates_fixed_identities_paths_and_units(tmp_path):
     assert any(CLAUDE_CONFIG_DIR in command for command in install_dirs)
     assert any(LIMEOPS_STATE_DIR in command for command in install_dirs)
     assert ["chmod", "-R", "u=rwX,go=rX", AGENT_LIB_DIR] in commands
+    assert ["systemctl", "restart", "limeopsd.service"] in commands
+
+
+def test_broker_state_requires_the_limeops_socket():
+    socket_stat = type("SocketStat", (), {"st_mode": stat.S_IFSOCK | 0o660})()
+    with (
+        patch.object(helper, "_unit_state", return_value="active"),
+        patch.object(helper.os, "stat", return_value=socket_stat),
+    ):
+        assert helper._agent_broker_state() == "active"
+
+    with (
+        patch.object(helper, "_unit_state", return_value="active"),
+        patch.object(helper.os, "stat", side_effect=FileNotFoundError),
+    ):
+        assert helper._agent_broker_state() == "failed"
+
+
+def test_runtime_start_rejects_an_active_broker_without_its_socket():
+    with patch.object(
+        helper,
+        "cmd_agent_runtime_status",
+        return_value={
+            "configured": True,
+            "claude_authenticated": True,
+            "broker_active": "failed",
+        },
+    ):
+        result = helper.cmd_agent_runtime_start({})
+
+    assert result == {"success": False, "error": "LimeOps broker is unavailable"}
 
 
 def test_agent_repo_dir_resolves_helper_symlink(tmp_path):
