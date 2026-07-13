@@ -649,7 +649,30 @@ class TestPihealthUpdate:
         assert result == {"success": True, "scheduled": True}
         argv = mock_run.call_args[0][0]
         assert argv[0] == "systemd-run"
-        assert argv[-3:] == ["systemctl", "restart", "pi-health.service"]
+        assert argv[-4:] == [
+            "systemctl",
+            "restart",
+            "pi-health.service",
+            "pihealth-helper.service",
+        ]
+
+    @patch("pihealth_helper.subprocess.Popen")
+    @patch("pihealth_helper.shutil.which", return_value=None)
+    @patch("pihealth_helper.os.path.isdir", return_value=True)
+    def test_restart_step_fallback_restarts_app_and_helper(
+        self, _isdir, _which, mock_popen
+    ):
+        result = helper.cmd_pihealth_update(
+            {"user": "pi", "repo_path": "/home/pi/pi-health", "step": "restart"}
+        )
+
+        assert result == {"success": True, "scheduled": True}
+        argv = mock_popen.call_args[0][0]
+        assert argv == [
+            "sh",
+            "-c",
+            "sleep 2; systemctl restart pi-health.service pihealth-helper.service",
+        ]
 
     @patch("pihealth_helper.shutil.rmtree")
     @patch("pihealth_helper.os.path.isdir", return_value=True)

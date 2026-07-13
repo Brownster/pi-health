@@ -120,6 +120,7 @@ SSHFS_MOUNTS_CONFIG = '/etc/sshfs/mounts.json'
 PLUGIN_DIR = os.getenv("PIHEALTH_PLUGIN_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "plugins"))
 PIHEALTH_REPO_DIR = os.getenv("PIHEALTH_REPO_DIR")
 PIHEALTH_SERVICE_NAME = os.getenv("PIHEALTH_SERVICE_NAME", "pi-health")
+PIHEALTH_HELPER_SERVICE_NAME = "pihealth-helper.service"
 
 CLAUDE_APT_KEY_URL = 'https://downloads.claude.ai/keys/claude-code.asc'
 CLAUDE_APT_KEY_PATH = '/etc/apt/keyrings/claude-code.asc'
@@ -2464,22 +2465,24 @@ def _pihealth_update_build(ctx):
 
 
 def _pihealth_update_restart(ctx):
-    """Schedule a short-delayed restart so the caller can flush its response first."""
+    """Schedule delayed app and helper restarts after flushing the response."""
     service_name = ctx["service_name"]
+    service_names = [service_name, PIHEALTH_HELPER_SERVICE_NAME]
 
     if shutil.which("systemd-run"):
         result = run_command([
             "systemd-run",
             "--on-active=2",
             "--timer-property=RemainAfterElapse=no",
-            "systemctl", "restart", service_name,
+            "systemctl", "restart", *service_names,
         ])
         if result.get("returncode") == 0:
             return {'success': True, 'scheduled': True}
 
     try:
+        quoted_services = " ".join(shlex.quote(name) for name in service_names)
         subprocess.Popen(
-            ["sh", "-c", f"sleep 2; systemctl restart {shlex.quote(service_name)}"],
+            ["sh", "-c", f"sleep 2; systemctl restart {quoted_services}"],
             start_new_session=True,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,

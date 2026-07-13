@@ -225,6 +225,7 @@ cat > "$HELPER_SERVICE_FILE" <<EOF
 Description=Pi-Health Privileged Helper Service
 Documentation=https://github.com/Brownster/pi-health
 After=local-fs.target
+PartOf=pi-health.service
 
 [Service]
 Type=simple
