@@ -134,7 +134,7 @@ CLAUDE_SIGNING_FINGERPRINT = '31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE'
 
 _agent_auth_manager = GuidedAuthManager(
     [
-        'runuser', '-u', 'lime-agent', '--', 'env', '-i',
+        '/usr/sbin/runuser', '-u', 'lime-agent', '--pty', '--', 'env', '-i',
         'HOME=/var/lib/lime-agent',
         'USER=lime-agent',
         'LOGNAME=lime-agent',
@@ -2421,6 +2421,7 @@ def _pihealth_update_migrate(ctx):
 
     # Restore service ownership regardless of whether new files were copied.
     run_command(["chown", "-R", f"{user}:pihealth", config_dir, state_dir, log_dir])
+    _restore_agent_runtime_ownership()
 
     if result.get("returncode") != 0:
         return {
@@ -2661,6 +2662,24 @@ def _agent_install_directory(path, mode, owner, group):
         'install', '-d', '-m', format(mode, '04o'), '-o', owner, '-g', group, path,
     ])
     return result.get('returncode') == 0
+
+
+def _restore_agent_runtime_ownership():
+    """Restore fixed agent paths after legacy state migration or helper restart."""
+    if run_command(['getent', 'passwd', 'lime-agent']).get('returncode') != 0:
+        return True
+    for path, mode in (
+        ('/var/lib/lime-agent', 0o700),
+        (CLAUDE_CONFIG_DIR, 0o700),
+        (AGENT_STATE_DIR, 0o750),
+    ):
+        if not os.path.isdir(path):
+            continue
+        if run_command(['chown', '-R', 'lime-agent:lime-agent', path]).get('returncode') != 0:
+            return False
+        if run_command(['chmod', format(mode, '04o'), path]).get('returncode') != 0:
+            return False
+    return True
 
 
 def _ensure_agent_file(path, content, mode, ownership):
@@ -2990,6 +3009,8 @@ def cmd_agent_provider_auth_start(params):
     rejected = _agent_reject_params(params)
     if rejected:
         return rejected
+    if not _restore_agent_runtime_ownership():
+        return {'success': False, 'error': 'Claude authentication storage is unavailable'}
     try:
         operation_id = _agent_auth_manager.start()
         return {'success': True, 'operation_id': operation_id}
@@ -3453,6 +3474,8 @@ def main():
     # Set up signal handlers
     signal.signal(signal.SIGTERM, cleanup)
     signal.signal(signal.SIGINT, cleanup)
+
+    _restore_agent_runtime_ownership()
 
     # Ensure socket directory exists
     socket_dir = os.path.dirname(SOCKET_PATH)

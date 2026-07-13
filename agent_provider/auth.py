@@ -142,15 +142,16 @@ class GuidedAuthManager:
 
     def _read_process(self, operation_id: str, process) -> None:
         assert process.stdout is not None
+        pending = bytearray()
         try:
             while True:
-                line = process.stdout.readline()
-                if not line:
+                chunk = os.read(process.stdout.fileno(), 4096)
+                if not chunk:
                     break
                 with self._lock:
                     if operation_id != self._operation_id or self._state != "running":
                         break
-                    self._output_bytes += len(line)
+                    self._output_bytes += len(chunk)
                     if self._output_bytes > MAX_AUTH_OUTPUT_BYTES:
                         self._state = "failed"
                         self._append({"type": "status", "message": "Claude authentication failed."})
@@ -158,11 +159,23 @@ class GuidedAuthManager:
                         over_limit = True
                     else:
                         over_limit = False
-                        for event in filter_auth_output(line.decode("utf-8", errors="replace")):
-                            self._append(event)
+                        pending.extend(chunk)
+                        boundary = max(pending.rfind(b"\n"), pending.rfind(b"\r"))
+                        if boundary >= 0:
+                            complete = bytes(pending[: boundary + 1])
+                            del pending[: boundary + 1]
+                            self._append_filtered(complete)
+                        # Claude's input prompt is intentionally not newline-terminated.
+                        partial = pending.decode("utf-8", errors="replace")
+                        for event in filter_auth_output(partial):
+                            if event.get("type") == "input_required":
+                                self._append(event)
                 if over_limit:
                     self._terminate(process)
                     break
+            with self._lock:
+                if operation_id == self._operation_id and self._state == "running" and pending:
+                    self._append_filtered(bytes(pending))
             returncode = process.wait()
             with self._lock:
                 if operation_id != self._operation_id or self._state != "running":
@@ -182,6 +195,10 @@ class GuidedAuthManager:
             with self._lock:
                 if operation_id == self._operation_id and self._timer:
                     self._timer.cancel()
+
+    def _append_filtered(self, output: bytes) -> None:
+        for event in filter_auth_output(output.decode("utf-8", errors="replace")):
+            self._append(event)
 
     def _expire(self, operation_id: str) -> None:
         with self._lock:

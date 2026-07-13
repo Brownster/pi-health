@@ -200,6 +200,9 @@ install -d -m 0750 -o "${RUN_USER}" -g pihealth \
   "${LIMEOS_CONFIG_DIR}" "${LIMEOS_CONFIG_DIR}/storage_plugins" \
   "${LIMEOS_STATE_DIR}" "${LIMEOS_STATE_DIR}/storage_plugins" \
   "${LIMEOS_LOG_DIR}" "${LIMEOS_LOG_DIR}/snapraid"
+# These fixed roots must exist before systemd builds the helper's write sandbox.
+# Agent setup assigns their final service ownership when the integration is enabled.
+install -d -m 0750 /var/lib/lime-agent /var/lib/limeops
 
 echo ">>> Migrating legacy runtime data..."
 "${PYTHON_BIN}" "${REPO_DIR}/scripts/migrate_runtime_state.py" \
@@ -247,8 +250,6 @@ ReadWritePaths=/backups
 ReadWritePaths=/etc/apt
 ReadWritePaths=/usr /var/lib/apt /var/lib/dpkg /var/cache/apt
 ReadWritePaths=-/var/lib/lime-agent -/var/lib/limeops -/run/limeos
-StateDirectory=lime-agent limeops
-StateDirectoryMode=0750
 # Self-update writes to the checkout (git pull, venv pip, npm build) and the
 # LimeOS runtime dirs (migration); ProtectHome/ProtectSystem block these
 # without explicit write paths.
@@ -257,7 +258,6 @@ PrivateTmp=true
 
 # Socket permissions
 RuntimeDirectory=pihealth
-RuntimeDirectory=limeos
 RuntimeDirectoryMode=0750
 UMask=0007
 

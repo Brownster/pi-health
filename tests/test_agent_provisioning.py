@@ -107,6 +107,31 @@ def test_helper_auth_commands_validate_operation_fields():
     ] is False
 
 
+def test_helper_runs_claude_login_in_a_pseudo_terminal():
+    command = helper._agent_auth_manager._command
+
+    assert command[:5] == ["/usr/sbin/runuser", "-u", "lime-agent", "--pty", "--"]
+
+
+def test_helper_restores_agent_paths_after_service_restart():
+    commands = []
+
+    def fake_run(argv, **_kwargs):
+        commands.append(argv)
+        return {"returncode": 0, "stdout": "", "stderr": ""}
+
+    with (
+        patch.object(helper, "run_command", side_effect=fake_run),
+        patch.object(helper.os.path, "isdir", return_value=True),
+    ):
+        assert helper._restore_agent_runtime_ownership() is True
+
+    assert ["chown", "-R", "lime-agent:lime-agent", "/var/lib/lime-agent"] in commands
+    assert ["chown", "-R", "lime-agent:lime-agent", CLAUDE_CONFIG_DIR] in commands
+    assert ["chown", "-R", "lime-agent:lime-agent", AGENT_STATE_DIR] in commands
+    assert ["chmod", "0700", CLAUDE_CONFIG_DIR] in commands
+
+
 def test_runtime_install_creates_fixed_identities_paths_and_units(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()

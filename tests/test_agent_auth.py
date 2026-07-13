@@ -64,6 +64,32 @@ def test_guided_auth_rejects_multiline_authorization_response(tmp_path):
     manager.cancel(operation_id)
 
 
+def test_guided_auth_surfaces_prompt_without_waiting_for_newline(tmp_path):
+    script = (
+        "import sys; "
+        "print('Open https://claude.ai/oauth/authorize?code=short-lived', flush=True); "
+        "sys.stdout.write('Paste code here if prompted > '); sys.stdout.flush(); "
+        "code=sys.stdin.readline().strip(); "
+        "raise SystemExit(0 if code == 'approved-code' else 1)"
+    )
+    manager = GuidedAuthManager(
+        [sys.executable, "-u", "-c", script],
+        cwd=tmp_path,
+        timeout_seconds=3,
+        id_factory=lambda: "auth-prompt",
+    )
+    operation_id = manager.start()
+
+    running = _wait_for(
+        manager,
+        operation_id,
+        lambda status: any(event["type"] == "input_required" for event in status["events"]),
+    )
+    assert any(event["type"] == "authorization_url" for event in running["events"])
+    manager.submit(operation_id, "approved-code")
+    _wait_for(manager, operation_id, lambda status: status["state"] == "complete")
+
+
 def test_guided_auth_times_out_and_returns_no_raw_output(tmp_path):
     manager = GuidedAuthManager(
         [sys.executable, "-u", "-c", "import time; print('debug SECRET', flush=True); time.sleep(5)"],

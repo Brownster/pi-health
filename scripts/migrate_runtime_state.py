@@ -17,6 +17,25 @@ HELPER_RESTART_DROPIN = "restart-with-pi-health.conf"
 HELPER_AGENT_DROPIN = "agent-provisioning.conf"
 
 
+def ensure_agent_runtime_roots() -> None:
+    """Seed mount-sandbox paths before the helper restarts into its new unit."""
+    subprocess.run(
+        [
+            "systemd-run",
+            "--quiet",
+            "--wait",
+            "--pipe",
+            "--collect",
+            "--service-type=exec",
+            "/usr/bin/mkdir",
+            "-p",
+            "/var/lib/lime-agent",
+            "/var/lib/limeops",
+        ],
+        check=True,
+    )
+
+
 def _ensure_helper_dropin(
     systemd_dir: Path, filename: str, content: str
 ) -> tuple[Path | None, bool]:
@@ -54,10 +73,6 @@ def ensure_helper_agent_permissions(
         "ReadWritePaths=/etc/apt\n"
         "ReadWritePaths=/usr /var/lib/apt /var/lib/dpkg /var/cache/apt\n"
         "ReadWritePaths=-/var/lib/lime-agent -/var/lib/limeops -/run/limeos\n"
-        "StateDirectory=lime-agent limeops\n"
-        "StateDirectoryMode=0750\n"
-        "RuntimeDirectory=limeos\n"
-        "RuntimeDirectoryMode=0750\n"
     )
     return _ensure_helper_dropin(systemd_dir, HELPER_AGENT_DROPIN, content)
 
@@ -88,6 +103,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    ensure_agent_runtime_roots()
     copied = migrate_legacy_runtime_data(
         source_root=args.source_root,
         config_dir=args.config_dir,

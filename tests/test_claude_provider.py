@@ -195,6 +195,23 @@ def test_auth_output_filter_emits_only_status_and_https_authorization_url():
     assert ".credentials.json" not in json.dumps(events)
 
 
+def test_auth_output_filter_strips_terminal_hyperlink_controls_from_url():
+    raw = (
+        "If the browser didn't open, visit: "
+        "\x1b]8;;https://claude.ai/oauth/authorize?code=short-lived\x07"
+        "Sign in\x1b]8;;\x07\r\n"
+        "Paste code here if prompted > "
+    )
+
+    assert filter_auth_output(raw) == [
+        {
+            "type": "authorization_url",
+            "url": "https://claude.ai/oauth/authorize?code=short-lived",
+        },
+        {"type": "input_required", "message": "Paste the authorization code to continue."},
+    ]
+
+
 def test_bounded_process_runner_enforces_output_limit_and_timeout(tmp_path):
     runner = BoundedProcessRunner(max_output_bytes=128)
     with pytest.raises(ProcessOutputLimitError):

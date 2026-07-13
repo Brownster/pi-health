@@ -34,7 +34,7 @@ MINIMUM_VERSION = (2, 1, 205)
 DEFAULT_MAX_PROMPT_BYTES = 256 * 1024
 DEFAULT_MAX_PROCESS_OUTPUT_BYTES = 1024 * 1024
 _VERSION_RE = re.compile(r"(?<!\d)(\d+)\.(\d+)\.(\d+)(?!\d)")
-_URL_RE = re.compile(r"https://[^\s<>\"']+")
+_URL_RE = re.compile(r"https://[^\s<>\"'\x00-\x1f\x7f]+")
 _AUTH_FAILURE_MARKERS = (
     "not logged in",
     "oauth token expired",
