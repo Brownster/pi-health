@@ -2877,32 +2877,39 @@ def _install_claude_apt_repository():
         return {'success': False, 'error': 'Failed to download Claude signing key'}
     if not key_data or len(key_data) > 256 * 1024:
         return {'success': False, 'error': 'Invalid Claude signing key'}
-    fd, temp_path = tempfile.mkstemp(prefix='claude-code-key-', suffix='.asc')
     try:
-        with os.fdopen(fd, 'wb') as handle:
-            handle.write(key_data)
-        checked = run_command(['gpg', '--show-keys', '--with-colons', temp_path], timeout=30)
-        fingerprints = [
-            line.split(':')[9].upper() for line in (checked.get('stdout') or '').splitlines()
-            if line.startswith('fpr:') and len(line.split(':')) > 9
-        ]
-        if checked.get('returncode') != 0 or CLAUDE_SIGNING_FINGERPRINT not in fingerprints:
-            return {'success': False, 'error': 'Claude signing key verification failed'}
-        if run_command(['install', '-d', '-m', '0755', '/etc/apt/keyrings']).get('returncode') != 0:
-            return {'success': False, 'error': 'Failed to create apt key directory'}
-        key_text = key_data.decode('ascii')
-        key_result = _write_managed_file(CLAUDE_APT_KEY_PATH, key_text, 0o644)
-        source_result = _write_managed_file(CLAUDE_APT_SOURCE_PATH, CLAUDE_APT_SOURCE, 0o644)
-        if not key_result.get('success') or not source_result.get('success'):
-            return {'success': False, 'error': 'Failed to configure Claude apt repository'}
-        return {'success': True}
+        with tempfile.TemporaryDirectory(prefix='claude-code-gpg-') as gpg_home:
+            temp_path = os.path.join(gpg_home, 'claude-code.asc')
+            with open(temp_path, 'wb') as handle:
+                handle.write(key_data)
+            checked = run_command(
+                ['gpg', '--homedir', gpg_home, '--show-keys', '--with-colons', temp_path],
+                timeout=30,
+            )
+            fingerprints = [
+                line.split(':')[9].upper()
+                for line in (checked.get('stdout') or '').splitlines()
+                if line.startswith('fpr:') and len(line.split(':')) > 9
+            ]
+            if (
+                checked.get('returncode') != 0
+                or CLAUDE_SIGNING_FINGERPRINT not in fingerprints
+            ):
+                return {'success': False, 'error': 'Claude signing key verification failed'}
+            if run_command(
+                ['install', '-d', '-m', '0755', '/etc/apt/keyrings']
+            ).get('returncode') != 0:
+                return {'success': False, 'error': 'Failed to create apt key directory'}
+            key_text = key_data.decode('ascii')
+            key_result = _write_managed_file(CLAUDE_APT_KEY_PATH, key_text, 0o644)
+            source_result = _write_managed_file(
+                CLAUDE_APT_SOURCE_PATH, CLAUDE_APT_SOURCE, 0o644
+            )
+            if not key_result.get('success') or not source_result.get('success'):
+                return {'success': False, 'error': 'Failed to configure Claude apt repository'}
+            return {'success': True}
     except (OSError, UnicodeDecodeError):
         return {'success': False, 'error': 'Failed to configure Claude apt repository'}
-    finally:
-        try:
-            os.unlink(temp_path)
-        except OSError:
-            pass
 
 
 def cmd_agent_provider_install(params):

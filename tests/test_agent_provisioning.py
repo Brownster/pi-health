@@ -172,6 +172,43 @@ def test_provider_install_uses_only_signed_apt_repository_commands():
     assert all("curl" not in command and "bash" not in command for command in commands)
 
 
+def test_claude_signing_key_verification_uses_private_temporary_gpg_home():
+    commands = []
+
+    class KeyResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self, _limit):
+            return b"armored signing key"
+
+    def fake_run(argv, **_kwargs):
+        commands.append(argv)
+        return {
+            "returncode": 0,
+            "stdout": f"fpr:::::::::{helper.CLAUDE_SIGNING_FINGERPRINT}:\n",
+            "stderr": "",
+        }
+
+    with (
+        patch.object(helper.urllib.request, "urlopen", return_value=KeyResponse()),
+        patch.object(helper, "run_command", side_effect=fake_run),
+        patch.object(helper, "_write_managed_file", return_value={"success": True}),
+    ):
+        result = helper._install_claude_apt_repository()
+
+    assert result["success"] is True
+    gpg = next(command for command in commands if command[0] == "gpg")
+    assert gpg[1] == "--homedir"
+    gpg_home = Path(gpg[2])
+    assert gpg_home.name.startswith("claude-code-gpg-")
+    assert gpg[3:5] == ["--show-keys", "--with-colons"]
+    assert Path(gpg[-1]).parent == gpg_home
+
+
 def test_agent_secret_writer_is_fixed_and_mode_0640(tmp_path):
     target = tmp_path / "agents.env"
     with (
