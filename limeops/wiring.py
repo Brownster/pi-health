@@ -11,6 +11,7 @@ it feeds lives in `limeops.operations` and is unit-tested there.
 
 from __future__ import annotations
 
+import json
 import platform
 import shutil
 import socket
@@ -35,10 +36,18 @@ _NETWORK_TARGETS = {
 }
 
 
-def _docker_client():  # pragma: no cover - target integration
-    import docker as docker_sdk
-
-    return docker_sdk.from_env()
+def _docker_command(*args: str, timeout: int = 15) -> str:
+    result = subprocess.run(
+        ["docker", *args],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        check=False,
+        shell=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError("Docker operation failed")
+    return result.stdout
 
 
 def _system_status() -> dict:  # pragma: no cover - target integration
@@ -56,13 +65,12 @@ def _system_status() -> dict:  # pragma: no cover - target integration
     }
 
 
-def _container_summary(container) -> dict:  # pragma: no cover - target integration
-    attrs = container.attrs or {}
+def _container_summary(attrs: dict) -> dict:  # pragma: no cover - target integration
     config = attrs.get("Config") or {}
     state = attrs.get("State") or {}
     return {
-        "name": container.name,
-        "status": container.status,
+        "name": str(attrs.get("Name") or "").removeprefix("/"),
+        "status": state.get("Status") or "unknown",
         "image": config.get("Image") or "",
         "health": ((state.get("Health") or {}).get("Status")) or None,
         "stack": (config.get("Labels") or {}).get("com.docker.compose.project"),
@@ -73,16 +81,25 @@ def _container_summary(container) -> dict:  # pragma: no cover - target integrat
 
 
 def _list_containers() -> list:  # pragma: no cover - target integration
-    return [_container_summary(c) for c in _docker_client().containers.list(all=True)]
+    ids = _docker_command("container", "ls", "--all", "--quiet", "--no-trunc").splitlines()
+    ids = [container_id for container_id in ids if container_id]
+    if not ids:
+        return []
+    containers = json.loads(_docker_command("container", "inspect", "--", *ids))
+    if not isinstance(containers, list):
+        raise ValueError("Invalid Docker response")
+    return [_container_summary(container) for container in containers]
 
 
 def _container_status(name: str) -> dict:  # pragma: no cover - target integration
-    return _container_summary(_docker_client().containers.get(name))
+    containers = json.loads(_docker_command("container", "inspect", "--", name))
+    if not isinstance(containers, list) or len(containers) != 1:
+        raise ValueError("Invalid Docker response")
+    return _container_summary(containers[0])
 
 
 def _container_logs(name: str, lines: int) -> str:  # pragma: no cover - target integration
-    logs = _docker_client().containers.get(name).logs(tail=lines)
-    return logs.decode("utf-8", errors="replace") if isinstance(logs, bytes) else str(logs)
+    return _docker_command("container", "logs", "--tail", str(lines), "--", name)
 
 
 def _stack_reads():  # pragma: no cover - target integration
