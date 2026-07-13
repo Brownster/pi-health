@@ -143,6 +143,7 @@ _agent_auth_manager = GuidedAuthManager(
         'PATH=/usr/local/bin:/usr/bin:/bin',
         'LANG=C.UTF-8',
         f'CLAUDE_CONFIG_DIR={CLAUDE_CONFIG_DIR}',
+        'DISABLE_AUTOUPDATER=1',
         '/usr/bin/claude', 'auth', 'login',
     ],
     cwd=AGENT_STATE_DIR,
@@ -2762,6 +2763,9 @@ def cmd_agent_runtime_install(params):
     for argv, timeout in (
         (['python3', '-m', 'venv', AGENT_VENV_DIR], 120),
         ([os.path.join(AGENT_VENV_DIR, 'bin', 'pip'), 'install', 'websocket-client>=1.8,<2'], 300),
+        # The broker reads system status via psutil; guarantee it for the system
+        # interpreter path so system.status cannot fail with upstream_failure.
+        (['apt-get', 'install', '-y', 'python3-psutil'], 300),
         (['chmod', '-R', 'u=rwX,go=rX', AGENT_LIB_DIR], 60),
         (['chown', '-R', 'root:root', AGENT_LIB_DIR], 60),
         (['chown', '-R', 'lime-agent:lime-agent', AGENT_VENV_DIR], 60),
@@ -2987,6 +2991,10 @@ def cmd_agent_provider_install(params):
     match = re.search(r'(?<!\d)\d+\.\d+\.\d+(?!\d)', version.get('stdout') or '')
     if not match or tuple(int(part) for part in match.group(0).split('.')) < (2, 1, 205):
         return {'success': False, 'error': 'Installed Claude Code version is unsupported'}
+    # Pin the apt package; the CLI's own auto-updater is disabled via DISABLE_AUTOUPDATER
+    # in the agent environment. Version moves are a tested LimeOS release, not a
+    # background download (see the package-baseline follow-up).
+    run_command(['apt-mark', 'hold', 'claude-code'], timeout=30)
     return {'success': True, 'installed': True, 'version': match.group(0) if match else None}
 
 

@@ -93,6 +93,7 @@ def test_provider_invokes_claude_tool_free_and_parses_final_answer(tmp_path):
     assert call["env"]["CLAUDE_CONFIG_DIR"] == str(tmp_path / "claude")
     assert not any(key.startswith("ANTHROPIC_") for key in call["env"])
     assert not any(key.startswith("CLAUDE_CODE_OAUTH_TOKEN") for key in call["env"])
+    assert call["env"]["DISABLE_AUTOUPDATER"] == "1"  # pin the CLI; no background updates
 
 
 def test_provider_parses_one_typed_limeops_request(tmp_path):

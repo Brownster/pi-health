@@ -342,6 +342,10 @@ class ClaudeCodeProvider:
             "LC_ALL": "C.UTF-8",
             "CLAUDE_CONFIG_DIR": str(self._config.config_dir),
             "CLAUDE_CODE_SKIP_PROMPT_HISTORY": "1",
+            # Pin the CLI: its internal auto-updater silently changed the --json-schema
+            # output contract under us (2.1.205 -> 2.1.207). Version moves must be a
+            # tested LimeOS release, not a background download.
+            "DISABLE_AUTOUPDATER": "1",
             "TMPDIR": "/tmp",
         }
 

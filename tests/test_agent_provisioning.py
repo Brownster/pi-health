@@ -197,6 +197,8 @@ def test_runtime_install_creates_fixed_identities_paths_and_units(tmp_path):
     assert any(LIMEOPS_STATE_DIR in command for command in install_dirs)
     assert ["chmod", "-R", "u=rwX,go=rX", AGENT_LIB_DIR] in commands
     assert ["systemctl", "restart", "limeopsd.service"] in commands
+    # psutil is guaranteed for the broker so system.status cannot fail on a fresh install.
+    assert ["apt-get", "install", "-y", "python3-psutil"] in commands
 
 
 def test_broker_state_requires_the_limeops_socket():
@@ -265,6 +267,8 @@ def test_provider_install_uses_only_signed_apt_repository_commands():
     assert any(command[:2] == ["apt-get", "update"] for command in commands)
     assert any(command[:4] == ["apt-get", "install", "-y", "claude-code"] for command in commands)
     assert all("curl" not in command and "bash" not in command for command in commands)
+    # The CLI is pinned so a background apt bump cannot change its contract.
+    assert ["apt-mark", "hold", "claude-code"] in commands
 
 
 def test_claude_repository_tracks_compatible_signed_channel():
