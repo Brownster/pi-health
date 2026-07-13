@@ -12,6 +12,7 @@ replay after reconnect) are dropped by the persisted dedup store.
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from collections.abc import Callable, Iterable, Iterator
@@ -110,7 +111,7 @@ class MentionListener:
         except TurnError as exc:
             chunks = [exc.public_message]
         except Exception:  # noqa: BLE001 - never leak internals into the thread
-            logger.exception("gateway turn failed for %s", request.conversation_id)
+            logger.error("gateway turn failed for %s", request.conversation_id)
             chunks = [TurnError.public_message]
         for chunk in chunks:
             try:
@@ -118,7 +119,7 @@ class MentionListener:
                     channel_id=event.channel_id, message=chunk, root_id=event.root_post_id
                 )
             except Exception:  # noqa: BLE001 - delivery failure must not kill the loop
-                logger.exception("failed to post reply in %s", event.root_post_id)
+                logger.error("failed to post reply in %s", event.root_post_id)
                 break
 
     # -- run loop ---------------------------------------------------------------
@@ -142,7 +143,7 @@ class MentionListener:
                     failures = 0
                     self.handle_frame(frame_text)
             except Exception:  # noqa: BLE001 - reconnect on any transport failure
-                logger.exception("listener transport failed; reconnecting")
+                logger.error("listener transport failed; reconnecting")
             backoff = self._config.reconnect_backoff_seconds
             delay = backoff[min(failures, len(backoff) - 1)]
             failures += 1
@@ -162,8 +163,14 @@ def websocket_frames(site_url: str, token: str) -> Iterator[str]:  # pragma: no 
     connection = websocket.create_connection(f"{url}/api/v4/websocket", timeout=90)
     try:
         connection.send(
-            '{"seq": 1, "action": "authentication_challenge",'
-            f' "data": {{"token": "{token}"}}}}'
+            json.dumps(
+                {
+                    "seq": 1,
+                    "action": "authentication_challenge",
+                    "data": {"token": token},
+                },
+                separators=(",", ":"),
+            )
         )
         while True:
             yield connection.recv()

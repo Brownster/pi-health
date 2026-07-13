@@ -95,6 +95,11 @@ def call(broker, operation, params=None):
         ("Authorization: Bearer eyJhbGciOi", "eyJhbGciOi"),
         ("postgres://mmuser:dbpass@postgres:5432/mm", "dbpass"),
         ("posting to https://mm.lan/hooks/abc123secret", "abc123secret"),
+        ("Authorization: Basic dXNlcjpwYXNzd29yZA==", "dXNlcjpwYXNzd29yZA=="),
+        (
+            "DATABASE_URL=postgresql://lime:password@db.internal/limeos",
+            "postgresql://lime:password@db.internal/limeos",
+        ),
     ],
 )
 def test_redact_text_removes_secret_material(raw, must_not_contain):
@@ -104,6 +109,13 @@ def test_redact_text_removes_secret_material(raw, must_not_contain):
 def test_redact_text_keeps_ordinary_log_lines():
     line = "2026-07-12 jellyfin exited with code 1 after 3s"
     assert redact_text(line) == line
+
+
+def test_redact_text_removes_complete_database_connection_value():
+    assert (
+        redact_text("DATABASE_URL=postgresql://lime:password@db.internal/limeos")
+        == "DATABASE_URL=[redacted]"
+    )
 
 
 def test_bounded_log_truncates_and_flags():

@@ -197,7 +197,12 @@ class OperationRegistry:
                     payload.get("done") or payload.get("error")
                 )
         except Exception as exc:
-            operation.append({"error": str(exc)}, self._event_limit)
+            error = (
+                "AI Agents operation failed"
+                if operation.kind.startswith("agent-")
+                else str(exc)
+            )
+            operation.append({"error": error}, self._event_limit)
             terminal_event = True
         finally:
             if not terminal_event:

@@ -207,10 +207,10 @@ def agent_providers():
 @login_required
 @csrf_protect
 def authenticate_claude():
-    values = request.get_json(silent=True) or {}
+    values = request.get_json(silent=True)
     if not isinstance(values, dict):
         return jsonify({"error": "Authentication values must be an object"}), 400
-    action = values.get("action", "start")
+    action = values.get("action")
     try:
         if action == "start" and set(values) <= {"action"}:
             producer = _agent_service().stream_auth()

@@ -36,10 +36,11 @@ _REDACTED = "[redacted]"
 # quadratically on long secret-free lines — a redaction-time DoS.
 _SECRET_PATTERNS = (
     re.compile(
-        r"(?i)\b(password|passwd|secret|token|api[_-]?key|access[_-]?key|auth)\b"
+        r"(?i)\b(password|passwd|secret|token|api[_-]?key|access[_-]?key|auth|"
+        r"database[_-]?url|db[_-]?url|connection[_-]?string|dsn)\b"
         r"(\s*[=:]\s*)\S{1,512}"
     ),
-    re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{1,512}"),
+    re.compile(r"(?i)\b(?:bearer|basic)\s+[A-Za-z0-9._~+/=-]{1,512}"),
     re.compile(
         r"(?i)\b([a-z][a-z0-9+.-]{0,15}://)[^\s/@]{1,256}:[^\s/@]{1,256}@"
     ),  # credentials inside URLs

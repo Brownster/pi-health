@@ -123,6 +123,18 @@ def test_auth_submit_cancel_disable_and_delivery_test_are_csrf_protected():
     assert client.post("/api/integrations/agents/disable").status_code == 403
 
 
+def test_auth_rejects_malformed_missing_and_unknown_fields():
+    service = _service()
+    client = _client(service)
+    path = "/api/integrations/agents/providers/claude/auth"
+    assert client.post(path, data="{", content_type="application/json").status_code == 400
+    assert client.post(path, json={}).status_code == 400
+    assert client.post(path, json={"action": "start", "extra": True}).status_code == 400
+    assert client.post(path, json={"action": "submit", "operation_id": "auth-1"}).status_code == 400
+    service.stream_auth.assert_not_called()
+    service.submit_auth.assert_not_called()
+
+
 def test_operation_stream_is_not_visible_to_another_session():
     service = _service()
     owner = _client(service)

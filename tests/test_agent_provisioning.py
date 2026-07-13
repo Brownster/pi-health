@@ -27,6 +27,9 @@ def test_agent_unit_has_no_privileged_sockets_or_source_access():
     assert "NoNewPrivileges=true" in unit
     assert "ProtectSystem=strict" in unit
     assert "ProtectHome=true" in unit
+    assert "PrivateDevices=true" in unit
+    assert "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6" in unit
+    assert "CapabilityBoundingSet=" in unit
     assert f"ReadWritePaths={AGENT_STATE_DIR} {CLAUDE_CONFIG_DIR}" in unit
     assert f"ReadOnlyPaths={AGENT_LIB_DIR}" in unit
     assert (
@@ -38,6 +41,8 @@ def test_agent_unit_has_no_privileged_sockets_or_source_access():
     assert f"EnvironmentFile={AGENT_ENV_PATH}" in unit
     assert "LoadCredential=agent-settings:/etc/limeos/integrations/agents.json" in unit
     assert "Environment=LIMEOS_AGENT_CONFIG=%d/agent-settings" in unit
+    assert "SupplementaryGroups=docker" not in unit
+    assert "SupplementaryGroups=pihealth" not in unit
 
 
 def test_limeops_unit_owns_privileged_read_boundary():

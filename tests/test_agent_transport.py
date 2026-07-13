@@ -2,6 +2,9 @@
 
 import io
 import json
+import logging
+import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -14,7 +17,12 @@ from agent_transport.gateway_contract import (
     TurnRequest,
     TurnResult,
 )
-from agent_transport.listener import ListenerConfig, MentionListener, chunk_reply
+from agent_transport.listener import (
+    ListenerConfig,
+    MentionListener,
+    chunk_reply,
+    websocket_frames,
+)
 from agent_transport.state import EventDedup, ThreadMap
 
 BOT = {"bot_username": "limeos", "bot_user_id": "bot-1"}
@@ -269,6 +277,72 @@ def test_listener_never_leaks_internal_errors(tmp_path):
     gateway, posts = FakeGateway(raises=RuntimeError("secret-connection-string")), []
     _listener(tmp_path, gateway, posts).handle_frame(_frame("@limeos hi"))
     assert "secret-connection-string" not in posts[0][2]
+
+
+def test_listener_logs_never_include_gateway_or_delivery_secrets(tmp_path, caplog):
+    secret = "postgres://admin:hunter2@db/limeos"
+    gateway, posts = FakeGateway(raises=RuntimeError(secret)), []
+    with caplog.at_level(logging.ERROR, logger="limeos.agent.listener"):
+        _listener(tmp_path, gateway, posts).handle_frame(_frame("@limeos hi"))
+    assert secret not in caplog.text
+
+    caplog.clear()
+    listener = MentionListener(
+        config=ListenerConfig(bot_username="limeos", bot_user_id="bot-1"),
+        gateway=FakeGateway(),
+        post_reply=lambda **_kwargs: (_ for _ in ()).throw(RuntimeError(secret)),
+        dedup=EventDedup(tmp_path / "delivery"),
+        threads=ThreadMap(tmp_path / "delivery"),
+    )
+    with caplog.at_level(logging.ERROR, logger="limeos.agent.listener"):
+        listener.handle_frame(_frame("@limeos status", post_id="delivery-1"))
+    assert secret not in caplog.text
+
+
+def test_websocket_authentication_json_encodes_token(monkeypatch):
+    sent = []
+
+    class FakeConnection:
+        def send(self, value):
+            sent.append(value)
+
+        def recv(self):
+            return "frame"
+
+        def close(self):
+            pass
+
+    monkeypatch.setitem(
+        sys.modules,
+        "websocket",
+        SimpleNamespace(create_connection=lambda *_args, **_kwargs: FakeConnection()),
+    )
+    token = 'abc"},"admin":true,"ignored":"'
+    frames = websocket_frames("https://mattermost.test", token)
+    assert next(frames) == "frame"
+    payload = json.loads(sent[0])
+    assert payload == {
+        "seq": 1,
+        "action": "authentication_challenge",
+        "data": {"token": token},
+    }
+    frames.close()
+
+
+def test_delivery_failure_is_not_replayed_after_listener_restart(tmp_path):
+    frame = _frame("@limeos status", post_id="delivery-failure")
+    gateway = FakeGateway()
+    first = MentionListener(
+        config=ListenerConfig(bot_username="limeos", bot_user_id="bot-1"),
+        gateway=gateway,
+        post_reply=lambda **_kwargs: (_ for _ in ()).throw(ConnectionError("down")),
+        dedup=EventDedup(tmp_path),
+        threads=ThreadMap(tmp_path),
+    )
+    assert first.handle_frame(frame) is True
+    restarted = _listener(tmp_path, gateway, [])
+    assert restarted.handle_frame(frame) is False
+    assert len(gateway.requests) == 1
 
 
 def test_listener_chunks_long_replies(tmp_path):

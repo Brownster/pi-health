@@ -11,6 +11,7 @@ import os
 import signal
 import subprocess
 import threading
+import time
 import uuid
 from pathlib import Path
 
@@ -213,13 +214,25 @@ class GuidedAuthManager:
 
     @staticmethod
     def _terminate(process) -> None:
-        if process.poll() is not None:
-            return
+        process_group = process.pid
         try:
-            os.killpg(process.pid, signal.SIGTERM)
-            process.wait(timeout=0.5)
-        except (ProcessLookupError, subprocess.TimeoutExpired):
+            os.killpg(process_group, signal.SIGTERM)
+        except ProcessLookupError:
+            return
+
+        deadline = time.monotonic() + 0.5
+        while time.monotonic() < deadline:
             try:
-                os.killpg(process.pid, signal.SIGKILL)
+                os.killpg(process_group, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.01)
+        else:
+            try:
+                os.killpg(process_group, signal.SIGKILL)
             except ProcessLookupError:
                 pass
+        try:
+            process.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            pass

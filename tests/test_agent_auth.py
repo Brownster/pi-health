@@ -77,3 +77,25 @@ def test_guided_auth_times_out_and_returns_no_raw_output(tmp_path):
         {"type": "status", "message": "Claude authentication timed out."}
     ]
     assert "SECRET" not in str(status)
+
+
+def test_guided_auth_timeout_kills_children_after_parent_exits(tmp_path):
+    marker = tmp_path / "orphan-auth-ran"
+    child = (
+        "import time; from pathlib import Path; time.sleep(0.4); "
+        f"Path({str(marker)!r}).write_text('survived')"
+    )
+    parent = (
+        "import subprocess, sys; "
+        f"subprocess.Popen([sys.executable, '-c', {child!r}])"
+    )
+    manager = GuidedAuthManager(
+        [sys.executable, "-c", parent],
+        cwd=tmp_path,
+        timeout_seconds=0.05,
+        id_factory=lambda: "auth-orphan",
+    )
+    operation_id = manager.start()
+    _wait_for(manager, operation_id, lambda value: value["state"] == "timeout")
+    time.sleep(0.5)
+    assert not marker.exists()

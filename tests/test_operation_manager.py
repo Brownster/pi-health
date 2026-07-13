@@ -175,3 +175,22 @@ def test_ephemeral_events_are_redacted_when_operation_finishes():
         owner="owner",
     )
     assert batch.events[0].payload == {"expired": True}
+
+
+def test_agent_operation_unexpected_exception_is_bounded_and_private():
+    registry = immediate_registry()
+    operation = registry.create(
+        owner="owner",
+        username="admin",
+        kind="agent-repair",
+        target="claude",
+        producer=lambda: (_ for _ in ()).throw(
+            RuntimeError("token=SECRET /etc/limeos/integrations/agents.env")
+        ),
+    )
+    batch = registry.events_since(
+        operation.operation_id,
+        expected_kind="agent-repair",
+        owner="owner",
+    )
+    assert batch.events[-1].payload == {"error": "AI Agents operation failed"}
