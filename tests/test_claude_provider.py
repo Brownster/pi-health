@@ -84,6 +84,9 @@ def test_provider_invokes_claude_tool_free_and_parses_final_answer(tmp_path):
     assert "--no-session-persistence" in argv
     assert "--no-chrome" in argv
     assert "--bare" not in argv
+    output_schema = json.loads(argv[argv.index("--json-schema") + 1])
+    assert output_schema["type"] == "object"
+    assert not {"oneOf", "allOf", "anyOf"} & output_schema.keys()
     assert call["input_text"] and "Why is Jellyfin down?" in call["input_text"]
     assert call["timeout_seconds"] == 12
     assert call["env"]["CLAUDE_CONFIG_DIR"] == str(tmp_path / "claude")

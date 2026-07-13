@@ -46,31 +46,19 @@ _AUTH_FAILURE_MARKERS = (
 _AUTH_URL_HOSTS = frozenset({"claude.ai", "claude.com", "console.anthropic.com"})
 
 TURN_SCHEMA = {
-    "oneOf": [
-        {
-            "type": "object",
-            "additionalProperties": False,
-            "required": ["type", "text"],
-            "properties": {
-                "type": {"const": "final"},
-                "text": {"type": "string", "maxLength": 32768},
-            },
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["type"],
+    "properties": {
+        "type": {"type": "string", "enum": ["final", "tool"]},
+        "text": {"type": "string", "maxLength": 32768},
+        "operation": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$",
+            "maxLength": 128,
         },
-        {
-            "type": "object",
-            "additionalProperties": False,
-            "required": ["type", "operation", "params"],
-            "properties": {
-                "type": {"const": "tool"},
-                "operation": {
-                    "type": "string",
-                    "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$",
-                    "maxLength": 128,
-                },
-                "params": {"type": "object"},
-            },
-        },
-    ]
+        "params": {"type": "object"},
+    },
 }
 
 
