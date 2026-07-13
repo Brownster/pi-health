@@ -372,14 +372,22 @@ class ClaudeCodeProvider:
         reply = outer["structured_output"]
         if not isinstance(reply, dict):
             raise ProviderMalformedError("Claude Code returned an invalid reply")
+        allowed_fields = {"type", "text", "operation", "params"}
+        if set(reply) - allowed_fields:
+            raise ProviderMalformedError("Claude Code returned a reply outside the contract")
+        if "text" in reply and not isinstance(reply["text"], str):
+            raise ProviderMalformedError("Claude Code returned a reply outside the contract")
+        if "operation" in reply and not isinstance(reply["operation"], str):
+            raise ProviderMalformedError("Claude Code returned a reply outside the contract")
+        if "params" in reply and not isinstance(reply["params"], dict):
+            raise ProviderMalformedError("Claude Code returned a reply outside the contract")
         reply_type = reply.get("type")
-        if reply_type == "final" and set(reply) == {"type", "text"} and isinstance(reply["text"], str):
+        if reply_type == "final" and isinstance(reply.get("text"), str):
             return FinalAnswer(reply["text"])
         if (
             reply_type == "tool"
-            and set(reply) == {"type", "operation", "params"}
-            and isinstance(reply["operation"], str)
-            and isinstance(reply["params"], dict)
+            and isinstance(reply.get("operation"), str)
+            and isinstance(reply.get("params"), dict)
         ):
             return ToolCall(reply["operation"], reply["params"])
         raise ProviderMalformedError("Claude Code returned a reply outside the contract")

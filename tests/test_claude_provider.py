@@ -106,6 +106,40 @@ def test_provider_parses_one_typed_limeops_request(tmp_path):
 
 
 @pytest.mark.parametrize(
+    ("reply", "expected"),
+    [
+        (
+            {
+                "type": "final",
+                "text": "All containers are running.",
+                "operation": "container.list",
+                "params": {"count": 18},
+            },
+            FinalAnswer("All containers are running."),
+        ),
+        (
+            {
+                "type": "tool",
+                "text": "Checking containers.",
+                "operation": "container.list",
+                "params": {},
+            },
+            ToolCall("container.list", {}),
+        ),
+    ],
+)
+def test_provider_uses_discriminator_when_schema_emits_other_branch_fields(
+    tmp_path, reply, expected
+):
+    provider = ClaudeCodeProvider(
+        config=ClaudeCodeConfig(config_dir=tmp_path / "claude", work_dir=tmp_path),
+        runner=FakeRunner([ProcessResult(0, _outer(reply), "")]),
+    )
+
+    assert provider.invoke(_context(), timeout_seconds=10) == expected
+
+
+@pytest.mark.parametrize(
     "payload",
     [
         "not-json",
