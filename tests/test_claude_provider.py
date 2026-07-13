@@ -15,6 +15,7 @@ from agent_gateway.provider import (
     ProviderContext,
     ProviderMalformedError,
     ProviderTimeoutError,
+    ProviderUnavailableError,
     ToolCall,
 )
 from agent_provider.claude import (
@@ -155,6 +156,48 @@ def test_provider_rejects_output_outside_the_frozen_shape(tmp_path, payload):
         runner=FakeRunner([ProcessResult(0, payload, "")]),
     )
     with pytest.raises(ProviderMalformedError):
+        provider.invoke(_context(), timeout_seconds=10)
+
+
+def _result_outer(reply):
+    # The CLI shape when a --json-schema turn is tool-routed (num_turns>1): the reply
+    # is a JSON *string* under `result`, with no `structured_output`.
+    return json.dumps(
+        {"type": "result", "subtype": "success", "is_error": False, "result": json.dumps(reply)}
+    )
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected"),
+    [
+        (_result_outer({"type": "final", "text": "Hello!"}), FinalAnswer("Hello!")),
+        (
+            _result_outer({"type": "tool", "operation": "container.list", "params": {}}),
+            ToolCall("container.list", {}),
+        ),
+    ],
+)
+def test_provider_parses_result_string_shape_from_newer_cli(tmp_path, payload, expected):
+    provider = ClaudeCodeProvider(
+        config=ClaudeCodeConfig(config_dir=tmp_path / "claude", work_dir=tmp_path),
+        runner=FakeRunner([ProcessResult(0, payload, "")]),
+    )
+    assert provider.invoke(_context(), timeout_seconds=10) == expected
+
+
+@pytest.mark.parametrize(
+    "envelope",
+    [
+        {"type": "result", "is_error": True, "result": "rate limit"},
+        {"type": "result", "subtype": "error_max_turns", "result": ""},
+    ],
+)
+def test_provider_maps_cli_error_result_to_unavailable(tmp_path, envelope):
+    provider = ClaudeCodeProvider(
+        config=ClaudeCodeConfig(config_dir=tmp_path / "claude", work_dir=tmp_path),
+        runner=FakeRunner([ProcessResult(0, json.dumps(envelope), "")]),
+    )
+    with pytest.raises(ProviderUnavailableError):
         provider.invoke(_context(), timeout_seconds=10)
 
 

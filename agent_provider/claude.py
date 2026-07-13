@@ -367,11 +367,15 @@ class ClaudeCodeProvider:
             outer = json.loads(stdout)
         except (TypeError, ValueError) as exc:
             raise ProviderMalformedError("Claude Code returned invalid JSON") from exc
-        if not isinstance(outer, dict) or "structured_output" not in outer:
-            raise ProviderMalformedError("Claude Code omitted structured output")
-        reply = outer["structured_output"]
-        if not isinstance(reply, dict):
+        if not isinstance(outer, dict):
             raise ProviderMalformedError("Claude Code returned an invalid reply")
+        # The CLI reports its own execution/API failures in the result envelope; a
+        # non-success is an unavailable provider, not a contract violation.
+        if outer.get("is_error") or outer.get("subtype") not in (None, "success"):
+            raise ProviderUnavailableError("Claude Code reported an error result")
+        reply = _extract_structured_reply(outer)
+        if not isinstance(reply, dict):
+            raise ProviderMalformedError("Claude Code omitted structured output")
         allowed_fields = {"type", "text", "operation", "params"}
         if set(reply) - allowed_fields:
             raise ProviderMalformedError("Claude Code returned a reply outside the contract")
@@ -391,6 +395,28 @@ class ClaudeCodeProvider:
         ):
             return ToolCall(reply["operation"], reply["params"])
         raise ProviderMalformedError("Claude Code returned a reply outside the contract")
+
+
+def _extract_structured_reply(outer: dict):
+    """Pull the schema-conforming reply out of the CLI result envelope.
+
+    The Claude Code CLI's shape varies by how it internally routes a `--json-schema`
+    turn: a direct single-turn answer lands in `structured_output` (object), while a
+    tool-routed turn (num_turns>1) puts the same schema JSON in `result` as a string.
+    Accept both so the assistant does not fail intermittently across CLI versions.
+    """
+    if isinstance(outer.get("structured_output"), dict):
+        return outer["structured_output"]
+    result = outer.get("result")
+    if isinstance(result, dict):
+        return result
+    if isinstance(result, str):
+        try:
+            parsed = json.loads(result)
+        except ValueError:
+            return None
+        return parsed if isinstance(parsed, dict) else None
+    return None
 
 
 def filter_auth_output(output: str) -> list[dict[str, str]]:
