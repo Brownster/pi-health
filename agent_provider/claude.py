@@ -43,7 +43,7 @@ _AUTH_FAILURE_MARKERS = (
     "please run /login",
     "please run claude auth login",
 )
-_AUTH_URL_HOSTS = frozenset({"claude.ai", "console.anthropic.com"})
+_AUTH_URL_HOSTS = frozenset({"claude.ai", "claude.com", "console.anthropic.com"})
 
 TURN_SCHEMA = {
     "oneOf": [

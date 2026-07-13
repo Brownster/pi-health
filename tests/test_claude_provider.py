@@ -198,7 +198,7 @@ def test_auth_output_filter_emits_only_status_and_https_authorization_url():
 def test_auth_output_filter_strips_terminal_hyperlink_controls_from_url():
     raw = (
         "If the browser didn't open, visit: "
-        "\x1b]8;;https://claude.ai/oauth/authorize?code=short-lived\x07"
+        "\x1b]8;;https://claude.com/oauth/authorize?code=short-lived\x07"
         "Sign in\x1b]8;;\x07\r\n"
         "Paste code here if prompted > "
     )
@@ -206,7 +206,7 @@ def test_auth_output_filter_strips_terminal_hyperlink_controls_from_url():
     assert filter_auth_output(raw) == [
         {
             "type": "authorization_url",
-            "url": "https://claude.ai/oauth/authorize?code=short-lived",
+            "url": "https://claude.com/oauth/authorize?code=short-lived",
         },
         {"type": "input_required", "message": "Paste the authorization code to continue."},
     ]

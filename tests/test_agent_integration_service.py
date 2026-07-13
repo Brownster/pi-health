@@ -231,7 +231,7 @@ def test_guided_auth_stream_maps_allowlisted_events_and_accepts_code():
                 "state": "running",
                 "cursor": 2,
                 "events": [
-                    {"type": "authorization_url", "url": "https://claude.ai/oauth/x"},
+                    {"type": "authorization_url", "url": "https://claude.com/oauth/x"},
                     {"type": "input_required", "message": "Paste the authorization code to continue."},
                 ],
             },
@@ -251,7 +251,7 @@ def test_guided_auth_stream_maps_allowlisted_events_and_accepts_code():
     helper.responses["agent_provider_auth_status"] = lambda _params: next(statuses)
     events = list(_service(helper).stream_auth())
     assert events[0]["operation_id"] == "provider-auth-1"
-    assert events[1]["authorization_url"].startswith("https://claude.ai/")
+    assert events[1]["authorization_url"].startswith("https://claude.com/")
     assert events[1]["_ephemeral"] is True
     assert events[-1]["done"] is True
     _service(helper).submit_auth("provider-auth-1", "approved-code")

@@ -37,7 +37,7 @@ _DENIED_CAPABILITIES = (
     "shell.execute",
     "system.update",
 )
-_AUTH_URL_HOSTS = frozenset({"claude.ai", "console.anthropic.com"})
+_AUTH_URL_HOSTS = frozenset({"claude.ai", "claude.com", "console.anthropic.com"})
 
 
 class AgentIntegrationError(Exception):
