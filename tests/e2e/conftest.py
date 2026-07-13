@@ -1246,11 +1246,13 @@ def install_v2_integrations_api_mocks():
         install_error: bool = False,
         agent_installed: bool = True,
         agent_authenticated: bool = True,
+        agent_configured: bool = True,
     ) -> None:
         state = {
             "installed": installed,
             "agent_installed": agent_installed and installed,
             "agent_authenticated": agent_authenticated and agent_installed and installed,
+            "agent_configured": agent_configured and agent_installed and installed,
             "agent_enabled": agent_installed and installed,
             "policy": {
                 "version": 1,
@@ -1306,7 +1308,7 @@ def install_v2_integrations_api_mocks():
                     agent_state = "not_installed"
                 elif not state["agent_enabled"]:
                     agent_state = "disabled"
-                elif not state["agent_authenticated"]:
+                elif not state["agent_authenticated"] or not state["agent_configured"]:
                     agent_state = "setup_required"
                 else:
                     agent_state = "connected"
@@ -1453,6 +1455,7 @@ def install_v2_integrations_api_mocks():
                 state["agent_installed"] = True
                 state["agent_enabled"] = True
                 state["agent_authenticated"] = False
+                state["agent_configured"] = True
                 route.fulfill(
                     status=202,
                     content_type="application/json",
@@ -1477,6 +1480,9 @@ def install_v2_integrations_api_mocks():
                 return
             if path == "/api/integrations/agents/repair" and method == "POST":
                 state["agent_enabled"] = True
+                values = route.request.post_data_json or {}
+                if values.get("admin_username") and values.get("admin_password"):
+                    state["agent_configured"] = True
                 route.fulfill(
                     status=202,
                     content_type="application/json",
@@ -1485,6 +1491,44 @@ def install_v2_integrations_api_mocks():
                             "operation_id": "mock-agent-repair",
                             "stream_url": "/api/integrations/agents/operations/mock-agent-repair/stream",
                         }
+                    ),
+                )
+                return
+            if path == "/api/integrations/agents/providers/claude/auth" and method == "POST":
+                values = route.request.post_data_json or {}
+                if values.get("action") == "start":
+                    route.fulfill(
+                        status=202,
+                        content_type="application/json",
+                        body=json.dumps(
+                            {
+                                "operation_id": "mock-agent-auth",
+                                "stream_url": "/api/integrations/agents/operations/mock-agent-auth/stream",
+                            }
+                        ),
+                    )
+                elif values.get("action") == "submit":
+                    route.fulfill(
+                        status=200,
+                        content_type="application/json",
+                        body=json.dumps({"accepted": True}),
+                    )
+                else:
+                    route.fulfill(
+                        status=200,
+                        content_type="application/json",
+                        body=json.dumps({"cancelled": True}),
+                    )
+                return
+            if path.endswith("/mock-agent-auth/stream") and method == "GET":
+                state["agent_authenticated"] = True
+                route.fulfill(
+                    status=200,
+                    content_type="text/event-stream",
+                    body=(
+                        'id: 0\ndata: {"step":"started","operation_id":"mock-provider-auth"}\n\n'
+                        'id: 1\ndata: {"step":"authorize","authorization_url":"https://claude.ai/oauth/authorize?code=short-lived"}\n\n'
+                        'id: 2\ndata: {"step":"complete","line":"Claude authentication completed","done":true}\n\n'
                     ),
                 )
                 return

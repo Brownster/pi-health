@@ -292,6 +292,27 @@ def test_repair_reinstalls_provider_and_runtime_before_starting():
     ]
 
 
+def test_repair_with_admin_credentials_rebuilds_bot_and_configuration():
+    helper = FakeHelper()
+    helper.responses["agent_runtime_status"].update(claude_authenticated=True)
+    events = list(
+        _service(helper).stream_repair(
+            {"admin_username": "admin", "admin_password": "write-only-password"}
+        )
+    )
+    assert events[-1]["done"] is True
+    assert [call[0] for call in helper.calls] == [
+        "agent_provider_install",
+        "agent_runtime_install",
+        "agent_runtime_status",
+        "agent_bot_secret_write",
+        "agent_configure",
+        "agent_runtime_status",
+        "agent_runtime_start",
+    ]
+    assert "write-only-password" not in json.dumps(events)
+
+
 def test_disable_test_usage_audit_and_permissions_delegate_without_secrets():
     helper = FakeHelper()
     service = _service(helper)

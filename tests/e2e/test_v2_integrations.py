@@ -13,12 +13,16 @@ def _open(
     *,
     installed=True,
     agent_installed=True,
+    agent_authenticated=True,
+    agent_configured=True,
 ):
     v2_login(page, base_url)
     install_v2_integrations_api_mocks(
         page,
         installed=installed,
         agent_installed=agent_installed,
+        agent_authenticated=agent_authenticated,
+        agent_configured=agent_configured,
     )
     page.goto(f"{base_url}/v2/integrations")
     expect(page.get_by_role("heading", name="integrations")).to_be_visible()
@@ -159,3 +163,61 @@ def test_disabling_agent_leaves_mattermost_connected(
     expect(page.get_by_text("AI Agents is disabled. Mattermost and alert delivery remain active.")).to_be_visible()
     expect(page.locator("[data-agent-integration]").get_by_text("disabled", exact=True)).to_be_visible()
     expect(page.get_by_text("connected", exact=True).first).to_be_visible()
+    page.reload()
+    expect(page.locator("[data-agent-integration]").get_by_text("disabled", exact=True)).to_be_visible()
+    expect(page.get_by_text("connected", exact=True).first).to_be_visible()
+
+
+def test_agent_authentication_recovers_after_browser_reload(
+    page: Page,
+    v2_server,
+    v2_login,
+    install_v2_integrations_api_mocks,
+):
+    _open(
+        page,
+        v2_server["base_url"],
+        v2_login,
+        install_v2_integrations_api_mocks,
+        agent_authenticated=False,
+    )
+
+    page.get_by_role("button", name="Authenticate Claude").click()
+    dialog = page.get_by_role("dialog", name="Connect Claude Code")
+    expect(dialog.get_by_text("Claude connected", exact=True)).to_be_visible()
+    expect(dialog.get_by_role("link", name="Open Claude authorization")).not_to_be_visible()
+    stored = page.evaluate(
+        """() => JSON.stringify({local: {...localStorage}, session: {...sessionStorage}})"""
+    )
+    assert "claude.ai" not in stored
+    assert "short-lived" not in stored
+    dialog.get_by_role("button", name="Done").click()
+    page.reload()
+    expect(page.locator("[data-agent-integration]").get_by_text("connected", exact=True)).to_be_visible()
+
+
+def test_agent_repair_can_restore_partial_mattermost_configuration(
+    page: Page,
+    v2_server,
+    v2_login,
+    install_v2_integrations_api_mocks,
+):
+    _open(
+        page,
+        v2_server["base_url"],
+        v2_login,
+        install_v2_integrations_api_mocks,
+        agent_configured=False,
+    )
+    agent = page.locator("[data-agent-integration]")
+    expect(agent.get_by_text("setup required", exact=True)).to_be_visible()
+    agent.get_by_role("button", name="Repair", exact=True).click()
+    dialog = page.get_by_role("dialog", name="Repair AI Agents")
+    dialog.get_by_label("Repair Mattermost bot and configuration").check()
+    dialog.get_by_label("Mattermost admin password").fill("long-test-password")
+    dialog.locator("button[data-agent-repair]").click()
+    expect(dialog.locator("[data-agent-operation-log]")).to_contain_text(
+        "AI Agents repair completed"
+    )
+    dialog.get_by_role("button", name="Close", exact=True).click()
+    expect(agent.get_by_text("connected", exact=True)).to_be_visible()

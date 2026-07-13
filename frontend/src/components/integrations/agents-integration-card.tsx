@@ -119,6 +119,7 @@ export function AgentsIntegrationCard({ refreshKey = 0 }: { refreshKey?: number 
   const [operationError, setOperationError] = useState<string | null>(null);
   const [requiresAuth, setRequiresAuth] = useState(false);
   const [installValues, setInstallValues] = useState<AgentInstallValues>(EMPTY_INSTALL);
+  const [repairMattermost, setRepairMattermost] = useState(false);
   const [advanced, setAdvanced] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
   const [authRunning, setAuthRunning] = useState(false);
@@ -179,10 +180,12 @@ export function AgentsIntegrationCard({ refreshKey = 0 }: { refreshKey?: number 
     setOperationLines([]);
     setOperationError(null);
     setRequiresAuth(false);
+    setRepairMattermost(false);
   }
 
   function closeOperation() {
     setInstallValues((current) => ({ ...current, admin_password: "" }));
+    setRepairMattermost(false);
     setOperationMode(null);
   }
 
@@ -210,7 +213,15 @@ export function AgentsIntegrationCard({ refreshKey = 0 }: { refreshKey?: number 
       if (operationMode === "install") {
         await installAgents(installValues, onEvent);
       } else {
-        await repairAgents(onEvent);
+        await repairAgents(
+          repairMattermost
+            ? {
+                admin_username: installValues.admin_username,
+                admin_password: installValues.admin_password,
+              }
+            : {},
+          onEvent,
+        );
       }
       await loadStatus();
       setNotice(
@@ -474,7 +485,7 @@ export function AgentsIntegrationCard({ refreshKey = 0 }: { refreshKey?: number 
                   {advanced && installValues.limits ? <div className="grid gap-3 border-l border-border pl-3 sm:grid-cols-3"><label className="space-y-1"><span className="text-xs text-muted-foreground">Turn timeout</span><input className={FIELD_CLASS} max={600} min={10} onChange={(event) => setInstallValues({ ...installValues, limits: { ...installValues.limits!, turn_timeout_seconds: Number(event.target.value) } })} type="number" value={installValues.limits.turn_timeout_seconds} /></label><label className="space-y-1"><span className="text-xs text-muted-foreground">Tool rounds</span><input className={FIELD_CLASS} max={10} min={1} onChange={(event) => setInstallValues({ ...installValues, limits: { ...installValues.limits!, tool_rounds_per_turn: Number(event.target.value) } })} type="number" value={installValues.limits.tool_rounds_per_turn} /></label><label className="space-y-1"><span className="text-xs text-muted-foreground">Daily invocations</span><input className={FIELD_CLASS} max={1000} min={1} onChange={(event) => setInstallValues({ ...installValues, limits: { ...installValues.limits!, invocations_per_day: Number(event.target.value) } })} type="number" value={installValues.limits.invocations_per_day} /></label></div> : null}
                   <Button className="gap-2" data-agent-install disabled={!installValues.admin_username || installValues.admin_password.length < 10} onClick={() => void runOperation()}><Bot className="h-4 w-4" />Install assistant</Button>
                 </>
-              ) : <><div className="flex items-start gap-3 border-l-2 border-info bg-info/5 px-4 py-3"><RefreshCw className="mt-0.5 h-4 w-4 shrink-0 text-info" /><p className="text-sm text-muted-foreground">Provider binaries and system services will be verified and repaired. Conversations, usage, audit records, and Mattermost alerts are preserved.</p></div><Button className="gap-2" onClick={() => void runOperation()}><Wrench className="h-4 w-4" />Start repair</Button></>}
+              ) : <><div className="flex items-start gap-3 border-l-2 border-info bg-info/5 px-4 py-3"><RefreshCw className="mt-0.5 h-4 w-4 shrink-0 text-info" /><p className="text-sm text-muted-foreground">Provider binaries and system services will be verified and repaired. Conversations, usage, audit records, and Mattermost alerts are preserved.</p></div><label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm"><input checked={repairMattermost} className="h-4 w-4 accent-primary" onChange={(event) => setRepairMattermost(event.target.checked)} type="checkbox" /><span><span className="block font-medium">Repair Mattermost bot and configuration</span><span className="block text-xs text-muted-foreground">Use this after an interrupted setup or missing bot configuration.</span></span></label>{repairMattermost ? <div className="grid gap-3 border-l border-border pl-3 sm:grid-cols-2"><label className="space-y-1"><span className="text-xs text-muted-foreground">Mattermost admin username</span><input autoComplete="username" className={FIELD_CLASS} onChange={(event) => setInstallValues({ ...installValues, admin_username: event.target.value })} value={installValues.admin_username} /></label><label className="space-y-1"><span className="text-xs text-muted-foreground">Mattermost admin password</span><input autoComplete="current-password" className={FIELD_CLASS} minLength={10} onChange={(event) => setInstallValues({ ...installValues, admin_password: event.target.value })} type="password" value={installValues.admin_password} /></label></div> : null}<Button className="gap-2" data-agent-repair disabled={repairMattermost && (!installValues.admin_username || installValues.admin_password.length < 10)} onClick={() => void runOperation()}><Wrench className="h-4 w-4" />Start repair</Button></>}
             </CardContent>
           </Card>
         </ModalOverlay>

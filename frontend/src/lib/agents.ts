@@ -158,10 +158,16 @@ export function installAgents(
 }
 
 export function repairAgents(
+  values: Partial<Pick<AgentInstallValues, "admin_username" | "admin_password">>,
   onEvent: (event: OperationEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {
-  return runAgentOperation("/api/integrations/agents/repair", {}, onEvent, signal);
+  return runAgentOperation(
+    "/api/integrations/agents/repair",
+    values,
+    onEvent,
+    signal,
+  );
 }
 
 export function startClaudeAuth(signal?: AbortSignal): Promise<OperationCreated> {
