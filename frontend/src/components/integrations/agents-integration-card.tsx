@@ -118,6 +118,7 @@ export function AgentsIntegrationCard({ refreshKey = 0 }: { refreshKey?: number 
   const [operationLines, setOperationLines] = useState<string[]>([]);
   const [operationError, setOperationError] = useState<string | null>(null);
   const [requiresAuth, setRequiresAuth] = useState(false);
+  const [finishSetup, setFinishSetup] = useState(false);
   const [installValues, setInstallValues] = useState<AgentInstallValues>(EMPTY_INSTALL);
   const [repairMattermost, setRepairMattermost] = useState(false);
   const [advanced, setAdvanced] = useState(false);
@@ -130,6 +131,7 @@ export function AgentsIntegrationCard({ refreshKey = 0 }: { refreshKey?: number 
   const [authLines, setAuthLines] = useState<string[]>([]);
   const [authError, setAuthError] = useState<string | null>(null);
   const [authComplete, setAuthComplete] = useState(false);
+  const [authRequiresSetup, setAuthRequiresSetup] = useState(false);
   const [submittingAuth, setSubmittingAuth] = useState(false);
   const [testing, setTesting] = useState(false);
   const [disabling, setDisabling] = useState(false);
@@ -175,17 +177,19 @@ export function AgentsIntegrationCard({ refreshKey = 0 }: { refreshKey?: number 
     return () => controller.abort();
   }, [status?.installed, tab]);
 
-  function openOperation(mode: OperationMode) {
+  function openOperation(mode: OperationMode, configureMattermost = false) {
     setOperationMode(mode);
     setOperationLines([]);
     setOperationError(null);
     setRequiresAuth(false);
-    setRepairMattermost(false);
+    setFinishSetup(mode === "repair" && configureMattermost);
+    setRepairMattermost(configureMattermost);
   }
 
   function closeOperation() {
     setInstallValues((current) => ({ ...current, admin_password: "" }));
     setRepairMattermost(false);
+    setFinishSetup(false);
     setOperationMode(null);
   }
 
@@ -245,6 +249,7 @@ export function AgentsIntegrationCard({ refreshKey = 0 }: { refreshKey?: number 
     setAuthLines([]);
     setAuthError(null);
     setAuthComplete(false);
+    setAuthRequiresSetup(false);
   }
 
   async function beginAuth() {
@@ -253,6 +258,7 @@ export function AgentsIntegrationCard({ refreshKey = 0 }: { refreshKey?: number 
     setAuthRunning(true);
     const controller = new AbortController();
     authAbortRef.current = controller;
+    let setupRequired = false;
     try {
       const operation = await startClaudeAuth(controller.signal);
       await streamClaudeAuth(
@@ -270,11 +276,19 @@ export function AgentsIntegrationCard({ refreshKey = 0 }: { refreshKey?: number 
           if (event.done) {
             setAuthUrl(null);
             setAuthComplete(true);
+            if (event.requires_setup) {
+              setupRequired = true;
+              setAuthRequiresSetup(true);
+            }
           }
         },
         controller.signal,
       );
-      setNotice("Claude is connected to the LimeOS assistant.");
+      setNotice(
+        setupRequired
+          ? "Claude is connected. Finish assistant setup to enable @limeos."
+          : "Claude is connected to the LimeOS assistant.",
+      );
       await loadStatus();
     } catch (caught) {
       if (!(caught instanceof DOMException && caught.name === "AbortError")) {
@@ -344,6 +358,7 @@ export function AgentsIntegrationCard({ refreshKey = 0 }: { refreshKey?: number 
 
   const mattermostReady = ["connected", "degraded"].includes(status?.mattermost.state ?? "");
   const needsProviderAuth = Boolean(status?.installed && !status.provider.authenticated);
+  const needsConfiguration = Boolean(status?.installed && !status.configured);
 
   return (
     <>
@@ -426,7 +441,7 @@ export function AgentsIntegrationCard({ refreshKey = 0 }: { refreshKey?: number 
                   <div className="flex flex-wrap gap-2">
                     {needsProviderAuth ? <Button className="gap-2" onClick={() => void beginAuth()} variant="info"><KeyRound className="h-4 w-4" />Authenticate Claude</Button> : null}
                     {status.state === "connected" ? <Button className="gap-2" disabled={testing} onClick={() => void testDelivery()} variant="info">{testing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}{testing ? "Sending" : "Test assistant"}</Button> : null}
-                    <Button className="gap-2" onClick={() => openOperation("repair")} variant="secondary"><Wrench className="h-4 w-4" />{status.state === "disabled" ? "Enable and repair" : "Repair"}</Button>
+                    <Button className="gap-2" onClick={() => openOperation("repair", needsConfiguration)} variant="secondary"><Wrench className="h-4 w-4" />{needsConfiguration ? "Finish setup" : status.state === "disabled" ? "Enable and repair" : "Repair"}</Button>
                     {status.state !== "disabled" ? <Button className="gap-2" onClick={() => setDisableOpen(true)} variant="danger"><Ban className="h-4 w-4" />Disable</Button> : null}
                     {status.mattermost.site_url ? <a className="inline-flex min-h-11 items-center gap-2 rounded-md border border-border px-4 font-mono text-sm transition-colors hover:bg-muted" href={status.mattermost.site_url} rel="noreferrer" target="_blank">Open Mattermost<ExternalLink className="h-4 w-4" /></a> : null}
                   </div>
@@ -465,7 +480,7 @@ export function AgentsIntegrationCard({ refreshKey = 0 }: { refreshKey?: number 
         <ModalOverlay onClose={operationRunning ? () => undefined : closeOperation}>
           <Card aria-labelledby="agent-operation-title" aria-modal="true" className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden" role="dialog">
             <CardHeader className="flex flex-row items-start justify-between border-b border-border">
-              <div><CardTitle id="agent-operation-title">{operationMode === "install" ? "Set up AI Agents" : "Repair AI Agents"}</CardTitle><CardDescription>{operationMode === "install" ? "Connect @limeos to Mattermost with Claude Code and read-only host access." : "Reinstall the provider and isolated runtime while preserving agent data."}</CardDescription></div>
+              <div><CardTitle id="agent-operation-title">{operationMode === "install" ? "Set up AI Agents" : finishSetup ? "Finish AI Agents setup" : "Repair AI Agents"}</CardTitle><CardDescription>{operationMode === "install" ? "Connect @limeos to Mattermost with Claude Code and read-only host access." : finishSetup ? "Create the missing Mattermost bot configuration and start the assistant." : "Reinstall the provider and isolated runtime while preserving agent data."}</CardDescription></div>
               <Button aria-label="Close agent setup" className="w-11 px-0" disabled={operationRunning} onClick={closeOperation} variant="ghost"><X className="h-4 w-4" /></Button>
             </CardHeader>
             <CardContent className="space-y-4 overflow-auto p-4 sm:p-6">
@@ -485,7 +500,7 @@ export function AgentsIntegrationCard({ refreshKey = 0 }: { refreshKey?: number 
                   {advanced && installValues.limits ? <div className="grid gap-3 border-l border-border pl-3 sm:grid-cols-3"><label className="space-y-1"><span className="text-xs text-muted-foreground">Turn timeout</span><input className={FIELD_CLASS} max={600} min={10} onChange={(event) => setInstallValues({ ...installValues, limits: { ...installValues.limits!, turn_timeout_seconds: Number(event.target.value) } })} type="number" value={installValues.limits.turn_timeout_seconds} /></label><label className="space-y-1"><span className="text-xs text-muted-foreground">Tool rounds</span><input className={FIELD_CLASS} max={10} min={1} onChange={(event) => setInstallValues({ ...installValues, limits: { ...installValues.limits!, tool_rounds_per_turn: Number(event.target.value) } })} type="number" value={installValues.limits.tool_rounds_per_turn} /></label><label className="space-y-1"><span className="text-xs text-muted-foreground">Daily invocations</span><input className={FIELD_CLASS} max={1000} min={1} onChange={(event) => setInstallValues({ ...installValues, limits: { ...installValues.limits!, invocations_per_day: Number(event.target.value) } })} type="number" value={installValues.limits.invocations_per_day} /></label></div> : null}
                   <Button className="gap-2" data-agent-install disabled={!installValues.admin_username || installValues.admin_password.length < 10} onClick={() => void runOperation()}><Bot className="h-4 w-4" />Install assistant</Button>
                 </>
-              ) : <><div className="flex items-start gap-3 border-l-2 border-info bg-info/5 px-4 py-3"><RefreshCw className="mt-0.5 h-4 w-4 shrink-0 text-info" /><p className="text-sm text-muted-foreground">Provider binaries and system services will be verified and repaired. Conversations, usage, audit records, and Mattermost alerts are preserved.</p></div><label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm"><input checked={repairMattermost} className="h-4 w-4 accent-primary" onChange={(event) => setRepairMattermost(event.target.checked)} type="checkbox" /><span><span className="block font-medium">Repair Mattermost bot and configuration</span><span className="block text-xs text-muted-foreground">Use this after an interrupted setup or missing bot configuration.</span></span></label>{repairMattermost ? <div className="grid gap-3 border-l border-border pl-3 sm:grid-cols-2"><label className="space-y-1"><span className="text-xs text-muted-foreground">Mattermost admin username</span><input autoComplete="username" className={FIELD_CLASS} onChange={(event) => setInstallValues({ ...installValues, admin_username: event.target.value })} value={installValues.admin_username} /></label><label className="space-y-1"><span className="text-xs text-muted-foreground">Mattermost admin password</span><input autoComplete="current-password" className={FIELD_CLASS} minLength={10} onChange={(event) => setInstallValues({ ...installValues, admin_password: event.target.value })} type="password" value={installValues.admin_password} /></label></div> : null}<Button className="gap-2" data-agent-repair disabled={repairMattermost && (!installValues.admin_username || installValues.admin_password.length < 10)} onClick={() => void runOperation()}><Wrench className="h-4 w-4" />Start repair</Button></>}
+              ) : <><div className="flex items-start gap-3 border-l-2 border-info bg-info/5 px-4 py-3"><RefreshCw className="mt-0.5 h-4 w-4 shrink-0 text-info" /><p className="text-sm text-muted-foreground">Provider binaries and system services will be verified and repaired. Conversations, usage, audit records, and Mattermost alerts are preserved.</p></div><label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm"><input checked={repairMattermost} className="h-4 w-4 accent-primary" onChange={(event) => setRepairMattermost(event.target.checked)} type="checkbox" /><span><span className="block font-medium">Repair Mattermost bot and configuration</span><span className="block text-xs text-muted-foreground">Use this after an interrupted setup or missing bot configuration.</span></span></label>{repairMattermost ? <div className="grid gap-3 border-l border-border pl-3 sm:grid-cols-2"><label className="space-y-1"><span className="text-xs text-muted-foreground">Mattermost admin username</span><input autoComplete="username" className={FIELD_CLASS} onChange={(event) => setInstallValues({ ...installValues, admin_username: event.target.value })} value={installValues.admin_username} /></label><label className="space-y-1"><span className="text-xs text-muted-foreground">Mattermost admin password</span><input autoComplete="current-password" className={FIELD_CLASS} minLength={10} onChange={(event) => setInstallValues({ ...installValues, admin_password: event.target.value })} type="password" value={installValues.admin_password} /></label></div> : null}<Button className="gap-2" data-agent-repair disabled={repairMattermost && (!installValues.admin_username || installValues.admin_password.length < 10)} onClick={() => void runOperation()}><Wrench className="h-4 w-4" />{finishSetup ? "Finish setup" : "Start repair"}</Button></>}
             </CardContent>
           </Card>
         </ModalOverlay>
@@ -500,7 +515,7 @@ export function AgentsIntegrationCard({ refreshKey = 0 }: { refreshKey?: number 
               {authUrl ? <a className="flex min-h-11 items-center justify-center gap-2 rounded-md border border-info/30 bg-info/10 px-4 font-mono text-sm text-info transition-colors hover:bg-info/15" href={authUrl} rel="noreferrer" target="_blank">Open Claude authorization<ExternalLink className="h-4 w-4" /></a> : null}
               {authNeedsInput ? <div className="space-y-2"><label className="block space-y-1"><span className="text-xs text-muted-foreground">Authorization response</span><textarea className={cn(FIELD_CLASS, "min-h-24 resize-y")} onChange={(event) => setAuthCode(event.target.value)} value={authCode} /></label><Button className="gap-2" disabled={!authCode.trim() || submittingAuth} onClick={() => void submitAuth()}>{submittingAuth ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}Submit response</Button></div> : null}
               {authLines.length || authError ? <pre className="max-h-48 overflow-auto rounded-md border border-border bg-black/30 p-3 font-mono text-xs leading-5 text-muted-foreground" data-agent-auth-log>{authLines.join("\n")}{authError ? `\n${authError}` : ""}</pre> : null}
-              {!authRunning ? <Button onClick={() => void closeAuth()}>{authComplete ? "Done" : "Close"}</Button> : null}
+              {!authRunning ? <div className="flex flex-wrap gap-2">{authComplete && authRequiresSetup ? <Button className="gap-2" onClick={() => { void closeAuth().then(() => openOperation("repair", true)); }}><Wrench className="h-4 w-4" />Finish setup</Button> : null}<Button onClick={() => void closeAuth()} variant={authRequiresSetup ? "secondary" : "default"}>{authComplete ? "Done" : "Close"}</Button></div> : null}
             </CardContent>
           </Card>
         </ModalOverlay>

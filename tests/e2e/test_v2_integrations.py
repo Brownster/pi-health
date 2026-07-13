@@ -211,9 +211,9 @@ def test_agent_repair_can_restore_partial_mattermost_configuration(
     )
     agent = page.locator("[data-agent-integration]")
     expect(agent.get_by_text("setup required", exact=True)).to_be_visible()
-    agent.get_by_role("button", name="Repair", exact=True).click()
-    dialog = page.get_by_role("dialog", name="Repair AI Agents")
-    dialog.get_by_label("Repair Mattermost bot and configuration").check()
+    agent.get_by_role("button", name="Finish setup", exact=True).click()
+    dialog = page.get_by_role("dialog", name="Finish AI Agents setup")
+    expect(dialog.get_by_label("Repair Mattermost bot and configuration")).to_be_checked()
     dialog.get_by_label("Mattermost admin password").fill("long-test-password")
     dialog.locator("button[data-agent-repair]").click()
     expect(dialog.locator("[data-agent-operation-log]")).to_contain_text(

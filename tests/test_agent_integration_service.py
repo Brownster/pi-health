@@ -122,6 +122,7 @@ def test_status_requires_mattermost_then_maps_runtime_states():
     )
     status = _service(helper).status()
     assert status["state"] == "connected"
+    assert status["configured"] is True
     assert "credentials" not in json.dumps(status).lower()
     helper.responses["agent_runtime_status"]["enabled"] = False
     assert _service(helper).status()["state"] == "disabled"
@@ -223,6 +224,7 @@ def test_install_rejects_unknown_fields_and_weak_admin_input():
 
 def test_guided_auth_stream_maps_allowlisted_events_and_accepts_code():
     helper = FakeHelper()
+    helper.responses["agent_runtime_status"].update(configured=True)
     statuses = iter(
         [
             {
@@ -259,6 +261,36 @@ def test_guided_auth_stream_maps_allowlisted_events_and_accepts_code():
         "agent_provider_auth_submit",
         {"operation_id": "provider-auth-1", "code": "approved-code"},
     )
+
+
+def test_guided_auth_completes_when_agent_configuration_still_needs_setup():
+    helper = FakeHelper()
+    statuses = iter(
+        [
+            {
+                "success": True,
+                "operation_id": "provider-auth-1",
+                "state": "complete",
+                "cursor": 1,
+                "events": [{"type": "status", "message": "Claude authentication completed."}],
+            }
+        ]
+    )
+    helper.responses["agent_provider_auth_start"] = {
+        "success": True,
+        "operation_id": "provider-auth-1",
+    }
+    helper.responses["agent_provider_auth_status"] = lambda _params: next(statuses)
+
+    events = list(_service(helper).stream_auth())
+
+    assert events[-1] == {
+        "step": "complete",
+        "line": "Claude authentication completed. Finish assistant setup.",
+        "requires_setup": True,
+        "done": True,
+    }
+    assert not any(call[0] == "agent_runtime_start" for call in helper.calls)
 
 
 def test_guided_auth_drops_non_claude_authorization_urls():

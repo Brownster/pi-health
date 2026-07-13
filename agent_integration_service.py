@@ -254,8 +254,24 @@ class AgentIntegrationService:
                     yield {"step": "status", "line": str(event.get("message", ""))[:160]}
             state = status.get("state")
             if state == "complete":
-                self._call("agent_runtime_start", public_error="Agent service failed to start")
-                yield {"step": "complete", "line": "Claude authentication completed", "done": True}
+                runtime = self._call(
+                    "agent_runtime_status",
+                    public_error="Agent runtime status is unavailable",
+                )
+                if runtime.get("configured"):
+                    self._call("agent_runtime_start", public_error="Agent service failed to start")
+                    yield {
+                        "step": "complete",
+                        "line": "Claude authentication completed",
+                        "done": True,
+                    }
+                else:
+                    yield {
+                        "step": "complete",
+                        "line": "Claude authentication completed. Finish assistant setup.",
+                        "requires_setup": True,
+                        "done": True,
+                    }
                 return
             if state in {"failed", "cancelled", "timeout"}:
                 yield {"step": "error", "error": "Claude authentication failed"}
@@ -466,6 +482,7 @@ class AgentIntegrationService:
             "state": state,
             "installed": bool(runtime.get("runtime_installed")),
             "enabled": bool(runtime.get("enabled")),
+            "configured": bool(runtime.get("configured")),
             "mattermost": {
                 "state": mattermost.get("state", "not_installed"),
                 "site_url": mattermost.get("site_url"),

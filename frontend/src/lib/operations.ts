@@ -15,6 +15,7 @@ export interface OperationEvent {
   operation_id?: string;
   authorization_url?: string;
   requires_auth?: boolean;
+  requires_setup?: boolean;
   expired?: boolean;
 }
 

@@ -1320,6 +1320,7 @@ def install_v2_integrations_api_mocks():
                             "state": agent_state,
                             "installed": state["agent_installed"],
                             "enabled": state["agent_enabled"],
+                            "configured": state["agent_configured"],
                             "mattermost": {
                                 "state": "connected" if state["installed"] else "not_installed",
                                 "site_url": (

@@ -19,6 +19,7 @@ export interface AgentStatus {
   state: AgentState;
   installed: boolean;
   enabled: boolean;
+  configured: boolean;
   mattermost: {
     state: string;
     site_url: string | null;
