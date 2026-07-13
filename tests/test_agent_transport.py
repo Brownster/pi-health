@@ -226,7 +226,7 @@ class FakeGateway:
         return TurnResult(text=self.result_text)
 
 
-def _listener(tmp_path, gateway, posts, **config_overrides):
+def _listener(tmp_path, gateway, posts, *, fetch_post=None, **config_overrides):
     def post_reply(*, channel_id, message, root_id):
         posts.append((channel_id, root_id, message))
         return f"reply-{len(posts)}"
@@ -237,7 +237,80 @@ def _listener(tmp_path, gateway, posts, **config_overrides):
         post_reply=post_reply,
         dedup=EventDedup(tmp_path),
         threads=ThreadMap(tmp_path),
+        fetch_post=fetch_post,
     )
+
+
+def _alert_post():
+    return {
+        "id": "root-1",
+        "message": "",
+        "props": {
+            "attachments": [
+                {
+                    "title": "Warning: container:sonarr",
+                    "text": "sonarr is not running",
+                    "fields": [
+                        {"title": "Kind", "value": "container"},
+                        {"title": "At", "value": "2026-07-13T20:04:15Z"},
+                    ],
+                }
+            ]
+        },
+    }
+
+
+def test_alert_thread_mention_injects_incident_content(tmp_path):
+    from agent_transport.events import extract_post_text
+
+    assert "sonarr is not running" in extract_post_text(_alert_post())
+
+    gateway, posts, fetched = FakeGateway(), [], []
+
+    def fetch_post(post_id):
+        fetched.append(post_id)
+        return _alert_post()
+
+    listener = _listener(tmp_path, gateway, posts, fetch_post=fetch_post)
+    # Mention that starts a thread rooted on the alert incident (root != post).
+    listener.handle_frame(_frame("@limeos investigate this", post_id="p2", root_id="root-1"))
+
+    assert fetched == ["root-1"]
+    turn_text = gateway.requests[0].text
+    assert "container:sonarr" in turn_text and "sonarr is not running" in turn_text
+    assert "investigate this" in turn_text
+
+
+def test_root_context_fetched_once_per_thread(tmp_path):
+    gateway, posts, fetched = FakeGateway(), [], []
+    listener = _listener(
+        tmp_path, gateway, posts, fetch_post=lambda pid: fetched.append(pid) or _alert_post()
+    )
+    listener.handle_frame(_frame("@limeos one", post_id="p2", root_id="root-1"))
+    listener.handle_frame(_frame("@limeos two", post_id="p3", root_id="root-1"))
+    assert fetched == ["root-1"]  # follow-ups don't re-inject the incident
+    assert "Alert being discussed" not in gateway.requests[1].text
+
+
+def test_new_thread_mention_does_not_fetch_root(tmp_path):
+    gateway, posts, fetched = FakeGateway(), [], []
+    listener = _listener(
+        tmp_path, gateway, posts, fetch_post=lambda pid: fetched.append(pid) or {}
+    )
+    # A fresh mention (root == post) has no prior incident to enrich from.
+    listener.handle_frame(_frame("@limeos status?", post_id="p1", root_id=""))
+    assert fetched == []
+
+
+def test_root_fetch_failure_is_non_fatal(tmp_path):
+    gateway, posts = FakeGateway(), []
+
+    def boom(_post_id):
+        raise RuntimeError("mm api down")
+
+    listener = _listener(tmp_path, gateway, posts, fetch_post=boom)
+    assert listener.handle_frame(_frame("@limeos hi", post_id="p2", root_id="root-1")) is True
+    assert gateway.requests[0].text == "hi"  # falls back to the bare mention text
 
 
 def test_listener_runs_turn_and_replies_in_thread(tmp_path):

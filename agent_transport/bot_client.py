@@ -123,6 +123,11 @@ class MattermostBotApi:
             if exc.status != 404:
                 raise
 
+    # -- reading -----------------------------------------------------------------
+    def get_post(self, post_id: str) -> dict:
+        post, _headers = self._request("GET", f"/api/v4/posts/{post_id}")
+        return post if isinstance(post, dict) else {}
+
     # -- posting ---------------------------------------------------------------
     def post_message(self, *, channel_id: str, message: str, root_id: str = "") -> str:
         payload: dict[str, Any] = {"channel_id": channel_id, "message": message}

@@ -64,6 +64,9 @@ class ThreadMap:
         loaded = _load(self._path).get("threads")
         self._threads: dict[str, str] = dict(loaded) if isinstance(loaded, dict) else {}
 
+    def known(self, root_post_id: str) -> bool:
+        return root_post_id in self._threads
+
     def conversation_for(self, root_post_id: str) -> str:
         existing = self._threads.get(root_post_id)
         if existing:

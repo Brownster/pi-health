@@ -171,6 +171,7 @@ def build_listener(
         post_reply=api.post_message,
         dedup=EventDedup(state_dir),
         threads=ThreadMap(state_dir),
+        fetch_post=api.get_post,
     )
 
 

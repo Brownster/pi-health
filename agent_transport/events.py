@@ -23,8 +23,41 @@ class MentionEvent:
     text: str  # mention-stripped
 
 
+#: Bound for thread-root context included in a turn (alert posts are small; hostile
+#: or pathological roots must not eat the 32 KiB turn budget).
+MAX_ROOT_TEXT_CHARS = 4096
+
+
 def _strip_mention(message: str, bot_username: str) -> str:
     return re.sub(rf"@{re.escape(bot_username)}\b", "", message).strip()
+
+
+def extract_post_text(post: dict) -> str:
+    """Readable text of a Mattermost post, including webhook attachments.
+
+    Alert incidents are incoming-webhook posts whose content lives in
+    ``props.attachments`` (title/text/fields), not ``message`` — without this the
+    assistant investigates an alert thread blind.
+    """
+    parts: list[str] = []
+    message = str(post.get("message") or "").strip()
+    if message:
+        parts.append(message)
+    attachments = ((post.get("props") or {}).get("attachments")) or []
+    for attachment in attachments:
+        if not isinstance(attachment, dict):
+            continue
+        for key in ("title", "text"):
+            value = str(attachment.get(key) or "").strip()
+            if value:
+                parts.append(value)
+        for field in attachment.get("fields") or []:
+            if isinstance(field, dict):
+                title = str(field.get("title") or "").strip()
+                value = str(field.get("value") or "").strip()
+                if title or value:
+                    parts.append(f"{title}: {value}".strip(": "))
+    return "\n".join(parts)[:MAX_ROOT_TEXT_CHARS]
 
 
 def parse_frame(

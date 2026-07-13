@@ -18,7 +18,7 @@ import time
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 
-from agent_transport.events import MentionEvent, parse_frame
+from agent_transport.events import MentionEvent, extract_post_text, parse_frame
 from agent_transport.gateway_contract import (
     MAX_TURN_INPUT_BYTES,
     MAX_TURN_OUTPUT_BYTES,
@@ -70,12 +70,16 @@ class MentionListener:
         post_reply: ReplyPoster,
         dedup: EventDedup,
         threads: ThreadMap,
+        fetch_post: Callable[[str], dict] | None = None,
     ) -> None:
         self._config = config
         self._gateway = gateway
         self._post_reply = post_reply
         self._dedup = dedup
         self._threads = threads
+        # Fetches a post by id so a mention that starts a thread on an alert incident
+        # can carry that incident's content into the turn. Best-effort; optional.
+        self._fetch_post = fetch_post
 
     # -- per-frame handling (pure of I/O except posting) -----------------------
     def handle_frame(self, frame_text: str) -> bool:
@@ -97,13 +101,27 @@ class MentionListener:
         return True
 
     def _run_turn(self, event: MentionEvent) -> None:
+        # On the first mention in a thread rooted elsewhere (e.g. an alert incident),
+        # prepend the root post's content so the assistant can see what it is being
+        # asked to investigate. Only for a new conversation, so follow-ups don't
+        # re-inject it; entirely best-effort.
+        text = event.text
+        if (
+            self._fetch_post is not None
+            and event.root_post_id != event.post_id
+            and not self._threads.known(event.root_post_id)
+        ):
+            root_text = self._root_context(event.root_post_id)
+            if root_text:
+                text = f"Alert being discussed:\n{root_text}\n\nUser: {event.text}"
+
         request = TurnRequest(
             conversation_id=self._threads.conversation_for(event.root_post_id),
             channel_id=event.channel_id,
             root_post_id=event.root_post_id,
             post_id=event.post_id,
             actor_username=event.username,
-            text=truncate_input(event.text),
+            text=truncate_input(text),
         )
         try:
             result = self._gateway.handle_turn(request)
@@ -121,6 +139,13 @@ class MentionListener:
             except Exception:  # noqa: BLE001 - delivery failure must not kill the loop
                 logger.error("failed to post reply in %s", event.root_post_id)
                 break
+
+    def _root_context(self, root_post_id: str) -> str:
+        try:
+            return extract_post_text(self._fetch_post(root_post_id) or {})
+        except Exception:  # noqa: BLE001 - context enrichment is best-effort
+            logger.error("failed to fetch root post %s", root_post_id)
+            return ""
 
     # -- run loop ---------------------------------------------------------------
     def run(
