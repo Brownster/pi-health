@@ -170,6 +170,17 @@ def test_build_operations_matches_the_default_policy_exactly():
     assert operations["disk.health"].resource_param is None
 
 
+def test_gateway_allowlist_matches_the_shipped_read_only_policy():
+    # The broker policy is authoritative, but the gateway forwards only its own allowlist;
+    # the two must stay in step so no read op is registered yet unreachable (or vice versa).
+    from agent_gateway.gateway import GatewayConfig
+
+    with open("config/agent-policy.default.json") as handle:
+        policy_operations = set(json.load(handle)["operations"])
+    assert set(GatewayConfig().allowed_operations) == policy_operations
+    assert set(build_operations(make_deps())) == policy_operations
+
+
 def test_context_reports_readonly_capabilities_and_operations():
     operations = build_operations(make_deps())
     data = operations["context"].handler({}, None)
