@@ -167,12 +167,18 @@ def test_runtime_install_creates_fixed_identities_paths_and_units(tmp_path):
         patch.object(helper, "_ensure_agent_file", return_value=True) as ensure_file,
         patch.object(helper, "run_command", side_effect=fake_run),
         patch.object(helper.shutil, "copytree"),
+        patch.object(helper.shutil, "copy2") as copy2,
+        patch.object(helper.os, "makedirs"),
         patch.object(helper.os.path, "isdir", return_value=True),
         patch.object(helper.os.path, "isfile", return_value=True),
     ):
         result = helper.cmd_agent_runtime_install({})
 
     assert result["success"] is True
+    # The package module + manifest are deployed so the broker can serve packages.status.
+    copied_sources = {call.args[0] for call in copy2.call_args_list}
+    assert any(src.endswith("limeos_packages.py") for src in copied_sources)
+    assert any(src.endswith("config/limeos-packages.json") for src in copied_sources)
     flat = [item for command in commands for item in command]
     assert "lime-agent" in flat and "limeops" in flat and "limeops-client" in flat
     account_commands = [
@@ -405,3 +411,9 @@ def test_agent_bot_secret_command_accepts_only_fixed_token_field():
     assert helper.cmd_agent_bot_secret_write({"token": "abc", "path": "/tmp/x"})[
         "success"
     ] is False
+
+
+def test_update_agent_step_skips_when_agent_not_installed():
+    with patch.object(helper.os.path, "exists", return_value=False):
+        result = helper._pihealth_update_agent(ctx={})
+    assert result["success"] is True and result["skipped"] is True

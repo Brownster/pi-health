@@ -2497,6 +2497,30 @@ def _pihealth_update_restart(ctx):
         return {'success': False, 'error': str(exc)}
 
 
+def _pihealth_update_agent(ctx):
+    """Converge the deployed AI agent runtime to the pulled release.
+
+    Only runs when the agent is already installed — a self-update never installs the
+    agent on a host that never opted in. When installed, it re-runs the idempotent
+    runtime install (re-copies the agent packages + package module/manifest, re-renders
+    the systemd unit templates so a deployed unit cannot drift from the release),
+    reconciles the package baseline, and restarts the agent so it picks up new code.
+    """
+    if not os.path.exists(AGENT_UNIT_PATH):
+        return {'success': True, 'skipped': True, 'reason': 'agent not installed'}
+    install = cmd_agent_runtime_install({})
+    if not install.get('success'):
+        return {'success': False, 'error': install.get('error', 'agent runtime refresh failed')}
+    reconcile = cmd_packages_reconcile({'mode': 'apply'})
+    run_command(['systemctl', 'restart', 'limeos-agent.service'], timeout=30)
+    return {
+        'success': True,
+        'refreshed': True,
+        'reconciled': reconcile.get('applied', []),
+        'drift': reconcile.get('drift', []),
+    }
+
+
 def cmd_pihealth_update(params):
     """Run one Pi-Health self-update step, or the legacy combined pull+restart.
 
@@ -2514,6 +2538,7 @@ def cmd_pihealth_update(params):
         "deps": _pihealth_update_deps,
         "migrate": _pihealth_update_migrate,
         "build": _pihealth_update_build,
+        "agent": _pihealth_update_agent,
         "restart": _pihealth_update_restart,
     }
     if step in step_handlers:
@@ -2760,6 +2785,18 @@ def cmd_agent_runtime_install(params):
             shutil.copytree(source, destination, dirs_exist_ok=True)
         except OSError:
             return {'success': False, 'error': 'Failed to install the agent runtime package'}
+    # Top-level module + its manifest so the broker can serve packages.status.
+    try:
+        module_source = os.path.join(repo_dir, 'limeos_packages.py')
+        if os.path.isfile(module_source):
+            shutil.copy2(module_source, os.path.join(AGENT_LIB_DIR, 'limeos_packages.py'))
+        manifest_dir = os.path.join(AGENT_LIB_DIR, 'config')
+        os.makedirs(manifest_dir, exist_ok=True)
+        manifest_source = os.path.join(repo_dir, 'config', 'limeos-packages.json')
+        if os.path.isfile(manifest_source):
+            shutil.copy2(manifest_source, os.path.join(manifest_dir, 'limeos-packages.json'))
+    except OSError:
+        return {'success': False, 'error': 'Failed to install the package manifest'}
     for argv, timeout in (
         (['python3', '-m', 'venv', AGENT_VENV_DIR], 120),
         ([os.path.join(AGENT_VENV_DIR, 'bin', 'pip'), 'install', 'websocket-client>=1.8,<2'], 300),

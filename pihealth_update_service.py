@@ -19,6 +19,20 @@ HelperCall = Callable[[str, Mapping[str, Any]], Mapping[str, Any]]
 
 _SHORT = 8
 
+# Changed paths that require converging the deployed AI agent runtime (PB-004): agent
+# code, the broker/policy, and the package baseline. Prefix match covers the package
+# dirs and the exact top-level files.
+_AGENT_UPDATE_PREFIXES = (
+    "agent_transport/",
+    "agent_gateway/",
+    "agent_provider/",
+    "agent_runtime/",
+    "limeops/",
+    "limeos_packages.py",
+    "config/limeos-packages.json",
+    "config/agent-policy.default.json",
+)
+
 
 def _short(commit: str | None) -> str:
     return (commit or "")[:_SHORT] or "unknown"
@@ -110,6 +124,22 @@ def stream_update(helper_call: HelperCall, config: Mapping[str, Any]):
         }
     else:
         yield {"step": "build", "line": "No UI changes."}
+
+    # -- AI agent runtime (only when agent code/config/baseline changed) -----
+    if any(path.startswith(_AGENT_UPDATE_PREFIXES) for path in changed):
+        yield {"step": "agent", "line": "Refreshing the AI agent runtime…"}
+        agent = call("agent")
+        if not agent.get("success"):
+            yield {"step": "agent", "error": agent.get("error", "agent refresh failed")}
+            return
+        yield {
+            "step": "agent",
+            "line": "Agent not installed; skipped."
+            if agent.get("skipped")
+            else "Agent runtime refreshed and package baseline reconciled.",
+        }
+    else:
+        yield {"step": "agent", "line": "No agent changes."}
 
     # -- restart (terminal) --------------------------------------------------
     yield {"step": "restart", "line": "Restarting service…"}

@@ -110,11 +110,14 @@ def test_update_streams_full_sequence_end_to_end(authenticated_client, monkeypat
     assert steps[:2] == ["pull", "pull"]
     assert steps[-2:] == ["restart", "restart"]
     # Every stage is represented, in order, exactly once as a group.
-    assert [step for step in dict.fromkeys(steps)] == ["pull", "deps", "migrate", "build", "restart"]
+    assert [step for step in dict.fromkeys(steps)] == [
+        "pull", "deps", "migrate", "build", "agent", "restart"
+    ]
 
     lines = {event.get("step"): event.get("line", "") for event in events}
     assert "No dependency changes." in lines["deps"]  # requirements.txt not in changed_files
     assert "No UI changes." in lines["build"]  # frontend/ not in changed_files
+    assert "No agent changes." in lines["agent"]  # no agent paths in changed_files
 
     terminal = events[-1]
     assert terminal["restarting"] is True

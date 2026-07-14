@@ -105,8 +105,19 @@ host's units can't silently diverge from the release.
 | PB-001 | Manifest schema + `config/limeos-packages.json` + validator/tests | The versioned baseline | ✅ `bb5e21e` |
 | PB-002 | `cmd_packages_reconcile` (helper) + `packages.status` limeops op | Read-only status + gated apply | ✅ done |
 | PB-003 | Nightly timer + drift→Mattermost incident + unattended-upgrades scoping | Controlled updates | Planned |
-| PB-004 | Installer runs reconcile; unit-template drift check in repair | Reproducible installs | Planned |
+| PB-004 | Deploy the agent runtime via self-update-from-repo; fix the module deploy gap | Reproducible installs | ✅ done |
 | PB-005 | Target signoff on Holly (pin holds across an apt upgrade; drift detected + reported) | Evidence | Planned |
+
+PB-004 landed: the self-update-from-repo flow (`pihealth_update_service.stream_update`) gained an
+**agent** step that runs when agent code, the broker/policy, or the package baseline changed. When
+the agent is installed it re-runs the idempotent runtime install (re-copying the agent packages
+**and** the top-level `limeos_packages.py` + manifest — a deploy gap that would have broken
+`packages.status` on the broker — and re-rendering the systemd unit templates so a deployed unit
+cannot drift from the release), reconciles the package baseline (`apply`), and restarts the agent.
+This replaces the manual `scp` hotfixes used during AA-009 and closes the unit-divergence gap
+(defect 3): every deploy re-renders units from `provisioning.py`. The remaining PB-004 idea —
+surfacing unit-template drift in the *repair* status even without a code change — folds into PB-003's
+reconcile `check`.
 
 PB-002 landed: `limeos_packages.py` gained the pure reconcile logic (`check_packages`,
 `plan_actions`, `compliance_report`, injectable version comparator); `packages.status` is a

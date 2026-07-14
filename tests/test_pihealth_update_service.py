@@ -119,3 +119,57 @@ def test_helper_exception_becomes_step_error():
 
     events = list(stream_update(Boom(), {"user": "pi"}))
     assert events[-1]["error"] == "helper offline"
+
+
+def test_agent_step_runs_when_agent_files_change():
+    helper, events = _run(
+        {
+            "pull": {"success": True, "old_commit": OLD, "new_commit": NEW,
+                     "changed_files": ["agent_gateway/gateway.py", "config/limeos-packages.json"]},
+            "migrate": {"success": True},
+            "agent": {"success": True, "refreshed": True},
+            "restart": {"success": True},
+        }
+    )
+    assert helper.calls == ["pull", "migrate", "agent", "restart"]
+    assert any(e["step"] == "agent" and "refreshed" in e.get("line", "") for e in events)
+
+
+def test_agent_step_reports_skip_when_not_installed():
+    helper, events = _run(
+        {
+            "pull": {"success": True, "old_commit": OLD, "new_commit": NEW,
+                     "changed_files": ["limeos_packages.py"]},
+            "migrate": {"success": True},
+            "agent": {"success": True, "skipped": True, "reason": "agent not installed"},
+            "restart": {"success": True},
+        }
+    )
+    assert "agent" in helper.calls
+    assert any(e["step"] == "agent" and "skipped" in e.get("line", "").lower() for e in events)
+
+
+def test_agent_step_not_called_without_agent_changes():
+    helper, events = _run(
+        {
+            "pull": {"success": True, "old_commit": OLD, "new_commit": NEW,
+                     "changed_files": ["app.py"]},
+            "migrate": {"success": True},
+            "restart": {"success": True},
+        }
+    )
+    assert "agent" not in helper.calls  # only a "No agent changes" event, no helper call
+    assert any(e["step"] == "agent" and "No agent changes" in e.get("line", "") for e in events)
+
+
+def test_agent_step_error_stops_before_restart():
+    helper, events = _run(
+        {
+            "pull": {"success": True, "old_commit": OLD, "new_commit": NEW,
+                     "changed_files": ["agent_transport/listener.py"]},
+            "migrate": {"success": True},
+            "agent": {"success": False, "error": "agent refresh failed"},
+        }
+    )
+    assert events[-1]["step"] == "agent" and events[-1]["error"] == "agent refresh failed"
+    assert "restart" not in helper.calls
