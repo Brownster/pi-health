@@ -228,6 +228,31 @@ def _installation_inventory() -> dict:  # pragma: no cover - target integration
     }
 
 
+def _dpkg_version(name: str) -> str | None:  # pragma: no cover - target integration
+    result = subprocess.run(
+        ["dpkg-query", "-W", "-f", "${Version}", name],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    return (result.stdout.strip() or None) if result.returncode == 0 else None
+
+
+def _dpkg_ge(a: str, b: str) -> bool:  # pragma: no cover - target integration
+    return subprocess.run(["dpkg", "--compare-versions", a, "ge", b], timeout=10).returncode == 0
+
+
+def _package_status() -> dict:  # pragma: no cover - target integration
+    from limeos_packages import check_packages, compliance_report, load_manifest
+
+    specs = load_manifest()
+
+    def version_of(spec):
+        return _dpkg_version(spec.name) if spec.manager == "apt" else None
+
+    return compliance_report(check_packages(specs, version_of, version_ge=_dpkg_ge))
+
+
 def default_dependencies() -> DiagnosticDependencies:  # pragma: no cover - target integration
     return DiagnosticDependencies(
         system_status=_system_status,
@@ -244,6 +269,7 @@ def default_dependencies() -> DiagnosticDependencies:  # pragma: no cover - targ
         snapraid_status=_snapraid_status,
         network_check=_network_check,
         installation_inventory=_installation_inventory,
+        package_status=_package_status,
     )
 
 

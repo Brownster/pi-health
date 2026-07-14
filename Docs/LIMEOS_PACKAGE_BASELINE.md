@@ -100,13 +100,22 @@ Fold a `check` of the deployed `limeopsd`/`limeos-agent` unit content against th
 host's units can't silently diverge from the release.
 
 ## Work packages
-| ID | Package | Deliverable |
-|---|---|---|
-| PB-001 | Manifest schema + `config/limeos-packages.json` + validator/tests | The versioned baseline |
-| PB-002 | `cmd_packages_reconcile` (helper) + `packages.status` limeops op | Read-only status + gated apply |
-| PB-003 | Nightly timer + drift→Mattermost incident + unattended-upgrades scoping | Controlled updates |
-| PB-004 | Installer runs reconcile; unit-template drift check in repair | Reproducible installs |
-| PB-005 | Target signoff on Holly (pin holds across an apt upgrade; drift detected + reported) | Evidence |
+| ID | Package | Deliverable | Status |
+|---|---|---|---|
+| PB-001 | Manifest schema + `config/limeos-packages.json` + validator/tests | The versioned baseline | ✅ `bb5e21e` |
+| PB-002 | `cmd_packages_reconcile` (helper) + `packages.status` limeops op | Read-only status + gated apply | ✅ done |
+| PB-003 | Nightly timer + drift→Mattermost incident + unattended-upgrades scoping | Controlled updates | Planned |
+| PB-004 | Installer runs reconcile; unit-template drift check in repair | Reproducible installs | Planned |
+| PB-005 | Target signoff on Holly (pin holds across an apt upgrade; drift detected + reported) | Evidence | Planned |
+
+PB-002 landed: `limeos_packages.py` gained the pure reconcile logic (`check_packages`,
+`plan_actions`, `compliance_report`, injectable version comparator); `packages.status` is a
+read-only limeops op (in the default policy + gateway allowlist) so the assistant can report
+compliance without any mutation authority; and `cmd_packages_reconcile(mode)` (helper) does
+`check` (read-only) or `apply` (manifest enforcement — install pinned versions, `apt-mark hold`,
+install missing, upgrade below `present-min`, remove `absent`), taking only `mode` and reading
+package names/versions solely from the validated manifest. Security-pocket updates stay with the
+nightly job (PB-003).
 
 ## Open decisions
 1. ~~Nightly apply scope~~ — decided: auto-apply non-critical security updates; held/critical

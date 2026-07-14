@@ -3250,6 +3250,78 @@ def cmd_agent_delivery_test(params):
         return {'success': False, 'error': 'Agent delivery test failed'}
 
 
+def _packages_apt_command(action):
+    """Translate a manifest ReconcileAction into a fixed apt argv (names/versions come
+    from the validated manifest, so no untrusted input reaches the shell)."""
+    if action.action == 'install_version':
+        return ['apt-get', 'install', '-y', '--allow-downgrades', f'{action.name}={action.version}']
+    if action.action == 'hold':
+        return ['apt-mark', 'hold', action.name]
+    if action.action in ('install', 'upgrade_min'):
+        return ['apt-get', 'install', '-y', action.name]
+    if action.action == 'remove':
+        return ['apt-get', 'remove', '-y', action.name]
+    # disable_self_update is enforced by DISABLE_AUTOUPDATER in the agent environment.
+    return None
+
+
+def cmd_packages_reconcile(params):
+    """Reconcile installed packages to the shipped manifest. Accepts only {mode}, where
+    mode is 'check' (read-only report) or 'apply' (enforce the manifest). Package names
+    and versions come only from the validated manifest, never from the caller."""
+    if not isinstance(params, dict) or set(params) - {'mode'}:
+        return {'success': False, 'error': 'packages.reconcile accepts only a mode'}
+    mode = params.get('mode', 'check')
+    if mode not in {'check', 'apply'}:
+        return {'success': False, 'error': 'mode must be check or apply'}
+    try:
+        from limeos_packages import (
+            check_packages,
+            compliance_report,
+            load_manifest,
+            plan_actions,
+        )
+        specs = load_manifest()
+    except Exception:
+        return {'success': False, 'error': 'Unable to read the package manifest'}
+
+    def dpkg_version(spec):
+        if spec.manager != 'apt':
+            return None
+        result = run_command(['dpkg-query', '-W', '-f', '${Version}', spec.name], timeout=10)
+        if result.get('returncode') != 0:
+            return None
+        return (result.get('stdout') or '').strip() or None
+
+    def dpkg_ge(a, b):
+        return run_command(['dpkg', '--compare-versions', a, 'ge', b], timeout=10).get(
+            'returncode'
+        ) == 0
+
+    if mode == 'check':
+        report = compliance_report(check_packages(specs, dpkg_version, version_ge=dpkg_ge))
+        return {'success': True, 'mode': 'check', **report}
+
+    apt_actions = [
+        action
+        for action in plan_actions(specs, dpkg_version, version_ge=dpkg_ge)
+        if action.manager == 'apt'
+    ]
+    if apt_actions:
+        run_command(['apt-get', 'update'], timeout=300)
+    applied, failed = [], []
+    for action in apt_actions:
+        argv = _packages_apt_command(action)
+        if argv is None:
+            continue
+        if run_command(argv, timeout=600).get('returncode') == 0:
+            applied.append(f'{action.action}:{action.name}')
+        else:
+            failed.append(f'{action.action}:{action.name}')
+    report = compliance_report(check_packages(specs, dpkg_version, version_ge=dpkg_ge))
+    return {'success': not failed, 'mode': 'apply', 'applied': applied, 'failed': failed, **report}
+
+
 # Command whitelist
 COMMANDS = {
     'lsblk': cmd_lsblk,
@@ -3316,6 +3388,7 @@ COMMANDS = {
     'agent_usage_read': cmd_agent_usage_read,
     'agent_audit_read': cmd_agent_audit_read,
     'agent_delivery_test': cmd_agent_delivery_test,
+    'packages_reconcile': cmd_packages_reconcile,
     'ping': lambda p: {'success': True, 'message': 'pong'}
 }
 
@@ -3337,6 +3410,7 @@ _MUTATING_COMMANDS = frozenset({
     'agent_runtime_install', 'agent_runtime_disable', 'agent_provider_install',
     'agent_provider_auth_start', 'agent_provider_auth_submit', 'agent_provider_auth_cancel',
     'agent_bot_secret_write', 'agent_configure', 'agent_runtime_start',
+    'packages_reconcile',
 })
 
 _mutation_lock = threading.Lock()

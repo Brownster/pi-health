@@ -15,7 +15,8 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 MANAGERS = frozenset({"apt", "pip", "npm", "claude"})
@@ -40,7 +41,7 @@ class PackageSpec:
     name: str
     manager: str
     policy: str
-    critical: bool
+    critical: bool = False
     version: str | None = None
     disable_self_update: bool = False
 
@@ -111,3 +112,131 @@ def load_manifest(path: Path | str = DEFAULT_MANIFEST_PATH) -> list[PackageSpec]
 
 def critical_packages(specs: list[PackageSpec]) -> list[PackageSpec]:
     return [spec for spec in specs if spec.critical]
+
+
+# -- reconcile logic (pure) ------------------------------------------------------
+#: Query an installed version for a spec; returns None when the package is absent.
+VersionOf = Callable[["PackageSpec"], "str | None"]
+#: True when version `a` is at least version `b`.
+VersionGe = Callable[[str, str], bool]
+
+
+def _version_key(version: str) -> list:
+    return [int(part) if part.isdigit() else part for part in re.findall(r"\d+|[A-Za-z]+", version)]
+
+
+def default_version_ge(a: str, b: str) -> bool:
+    """Best-effort version comparison for the pure default.
+
+    The privileged reconcile injects a dpkg-based comparator for correctness; this keeps
+    the module dependency-free and good enough for the common numeric cases.
+    """
+    try:
+        return _version_key(a) >= _version_key(b)
+    except TypeError:
+        return a >= b
+
+
+@dataclass(frozen=True)
+class PackageStatus:
+    name: str
+    manager: str
+    policy: str
+    expected: str | None
+    installed: str | None
+    compliant: bool
+    detail: str
+
+
+@dataclass(frozen=True)
+class ReconcileAction:
+    name: str
+    manager: str
+    action: str  # install | install_version | hold | upgrade_min | remove | disable_self_update
+    version: str | None = None
+
+
+def _evaluate(spec: PackageSpec, installed: str | None, version_ge: VersionGe) -> tuple[bool, str]:
+    if spec.policy == "absent":
+        if installed is None:
+            return True, "absent as required"
+        return False, f"installed ({installed}) but should be absent"
+    if installed is None:
+        return False, "not installed"
+    if spec.policy == "pinned":
+        if installed == spec.version:
+            return True, f"at pinned version {spec.version}"
+        return False, f"at {installed}, pinned to {spec.version}"
+    if spec.policy == "present-min":
+        if version_ge(installed, spec.version or ""):
+            return True, f"{installed} meets minimum {spec.version}"
+        return False, f"at {installed}, below minimum {spec.version}"
+    return True, f"present ({installed})"
+
+
+def check_packages(
+    specs: list[PackageSpec],
+    version_of: VersionOf,
+    *,
+    version_ge: VersionGe = default_version_ge,
+) -> list[PackageStatus]:
+    statuses = []
+    for spec in specs:
+        installed = version_of(spec)
+        compliant, detail = _evaluate(spec, installed, version_ge)
+        statuses.append(
+            PackageStatus(
+                name=spec.name,
+                manager=spec.manager,
+                policy=spec.policy,
+                expected=spec.version,
+                installed=installed,
+                compliant=compliant,
+                detail=detail,
+            )
+        )
+    return statuses
+
+
+def compliance_report(statuses: list[PackageStatus]) -> dict:
+    """Non-secret compliance summary for `packages.status` and the nightly job."""
+    drift = [status.name for status in statuses if not status.compliant]
+    return {
+        "ok": not drift,
+        "drift": drift,
+        "packages": [asdict(status) for status in statuses],
+    }
+
+
+def plan_actions(
+    specs: list[PackageSpec],
+    version_of: VersionOf,
+    *,
+    version_ge: VersionGe = default_version_ge,
+) -> list[ReconcileAction]:
+    """The manifest-enforcement steps `reconcile apply` should perform (no security-pocket
+    updates — that is the nightly unattended-upgrades job's role)."""
+    actions: list[ReconcileAction] = []
+    for spec in specs:
+        installed = version_of(spec)
+        if spec.policy == "absent":
+            if installed is not None:
+                actions.append(ReconcileAction(spec.name, spec.manager, "remove"))
+            continue
+        if spec.policy == "pinned":
+            if installed != spec.version:
+                actions.append(
+                    ReconcileAction(spec.name, spec.manager, "install_version", spec.version)
+                )
+            actions.append(ReconcileAction(spec.name, spec.manager, "hold"))
+            if spec.disable_self_update:
+                actions.append(ReconcileAction(spec.name, spec.manager, "disable_self_update"))
+        elif spec.policy == "present-min":
+            if installed is None or not version_ge(installed, spec.version or ""):
+                actions.append(
+                    ReconcileAction(spec.name, spec.manager, "upgrade_min", spec.version)
+                )
+        elif spec.policy == "present":
+            if installed is None:
+                actions.append(ReconcileAction(spec.name, spec.manager, "install"))
+    return actions

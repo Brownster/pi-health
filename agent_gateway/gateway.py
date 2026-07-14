@@ -77,6 +77,7 @@ class GatewayConfig:
         "mount.status",
         "snapraid.status",
         "network.check",
+        "packages.status",
     )
 
 

@@ -159,6 +159,7 @@ class DiagnosticDependencies:
     snapraid_status: Callable[[], dict]
     network_check: Callable[[str], dict]
     installation_inventory: Callable[[], dict]
+    package_status: Callable[[], dict]
 
 
 def build_operations(deps: DiagnosticDependencies) -> dict[str, OperationDefinition]:
@@ -234,4 +235,5 @@ def build_operations(deps: DiagnosticDependencies) -> dict[str, OperationDefinit
         lambda p, c: deps.installation_inventory(),
         _no_params,
     )
+    add("packages.status", lambda p, c: deps.package_status(), _no_params)
     return operations

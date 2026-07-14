@@ -5,18 +5,35 @@
     "max_output_bytes": 262144
   },
   "operations": {
-    "context": {"enabled": true},
-    "system.status": {"enabled": true},
-    "container.list": {"enabled": true},
-    "container.status": {"enabled": true, "resources": []},
+    "context": {
+      "enabled": true
+    },
+    "system.status": {
+      "enabled": true
+    },
+    "container.list": {
+      "enabled": true
+    },
+    "container.status": {
+      "enabled": true,
+      "resources": []
+    },
     "container.logs": {
       "enabled": true,
       "max_output_bytes": 131072,
       "resources": []
     },
-    "stack.list": {"enabled": true},
-    "stack.status": {"enabled": true, "resources": []},
-    "stack.inspect": {"enabled": true, "resources": []},
+    "stack.list": {
+      "enabled": true
+    },
+    "stack.status": {
+      "enabled": true,
+      "resources": []
+    },
+    "stack.inspect": {
+      "enabled": true,
+      "resources": []
+    },
     "service.status": {
       "enabled": true,
       "resources": [
@@ -42,13 +59,28 @@
         "limeos-agent"
       ]
     },
-    "disk.health": {"enabled": true},
-    "mount.status": {"enabled": true},
-    "snapraid.status": {"enabled": true},
+    "disk.health": {
+      "enabled": true
+    },
+    "mount.status": {
+      "enabled": true
+    },
+    "snapraid.status": {
+      "enabled": true
+    },
     "network.check": {
       "enabled": true,
-      "resources": ["gateway", "internet", "mattermost"]
+      "resources": [
+        "gateway",
+        "internet",
+        "mattermost"
+      ]
     },
-    "installation.inventory": {"enabled": true}
+    "installation.inventory": {
+      "enabled": true
+    },
+    "packages.status": {
+      "enabled": true
+    }
   }
 }

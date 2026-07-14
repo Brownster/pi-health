@@ -46,6 +46,7 @@ def make_deps(**overrides):
         "snapraid_status": lambda: {"status": "healthy"},
         "network_check": lambda target: {"target": target, "ok": True},
         "installation_inventory": lambda: {"units": {}},
+        "package_status": lambda: {"ok": True, "drift": [], "packages": []},
     }
     values.update(overrides)
     return DiagnosticDependencies(**values)
@@ -182,6 +183,18 @@ def test_container_status_success_envelope_through_broker():
     response = call(broker, "container.status", {"name": "jellyfin"})
     assert response["ok"] is True
     assert response["data"] == {"name": "jellyfin", "status": "exited"}
+
+
+def test_packages_status_read_op_returns_compliance_report():
+    deps = make_deps(
+        package_status=lambda: {"ok": False, "drift": ["claude-code"], "packages": [
+            {"name": "claude-code", "compliant": False, "installed": "2.1.208"}
+        ]}
+    )
+    broker = make_broker(build_operations(deps))
+    response = call(broker, "packages.status")
+    assert response["ok"] is True
+    assert response["data"]["drift"] == ["claude-code"]
 
 
 def test_container_logs_flow_redacts_and_defaults_lines():
