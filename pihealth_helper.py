@@ -2917,7 +2917,53 @@ def cmd_agent_runtime_install(params):
     ):
         if run_command(argv, timeout=60).get('returncode') != 0:
             return {'success': False, 'error': 'Failed to activate agent runtime units'}
+    _write_agent_release_marker(repo_dir)
     return {'success': True, 'runtime_installed': True}
+
+
+def _agent_repo_commit(repo_dir):
+    result = run_command(['git', '-C', repo_dir, 'rev-parse', 'HEAD'])
+    return (result.get('stdout') or '').strip() if result.get('returncode') == 0 else ''
+
+
+def _write_agent_release_marker(repo_dir):
+    """Record the deployed agent-runtime commit so startup can detect a stale deploy."""
+    commit = _agent_repo_commit(repo_dir)
+    if not commit:
+        return
+    try:
+        with open(os.path.join(AGENT_LIB_DIR, '.release'), 'w') as handle:
+            handle.write(commit + '\n')
+    except OSError:
+        pass
+
+
+def cmd_agent_converge_if_stale(params):
+    """Converge the agent runtime iff the deployed commit is behind the repo.
+
+    This closes the first-release bootstrap gap: a self-update runs the pre-pull
+    orchestrator/helper, so the release that introduces the agent step cannot run it in
+    that same flow, and a subsequent update exits as already-current. The web service
+    calls this on startup (after it has restarted on the new code), so the agent converges
+    automatically on the next boot without a second update.
+    """
+    rejected = _agent_reject_params(params)
+    if rejected:
+        return rejected
+    if not os.path.exists(AGENT_UNIT_PATH):
+        return {'success': True, 'skipped': True, 'reason': 'agent not installed'}
+    repo_dir = _agent_repo_dir()
+    if not repo_dir:
+        return {'success': True, 'skipped': True, 'reason': 'repository unavailable'}
+    head = _agent_repo_commit(repo_dir)
+    try:
+        with open(os.path.join(AGENT_LIB_DIR, '.release')) as handle:
+            deployed = handle.read().strip()
+    except OSError:
+        deployed = ''
+    if head and deployed == head:
+        return {'success': True, 'skipped': True, 'reason': 'agent runtime is current'}
+    return _pihealth_update_agent(ctx={})
 
 
 def _unit_state(unit, action):
@@ -3067,6 +3113,21 @@ def _install_claude_apt_repository():
         return {'success': False, 'error': 'Failed to configure Claude apt repository'}
 
 
+def _resolve_claude_apt_version(pinned_upstream):
+    """Full apt version of claude-code whose upstream matches the pin, or None if the
+    channel does not currently offer it."""
+    from limeos_packages import upstream_version
+
+    result = run_command(['apt-cache', 'madison', 'claude-code'], timeout=30)
+    if result.get('returncode') != 0:
+        return None
+    for line in (result.get('stdout') or '').splitlines():
+        parts = [part.strip() for part in line.split('|')]
+        if len(parts) >= 2 and upstream_version(parts[1]) == pinned_upstream:
+            return parts[1]
+    return None
+
+
 def cmd_agent_provider_install(params):
     """Install Claude Code from the fixed stable signed apt repository."""
     rejected = _agent_reject_params(params)
@@ -3075,36 +3136,43 @@ def cmd_agent_provider_install(params):
     repository = _install_claude_apt_repository()
     if not repository.get('success'):
         return repository
-    # Install the version pinned by the package manifest so a fresh install gets the tested
-    # version, not whatever the rolling apt channel serves today. (If the pinned version is
-    # no longer in the channel the install fails cleanly — the signal to test + bump the
-    # manifest in a release. Switch the manifest policy to present-min if the pin proves
-    # too tight for the rolling channel.)
-    pinned = None
+    # A missing or unreadable Claude pin is a hard error — never fall back to the rolling
+    # latest, which would install and hold an untested version while reporting success.
     try:
-        from limeos_packages import load_manifest
+        from limeos_packages import load_manifest, upstream_version
         pinned = next(
             (spec.version for spec in load_manifest()
              if spec.name == 'claude-code' and spec.policy == 'pinned' and spec.version),
             None,
         )
     except Exception:
-        pinned = None
-    install_target = f'claude-code={pinned}' if pinned else 'claude-code'
-    for argv, timeout in (
-        (['apt-get', 'update'], 300),
-        (['apt-get', 'install', '-y', '--allow-change-held-packages', install_target], 600),
-    ):
-        result = run_command(argv, timeout=timeout)
-        if result.get('returncode') != 0:
-            return {'success': False, 'error': 'Failed to install Claude Code'}
+        return {'success': False, 'error': 'Unable to read the Claude Code pin from the manifest'}
+    if not pinned:
+        return {'success': False, 'error': 'Claude Code pin missing from the package manifest'}
+    if run_command(['apt-get', 'update'], timeout=300).get('returncode') != 0:
+        return {'success': False, 'error': 'Failed to refresh the apt index'}
+    # Resolve the full Debian version whose upstream matches the pin (the pin names an
+    # upstream version like 2.1.207; the channel serves 2.1.207-1). If the pinned version
+    # is no longer offered, fail cleanly — the signal to test + bump the manifest (or move
+    # the entry to present-min for a rolling channel).
+    full_version = _resolve_claude_apt_version(upstream_version(pinned))
+    if not full_version:
+        return {'success': False,
+                'error': f'Pinned Claude Code {pinned} is not available in the apt channel'}
+    install = run_command(
+        ['apt-get', 'install', '-y', '--allow-downgrades', '--allow-change-held-packages',
+         f'claude-code={full_version}'],
+        timeout=600,
+    )
+    if install.get('returncode') != 0:
+        return {'success': False, 'error': 'Failed to install Claude Code'}
     version = run_command(['/usr/bin/claude', '--version'], timeout=10)
     if version.get('returncode') != 0:
         return {'success': False, 'error': 'Claude Code verification failed'}
     match = re.search(r'(?<!\d)\d+\.\d+\.\d+(?!\d)', version.get('stdout') or '')
     if not match or tuple(int(part) for part in match.group(0).split('.')) < (2, 1, 205):
         return {'success': False, 'error': 'Installed Claude Code version is unsupported'}
-    if pinned and match.group(0) != pinned:
+    if upstream_version(match.group(0)) != upstream_version(pinned):
         return {'success': False,
                 'error': f'Claude Code {match.group(0)} does not match the pinned {pinned}'}
     # Hold the version; the CLI's own auto-updater is disabled via DISABLE_AUTOUPDATER in the
@@ -3509,6 +3577,7 @@ COMMANDS = {
     'agent_audit_read': cmd_agent_audit_read,
     'agent_delivery_test': cmd_agent_delivery_test,
     'packages_reconcile': cmd_packages_reconcile,
+    'agent_converge_if_stale': cmd_agent_converge_if_stale,
     'ping': lambda p: {'success': True, 'message': 'pong'}
 }
 
@@ -3530,7 +3599,7 @@ _MUTATING_COMMANDS = frozenset({
     'agent_runtime_install', 'agent_runtime_disable', 'agent_provider_install',
     'agent_provider_auth_start', 'agent_provider_auth_submit', 'agent_provider_auth_cancel',
     'agent_bot_secret_write', 'agent_configure', 'agent_runtime_start',
-    'packages_reconcile',
+    'packages_reconcile', 'agent_converge_if_stale',
 })
 
 _mutation_lock = threading.Lock()

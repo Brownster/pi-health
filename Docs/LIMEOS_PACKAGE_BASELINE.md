@@ -149,13 +149,28 @@ fixed and tested:
   version can fail once the channel drops it — the clean failure is the signal to test and
   bump the manifest in a release; switch the manifest policy to `present-min` if an exact pin
   proves too tight.
-- **First-release bootstrap (documented, mitigated).** A self-update runs the *pre-pull*
-  orchestrator and helper code, so the release that first introduces the `agent` step does
-  not run it in that same flow. But `_pihealth_update_restart` already restarts **both**
-  `pi-health` and `pihealth-helper` on the new code, so the **next** update converges the
-  agent fully. Net: the PB-004 release needs the update run **twice** (or a one-off
-  `systemctl restart pihealth-helper` after the first pull). A general post-restart
-  continuation marker is a possible future refinement, not required for steady-state updates.
+- **First-release bootstrap (fixed).** A self-update runs the *pre-pull* orchestrator and
+  helper, so the release that first introduces the `agent` step cannot run it in that same
+  flow, and a subsequent update exits as already-current — so the two-run mitigation did not
+  actually work (confirmed live on Holly). Fixed with a **release marker + startup
+  convergence**: `cmd_agent_runtime_install` records the deployed commit at
+  `/usr/lib/limeos-agent/.release`; the web service, once it has restarted on the new code,
+  calls the helper `agent_converge_if_stale` in the background, which runs the full agent
+  step only when the deployed commit is behind the repo. So the agent converges automatically
+  on the next boot with no second update. `pihealth_helper.py` is also now an agent-update
+  prefix so a helper change triggers convergence in the normal flow.
+
+### Second review pass (2026-07-15) — provider-install pin correctness
+A follow-up review found the provider install still targeted an exact semver against a
+rolling channel. Fixed together:
+- **Downgrade of a held package** now works — the install passes `--allow-downgrades` *and*
+  `--allow-change-held-packages`.
+- **Fail-open pin loading removed** — a missing/unreadable Claude pin now aborts the install
+  instead of silently installing the rolling latest.
+- **Upstream/Debian-revision resolution** — the install resolves the full apt version whose
+  upstream matches the pin (via `apt-cache madison`) and installs that exact version; if the
+  channel no longer offers the pinned upstream it fails cleanly (the signal to test + bump
+  the manifest, or move the entry to `present-min`).
 
 ## Open decisions
 1. ~~Nightly apply scope~~ — decided: auto-apply non-critical security updates; held/critical

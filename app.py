@@ -1368,9 +1368,31 @@ def create_app(config=None, dependencies=None):
     if application.config["START_SCHEDULERS"]:
         init_scheduler(application)
         init_backup_scheduler(application)
+        _start_agent_convergence()
 
     print(f"Loaded {len(resolved.users)} user(s) for authentication")
     return application
+
+
+def _start_agent_convergence():
+    """Converge a stale agent runtime after a self-update restart, in the background.
+
+    A self-update runs the pre-pull orchestrator/helper, so the release that first ships
+    an agent-runtime change cannot converge it in that same flow. Once the web service has
+    restarted on the new code it asks the helper to converge if the deployed commit is
+    behind — closing the bootstrap gap without a second update. Best-effort: it never
+    blocks or fails web startup.
+    """
+    import threading
+
+    def _run():
+        try:
+            from helper_client import helper_call
+            helper_call("agent_converge_if_stale", {})
+        except Exception:
+            pass
+
+    threading.Thread(target=_run, name="agent-convergence", daemon=True).start()
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8002))

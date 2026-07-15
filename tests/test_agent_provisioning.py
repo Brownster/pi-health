@@ -254,51 +254,82 @@ def test_agent_repo_dir_resolves_helper_symlink(tmp_path):
         assert helper._agent_repo_dir() == str(repo)
 
 
-def test_provider_install_pins_the_manifest_version_and_enforces_the_hold():
+def _claude_install_run(pinned, *, madison=None, hold_rc=0):
+    """A run_command fake for provider-install: madison offers `<pinned>-1`, --version
+    reports the upstream pin, everything else succeeds."""
+    full = madison if madison is not None else f"{pinned}-1"
+
+    def fake_run(argv, **_kwargs):
+        if argv[:2] == ["apt-cache", "madison"]:
+            body = f"claude-code | {full} | https://downloads.claude.ai ...\n" if full else ""
+            return {"returncode": 0, "stdout": body, "stderr": ""}
+        if argv[:2] == ["apt-mark", "hold"]:
+            return {"returncode": hold_rc, "stderr": "cannot hold" if hold_rc else ""}
+        return {"returncode": 0, "stdout": pinned, "stderr": ""}
+
+    return fake_run
+
+
+def test_provider_install_resolves_full_debian_version_and_holds():
     from limeos_packages import load_manifest
 
     pinned = next(spec.version for spec in load_manifest() if spec.name == "claude-code")
     commands = []
 
-    def fake_run(argv, **_kwargs):
+    def fake_run(argv, **kwargs):
         commands.append(argv)
-        # Report the pinned version for the --version verification.
-        return {"returncode": 0, "stdout": pinned, "stderr": ""}
-
-    with (
-        patch.object(helper, "run_command", side_effect=fake_run),
-        patch.object(
-            helper, "_install_claude_apt_repository", return_value={"success": True}
-        ),
-    ):
-        result = helper.cmd_agent_provider_install({})
-
-    assert result["success"] is True and result["version"] == pinned
-    assert any(command[:2] == ["apt-get", "update"] for command in commands)
-    # Installs the pinned version, not the rolling latest.
-    assert [
-        "apt-get", "install", "-y", "--allow-change-held-packages", f"claude-code={pinned}"
-    ] in commands
-    assert all("curl" not in command and "bash" not in command for command in commands)
-    assert ["apt-mark", "hold", "claude-code"] in commands
-
-
-def test_provider_install_fails_when_the_hold_cannot_be_set():
-    from limeos_packages import load_manifest
-
-    pinned = next(spec.version for spec in load_manifest() if spec.name == "claude-code")
-
-    def fake_run(argv, **_kwargs):
-        if argv[:2] == ["apt-mark", "hold"]:
-            return {"returncode": 1, "stderr": "cannot hold"}
-        return {"returncode": 0, "stdout": pinned, "stderr": ""}
+        return _claude_install_run(pinned)(argv, **kwargs)
 
     with (
         patch.object(helper, "run_command", side_effect=fake_run),
         patch.object(helper, "_install_claude_apt_repository", return_value={"success": True}),
     ):
         result = helper.cmd_agent_provider_install({})
+
+    assert result["success"] is True and result["version"] == pinned
+    # Installs the resolved full Debian version, with downgrade + held flags.
+    assert [
+        "apt-get", "install", "-y", "--allow-downgrades", "--allow-change-held-packages",
+        f"claude-code={pinned}-1",
+    ] in commands
+    assert ["apt-mark", "hold", "claude-code"] in commands
+    assert all("curl" not in command and "bash" not in command for command in commands)
+
+
+def test_provider_install_fails_when_the_hold_cannot_be_set():
+    from limeos_packages import load_manifest
+
+    pinned = next(spec.version for spec in load_manifest() if spec.name == "claude-code")
+    with (
+        patch.object(helper, "run_command", side_effect=_claude_install_run(pinned, hold_rc=1)),
+        patch.object(helper, "_install_claude_apt_repository", return_value={"success": True}),
+    ):
+        result = helper.cmd_agent_provider_install({})
     assert result["success"] is False and "hold" in result["error"].lower()
+
+
+def test_provider_install_aborts_when_pin_missing_from_manifest():
+    with (
+        patch.object(helper, "run_command", return_value={"returncode": 0, "stdout": ""}),
+        patch.object(helper, "_install_claude_apt_repository", return_value={"success": True}),
+        patch("limeos_packages.load_manifest", return_value=[]),
+    ):
+        result = helper.cmd_agent_provider_install({})
+    assert result["success"] is False and "pin" in result["error"].lower()
+
+
+def test_provider_install_aborts_when_pinned_version_unavailable():
+    from limeos_packages import load_manifest
+
+    pinned = next(spec.version for spec in load_manifest() if spec.name == "claude-code")
+    # Channel only offers a different upstream (rolled forward) -> no match -> abort.
+    with (
+        patch.object(helper, "run_command",
+                     side_effect=_claude_install_run(pinned, madison="2.1.999-1")),
+        patch.object(helper, "_install_claude_apt_repository", return_value={"success": True}),
+    ):
+        result = helper.cmd_agent_provider_install({})
+    assert result["success"] is False and "not available" in result["error"].lower()
 
 
 def test_claude_repository_tracks_compatible_signed_channel():
@@ -505,3 +536,45 @@ def test_update_agent_step_reports_restart_failure():
     ):
         result = helper._pihealth_update_agent(ctx={})
     assert result["success"] is False and "restart" in result["error"].lower()
+
+
+def test_converge_if_stale_skips_when_up_to_date(tmp_path):
+    (tmp_path / ".release").write_text("abc123\n")
+    with (
+        patch.object(helper.os.path, "exists", return_value=True),
+        patch.object(helper, "AGENT_LIB_DIR", str(tmp_path)),
+        patch.object(helper, "_agent_repo_dir", return_value="/repo"),
+        patch.object(helper, "_agent_repo_commit", return_value="abc123"),
+    ):
+        result = helper.cmd_agent_converge_if_stale({})
+    assert result["skipped"] is True and "current" in result["reason"]
+
+
+def test_converge_if_stale_runs_agent_step_when_behind(tmp_path):
+    (tmp_path / ".release").write_text("old000\n")
+    with (
+        patch.object(helper.os.path, "exists", return_value=True),
+        patch.object(helper, "AGENT_LIB_DIR", str(tmp_path)),
+        patch.object(helper, "_agent_repo_dir", return_value="/repo"),
+        patch.object(helper, "_agent_repo_commit", return_value="new999"),
+        patch.object(helper, "_pihealth_update_agent",
+                     return_value={"success": True, "refreshed": True}) as step,
+    ):
+        result = helper.cmd_agent_converge_if_stale({})
+    assert result["refreshed"] is True
+    step.assert_called_once()
+
+
+def test_converge_if_stale_skips_when_agent_not_installed():
+    with patch.object(helper.os.path, "exists", return_value=False):
+        assert helper.cmd_agent_converge_if_stale({})["skipped"] is True
+
+
+def test_converge_if_stale_rejects_parameters():
+    assert helper.cmd_agent_converge_if_stale({"force": True})["success"] is False
+
+
+def test_helper_pull_change_triggers_agent_convergence():
+    from pihealth_update_service import _AGENT_UPDATE_PREFIXES
+
+    assert any("pihealth_helper.py".startswith(p) for p in _AGENT_UPDATE_PREFIXES)

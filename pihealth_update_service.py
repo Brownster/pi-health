@@ -29,6 +29,7 @@ _AGENT_UPDATE_PREFIXES = (
     "agent_runtime/",
     "limeops/",
     "limeos_packages.py",
+    "pihealth_helper.py",
     "config/limeos-packages.json",
     "config/agent-policy.default.json",
 )
