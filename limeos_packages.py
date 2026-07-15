@@ -121,6 +121,17 @@ VersionOf = Callable[["PackageSpec"], "str | None"]
 VersionGe = Callable[[str, str], bool]
 
 
+def _upstream_version(version: str) -> str:
+    """The upstream part of a Debian version: strip an epoch (`N:`) and revision (`-N`).
+
+    A `pinned` package names an upstream version (e.g. 2.1.207); the packaging revision
+    (2.1.207-1) is metadata, not a version bump, so `2.1.207-1` satisfies pin `2.1.207`.
+    Enforcement is the hold that freezes the installed version, not an exact reinstall.
+    """
+    version = version.split(":", 1)[-1]
+    return version.rsplit("-", 1)[0] if "-" in version else version
+
+
 def _version_key(version: str) -> list:
     return [int(part) if part.isdigit() else part for part in re.findall(r"\d+|[A-Za-z]+", version)]
 
@@ -164,7 +175,7 @@ def _evaluate(spec: PackageSpec, installed: str | None, version_ge: VersionGe) -
     if installed is None:
         return False, "not installed"
     if spec.policy == "pinned":
-        if installed == spec.version:
+        if _upstream_version(installed) == _upstream_version(spec.version or ""):
             return True, f"at pinned version {spec.version}"
         return False, f"at {installed}, pinned to {spec.version}"
     if spec.policy == "present-min":
@@ -224,7 +235,9 @@ def plan_actions(
                 actions.append(ReconcileAction(spec.name, spec.manager, "remove"))
             continue
         if spec.policy == "pinned":
-            if installed != spec.version:
+            if installed is None or _upstream_version(installed) != _upstream_version(
+                spec.version or ""
+            ):
                 actions.append(
                     ReconcileAction(spec.name, spec.manager, "install_version", spec.version)
                 )

@@ -201,3 +201,16 @@ def test_plan_actions_holds_a_pin_already_at_version():
     actions = plan_actions(specs, _installed({"claude-code": "2.1.207"}))
     # Already at the pin: no reinstall, but still ensure the hold.
     assert actions == [ReconcileAction("claude-code", "apt", "hold")]
+
+
+def test_pinned_ignores_debian_revision_and_epoch():
+    # dpkg reports 2.1.207-1; the manifest pins the upstream 2.1.207 — compliant, hold only.
+    specs = _specs({"name": "claude-code", "manager": "apt", "policy": "pinned",
+                    "version": "2.1.207", "critical": True})
+    statuses = check_packages(specs, _installed({"claude-code": "2.1.207-1"}))
+    assert statuses[0].compliant is True
+    actions = plan_actions(specs, _installed({"claude-code": "1:2.1.207-3"}))
+    assert actions == [ReconcileAction("claude-code", "apt", "hold")]  # no reinstall
+    # A genuine upstream change still drifts (and would attempt the pinned reinstall).
+    drifted = check_packages(specs, _installed({"claude-code": "2.1.210-1"}))
+    assert drifted[0].compliant is False
