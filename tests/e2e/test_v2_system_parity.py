@@ -23,11 +23,29 @@ def test_v2_system_metrics_render(
 ):
     page = profiled_page
     base_url = v2_server["base_url"]
+    loaded_scripts = []
+    page.on(
+        "request",
+        lambda request: loaded_scripts.append(request.url)
+        if request.resource_type == "script"
+        else None,
+    )
     _open_v2_system(page, base_url, v2_login, install_v2_system_api_mocks)
 
     expect(page.get_by_text("48.0 °C")).to_be_visible()
     expect(page.get_by_text("cpu0").first).to_be_visible()
     expect(page.get_by_text("raspberry pi")).to_be_visible()
+    expect(page.get_by_role("heading", name="performance_history", exact=True)).to_be_visible()
+    expect(page.get_by_role("heading", name="CPU and memory", exact=True)).to_be_visible()
+    assert any("performance-history" in url for url in loaded_scripts)
+    expect(page.locator("[data-testid='history-chart-cpu_percent'] svg")).to_be_visible()
+    expect(page.locator("path.recharts-line-curve")).to_have_count(4)
+    summary = page.locator("[data-testid='history-summary-cpu_percent']")
+    assert summary.evaluate("node => node.scrollWidth <= node.clientWidth")
+    expect(page.get_by_role("button", name="24h")).to_have_attribute("aria-pressed", "true")
+    page.get_by_role("button", name="7d").click()
+    expect(page.get_by_role("button", name="7d")).to_have_attribute("aria-pressed", "true")
+    expect(page.get_by_text("30 minute samples", exact=True)).to_be_visible()
     assert_no_horizontal_overflow(page, f"v2 system ({viewport_profile_name})")
 
 

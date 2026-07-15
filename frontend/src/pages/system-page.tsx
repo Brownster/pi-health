@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { TriangleAlert } from "lucide-react";
 
 import { Badge, StatusBadge } from "@/components/ui/badge";
@@ -10,6 +10,12 @@ import { RefreshControls } from "@/components/ui/refresh-controls";
 import { type SystemStats, type UsageSummary, fetchSystemStats } from "@/lib/system";
 import { formatBytes, formatClockTime, formatPercent } from "@/lib/format";
 import { cn } from "@/lib/utils";
+
+const PerformanceHistory = lazy(() =>
+  import("@/components/system/performance-history").then((module) => ({
+    default: module.PerformanceHistory,
+  })),
+);
 
 type MetricTone = "primary" | "success" | "warning" | "danger" | "info";
 
@@ -75,12 +81,29 @@ function usageDetail(usage: UsageSummary): string {
   return `${formatBytes(usage.used)} / ${formatBytes(usage.total)}`;
 }
 
+function StorageMetric({ label, usage }: { label: string; usage: UsageSummary }) {
+  const tone = getMetricTone(usage.percent);
+  return (
+    <div className="border-t border-divider py-3 first:border-t-0 first:pt-0 last:pb-0">
+      <p className="font-mono text-[10px] uppercase text-muted-foreground">{label}</p>
+      <div className="mt-1 flex items-baseline justify-between gap-3">
+        <span className={cn("font-mono text-lg", getToneTextClass(tone))}>
+          {formatPercent(usage.percent)}
+        </span>
+        <span className="truncate font-mono text-[10px] text-dim">{usageDetail(usage)}</span>
+      </div>
+      <MetricBar className="mt-2" label={`${label} storage`} tone={tone} value={usage.percent} />
+    </div>
+  );
+}
+
 export function SystemPage() {
   const [stats, setStats] = useState<SystemStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState("Never");
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const isMountedRef = useRef(true);
 
   const loadStats = useCallback(async (reason: "initial" | "manual" | "poll") => {
@@ -104,6 +127,9 @@ export function SystemPage() {
       }
     } finally {
       if (isMountedRef.current) {
+        if (reason !== "initial") {
+          setHistoryRefreshKey((current) => current + 1);
+        }
         if (reason === "initial") {
           setIsLoading(false);
         }
@@ -238,19 +264,9 @@ export function SystemPage() {
               <CardHeader>
                 <CardTitle className="text-base sm:text-lg">Storage</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-3">
-                <MetricCard
-                  detail={usageDetail(stats.disk)}
-                  label="primary"
-                  percent={stats.disk.percent}
-                  value={formatPercent(stats.disk.percent)}
-                />
-                <MetricCard
-                  detail={usageDetail(stats.disk2)}
-                  label="secondary"
-                  percent={stats.disk2.percent}
-                  value={formatPercent(stats.disk2.percent)}
-                />
+              <CardContent>
+                <StorageMetric label="primary" usage={stats.disk} />
+                <StorageMetric label="secondary" usage={stats.disk2} />
               </CardContent>
             </Card>
 
@@ -272,6 +288,18 @@ export function SystemPage() {
           </div>
         </>
       ) : null}
+
+      <Suspense
+        fallback={
+          <Card>
+            <CardContent className="flex h-[240px] items-center justify-center p-5 text-sm text-muted-foreground">
+              Loading performance history...
+            </CardContent>
+          </Card>
+        }
+      >
+        <PerformanceHistory refreshKey={historyRefreshKey} />
+      </Suspense>
     </section>
   );
 }

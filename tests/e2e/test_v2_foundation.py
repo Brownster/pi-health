@@ -40,6 +40,13 @@ def test_v2_lime_dashboard(
 ):
     page = profiled_page
     base_url = v2_server["base_url"]
+    loaded_scripts = []
+    page.on(
+        "request",
+        lambda request: loaded_scripts.append(request.url)
+        if request.resource_type == "script"
+        else None,
+    )
 
     overview = {
         "health": {"state": "healthy", "issues": []},
@@ -140,6 +147,7 @@ def test_v2_lime_dashboard(
     page.reload()
     expect(page.get_by_role("switch", name="Auto refresh")).to_have_attribute("aria-checked", "true")
     expect(page.get_by_role("button", name="60s")).to_have_attribute("aria-pressed", "true")
+    assert not any("performance-history" in url for url in loaded_scripts)
     if viewport_profile_name in ("phone", "tablet"):
         assert_no_horizontal_overflow(page, f"Lime OS dashboard ({viewport_profile_name})")
 

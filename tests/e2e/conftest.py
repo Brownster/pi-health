@@ -1129,8 +1129,63 @@ def install_v2_system_api_mocks():
         stats.update(overrides or {})
 
         def _handler(route):
-            if urlparse(route.request.url).path == "/api/stats":
+            parsed = urlparse(route.request.url)
+            if parsed.path == "/api/stats":
                 route.fulfill(status=200, content_type="application/json", body=json.dumps(stats))
+                return
+            if parsed.path == "/api/system/history":
+                selected_range = parse_qs(parsed.query).get("range", ["24h"])[0]
+                bucket_seconds = {"24h": 300, "7d": 1800, "30d": 7200}.get(selected_range, 300)
+                history = {
+                    "range": selected_range,
+                    "from": "2026-07-14T12:00:00Z",
+                    "to": "2026-07-15T12:00:00Z",
+                    "bucket_seconds": bucket_seconds,
+                    "points": [
+                        {
+                            "at": "2026-07-15T09:00:00Z",
+                            "cpu_percent": 10.0,
+                            "memory_percent": 20.0,
+                            "temperature_celsius": 46.0,
+                            "disk_percent": 49.0,
+                        },
+                        {
+                            "at": "2026-07-15T09:05:00Z",
+                            "cpu_percent": 12.5,
+                            "memory_percent": 22.5,
+                            "temperature_celsius": 47.0,
+                            "disk_percent": 49.5,
+                        },
+                        {
+                            "at": "2026-07-15T09:10:00Z",
+                            "cpu_percent": None,
+                            "memory_percent": None,
+                            "temperature_celsius": None,
+                            "disk_percent": None,
+                        },
+                        {
+                            "at": "2026-07-15T09:15:00Z",
+                            "cpu_percent": 15.0,
+                            "memory_percent": 27.5,
+                            "temperature_celsius": 49.0,
+                            "disk_percent": 50.0,
+                        },
+                        {
+                            "at": "2026-07-15T09:20:00Z",
+                            "cpu_percent": 12.5,
+                            "memory_percent": 25.0,
+                            "temperature_celsius": 48.0,
+                            "disk_percent": 50.0,
+                        },
+                    ],
+                    "summary": {
+                        "cpu_percent": {"current": 12.5, "min": 10.0, "average": 12.5, "max": 15.0},
+                        "memory_percent": {"current": 25.0, "min": 20.0, "average": 23.75, "max": 27.5},
+                        "temperature_celsius": {"current": 48.0, "min": 46.0, "average": 47.5, "max": 49.0},
+                        "disk_percent": {"current": 50.0, "min": 49.0, "average": 49.625, "max": 50.0},
+                    },
+                }
+                route.fulfill(status=200, content_type="application/json", body=json.dumps(history))
                 return
             route.continue_()
 
