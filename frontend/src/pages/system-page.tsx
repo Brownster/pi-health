@@ -1,16 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { RefreshCw, TriangleAlert } from "lucide-react";
+import { TriangleAlert } from "lucide-react";
 
 import { Badge, StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { MetricBar } from "@/components/ui/metric-bar";
 import { PageHeader } from "@/components/ui/page-header";
+import { RefreshControls } from "@/components/ui/refresh-controls";
 import { type SystemStats, type UsageSummary, fetchSystemStats } from "@/lib/system";
 import { formatBytes, formatClockTime, formatPercent } from "@/lib/format";
 import { cn } from "@/lib/utils";
-
-const POLL_INTERVAL_MS = 10_000;
 
 type MetricTone = "primary" | "success" | "warning" | "danger" | "info";
 
@@ -118,10 +117,8 @@ export function SystemPage() {
   useEffect(() => {
     isMountedRef.current = true;
     void loadStats("initial");
-    const intervalId = window.setInterval(() => void loadStats("poll"), POLL_INTERVAL_MS);
     return () => {
       isMountedRef.current = false;
-      window.clearInterval(intervalId);
     };
   }, [loadStats]);
 
@@ -129,15 +126,10 @@ export function SystemPage() {
     <section className="space-y-4 sm:space-y-6">
       <PageHeader
         actions={
-          <Button
-            className="gap-2"
-            disabled={isRefreshing}
-            onClick={() => void loadStats("manual")}
-            variant="secondary"
-          >
-            <RefreshCw aria-hidden="true" className={cn("h-4 w-4", isRefreshing ? "animate-spin" : "")} />
-            {isRefreshing ? "refreshing" : "refresh"}
-          </Button>
+          <RefreshControls
+            isRefreshing={isLoading || isRefreshing}
+            onRefresh={() => void loadStats("manual")}
+          />
         }
         description={`last updated: ${lastUpdated}`}
         status={stats?.isRaspberryPi ? <StatusBadge label="raspberry pi" tone="info" /> : null}

@@ -1,25 +1,40 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ExternalLink, RefreshCw, Server, TriangleAlert } from "lucide-react";
+import {
+  Activity,
+  Boxes,
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  CircleAlert,
+  ExternalLink,
+  Gauge,
+  Layers3,
+  Server,
+  TriangleAlert,
+} from "lucide-react";
 import { Link } from "react-router-dom";
 
 import { Badge, StatusBadge } from "@/components/ui/badge";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { MetricBar } from "@/components/ui/metric-bar";
 import { PageHeader } from "@/components/ui/page-header";
-import {
-  type ContainerSummary,
-  fetchContainers,
-  getContainerWebPort,
-  getContainerWebUrl,
-} from "@/lib/containers";
+import { RefreshControls } from "@/components/ui/refresh-controls";
 import { formatBytes, formatClockTime, formatPercent } from "@/lib/format";
-import { fetchSystemStats, type SystemStats } from "@/lib/system";
+import {
+  type OverviewAlertRecord,
+  type OverviewApplication,
+  type OverviewHealthState,
+  type OverviewIssue,
+  fetchOverview,
+  getOverviewApplicationUrl,
+  type OverviewSnapshot,
+} from "@/lib/overview";
 import { cn } from "@/lib/utils";
 
-const POLL_INTERVAL_MS = 30_000;
+const INITIAL_APPLICATION_LIMIT = 12;
 
-const serviceNames: Record<string, string> = {
+const applicationNames: Record<string, string> = {
   transmission: "Transmission",
   jackett: "Jackett",
   sonarr: "Sonarr",
@@ -36,18 +51,42 @@ const serviceNames: Record<string, string> = {
 
 type MetricTone = "primary" | "success" | "warning" | "danger" | "info";
 
+const healthPresentation: Record<
+  OverviewHealthState,
+  { label: string; detail: string; tone: "success" | "warning" | "danger" | "neutral" }
+> = {
+  healthy: {
+    label: "All systems operational",
+    detail: "Metrics, workloads, and monitored resources are healthy.",
+    tone: "success",
+  },
+  attention: {
+    label: "Attention required",
+    detail: "One or more resources need review.",
+    tone: "warning",
+  },
+  critical: {
+    label: "Critical issues",
+    detail: "Immediate action is recommended.",
+    tone: "danger",
+  },
+  unknown: {
+    label: "Status unavailable",
+    detail: "Some health sources could not be checked.",
+    tone: "neutral",
+  },
+};
+
 function getFriendlyName(name: string): string {
   return (
-    serviceNames[name.toLowerCase()] ??
-    name
-      .replace(/[-_]+/g, " ")
-      .replace(/\b\w/g, (character) => character.toUpperCase())
+    applicationNames[name.toLowerCase()] ??
+    name.replace(/[-_]+/g, " ").replace(/\b\w/g, (character) => character.toUpperCase())
   );
 }
 
 function getTone(value: number | null, warningAt: number, dangerAt: number): MetricTone {
   if (value === null) {
-    return "primary";
+    return "info";
   }
   if (value >= dangerAt) {
     return "danger";
@@ -69,7 +108,19 @@ function getToneTextClass(tone: MetricTone): string {
 }
 
 function getErrorMessage(error: unknown): string {
-  return error instanceof Error && error.message ? error.message : "Request failed";
+  return error instanceof Error && error.message ? error.message : "Unable to load Overview";
+}
+
+function formatEventTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "time unavailable";
+  }
+  const now = new Date();
+  if (date.toDateString() === now.toDateString()) {
+    return formatClockTime(date);
+  }
+  return new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short" }).format(date);
 }
 
 function MetricCard({
@@ -86,239 +137,329 @@ function MetricCard({
   detail?: string;
 }) {
   return (
-    <Card>
-      <CardContent className="p-4">
-        <p className="font-mono text-[11px] uppercase tracking-[0.1em] text-muted-foreground">
-          {label}
-        </p>
-        <div className="mt-1 flex min-h-8 items-baseline justify-between gap-3">
-          <p className={cn("font-mono text-xl font-medium", getToneTextClass(tone))}>{value}</p>
-          {detail ? <p className="truncate font-mono text-[10px] text-dim">{detail}</p> : null}
-        </div>
-        <MetricBar className="mt-2" label={`${label} ${value}`} tone={tone} value={percent} />
-      </CardContent>
-    </Card>
+    <Link className="group block focus-visible:outline-none" to="/system">
+      <Card className="h-full transition-colors group-hover:border-[#303b48] group-focus-visible:ring-2 group-focus-visible:ring-ring">
+        <CardContent className="p-4">
+          <div className="flex items-center justify-between gap-2">
+            <p className="font-mono text-[11px] uppercase text-muted-foreground">{label}</p>
+            <Gauge aria-hidden="true" className="h-3.5 w-3.5 text-dim transition-colors group-hover:text-primary" />
+          </div>
+          <div className="mt-1 flex min-h-8 items-baseline justify-between gap-3">
+            <p className={cn("font-mono text-xl font-medium", getToneTextClass(tone))}>{value}</p>
+            {detail ? <p className="truncate font-mono text-[10px] text-dim">{detail}</p> : null}
+          </div>
+          <MetricBar className="mt-2" label={`${label} ${value}`} tone={tone} value={percent} />
+        </CardContent>
+      </Card>
+    </Link>
   );
 }
 
-function ServiceCard({ container }: { container: ContainerSummary }) {
-  const port = getContainerWebPort(container);
-  const isRunning = container.status === "running";
-  const friendlyName = getFriendlyName(container.name);
-  const serviceUrl = getContainerWebUrl(container);
+function HealthSummary({ state, issues }: { state: OverviewHealthState; issues: OverviewIssue[] }) {
+  const presentation = healthPresentation[state];
+  const icon = state === "healthy" ? CheckCircle2 : state === "critical" ? CircleAlert : TriangleAlert;
+  const Icon = icon;
+  const toneClasses = {
+    success: "border-success/60 bg-success/[0.06] text-success",
+    warning: "border-warning/60 bg-warning/[0.06] text-warning",
+    danger: "border-danger/60 bg-danger/[0.06] text-danger",
+    neutral: "border-muted-foreground/40 bg-muted/40 text-muted-foreground",
+  }[presentation.tone];
 
   return (
-    <Card className="transition-colors duration-200 hover:border-primary/25">
-      <CardContent className="p-4">
-        <div className="flex min-w-0 items-center gap-3">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-[#28323f] bg-muted font-mono text-sm font-semibold text-primary">
-            {friendlyName.charAt(0).toUpperCase()}
-          </div>
+    <section aria-labelledby="overview-health-title" className={cn("border-l-2", toneClasses)}>
+      <div className="flex flex-col gap-4 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+        <div className="flex min-w-0 items-start gap-3">
+          <Icon aria-hidden="true" className="mt-0.5 h-5 w-5 shrink-0" />
           <div className="min-w-0">
-            <h2 className="truncate text-[15px] font-semibold text-foreground">{friendlyName}</h2>
-            <p className="mt-0.5 truncate font-mono text-[11px] text-dim">
-              {port ? `port:${port}` : container.image}
-            </p>
+            <h2 className="font-mono text-base font-semibold text-foreground" id="overview-health-title">
+              {presentation.label}
+            </h2>
+            <p className="mt-0.5 text-sm text-muted-foreground">{presentation.detail}</p>
           </div>
         </div>
-
-        <div className="mt-4 flex min-h-9 items-center justify-between gap-3">
-          <StatusBadge
-            label={container.status || "unknown"}
-            tone={isRunning ? "success" : container.status === "exited" ? "danger" : "neutral"}
-          />
-          {serviceUrl && isRunning ? (
-            <a
-              className="inline-flex min-h-9 cursor-pointer items-center gap-1.5 rounded-md border border-primary/25 px-3 font-mono text-xs text-primary transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              href={serviceUrl}
-              rel="noopener noreferrer"
-              target="_blank"
+        <Badge tone={presentation.tone}>{issues.length} {issues.length === 1 ? "issue" : "issues"}</Badge>
+      </div>
+      {issues.length ? (
+        <div className="grid border-t border-current/15 sm:grid-cols-2 xl:grid-cols-3">
+          {issues.slice(0, 3).map((issue) => (
+            <Link
+              className="flex min-w-0 items-center justify-between gap-3 border-b border-current/10 px-4 py-2.5 text-sm transition-colors hover:bg-white/[0.025] sm:border-r sm:px-5 xl:border-b-0"
+              key={issue.code}
+              to={issue.path}
             >
-              open
-              <ExternalLink aria-hidden="true" className="h-3.5 w-3.5" />
-            </a>
-          ) : (
-            <Link className={buttonVariants({ variant: "ghost", size: "sm" })} to="/containers">
-              manage
+              <span className="min-w-0 truncate text-foreground">{issue.label}</span>
+              <span className="shrink-0 font-mono text-[10px] uppercase text-current">review</span>
             </Link>
-          )}
+          ))}
         </div>
-      </CardContent>
-    </Card>
+      ) : null}
+    </section>
   );
+}
+
+function AlertRow({ record, recovered = false }: { record: OverviewAlertRecord; recovered?: boolean }) {
+  return (
+    <div className="flex min-w-0 items-start gap-3 border-t border-divider py-3 first:border-t-0 first:pt-0 last:pb-0">
+      <span
+        aria-hidden="true"
+        className={cn(
+          "mt-1.5 h-2 w-2 shrink-0 rounded-full",
+          recovered ? "bg-success" : record.severity === "critical" ? "bg-danger" : "bg-warning",
+        )}
+      />
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm text-foreground">{record.summary}</p>
+        <p className="mt-0.5 font-mono text-[10px] text-dim">
+          {recovered ? "resolved" : record.kind} · {formatEventTime(record.at)}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function ApplicationLauncher({ application }: { application: OverviewApplication }) {
+  const name = getFriendlyName(application.name);
+  const isRunning = application.status === "running";
+  const url = getOverviewApplicationUrl(application);
+  const content = (
+    <>
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded border border-[#2a3440] bg-muted font-mono text-xs font-semibold text-primary">
+        {name.charAt(0).toUpperCase()}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-medium text-foreground">{name}</span>
+        <span className="mt-0.5 flex items-center gap-1.5 font-mono text-[10px] text-dim">
+          <span className={cn("h-1.5 w-1.5 rounded-full", isRunning ? "bg-success" : "bg-danger")} />
+          {application.status}
+        </span>
+      </span>
+      {url && isRunning ? <ExternalLink aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-dim" /> : null}
+    </>
+  );
+  const className = "flex min-h-14 min-w-0 items-center gap-3 rounded-md border border-border bg-card px-3 py-2 transition-colors hover:border-[#303b48] hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+
+  if (url && isRunning) {
+    return <a className={className} href={url} rel="noopener noreferrer" target="_blank">{content}</a>;
+  }
+  return <Link className={className} to="/containers">{content}</Link>;
 }
 
 export function DashboardHomePage() {
-  const [containers, setContainers] = useState<ContainerSummary[]>([]);
-  const [stats, setStats] = useState<SystemStats | null>(null);
-  const [errors, setErrors] = useState<string[]>([]);
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [snapshot, setSnapshot] = useState<OverviewSnapshot | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [showAllApplications, setShowAllApplications] = useState(false);
 
-  const loadDashboard = useCallback(async (signal?: AbortSignal, background = false) => {
-    if (!background) {
+  const loadOverview = useCallback(async (reason: "initial" | "manual" | "poll", signal?: AbortSignal) => {
+    if (reason !== "poll") {
       setIsRefreshing(true);
     }
-
-    const [containersResult, statsResult] = await Promise.allSettled([
-      fetchContainers({ includeStats: false, signal }),
-      fetchSystemStats(signal),
-    ]);
-
-    if (signal?.aborted) {
-      return;
+    try {
+      const next = await fetchOverview(signal);
+      if (signal?.aborted) {
+        return;
+      }
+      setSnapshot(next);
+      setError(null);
+      const collectedAt = new Date(next.collected_at);
+      setLastUpdated(Number.isNaN(collectedAt.getTime()) ? new Date() : collectedAt);
+    } catch (caughtError) {
+      if (!signal?.aborted) {
+        setError(getErrorMessage(caughtError));
+      }
+    } finally {
+      if (!signal?.aborted && reason !== "poll") {
+        setIsRefreshing(false);
+      }
     }
-
-    const nextErrors: string[] = [];
-    let loaded = false;
-
-    if (containersResult.status === "fulfilled") {
-      setContainers(containersResult.value);
-      loaded = true;
-    } else {
-      nextErrors.push(`Containers: ${getErrorMessage(containersResult.reason)}`);
-    }
-
-    if (statsResult.status === "fulfilled") {
-      setStats(statsResult.value);
-      nextErrors.push(...statsResult.value.warnings.map((warning) => `System metrics: ${warning.message}`));
-      loaded = true;
-    } else {
-      nextErrors.push(`System metrics: ${getErrorMessage(statsResult.reason)}`);
-    }
-
-    setErrors(nextErrors);
-    if (loaded) {
-      setLastUpdated(new Date());
-    }
-    setIsRefreshing(false);
   }, []);
 
   useEffect(() => {
     const controller = new AbortController();
-    void loadDashboard(controller.signal, true);
-    const pollId = window.setInterval(() => void loadDashboard(controller.signal, true), POLL_INTERVAL_MS);
+    void loadOverview("initial", controller.signal);
+    return () => controller.abort();
+  }, [loadOverview]);
 
-    return () => {
-      controller.abort();
-      window.clearInterval(pollId);
-    };
-  }, [loadDashboard]);
-
-  const webServices = useMemo(
-    () => containers.filter((container) => getContainerWebPort(container) !== null),
-    [containers],
+  const applications = useMemo(
+    () => showAllApplications
+      ? (snapshot?.applications ?? [])
+      : (snapshot?.applications ?? []).slice(0, INITIAL_APPLICATION_LIMIT),
+    [showAllApplications, snapshot?.applications],
   );
-  const runningServices = webServices.filter((container) => container.status === "running");
 
-  const cpuTone = getTone(stats?.cpuPercent ?? null, 60, 85);
-  const memoryTone = getTone(stats?.memory.percent ?? null, 70, 90);
-  const temperature = stats?.temperatureCelsius ?? null;
-  const temperatureTone = getTone(temperature, 65, 80);
-  const diskTone = getTone(stats?.disk.percent ?? null, 75, 90);
-
-  const status = !lastUpdated ? (
+  const metrics = snapshot?.metrics;
+  const temperature = metrics?.temperature_celsius ?? null;
+  const healthState = snapshot?.health.state ?? "unknown";
+  const headerStatus = !snapshot ? (
     <StatusBadge label="syncing" tone="info" />
-  ) : errors.length ? (
-    <StatusBadge label="degraded" tone="warning" />
   ) : (
-    <StatusBadge label={`${runningServices.length} up`} tone="success" />
+    <StatusBadge
+      label={healthState}
+      tone={healthState === "healthy" ? "success" : healthState === "critical" ? "danger" : healthState === "attention" ? "warning" : "neutral"}
+    />
   );
 
   return (
     <section className="space-y-5 sm:space-y-6">
       <PageHeader
         actions={
-          <Button
-            className="gap-2"
-            disabled={isRefreshing}
-            onClick={() => void loadDashboard(undefined, false)}
-            variant="secondary"
-          >
-            <RefreshCw aria-hidden="true" className={cn("h-4 w-4", isRefreshing && "animate-spin")} />
-            refresh
-          </Button>
+          <RefreshControls
+            isRefreshing={isRefreshing}
+            onRefresh={() => void loadOverview("manual")}
+          />
         }
-        description={
-          <>
-            docker · {containers.length} containers · {lastUpdated ? `synced ${formatClockTime(lastUpdated)}` : "syncing"}
-          </>
-        }
-        status={status}
-        title="web_services"
+        description={lastUpdated ? `last updated: ${formatClockTime(lastUpdated)}` : "collecting current status"}
+        status={headerStatus}
+        title="overview"
       />
 
-      {errors.length ? (
-        <Card aria-live="polite" className="border-warning/30" role="status">
-          <CardContent className="flex items-start gap-3 p-4 text-sm text-warning">
-            <TriangleAlert aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
-            <div className="space-y-1">
-              {errors.map((error) => (
-                <p key={error}>{error}</p>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+      {error ? (
+        <div aria-live="polite" className="flex items-start gap-3 border-l-2 border-danger bg-danger/[0.06] p-4 text-sm text-danger" role="status">
+          <TriangleAlert aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
+          <div>
+            <p className="font-medium">Overview refresh failed</p>
+            <p className="mt-0.5 text-muted-foreground">{error}</p>
+          </div>
+        </div>
       ) : null}
+
+      {snapshot ? <HealthSummary issues={snapshot.health.issues} state={snapshot.health.state} /> : null}
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard
           label="cpu"
-          percent={stats?.cpuPercent ?? null}
-          tone={cpuTone}
-          value={formatPercent(stats?.cpuPercent)}
+          percent={metrics?.cpu_percent ?? null}
+          tone={getTone(metrics?.cpu_percent ?? null, 60, 85)}
+          value={formatPercent(metrics?.cpu_percent)}
         />
         <MetricCard
-          detail={stats ? `${formatBytes(stats.memory.used)} / ${formatBytes(stats.memory.total)}` : undefined}
+          detail={metrics ? `${formatBytes(metrics.memory_used)} / ${formatBytes(metrics.memory_total)}` : undefined}
           label="memory"
-          percent={stats?.memory.percent ?? null}
-          tone={memoryTone}
-          value={formatPercent(stats?.memory.percent)}
+          percent={metrics?.memory_percent ?? null}
+          tone={getTone(metrics?.memory_percent ?? null, 70, 90)}
+          value={formatPercent(metrics?.memory_percent)}
         />
         <MetricCard
           label="temperature"
           percent={temperature === null ? null : (temperature / 90) * 100}
-          tone={temperatureTone}
+          tone={getTone(temperature, 65, 80)}
           value={temperature === null ? "—" : `${temperature.toFixed(1)} °C`}
         />
         <MetricCard
-          detail={stats ? `${formatBytes(stats.disk.used)} / ${formatBytes(stats.disk.total)}` : undefined}
+          detail={metrics ? `${formatBytes(metrics.disk_used)} / ${formatBytes(metrics.disk_total)}` : undefined}
           label="storage"
-          percent={stats?.disk.percent ?? null}
-          tone={diskTone}
-          value={formatPercent(stats?.disk.percent)}
+          percent={metrics?.disk_percent ?? null}
+          tone={getTone(metrics?.disk_percent ?? null, 75, 90)}
+          value={formatPercent(metrics?.disk_percent)}
         />
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-divider pb-3">
-        <div className="flex items-center gap-2">
-          <Server aria-hidden="true" className="h-4 w-4 text-primary" />
-          <h2 className="font-mono text-sm font-semibold text-foreground">services</h2>
-        </div>
-        <Badge tone="neutral">{webServices.length} detected</Badge>
-      </div>
-
-      {webServices.length ? (
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-          {webServices.map((container) => (
-            <ServiceCard container={container} key={container.id} />
-          ))}
-        </div>
-      ) : (
+      <div className="grid gap-3 xl:grid-cols-2">
         <Card>
-          <CardContent className="flex min-h-40 flex-col items-center justify-center gap-3 p-6 text-center">
-            <Server aria-hidden="true" className="h-6 w-6 text-dim" />
-            <p className="text-sm text-muted-foreground">
-              {lastUpdated ? "No web services detected." : "Loading services..."}
-            </p>
-            {lastUpdated ? (
-              <Link className={buttonVariants({ variant: "outline", size: "sm" })} to="/containers">
-                view containers
+          <CardContent className="p-4 sm:p-5">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Activity aria-hidden="true" className="h-4 w-4 text-primary" />
+                <h2 className="font-mono text-sm font-semibold">workloads</h2>
+              </div>
+              <Badge tone="neutral">current</Badge>
+            </div>
+            <div className="mt-4 grid divide-y divide-divider sm:grid-cols-2 sm:divide-x sm:divide-y-0">
+              <Link className="pb-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:pb-0 sm:pr-5" to="/containers">
+                <div className="flex items-center justify-between">
+                  <span className="flex items-center gap-2 text-sm text-muted-foreground"><Boxes aria-hidden="true" className="h-4 w-4" /> containers</span>
+                  <span className="font-mono text-2xl text-foreground">{snapshot?.workloads.containers.total ?? "—"}</span>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Badge tone="success">{snapshot?.workloads.containers.running ?? 0} running</Badge>
+                  <Badge tone={(snapshot?.workloads.containers.unhealthy ?? 0) > 0 ? "danger" : "neutral"}>{snapshot?.workloads.containers.unhealthy ?? 0} unhealthy</Badge>
+                  <Badge tone={(snapshot?.workloads.containers.stopped ?? 0) > 0 ? "warning" : "neutral"}>{snapshot?.workloads.containers.stopped ?? 0} stopped</Badge>
+                </div>
               </Link>
-            ) : null}
+              <Link className="pt-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:pl-5 sm:pt-0" to="/stacks">
+                <div className="flex items-center justify-between">
+                  <span className="flex items-center gap-2 text-sm text-muted-foreground"><Layers3 aria-hidden="true" className="h-4 w-4" /> stacks</span>
+                  <span className="font-mono text-2xl text-foreground">{snapshot?.workloads.stacks.total ?? "—"}</span>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Badge tone="success">{snapshot?.workloads.stacks.healthy ?? 0} healthy</Badge>
+                  <Badge tone={(snapshot?.workloads.stacks.partial ?? 0) > 0 ? "warning" : "neutral"}>{snapshot?.workloads.stacks.partial ?? 0} partial</Badge>
+                  <Badge tone={(snapshot?.workloads.stacks.down ?? 0) > 0 ? "danger" : "neutral"}>{snapshot?.workloads.stacks.down ?? 0} down</Badge>
+                </div>
+              </Link>
+            </div>
           </CardContent>
         </Card>
-      )}
+
+        <Card>
+          <CardContent className="p-4 sm:p-5">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <TriangleAlert aria-hidden="true" className="h-4 w-4 text-primary" />
+                <h2 className="font-mono text-sm font-semibold">alerts</h2>
+              </div>
+              <Link className="font-mono text-[11px] text-muted-foreground hover:text-primary" to="/integrations">view policy</Link>
+            </div>
+            <div className="mt-4">
+              {snapshot?.alerts.active.length ? (
+                snapshot.alerts.active.slice(0, 3).map((record) => <AlertRow key={record.key} record={record} />)
+              ) : (
+                <div className="flex items-center gap-3 py-1 text-sm text-muted-foreground">
+                  <CheckCircle2 aria-hidden="true" className="h-4 w-4 text-success" />
+                  No active alerts.
+                </div>
+              )}
+              {snapshot?.alerts.recent_recoveries.length ? (
+                <div className="mt-4 border-t border-divider pt-3">
+                  <p className="mb-3 font-mono text-[10px] uppercase text-dim">recently resolved</p>
+                  {snapshot.alerts.recent_recoveries.map((record) => <AlertRow key={`${record.key}:${record.at}`} record={record} recovered />)}
+                </div>
+              ) : null}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {snapshot?.warnings.length ? (
+        <div className="flex items-start gap-3 border-l-2 border-warning/60 bg-warning/[0.04] px-4 py-3 text-sm">
+          <TriangleAlert aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+          <p className="text-muted-foreground">
+            <span className="font-medium text-warning">Data gaps:</span>{" "}
+            {snapshot.warnings.slice(0, 3).map((warning) => warning.message).join(" · ")}
+          </p>
+        </div>
+      ) : null}
+
+      <section aria-labelledby="applications-title">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-divider pb-3">
+          <div className="flex items-center gap-2">
+            <Server aria-hidden="true" className="h-4 w-4 text-primary" />
+            <h2 className="font-mono text-sm font-semibold" id="applications-title">applications</h2>
+          </div>
+          <Badge tone="neutral">{snapshot?.applications.length ?? 0} detected</Badge>
+        </div>
+
+        {applications.length ? (
+          <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+            {applications.map((application) => <ApplicationLauncher application={application} key={application.id} />)}
+          </div>
+        ) : (
+          <div className="mt-3 flex min-h-24 items-center justify-center rounded-md border border-border bg-card p-5 text-sm text-muted-foreground">
+            {snapshot ? "No web applications detected." : "Loading applications..."}
+          </div>
+        )}
+
+        {(snapshot?.applications.length ?? 0) > INITIAL_APPLICATION_LIMIT ? (
+          <div className="mt-3 flex justify-center">
+            <Button className="gap-2" onClick={() => setShowAllApplications((current) => !current)} size="sm" variant="ghost">
+              {showAllApplications ? <ChevronUp aria-hidden="true" className="h-4 w-4" /> : <ChevronDown aria-hidden="true" className="h-4 w-4" />}
+              {showAllApplications ? "show less" : `show ${(snapshot?.applications.length ?? 0) - INITIAL_APPLICATION_LIMIT} more`}
+            </Button>
+          </div>
+        ) : null}
+      </section>
     </section>
   );
 }

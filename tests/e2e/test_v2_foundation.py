@@ -25,7 +25,7 @@ def test_v2_shell_viewport_matrix(
     v2_login(page, base_url)
     page.goto(f"{base_url}/v2")
     expect(page.locator("[data-testid='lime-os-brand']:visible")).to_be_visible()
-    expect(page.get_by_role("heading", name="web_services")).to_be_visible()
+    expect(page.get_by_role("heading", name="overview", exact=True)).to_be_visible()
 
     if viewport_profile_name in ("phone", "tablet"):
         assert_no_horizontal_overflow(page, f"v2 shell ({viewport_profile_name})")
@@ -41,50 +41,105 @@ def test_v2_lime_dashboard(
     page = profiled_page
     base_url = v2_server["base_url"]
 
-    containers = [
-        {
-            "id": "jellyfin-1",
-            "name": "jellyfin",
-            "image": "jellyfin/jellyfin:latest",
-            "status": "running",
-            "ports": [{"host_port": 8096, "container_port": 8096, "protocol": "tcp"}],
-            "web_url": "https://media.example.test/jellyfin",
+    overview = {
+        "health": {"state": "healthy", "issues": []},
+        "metrics": {
+            "cpu_percent": 12.5,
+            "memory_percent": 37.5,
+            "memory_used": 3_221_225_472,
+            "memory_total": 8_589_934_592,
+            "temperature_celsius": 52.4,
+            "disk_percent": 60.0,
+            "disk_used": 659_706_976_665,
+            "disk_total": 1_099_511_627_776,
         },
-        {
-            "id": "sonarr-1",
-            "name": "sonarr",
-            "image": "linuxserver/sonarr:latest",
-            "status": "running",
-            "ports": [{"host_port": 8989, "container_port": 8989, "protocol": "tcp"}],
+        "workloads": {
+            "containers": {"total": 18, "running": 18, "unhealthy": 0, "stopped": 0},
+            "stacks": {"total": 4, "healthy": 4, "partial": 0, "down": 0, "unknown": 0},
         },
-    ]
-    stats = {
-        "cpu_usage_percent": 12.5,
-        "memory_usage": {"total": 8_589_934_592, "used": 3_221_225_472, "free": 5_368_709_120, "percent": 37.5},
-        "disk_usage": {"total": 1_099_511_627_776, "used": 659_706_976_665, "free": 439_804_651_111, "percent": 60.0},
-        "temperature_celsius": 52.4,
-        "network_usage": {"bytes_recv": 1_000_000, "bytes_sent": 500_000},
+        "alerts": {
+            "active": [],
+            "recent_recoveries": [
+                {
+                    "event": "recovery",
+                    "key": "disk:archive",
+                    "kind": "disk",
+                    "severity": "warning",
+                    "summary": "Archive disk recovered",
+                    "at": "2026-07-15T10:00:00Z",
+                }
+            ],
+        },
+        "applications": [
+            {
+                "id": "jellyfin-1",
+                "name": "jellyfin",
+                "image": "jellyfin/jellyfin:latest",
+                "status": "running",
+                "port": 8096,
+                "web_url": "https://media.example.test/jellyfin",
+                "web_scheme": None,
+            },
+            {
+                "id": "sonarr-1",
+                "name": "sonarr",
+                "image": "linuxserver/sonarr:latest",
+                "status": "running",
+                "port": 8989,
+                "web_url": None,
+                "web_scheme": None,
+            },
+            *[
+                {
+                    "id": f"service-{index}",
+                    "name": name,
+                    "image": f"limeos/{name}:latest",
+                    "status": "running",
+                    "port": 9000 + index,
+                    "web_url": None,
+                    "web_scheme": None,
+                }
+                for index, name in enumerate(
+                    ["radarr", "lidarr", "jackett", "transmission", "nzbget", "audiobookshelf", "airsonic-advanced", "get_iplayer", "rtdclient", "prowlarr", "bazarr"]
+                )
+            ],
+        ],
+        "warnings": [],
+        "collected_at": "2026-07-15T12:00:00Z",
     }
 
     page.route(
-        "**/api/containers?stats=false",
-        lambda route: route.fulfill(status=200, content_type="application/json", body=json.dumps(containers)),
-    )
-    page.route(
-        "**/api/stats",
-        lambda route: route.fulfill(status=200, content_type="application/json", body=json.dumps(stats)),
+        "**/api/overview",
+        lambda route: route.fulfill(status=200, content_type="application/json", body=json.dumps(overview)),
     )
     page.goto(f"{base_url}/login.html")
     v2_login(page, base_url)
     page.goto(f"{base_url}/v2")
 
-    expect(page.get_by_role("heading", name="web_services")).to_be_visible()
-    expect(page.get_by_text("2 up", exact=True)).to_be_visible()
-    expect(page.get_by_role("heading", name="Jellyfin")).to_be_visible()
+    expect(page.get_by_role("heading", name="overview", exact=True)).to_be_visible()
+    expect(page.get_by_role("heading", name="All systems operational")).to_be_visible()
+    expect(page.get_by_text("18 running", exact=True)).to_be_visible()
+    expect(page.get_by_text("4 healthy", exact=True)).to_be_visible()
+    expect(page.get_by_text("Archive disk recovered", exact=True)).to_be_visible()
+    expect(page.get_by_text("Jellyfin", exact=True)).to_be_visible()
     expect(page.locator("a[href='https://media.example.test/jellyfin']")).to_be_visible()
-    expect(page.get_by_role("heading", name="Sonarr")).to_be_visible()
+    expect(page.get_by_text("Sonarr", exact=True)).to_be_visible()
     expect(page.get_by_text("12.5%", exact=True)).to_be_visible()
     expect(page.get_by_text("52.4 °C", exact=True)).to_be_visible()
+    expect(page.get_by_text("Bazarr", exact=True)).to_have_count(0)
+    page.get_by_role("button", name="show 1 more").click()
+    expect(page.get_by_text("Bazarr", exact=True)).to_be_visible()
+
+    auto_refresh = page.get_by_role("switch", name="Auto refresh")
+    expect(auto_refresh).to_have_attribute("aria-checked", "false")
+    expect(page.get_by_role("button", name="30s")).to_be_disabled()
+    auto_refresh.click()
+    expect(auto_refresh).to_have_attribute("aria-checked", "true")
+    page.get_by_role("button", name="60s").click()
+    expect(page.get_by_role("button", name="60s")).to_have_attribute("aria-pressed", "true")
+    page.reload()
+    expect(page.get_by_role("switch", name="Auto refresh")).to_have_attribute("aria-checked", "true")
+    expect(page.get_by_role("button", name="60s")).to_have_attribute("aria-pressed", "true")
     if viewport_profile_name in ("phone", "tablet"):
         assert_no_horizontal_overflow(page, f"Lime OS dashboard ({viewport_profile_name})")
 
