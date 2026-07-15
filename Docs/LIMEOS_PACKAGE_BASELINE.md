@@ -128,6 +128,35 @@ install missing, upgrade below `present-min`, remove `absent`), taking only `mod
 package names/versions solely from the validated manifest. Security-pocket updates stay with the
 nightly job (PB-003).
 
+## Review findings addressed (2026-07-15)
+A review of `2366e41..d4789e0` surfaced four convergence/reporting gaps; the high ones are
+fixed and tested:
+
+- **Stale broker policy on update (fixed).** Install/repair preserved the on-disk policy,
+  so a host created before a new read op (e.g. `packages.status`) kept denying it. The
+  update `agent` step now runs `_migrate_agent_policy`: it merges the release's default
+  operation set over the deployed policy (adding new ops) while **preserving the
+  host-specific resource allowlists** setup filled in, validates via `LimeOpsPolicy`, and
+  rewrites it before the broker restarts.
+- **Agent update failures reported as success (fixed).** The `agent` step now fails if the
+  policy migration, the package reconcile (`apply`), or the agent restart fails, instead of
+  always returning success.
+- **Claude pin not enforceable (fixed).** `cmd_agent_provider_install` installs the
+  manifest-pinned version (`claude-code=<pin>`, `--allow-change-held-packages`), verifies
+  the running version matches the pin, and **fails if `apt-mark hold` fails**. The reconcile
+  `install_version` now passes `--allow-change-held-packages` so a pin up/downgrade works on
+  an already-held package. *Tradeoff:* the Claude apt channel is rolling, so pinning an exact
+  version can fail once the channel drops it — the clean failure is the signal to test and
+  bump the manifest in a release; switch the manifest policy to `present-min` if an exact pin
+  proves too tight.
+- **First-release bootstrap (documented, mitigated).** A self-update runs the *pre-pull*
+  orchestrator and helper code, so the release that first introduces the `agent` step does
+  not run it in that same flow. But `_pihealth_update_restart` already restarts **both**
+  `pi-health` and `pihealth-helper` on the new code, so the **next** update converges the
+  agent fully. Net: the PB-004 release needs the update run **twice** (or a one-off
+  `systemctl restart pihealth-helper` after the first pull). A general post-restart
+  continuation marker is a possible future refinement, not required for steady-state updates.
+
 ## Open decisions
 1. ~~Nightly apply scope~~ — decided: auto-apply non-critical security updates; held/critical
    updates are posted to the updates channel and applied on the next run after approval.

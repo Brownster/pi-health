@@ -254,12 +254,16 @@ def test_agent_repo_dir_resolves_helper_symlink(tmp_path):
         assert helper._agent_repo_dir() == str(repo)
 
 
-def test_provider_install_uses_only_signed_apt_repository_commands():
+def test_provider_install_pins_the_manifest_version_and_enforces_the_hold():
+    from limeos_packages import load_manifest
+
+    pinned = next(spec.version for spec in load_manifest() if spec.name == "claude-code")
     commands = []
 
     def fake_run(argv, **_kwargs):
         commands.append(argv)
-        return {"returncode": 0, "stdout": "2.1.205", "stderr": ""}
+        # Report the pinned version for the --version verification.
+        return {"returncode": 0, "stdout": pinned, "stderr": ""}
 
     with (
         patch.object(helper, "run_command", side_effect=fake_run),
@@ -269,12 +273,32 @@ def test_provider_install_uses_only_signed_apt_repository_commands():
     ):
         result = helper.cmd_agent_provider_install({})
 
-    assert result["success"] is True
+    assert result["success"] is True and result["version"] == pinned
     assert any(command[:2] == ["apt-get", "update"] for command in commands)
-    assert any(command[:4] == ["apt-get", "install", "-y", "claude-code"] for command in commands)
+    # Installs the pinned version, not the rolling latest.
+    assert [
+        "apt-get", "install", "-y", "--allow-change-held-packages", f"claude-code={pinned}"
+    ] in commands
     assert all("curl" not in command and "bash" not in command for command in commands)
-    # The CLI is pinned so a background apt bump cannot change its contract.
     assert ["apt-mark", "hold", "claude-code"] in commands
+
+
+def test_provider_install_fails_when_the_hold_cannot_be_set():
+    from limeos_packages import load_manifest
+
+    pinned = next(spec.version for spec in load_manifest() if spec.name == "claude-code")
+
+    def fake_run(argv, **_kwargs):
+        if argv[:2] == ["apt-mark", "hold"]:
+            return {"returncode": 1, "stderr": "cannot hold"}
+        return {"returncode": 0, "stdout": pinned, "stderr": ""}
+
+    with (
+        patch.object(helper, "run_command", side_effect=fake_run),
+        patch.object(helper, "_install_claude_apt_repository", return_value={"success": True}),
+    ):
+        result = helper.cmd_agent_provider_install({})
+    assert result["success"] is False and "hold" in result["error"].lower()
 
 
 def test_claude_repository_tracks_compatible_signed_channel():
@@ -417,3 +441,67 @@ def test_update_agent_step_skips_when_agent_not_installed():
     with patch.object(helper.os.path, "exists", return_value=False):
         result = helper._pihealth_update_agent(ctx={})
     assert result["success"] is True and result["skipped"] is True
+
+
+def test_policy_migration_adds_new_operations_and_preserves_resources(tmp_path):
+    # Deployed policy predates packages.status and carries host-specific resources.
+    policy_path = tmp_path / "agent-policy.json"
+    policy_path.write_text(json.dumps({
+        "schema_version": "1",
+        "defaults": {"timeout_seconds": 30, "max_output_bytes": 262144},
+        "operations": {
+            "context": {"enabled": True},
+            "container.status": {"enabled": True, "resources": ["jellyfin", "sonarr"]},
+        },
+    }))
+    written = {}
+
+    def fake_write(path, content, mode=0o644):
+        written[path] = content
+        return {"success": True, "path": path}
+
+    with (
+        patch.object(helper, "AGENT_POLICY_PATH", str(policy_path)),
+        patch.object(helper, "_agent_repo_dir", return_value="."),
+        patch.object(helper, "_write_managed_file", side_effect=fake_write),
+        patch.object(helper, "run_command", return_value={"returncode": 0}),
+    ):
+        result = helper._migrate_agent_policy()
+
+    assert result["success"] is True
+    assert "packages.status" in result["added_operations"]
+    merged = json.loads(written[str(policy_path)])
+    # New op added...
+    assert "packages.status" in merged["operations"]
+    # ...and the host resource allowlist preserved.
+    assert merged["operations"]["container.status"]["resources"] == ["jellyfin", "sonarr"]
+
+
+def test_policy_migration_skips_when_not_installed(tmp_path):
+    with patch.object(helper, "AGENT_POLICY_PATH", str(tmp_path / "absent.json")):
+        assert helper._migrate_agent_policy()["skipped"] is True
+
+
+def test_update_agent_step_reports_reconcile_failure():
+    with (
+        patch.object(helper.os.path, "exists", return_value=True),
+        patch.object(helper, "_migrate_agent_policy", return_value={"success": True}),
+        patch.object(helper, "cmd_agent_runtime_install", return_value={"success": True}),
+        patch.object(helper, "cmd_packages_reconcile",
+                     return_value={"success": False, "failed": ["x"], "drift": ["x"]}),
+        patch.object(helper, "run_command", return_value={"returncode": 0}),
+    ):
+        result = helper._pihealth_update_agent(ctx={})
+    assert result["success"] is False and result["failed"] == ["x"]
+
+
+def test_update_agent_step_reports_restart_failure():
+    with (
+        patch.object(helper.os.path, "exists", return_value=True),
+        patch.object(helper, "_migrate_agent_policy", return_value={"success": True}),
+        patch.object(helper, "cmd_agent_runtime_install", return_value={"success": True}),
+        patch.object(helper, "cmd_packages_reconcile", return_value={"success": True}),
+        patch.object(helper, "run_command", return_value={"returncode": 1}),
+    ):
+        result = helper._pihealth_update_agent(ctx={})
+    assert result["success"] is False and "restart" in result["error"].lower()

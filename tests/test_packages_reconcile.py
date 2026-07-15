@@ -47,7 +47,10 @@ def test_reconcile_apply_pins_the_cli_and_installs_missing():
         result = helper.cmd_packages_reconcile({"mode": "apply"})
     assert result["mode"] == "apply"
     assert ["apt-get", "update"] in fake.calls
-    assert ["apt-get", "install", "-y", "--allow-downgrades", "claude-code=2.1.207"] in fake.calls
+    assert [
+        "apt-get", "install", "-y", "--allow-downgrades", "--allow-change-held-packages",
+        "claude-code=2.1.207",
+    ] in fake.calls
     assert ["apt-mark", "hold", "claude-code"] in fake.calls
     assert ["apt-get", "install", "-y", "python3-psutil"] in fake.calls
     # Only manifest packages are ever touched — no arbitrary names.

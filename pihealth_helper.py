@@ -2497,25 +2497,85 @@ def _pihealth_update_restart(ctx):
         return {'success': False, 'error': str(exc)}
 
 
+def _migrate_agent_policy():
+    """Converge the deployed broker policy to the current default operation set while
+    preserving host-specific resource allowlists.
+
+    The install/repair path preserves the on-disk policy, so an installation created
+    before a new read operation existed would keep denying it. This merges the release's
+    default operations (adding new ones) over the existing policy, carrying forward the
+    per-operation resources that setup filled in, validates the result, and rewrites it.
+    """
+    if not os.path.exists(AGENT_POLICY_PATH):
+        return {'success': True, 'skipped': True, 'reason': 'policy not installed'}
+    repo_dir = _agent_repo_dir()
+    try:
+        with open(os.path.join(repo_dir, 'config', 'agent-policy.default.json')) as handle:
+            default_policy = json.load(handle)
+        with open(AGENT_POLICY_PATH) as handle:
+            current = json.load(handle)
+    except (OSError, ValueError):
+        return {'success': False, 'error': 'Unable to read the broker policy'}
+    current_ops = current.get('operations', {}) if isinstance(current, dict) else {}
+    merged_ops = {}
+    for name, spec in (default_policy.get('operations') or {}).items():
+        op = dict(spec)
+        previous = current_ops.get(name)
+        if isinstance(previous, dict) and 'resources' in previous and 'resources' in op:
+            op['resources'] = previous['resources']  # keep host-specific allowlists
+        merged_ops[name] = op
+    merged = dict(default_policy)
+    merged['operations'] = merged_ops
+    try:
+        from limeops.policy import LimeOpsPolicy
+        LimeOpsPolicy.from_mapping(merged)  # validate before writing
+    except Exception:
+        return {'success': False, 'error': 'Migrated broker policy failed validation'}
+    written = _write_managed_file(
+        AGENT_POLICY_PATH, json.dumps(merged, indent=2, sort_keys=True) + '\n', 0o640
+    )
+    if not written.get('success'):
+        return {'success': False, 'error': 'Failed to write the broker policy'}
+    if run_command(['chown', 'root:limeops', AGENT_POLICY_PATH]).get('returncode') != 0:
+        return {'success': False, 'error': 'Failed to secure the broker policy'}
+    added = sorted(set(merged_ops) - set(current_ops))
+    return {'success': True, 'migrated': True, 'added_operations': added}
+
+
 def _pihealth_update_agent(ctx):
     """Converge the deployed AI agent runtime to the pulled release.
 
     Only runs when the agent is already installed — a self-update never installs the
-    agent on a host that never opted in. When installed, it re-runs the idempotent
-    runtime install (re-copies the agent packages + package module/manifest, re-renders
-    the systemd unit templates so a deployed unit cannot drift from the release),
-    reconciles the package baseline, and restarts the agent so it picks up new code.
+    agent on a host that never opted in. When installed, it migrates the broker policy to
+    the release's operation set (preserving host resources), re-runs the idempotent
+    runtime install (re-copies the agent packages + package module/manifest and re-renders
+    the systemd unit templates so a deployed unit cannot drift), reconciles the package
+    baseline, and restarts the agent. A failure at any step is reported, not swallowed.
     """
     if not os.path.exists(AGENT_UNIT_PATH):
         return {'success': True, 'skipped': True, 'reason': 'agent not installed'}
-    install = cmd_agent_runtime_install({})
+    policy = _migrate_agent_policy()
+    if not policy.get('success'):
+        return {'success': False, 'error': policy.get('error', 'broker policy migration failed')}
+    install = cmd_agent_runtime_install({})  # restarts limeopsd -> loads the migrated policy
     if not install.get('success'):
         return {'success': False, 'error': install.get('error', 'agent runtime refresh failed')}
     reconcile = cmd_packages_reconcile({'mode': 'apply'})
-    run_command(['systemctl', 'restart', 'limeos-agent.service'], timeout=30)
+    if not reconcile.get('success', True):
+        return {
+            'success': False,
+            'error': 'Package baseline reconcile reported failures',
+            'failed': reconcile.get('failed', []),
+            'drift': reconcile.get('drift', []),
+        }
+    if run_command(['systemctl', 'restart', 'limeos-agent.service'], timeout=30).get(
+        'returncode'
+    ) != 0:
+        return {'success': False, 'error': 'Failed to restart the agent runtime'}
     return {
         'success': True,
         'refreshed': True,
+        'added_operations': policy.get('added_operations', []),
         'reconciled': reconcile.get('applied', []),
         'drift': reconcile.get('drift', []),
     }
@@ -3015,9 +3075,25 @@ def cmd_agent_provider_install(params):
     repository = _install_claude_apt_repository()
     if not repository.get('success'):
         return repository
+    # Install the version pinned by the package manifest so a fresh install gets the tested
+    # version, not whatever the rolling apt channel serves today. (If the pinned version is
+    # no longer in the channel the install fails cleanly — the signal to test + bump the
+    # manifest in a release. Switch the manifest policy to present-min if the pin proves
+    # too tight for the rolling channel.)
+    pinned = None
+    try:
+        from limeos_packages import load_manifest
+        pinned = next(
+            (spec.version for spec in load_manifest()
+             if spec.name == 'claude-code' and spec.policy == 'pinned' and spec.version),
+            None,
+        )
+    except Exception:
+        pinned = None
+    install_target = f'claude-code={pinned}' if pinned else 'claude-code'
     for argv, timeout in (
         (['apt-get', 'update'], 300),
-        (['apt-get', 'install', '-y', 'claude-code'], 600),
+        (['apt-get', 'install', '-y', '--allow-change-held-packages', install_target], 600),
     ):
         result = run_command(argv, timeout=timeout)
         if result.get('returncode') != 0:
@@ -3028,11 +3104,14 @@ def cmd_agent_provider_install(params):
     match = re.search(r'(?<!\d)\d+\.\d+\.\d+(?!\d)', version.get('stdout') or '')
     if not match or tuple(int(part) for part in match.group(0).split('.')) < (2, 1, 205):
         return {'success': False, 'error': 'Installed Claude Code version is unsupported'}
-    # Pin the apt package; the CLI's own auto-updater is disabled via DISABLE_AUTOUPDATER
-    # in the agent environment. Version moves are a tested LimeOS release, not a
-    # background download (see the package-baseline follow-up).
-    run_command(['apt-mark', 'hold', 'claude-code'], timeout=30)
-    return {'success': True, 'installed': True, 'version': match.group(0) if match else None}
+    if pinned and match.group(0) != pinned:
+        return {'success': False,
+                'error': f'Claude Code {match.group(0)} does not match the pinned {pinned}'}
+    # Hold the version; the CLI's own auto-updater is disabled via DISABLE_AUTOUPDATER in the
+    # agent environment. A failed hold means the pin isn't enforced, so fail the install.
+    if run_command(['apt-mark', 'hold', 'claude-code'], timeout=30).get('returncode') != 0:
+        return {'success': False, 'error': 'Failed to hold the Claude Code version'}
+    return {'success': True, 'installed': True, 'version': match.group(0)}
 
 
 def write_agent_bot_secret(token):
@@ -3291,7 +3370,11 @@ def _packages_apt_command(action):
     """Translate a manifest ReconcileAction into a fixed apt argv (names/versions come
     from the validated manifest, so no untrusted input reaches the shell)."""
     if action.action == 'install_version':
-        return ['apt-get', 'install', '-y', '--allow-downgrades', f'{action.name}={action.version}']
+        # A pinned package is held; changing its version (up or down) needs both flags.
+        return [
+            'apt-get', 'install', '-y', '--allow-downgrades', '--allow-change-held-packages',
+            f'{action.name}={action.version}',
+        ]
     if action.action == 'hold':
         return ['apt-mark', 'hold', action.name]
     if action.action in ('install', 'upgrade_min'):
