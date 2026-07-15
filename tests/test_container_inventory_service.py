@@ -79,6 +79,7 @@ def test_inventory_composes_metadata_and_injected_state():
             "update_available": True,
             "ports": [],
             "health": None,
+            "restart_policy": "no",
             "exit_code": None,
             "network": {
                 "mode": "bridge",
@@ -111,6 +112,18 @@ def test_inventory_skips_stats_when_not_requested():
     result = service.list_containers(include_stats=False)
 
     assert result[0]["cpu_percent"] is None
+
+
+def test_inventory_exposes_restart_policy_name():
+    container = make_container()
+    container.attrs["HostConfig"]["RestartPolicy"] = {"Name": "unless-stopped"}
+    service = ContainerInventoryService(
+        docker=FakeDocker([container]),
+        stats_reader=lambda _container_id: None,
+        update_reader=lambda _container_id: False,
+    )
+
+    assert service.list_containers(include_stats=False)[0]["restart_policy"] == "unless-stopped"
 
 
 def test_inventory_reports_docker_unavailable_without_listing():

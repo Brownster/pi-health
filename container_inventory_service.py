@@ -109,6 +109,7 @@ class ContainerInventoryService:
             "update_available": self._update_reader(container.id[:12]),
             "ports": ports,
             "health": self._health(container),
+            "restart_policy": self._restart_policy(container),
             "exit_code": (container.attrs.get("State") or {}).get("ExitCode")
             if container.status in ("exited", "dead")
             else None,
@@ -203,6 +204,18 @@ class ContainerInventoryService:
             return ((container.attrs.get("State") or {}).get("Health") or {}).get("Status")
         except Exception:
             return None
+
+    @staticmethod
+    def _restart_policy(container) -> str:
+        try:
+            return str(
+                ((container.attrs.get("HostConfig") or {}).get("RestartPolicy") or {}).get(
+                    "Name"
+                )
+                or "no"
+            )
+        except Exception:
+            return "no"
 
     @staticmethod
     def _stack(container) -> str | None:

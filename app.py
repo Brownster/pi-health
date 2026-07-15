@@ -80,6 +80,7 @@ from setup_manager import setup_manager
 from helper_client import helper_call
 from operation_manager import OperationRegistry, OperationCapacityError
 from operation_sse import stream_operation_response
+from overview_service import OverviewService
 from pihealth_update_service import stream_update as stream_pihealth_update
 from ports import (
     AuditPort,
@@ -216,6 +217,7 @@ class AppDependencies:
     tools_service: ToolsService | None = None
     mattermost_integration_service: MattermostIntegrationService | None = None
     agent_integration_service: AgentIntegrationService | None = None
+    overview_service: OverviewService | None = None
 
 
 def _default_system_service():
@@ -325,6 +327,15 @@ def _default_agent_integration_service(mattermost_service, docker_port, stack_re
         helper_call=helper_call,
         mattermost_status=mattermost_service.status,
         resource_provider=resources,
+    )
+
+
+def _default_overview_service(system_service, container_service, stack_service, mattermost_service):
+    return OverviewService(
+        system_stats_provider=system_service.stats,
+        container_provider=lambda: container_service.list_containers(include_stats=False),
+        stack_provider=lambda: stack_service.list_with_status(include_status=True),
+        alert_status_provider=mattermost_service.status,
     )
 
 
@@ -774,6 +785,13 @@ def serve_favicon():
 def api_stats():
     """API endpoint to return system stats as JSON."""
     return jsonify(current_app.extensions["system_service"].stats())
+
+
+@core_api.route('/api/overview', methods=['GET'])
+@login_required
+def api_overview():
+    """Return one bounded, partial-failure-safe Overview snapshot."""
+    return jsonify(current_app.extensions["overview_service"].snapshot())
 
 
 @core_api.route('/api/containers', methods=['GET'])
@@ -1349,6 +1367,15 @@ def create_app(config=None, dependencies=None):
             application.extensions["mattermost_integration_service"],
             application.extensions["docker"],
             application.extensions["stack_read_service"],
+        )
+    )
+    application.extensions["overview_service"] = (
+        resolved.overview_service
+        or _default_overview_service(
+            application.extensions["system_service"],
+            application.extensions["container_inventory_service"],
+            application.extensions["stack_read_service"],
+            application.extensions["mattermost_integration_service"],
         )
     )
 
