@@ -105,11 +105,21 @@ Run `docker-compose up -d` in the same directory as your `docker-compose.yml` fi
 Run these quick checks before you move the Pi to its final home.
 
 1.  **Services running:** `systemctl status pi-health` and `systemctl status pihealth-helper`
-2.  **Port 80 free:** Make sure nothing else is bound to port 80.
-3.  **Docker group:** Log out/in if you were just added to the `docker` group.
-4.  **Stacks path:** Confirm `STACKS_PATH` in `/etc/limeos/credentials.env` if you changed it.
-5.  **Mounts ready:** Use **Disks** to mount drives, then click **Regenerate Startup Service**.
-6.  **VPN/Tailscale:** Use **Settings > Setup** or confirm they are installed.
+2.  **Metric history running:** `systemctl status limeos-metrics-collector.timer`
+3.  **Port 80 free:** Make sure nothing else is bound to port 80.
+4.  **Docker group:** Log out/in if you were just added to the `docker` group.
+5.  **Stacks path:** Confirm `STACKS_PATH` in `/etc/limeos/credentials.env` if you changed it.
+6.  **Mounts ready:** Use **Disks** to mount drives, then click **Regenerate Startup Service**.
+7.  **VPN/Tailscale:** Use **Settings > Setup** or confirm they are installed.
+
+The **Overview** shows current host health, workload counts, active alerts, recent recoveries,
+and compact links to detected web applications. Use **System Health** for detailed CPU, memory,
+temperature, and storage history over 24 hours, 7 days, or 30 days. The first history sample
+normally appears within two minutes of boot; later samples are collected every five minutes and
+retained for 31 days.
+
+Automatic refresh is off by default. The Overview and System Health pages share the same 30- or
+60-second browser preference. Automatic refresh pauses while the browser tab is hidden.
 
 ### 3. First-Time Login & User Management
 

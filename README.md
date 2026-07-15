@@ -12,7 +12,7 @@ Pi-Health is a full home lab management interface for Raspberry Pi and small ser
 
 ## Features
 
-- **System Health Monitoring**: CPU, memory, temperature, disk, and network stats
+- **System Health Monitoring**: Current CPU, memory, temperature, disk, and network stats with 31-day trends
 - **Docker Management**: View, start, stop, and restart containers
 - **Stack Management**: Deploy and manage Docker Compose stacks
 - **App Store**: YAML-driven catalog with one-click deployments
@@ -76,6 +76,7 @@ This will:
 - Create a Python virtual environment
 - Set up the privileged helper service (for disk operations)
 - Register a systemd service for pi-health
+- Register a five-minute metric-history timer
 - Create the `pihealth` group for socket permissions
 
 Optional flags:

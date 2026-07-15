@@ -1,7 +1,7 @@
 # Overview and Performance Dashboard
 
 Date: 2026-07-15  
-Status: Approved for implementation
+Status: Implemented
 
 ## Goal
 
@@ -263,3 +263,20 @@ confirm that Recharts is absent from the Overview's initial chunk.
    budget on Holly's Pi.
 9. A failed metric, alert, stack, or container source does not hide healthy sections.
 10. Existing Mattermost alert delivery and AI agent operation remain unaffected.
+
+## Deployment Notes
+
+Fresh host installs enable `limeos-metrics-collector.timer` through `setup.sh`. Existing hosts
+receive the same service and timer during the normal self-update migration, without reinstalling
+LimeOS. The timer starts its first collection within two minutes and then runs every five minutes.
+
+Verify collection with:
+
+```bash
+systemctl status limeos-metrics-collector.timer
+systemctl status limeos-metrics-collector.service
+```
+
+The one-shot service is normally inactive between successful runs. Its most recent result should
+be successful. Until the first sample exists, System Health displays an empty-history state rather
+than an error.
