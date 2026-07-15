@@ -207,8 +207,8 @@ def test_legacy_container_url_redirects_to_v2(
 
     expect(page).to_have_url(f"{base_url}/v2/containers")
     expect(page.get_by_role("heading", name="docker_containers")).to_be_visible()
-    expect(page.get_by_role("button", name="Start").first).to_be_visible()
-    expect(page.get_by_role("button", name="Restart").first).to_be_visible()
+    expect(page.locator("button[data-action='start']:visible").first).to_be_visible()
+    expect(page.locator("button[data-action='restart']:visible")).to_have_count(0)
     if viewport_profile_name in ("phone", "tablet"):
         assert_no_horizontal_overflow(page, f"v2 containers ({viewport_profile_name})")
 
@@ -229,7 +229,6 @@ def test_v2_containers_diagnostics_workflow(
 
     expect(page.get_by_role("heading", name="docker_containers")).to_be_visible()
     logs_button = page.locator("button[data-diagnostic-action='logs']:visible").first
-    network_button = page.locator("button[data-diagnostic-action='network-test']:visible").first
     expect(logs_button).to_be_visible()
 
     logs_button.click()
@@ -239,7 +238,10 @@ def test_v2_containers_diagnostics_workflow(
     page.click("#v2-logs-modal-close")
     expect(page.locator("#v2-logs-modal")).to_have_count(0)
 
-    network_button.click()
+    page.locator("button[data-container-menu]:visible").first.click()
+    action_menu = page.locator("[data-container-actions-menu]")
+    expect(action_menu).to_be_visible()
+    action_menu.locator("button[data-diagnostic-action='network-test']").click()
     network_modal = page.locator("#v2-container-network-modal")
     expect(network_modal).to_be_visible()
     page.wait_for_function(

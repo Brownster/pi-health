@@ -1,4 +1,17 @@
-import { FileText, Loader2, Wifi } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import {
+  ArrowUpCircle,
+  EllipsisVertical,
+  ExternalLink,
+  FileText,
+  Loader2,
+  Play,
+  RefreshCw,
+  RotateCw,
+  Square,
+  Wifi,
+} from "lucide-react";
 
 import { StatusBadge, type BadgeProps } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,13 +31,6 @@ export interface NetworkRate {
 
 export type NetworkRateMap = Record<string, NetworkRate>;
 
-const ACTION_ORDER: ContainerAction[] = [
-  "start",
-  "stop",
-  "restart",
-  "check_update",
-  "update",
-];
 export const ACTION_META: Record<
   ContainerAction,
   { label: string; pendingLabel: string; className: string }
@@ -202,140 +208,291 @@ type ListProps = {
   onOpenNetworkTest: (container: ContainerSummary) => void;
 };
 
-function ActionControls({
+const QUICK_ACTION_ICONS = {
+  start: Play,
+  stop: Square,
+  restart: RotateCw,
+} as const;
+
+function getLifecycleActions(container: ContainerSummary) {
+  return container.status === "running"
+    ? (["stop", "restart"] as const)
+    : (["start"] as const);
+}
+
+function QuickActions({
   container,
   pendingAction,
   align,
   onAction,
+  onOpenLogs,
+  onOpenNetworkTest,
 }: {
   container: ContainerSummary;
   pendingAction?: ContainerAction;
   align: "start" | "end";
   onAction: ListProps["onAction"];
+  onOpenLogs: ListProps["onOpenLogs"];
+  onOpenNetworkTest: ListProps["onOpenNetworkTest"];
 }) {
   const busy = Boolean(pendingAction);
+  const disabled = busy || isUnavailable(container.status);
   return (
     <div
       className={cn(
-        "flex flex-wrap gap-2",
+        "flex items-center gap-1.5",
         align === "end" ? "justify-end" : "justify-start",
       )}
     >
-      {ACTION_ORDER.map((action) => {
+      {getLifecycleActions(container).map((action) => {
         const meta = ACTION_META[action];
-        const disabled =
-          busy ||
-          isUnavailable(container.status) ||
-          (action === "start" && container.status === "running") ||
-          (action === "stop" &&
-            (container.status === "stopped" || container.status === "exited"));
+        const Icon = QUICK_ACTION_ICONS[action];
         return (
           <Button
             aria-label={`${meta.label} ${container.name}`}
-            className={cn(
-              "gap-1.5 px-2.5 text-xs sm:px-3 sm:text-sm",
-              meta.className,
-            )}
+            className={cn("h-9 min-h-9 w-9 px-0", meta.className)}
             data-action={action}
             data-container-id={container.id}
             disabled={disabled}
             key={action}
             onClick={() => onAction(container, action)}
             size="sm"
+            title={`${meta.label} ${container.name}`}
             variant="outline"
           >
             {pendingAction === action ? (
-              <Loader2
-                aria-hidden="true"
-                className="h-3.5 w-3.5 animate-spin"
-              />
-            ) : null}
-            {pendingAction === action ? meta.pendingLabel : meta.label}
+              <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
+            ) : (
+              <Icon aria-hidden="true" className="h-4 w-4" />
+            )}
           </Button>
         );
       })}
-    </div>
-  );
-}
-
-function DiagnosticControls({
-  container,
-  busy,
-  align,
-  onOpenLogs,
-  onOpenNetworkTest,
-}: {
-  container: ContainerSummary;
-  busy: boolean;
-  align: "start" | "end";
-  onOpenLogs: ListProps["onOpenLogs"];
-  onOpenNetworkTest: ListProps["onOpenNetworkTest"];
-}) {
-  const disabled = busy || isUnavailable(container.status);
-  return (
-    <div
-      className={cn(
-        "flex flex-wrap gap-2",
-        align === "end" ? "justify-end" : "justify-start",
-      )}
-    >
       <Button
         aria-label={`Logs ${container.name}`}
-        className="gap-1.5 text-xs sm:text-sm"
+        className="h-9 min-h-9 w-9 px-0"
         data-container-id={container.id}
         data-diagnostic-action="logs"
         disabled={disabled}
         onClick={() => onOpenLogs(container)}
         size="sm"
+        title={`Logs ${container.name}`}
         variant="outline"
       >
-        <FileText aria-hidden="true" className="h-3.5 w-3.5" />
-        Logs
+        <FileText aria-hidden="true" className="h-4 w-4" />
       </Button>
-      <Button
-        aria-label={`Network Test ${container.name}`}
-        className="gap-1.5 text-xs sm:text-sm"
-        data-container-id={container.id}
-        data-diagnostic-action="network-test"
+      <MoreActions
+        container={container}
         disabled={disabled}
-        onClick={() => onOpenNetworkTest(container)}
-        size="sm"
-        variant="outline"
-      >
-        <Wifi aria-hidden="true" className="h-3.5 w-3.5" />
-        Network Test
-      </Button>
+        onAction={onAction}
+        onOpenNetworkTest={onOpenNetworkTest}
+        pendingAction={pendingAction}
+      />
     </div>
   );
 }
 
-function WebLink({
+function MoreActions({
   container,
-  mobile = false,
+  disabled,
+  pendingAction,
+  onAction,
+  onOpenNetworkTest,
 }: {
   container: ContainerSummary;
-  mobile?: boolean;
+  disabled: boolean;
+  pendingAction?: ContainerAction;
+  onAction: ListProps["onAction"];
+  onOpenNetworkTest: ListProps["onOpenNetworkTest"];
 }) {
+  const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState({ left: 0, top: 0 });
+  const rootRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  const positionMenu = () => {
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const menuWidth = 192;
+    const menuHeight = menuRef.current?.offsetHeight ?? 142;
+    const below = rect.bottom + 8;
+    setPosition({
+      left: Math.min(
+        window.innerWidth - menuWidth - 8,
+        Math.max(8, rect.right - menuWidth),
+      ),
+      top:
+        below + menuHeight <= window.innerHeight - 8
+          ? below
+          : Math.max(8, rect.top - menuHeight - 8),
+    });
+  };
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    positionMenu();
+    menuRef.current?.querySelector<HTMLButtonElement>("[role='menuitem']")?.focus();
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (
+        !rootRef.current?.contains(target) &&
+        !menuRef.current?.contains(target)
+      ) {
+        setOpen(false);
+      }
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setOpen(false);
+      triggerRef.current?.focus();
+    };
+    const reposition = () => positionMenu();
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    window.addEventListener("resize", reposition);
+    window.addEventListener("scroll", reposition, true);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+      window.removeEventListener("resize", reposition);
+      window.removeEventListener("scroll", reposition, true);
+    };
+  }, [open]);
+
+  const runAction = (action: ContainerAction) => {
+    setOpen(false);
+    onAction(container, action);
+  };
+
+  return (
+    <div className="relative" ref={rootRef}>
+      <Button
+        aria-expanded={open}
+        aria-haspopup="menu"
+        aria-label={`More actions for ${container.name}`}
+        className="h-9 min-h-9 w-9 px-0"
+        data-container-menu={container.id}
+        disabled={disabled}
+        onKeyDown={(event) => {
+          if (event.key !== "ArrowDown") return;
+          event.preventDefault();
+          setOpen(true);
+        }}
+        onClick={() => setOpen((current) => !current)}
+        ref={triggerRef}
+        size="sm"
+        title={`More actions for ${container.name}`}
+        variant="outline"
+      >
+        {pendingAction === "check_update" || pendingAction === "update" ? (
+          <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
+        ) : (
+          <EllipsisVertical aria-hidden="true" className="h-4 w-4" />
+        )}
+      </Button>
+      {open
+        ? createPortal(
+            <div
+              aria-label={`More actions for ${container.name}`}
+              className="fixed z-50 w-48 overflow-hidden rounded-md border border-border bg-card p-1 shadow-xl shadow-black/30"
+              data-container-actions-menu={container.id}
+              onBlur={(event) => {
+                const next = event.relatedTarget as Node | null;
+                if (
+                  next &&
+                  (menuRef.current?.contains(next) ||
+                    triggerRef.current?.contains(next))
+                ) {
+                  return;
+                }
+                setOpen(false);
+              }}
+              onKeyDown={(event) => {
+                if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+                event.preventDefault();
+                const items = Array.from(
+                  menuRef.current?.querySelectorAll<HTMLButtonElement>(
+                    "[role='menuitem']",
+                  ) ?? [],
+                );
+                const current = items.indexOf(document.activeElement as HTMLButtonElement);
+                const offset = event.key === "ArrowDown" ? 1 : -1;
+                items[(current + offset + items.length) % items.length]?.focus();
+              }}
+              ref={menuRef}
+              role="menu"
+              style={{ left: position.left, top: position.top }}
+            >
+              <button
+                className="flex min-h-10 w-full items-center gap-2 rounded-sm px-3 text-left text-sm text-foreground hover:bg-muted focus-visible:bg-muted focus-visible:outline-none"
+                data-action="check_update"
+                data-container-id={container.id}
+                onClick={() => runAction("check_update")}
+                role="menuitem"
+                type="button"
+              >
+                <RefreshCw
+                  aria-hidden="true"
+                  className="h-4 w-4 text-muted-foreground"
+                />
+                Check update
+              </button>
+              <button
+                className="flex min-h-10 w-full items-center gap-2 rounded-sm px-3 text-left text-sm text-info hover:bg-muted focus-visible:bg-muted focus-visible:outline-none"
+                data-action="update"
+                data-container-id={container.id}
+                onClick={() => runAction("update")}
+                role="menuitem"
+                type="button"
+              >
+                <ArrowUpCircle aria-hidden="true" className="h-4 w-4" />
+                Update image
+              </button>
+              <div className="my-1 border-t border-divider" />
+              <button
+                className="flex min-h-10 w-full items-center gap-2 rounded-sm px-3 text-left text-sm text-foreground hover:bg-muted focus-visible:bg-muted focus-visible:outline-none"
+                data-container-id={container.id}
+                data-diagnostic-action="network-test"
+                onClick={() => {
+                  setOpen(false);
+                  onOpenNetworkTest(container);
+                }}
+                role="menuitem"
+                type="button"
+              >
+                <Wifi
+                  aria-hidden="true"
+                  className="h-4 w-4 text-muted-foreground"
+                />
+                Network test
+              </button>
+            </div>,
+            document.body,
+          )
+        : null}
+    </div>
+  );
+}
+
+function WebLink({ container }: { container: ContainerSummary }) {
   const url = getContainerWebUrl(container);
-  if (!url)
-    return (
-      <span className="text-xs text-muted-foreground">
-        {mobile ? "Web UI unavailable" : "N/A"}
-      </span>
-    );
+  if (!url) return null;
   return (
     <a
       aria-label={`Open ${container.name} web UI in a new tab`}
-      className={
-        mobile
-          ? "inline-flex min-h-11 items-center rounded-md border border-border px-3 text-sm text-primary underline-offset-2 hover:bg-muted hover:underline"
-          : "inline-flex min-h-11 items-center text-sm text-primary underline-offset-2 hover:underline"
-      }
+      className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       href={url}
       rel="noopener noreferrer"
       target="_blank"
+      title={`Open ${container.name} web UI`}
     >
-      {mobile ? "Open Web UI" : "Open"}
+      <ExternalLink aria-hidden="true" className="h-4 w-4" />
     </a>
   );
 }
@@ -365,7 +522,6 @@ export function ContainerList(props: ListProps) {
                   "CPU",
                   "Memory",
                   "Network",
-                  "Web UI",
                   "Actions",
                 ].map((heading) => (
                   <th
@@ -393,6 +549,7 @@ export function ContainerList(props: ListProps) {
                         >
                           {container.name}
                         </button>
+                        <WebLink container={container} />
                         {container.health ? (
                           <span
                             aria-label={`Health ${container.health}`}
@@ -410,11 +567,14 @@ export function ContainerList(props: ListProps) {
                         {container.update_available ? (
                           <span
                             aria-label="Update available"
-                            className="text-amber-300"
+                            className="inline-flex text-amber-300"
                             role="img"
                             title="Update available"
                           >
-                            ↻
+                            <RefreshCw
+                              aria-hidden="true"
+                              className="h-3.5 w-3.5"
+                            />
                           </span>
                         ) : null}
                         {vpnRoles?.[container.name] ? (
@@ -449,22 +609,14 @@ export function ContainerList(props: ListProps) {
                         tx={container.net_tx}
                       />
                     </td>
-                    <td className="px-4 py-3">
-                      <WebLink container={container} />
-                    </td>
-                    <td className="space-y-2 px-4 py-3 text-right">
-                      <ActionControls
+                    <td className="w-[11rem] px-4 py-3 text-right">
+                      <QuickActions
                         align="end"
                         container={container}
                         onAction={onAction}
-                        pendingAction={pending}
-                      />
-                      <DiagnosticControls
-                        align="end"
-                        busy={Boolean(pending)}
-                        container={container}
                         onOpenLogs={onOpenLogs}
                         onOpenNetworkTest={onOpenNetworkTest}
+                        pendingAction={pending}
                       />
                     </td>
                   </tr>
@@ -482,12 +634,15 @@ export function ContainerList(props: ListProps) {
               <CardContent className="space-y-3 p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <button
-                      className="truncate text-left text-sm font-semibold text-primary hover:underline"
-                      onClick={() => onOpenDetails(container)}
-                    >
-                      {container.name}
-                    </button>
+                    <div className="flex min-w-0 items-center gap-1">
+                      <button
+                        className="truncate text-left text-sm font-semibold text-primary hover:underline"
+                        onClick={() => onOpenDetails(container)}
+                      >
+                        {container.name}
+                      </button>
+                      <WebLink container={container} />
+                    </div>
                     <p className="line-clamp-2 break-all text-xs text-muted-foreground">
                       {container.image}
                     </p>
@@ -530,21 +685,13 @@ export function ContainerList(props: ListProps) {
                     tx={container.net_tx}
                   />
                 </div>
-                <div className="grid gap-2 sm:flex sm:items-center sm:justify-between">
-                  <WebLink container={container} mobile />
-                </div>
-                <ActionControls
+                <QuickActions
                   align="start"
                   container={container}
                   onAction={onAction}
-                  pendingAction={pending}
-                />
-                <DiagnosticControls
-                  align="start"
-                  busy={Boolean(pending)}
-                  container={container}
                   onOpenLogs={onOpenLogs}
                   onOpenNetworkTest={onOpenNetworkTest}
+                  pendingAction={pending}
                 />
               </CardContent>
             </Card>

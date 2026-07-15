@@ -20,6 +20,16 @@ def _open_v2_containers(page, base_url, v2_login, install_v2_containers_api_mock
     expect(page.get_by_role("heading", name="docker_containers")).to_be_visible()
 
 
+def _open_container_menu(page: Page, container_id: str):
+    trigger = page.locator(
+        f"button[data-container-menu='{container_id}']:visible"
+    ).first
+    trigger.click()
+    menu = page.locator(f"[data-container-actions-menu='{container_id}']")
+    expect(menu).to_be_visible()
+    return trigger, menu
+
+
 def test_v2_containers_group_by_stack_and_vpn_badge(
     page: Page,
     v2_server,
@@ -66,7 +76,8 @@ def test_v2_containers_check_all_and_provider_update_guard(
     expect(page.locator("button[data-filter='updates']")).to_be_visible()
 
     # Updating the provider opens the safety modal rather than updating immediately.
-    page.locator("button[data-action='update'][data-container-id='gluetun-id']").first.click()
+    _, menu = _open_container_menu(page, "gluetun-id")
+    menu.locator("button[data-action='update']").click()
     expect(page.locator("[data-provider-update-modal]")).to_be_visible()
     page.click("button[data-provider-update-recreate]")
     expect(page.get_by_text("recreated its network group")).to_be_visible(timeout=10000)
@@ -100,6 +111,38 @@ def test_v2_containers_web_ui_defaults_to_http(
     expect(link).to_have_attribute(
         "href", f"http://{page.evaluate('window.location.hostname')}:8088"
     )
+
+
+def test_v2_containers_compact_actions_and_keyboard_menu(
+    page: Page,
+    v2_server,
+    v2_login,
+    v2_mock_container_id,
+    install_v2_containers_api_mocks,
+):
+    base_url = v2_server["base_url"]
+    _open_v2_containers(page, base_url, v2_login, install_v2_containers_api_mocks)
+
+    running = f"[data-container-id='{v2_mock_container_id}']"
+    expect(page.locator(f"button[data-action='stop']{running}:visible")).to_be_visible()
+    expect(page.locator(f"button[data-action='restart']{running}:visible")).to_be_visible()
+    expect(page.locator(f"button[data-action='start']{running}:visible")).to_have_count(0)
+    expect(
+        page.locator(
+            f"button[data-diagnostic-action='logs']{running}:visible"
+        )
+    ).to_be_visible()
+
+    trigger, menu = _open_container_menu(page, v2_mock_container_id)
+    expect(menu.get_by_role("menuitem", name="Check update")).to_be_visible()
+    expect(menu.get_by_role("menuitem", name="Update image")).to_be_visible()
+    expect(menu.get_by_role("menuitem", name="Network test")).to_be_visible()
+
+    page.keyboard.press("ArrowDown")
+    expect(menu.get_by_role("menuitem", name="Update image")).to_be_focused()
+    page.keyboard.press("Escape")
+    expect(menu).to_have_count(0)
+    expect(trigger).to_be_focused()
 
 
 def _focus_is_inside(page, modal_id: str) -> bool:
@@ -142,7 +185,11 @@ def test_v2_containers_overflow_through_workflows(
     expect(page.locator("#v2-logs-modal")).to_have_count(0)
 
     # Container network modal open -> overflow-safe -> close
-    page.locator("button[data-diagnostic-action='network-test']:visible").first.click()
+    _, menu = _open_container_menu(page, "v2-mock-container-1")
+    assert_no_horizontal_overflow(
+        page, f"v2 container action menu ({viewport_profile_name})"
+    )
+    menu.locator("button[data-diagnostic-action='network-test']").click()
     expect(page.locator("#v2-container-network-modal")).to_be_visible()
     page.wait_for_function(
         """() => {
@@ -266,6 +313,10 @@ def test_v2_containers_stopped_filter_includes_exited(
     page.get_by_role("button", name="Stopped").click()
     expect(page.get_by_text("v2-mock-exited")).not_to_have_count(0)
     expect(page.get_by_text("v2-mock-service")).to_have_count(0)
+    exited = "[data-container-id='v2-mock-exited-1']"
+    expect(page.locator(f"button[data-action='start']{exited}:visible")).to_be_visible()
+    expect(page.locator(f"button[data-action='stop']{exited}:visible")).to_have_count(0)
+    expect(page.locator(f"button[data-action='restart']{exited}:visible")).to_have_count(0)
 
 
 def test_v2_containers_dialog_focus_trap_and_restore(
