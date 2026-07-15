@@ -17,6 +17,16 @@ def _open_v2_stacks(page, base_url, v2_login, install_v2_stacks_api_mocks):
     expect(page.get_by_role("heading", name="docker_stacks")).to_be_visible()
 
 
+def _open_stack_menu(page: Page, stack_name: str):
+    trigger = page.locator(
+        f"button[data-stack-menu='{stack_name}']:visible"
+    ).first
+    trigger.click()
+    menu = page.locator(f"[data-stack-actions-menu='{stack_name}']")
+    expect(menu).to_be_visible()
+    return trigger, menu
+
+
 def test_v2_stacks_list_renders(
     profiled_page: Page,
     viewport_profile_name: str,
@@ -32,6 +42,42 @@ def test_v2_stacks_list_renders(
     expect(page.get_by_text("media").first).to_be_visible()
     expect(page.get_by_text("2 / 2 services up").first).to_be_visible()
     assert_no_horizontal_overflow(page, f"v2 stacks ({viewport_profile_name})")
+    _, menu = _open_stack_menu(page, "media")
+    assert_no_horizontal_overflow(
+        page, f"v2 stack action menu ({viewport_profile_name})"
+    )
+    page.keyboard.press("Escape")
+    expect(menu).to_have_count(0)
+
+
+def test_v2_stacks_compact_actions_and_keyboard_menu(
+    page: Page,
+    v2_server,
+    v2_login,
+    install_v2_stacks_api_mocks,
+):
+    base_url = v2_server["base_url"]
+    _open_v2_stacks(page, base_url, v2_login, install_v2_stacks_api_mocks)
+
+    stack = "[data-stack='media']"
+    expect(page.locator(f"button[data-action='down']{stack}:visible")).to_be_visible()
+    expect(page.locator(f"button[data-action='restart']{stack}:visible")).to_be_visible()
+    expect(page.locator(f"button[data-action='up']{stack}:visible")).to_have_count(0)
+    expect(
+        page.locator(f"button[data-stack-action='logs']{stack}:visible")
+    ).to_be_visible()
+
+    trigger, menu = _open_stack_menu(page, "media")
+    expect(menu.get_by_role("menuitem", name="Pull images")).to_be_visible()
+    expect(menu.get_by_role("menuitem", name="Edit compose")).to_be_visible()
+    expect(menu.get_by_role("menuitem", name="Backups")).to_be_visible()
+    expect(menu.get_by_role("menuitem", name="Delete stack")).to_be_visible()
+
+    page.keyboard.press("ArrowDown")
+    expect(menu.get_by_role("menuitem", name="Edit compose")).to_be_focused()
+    page.keyboard.press("Escape")
+    expect(menu).to_have_count(0)
+    expect(trigger).to_be_focused()
 
 
 def test_v2_stacks_logs_modal(
@@ -65,7 +111,7 @@ def test_v2_stacks_lifecycle_streaming_console(
         lambda request: lifecycle_requests.append((request.method, request.url)),
     )
 
-    page.locator("button[data-action='up'][data-stack='media']:visible").first.click()
+    page.locator("button[data-action='restart'][data-stack='media']:visible").first.click()
     expect(page.locator("#v2-stack-console")).to_be_visible()
     # Streamed output line, then completion status.
     expect(page.locator("#v2-stack-console-output")).to_contain_text("Started", timeout=15000)
@@ -78,8 +124,8 @@ def test_v2_stacks_lifecycle_streaming_console(
         method == "GET" and url.endswith("/api/stacks/operations/mock-stack-operation/stream")
         for method, url in lifecycle_requests
     )
-    assert not any(url.endswith("/api/stacks/media/up/stream") for _, url in lifecycle_requests)
-    assert not any(url.endswith("/api/stacks/media/up") for _, url in lifecycle_requests)
+    assert not any(url.endswith("/api/stacks/media/restart/stream") for _, url in lifecycle_requests)
+    assert not any(url.endswith("/api/stacks/media/restart") for _, url in lifecycle_requests)
     page.click("#v2-stack-console-close")
     expect(page.locator("#v2-stack-console")).to_have_count(0)
 
@@ -93,7 +139,8 @@ def test_v2_stacks_compose_env_editor(
     base_url = v2_server["base_url"]
     _open_v2_stacks(page, base_url, v2_login, install_v2_stacks_api_mocks)
 
-    page.locator("button[data-stack-action='edit']:visible").first.click()
+    _, menu = _open_stack_menu(page, "media")
+    menu.locator("button[data-stack-action='edit']").click()
     editor = page.locator("#v2-stack-editor-modal")
     expect(editor).to_be_visible()
 
@@ -125,7 +172,8 @@ def test_v2_stacks_backups_restore_with_confirm(
     base_url = v2_server["base_url"]
     _open_v2_stacks(page, base_url, v2_login, install_v2_stacks_api_mocks)
 
-    page.locator("button[data-stack-action='backups']:visible").first.click()
+    _, menu = _open_stack_menu(page, "media")
+    menu.locator("button[data-stack-action='backups']").click()
     expect(page.locator("#v2-stack-backups-modal")).to_be_visible()
 
     backup = "docker-compose.yml.20260101-000000.bak"

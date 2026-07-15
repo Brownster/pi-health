@@ -10,6 +10,7 @@ import {
   Trash2,
 } from "lucide-react";
 
+import { ActionMenu } from "@/components/ui/action-menu";
 import { StatusBadge, type BadgeProps } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -21,12 +22,6 @@ import {
 } from "@/lib/stacks";
 import { cn } from "@/lib/utils";
 
-export const STACK_ACTION_ORDER: StackAction[] = [
-  "up",
-  "down",
-  "restart",
-  "pull",
-];
 export const STACK_ACTION_META: Record<
   StackAction,
   { label: string; pendingLabel: string; className: string; Icon: typeof Play }
@@ -64,6 +59,12 @@ function getStatusTone(status: string): BadgeProps["tone"] {
   if (status === "stopped" || status === "exited") return "danger";
   if (status === "partial") return "warning";
   return "neutral";
+}
+
+function getLifecycleActions(stack: StackSummary) {
+  return stack.status === "running"
+    ? (["down", "restart"] as const)
+    : (["up"] as const);
 }
 
 export interface StackContainerRef {
@@ -149,89 +150,96 @@ export function StackCard({
             ))}
           </ul>
         ) : null}
-        <div className="flex flex-wrap gap-2">
-          {STACK_ACTION_ORDER.map((action) => {
+        <div className="flex items-center gap-1.5">
+          {getLifecycleActions(stack).map((action) => {
             const meta = STACK_ACTION_META[action];
             const Icon = meta.Icon;
             return (
               <Button
                 aria-label={`${meta.label} ${stack.name}`}
-                className={cn(
-                  "gap-1.5 px-2.5 text-xs sm:text-sm",
-                  meta.className,
-                )}
+                className={cn("h-9 min-h-9 w-9 px-0", meta.className)}
                 data-action={action}
                 data-stack={stack.name}
                 disabled={busy}
                 key={action}
                 onClick={() => onAction(stack, action)}
                 size="sm"
+                title={`${meta.label} ${stack.name}`}
                 variant="outline"
               >
                 {pendingAction === action ? (
-                  <Loader2
-                    aria-hidden="true"
-                    className="h-3.5 w-3.5 animate-spin"
-                  />
+                  <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
                 ) : (
-                  <Icon aria-hidden="true" className="h-3.5 w-3.5" />
+                  <Icon aria-hidden="true" className="h-4 w-4" />
                 )}
-                {pendingAction === action ? meta.pendingLabel : meta.label}
               </Button>
             );
           })}
           <Button
             aria-label={`Logs ${stack.name}`}
-            className="gap-1.5 text-xs sm:text-sm"
+            className="h-9 min-h-9 w-9 px-0"
             data-stack-action="logs"
             data-stack={stack.name}
             disabled={busy}
             onClick={() => onLogs(stack)}
             size="sm"
+            title={`Logs ${stack.name}`}
             variant="outline"
           >
-            <FileText aria-hidden="true" className="h-3.5 w-3.5" />
-            Logs
+            <FileText aria-hidden="true" className="h-4 w-4" />
           </Button>
-          <Button
-            aria-label={`Edit ${stack.name}`}
-            className="gap-1.5 text-xs sm:text-sm"
-            data-stack-action="edit"
-            data-stack={stack.name}
+          <ActionMenu
             disabled={busy}
-            onClick={() => onEdit(stack)}
-            size="sm"
-            variant="outline"
-          >
-            <Pencil aria-hidden="true" className="h-3.5 w-3.5" />
-            Edit
-          </Button>
-          <Button
-            aria-label={`Backups ${stack.name}`}
-            className="gap-1.5 text-xs sm:text-sm"
-            data-stack-action="backups"
-            data-stack={stack.name}
-            disabled={busy}
-            onClick={() => onBackups(stack)}
-            size="sm"
-            variant="outline"
-          >
-            <Archive aria-hidden="true" className="h-3.5 w-3.5" />
-            Backups
-          </Button>
-          <Button
-            aria-label={`Delete ${stack.name}`}
-            className="gap-1.5 text-xs sm:text-sm"
-            data-stack-action="delete"
-            data-stack={stack.name}
-            disabled={busy}
-            onClick={() => onDelete(stack)}
-            size="sm"
-            variant="danger"
-          >
-            <Trash2 aria-hidden="true" className="h-3.5 w-3.5" />
-            Delete
-          </Button>
+            items={[
+              {
+                id: "pull",
+                label: "Pull images",
+                Icon: Download,
+                onSelect: () => onAction(stack, "pull"),
+                tone: "info",
+                data: {
+                  "data-action": "pull",
+                  "data-stack": stack.name,
+                },
+              },
+              {
+                id: "edit",
+                label: "Edit compose",
+                Icon: Pencil,
+                onSelect: () => onEdit(stack),
+                data: {
+                  "data-stack-action": "edit",
+                  "data-stack": stack.name,
+                },
+              },
+              {
+                id: "backups",
+                label: "Backups",
+                Icon: Archive,
+                onSelect: () => onBackups(stack),
+                data: {
+                  "data-stack-action": "backups",
+                  "data-stack": stack.name,
+                },
+              },
+              {
+                id: "delete",
+                label: "Delete stack",
+                Icon: Trash2,
+                onSelect: () => onDelete(stack),
+                separatorBefore: true,
+                tone: "danger",
+                data: {
+                  "data-stack-action": "delete",
+                  "data-stack": stack.name,
+                },
+              },
+            ]}
+            label={`More actions for ${stack.name}`}
+            menuData={{ "data-stack-actions-menu": stack.name }}
+            pending={pendingAction === "pull"}
+            triggerData={{ "data-stack-menu": stack.name }}
+          />
         </div>
       </CardContent>
     </Card>

@@ -958,7 +958,7 @@ export function StacksPage() {
       ) : null}
 
       {!isLoading && stacks.length ? (
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="grid items-start gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {stacks.map((stack) => (
             <StackCard
               containers={containersByStack.get(stack.name)}
