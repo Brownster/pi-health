@@ -4,10 +4,12 @@ import { Activity, Loader2, RefreshCw, ShieldCheck, TriangleAlert } from "lucide
 import { StatusBadge, type BadgeProps } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { MetricBar } from "@/components/ui/metric-bar";
 import { ModalOverlay } from "@/components/ui/modal-overlay";
 import { PageHeader } from "@/components/ui/page-header";
 import {
   type DiskInfo,
+  type DiskUsage,
   type SmartHealth,
   type SmartTestType,
   type SuggestedMount,
@@ -20,7 +22,7 @@ import {
   runSmartTest,
   unmountDisk,
 } from "@/lib/disks";
-import { formatClockTime } from "@/lib/format";
+import { formatBytes, formatClockTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 type AsyncStatus = "idle" | "loading" | "ready" | "error";
@@ -66,6 +68,36 @@ function getErrorMessage(error: unknown): string {
     return error.message;
   }
   return "Unable to load disks";
+}
+
+function getUsageTone(percent: number): "success" | "warning" | "danger" {
+  if (percent >= 90) return "danger";
+  if (percent >= 75) return "warning";
+  return "success";
+}
+
+function getDiskUsage(disk: DiskInfo): DiskUsage | null {
+  if (disk.usage?.total !== null && disk.usage?.total !== undefined) {
+    return disk.usage;
+  }
+
+  const mountedUsage = disk.partitions
+    .map((partition) => partition.usage)
+    .filter((usage): usage is DiskUsage => usage?.total !== null && usage?.total !== undefined);
+  if (!mountedUsage.length) return null;
+
+  const total = mountedUsage.reduce((sum, usage) => sum + (usage.total ?? 0), 0);
+  const used = mountedUsage.reduce((sum, usage) => sum + (usage.used ?? 0), 0);
+  const available = mountedUsage.reduce(
+    (sum, usage) => sum + (usage.available ?? 0),
+    0,
+  );
+  return {
+    total,
+    used,
+    available,
+    percent: total > 0 ? (used / total) * 100 : 0,
+  };
 }
 
 function SmartDetailRow({ label, value }: { label: string; value: string | number | null }) {
@@ -163,6 +195,8 @@ function DiskCard({
   onSmart: (disk: DiskInfo) => void;
   onUnmount: (mountpoint: string) => void;
 }) {
+  const usage = getDiskUsage(disk);
+  const usagePercent = usage?.percent ?? null;
   return (
     <Card className="transition-colors duration-200 hover:border-primary/25">
       <CardContent className="space-y-3 p-4">
@@ -190,6 +224,35 @@ function DiskCard({
             <p className="font-mono">{[disk.transport, disk.type].filter(Boolean).join(" · ") || "—"}</p>
           </div>
         </div>
+
+        {usage && usagePercent !== null ? (
+          <div className="rounded-md border border-border bg-muted/20 p-2" data-disk-usage={disk.name}>
+            <div className="flex items-baseline justify-between gap-3">
+              <p className="font-mono text-[10px] uppercase tracking-[0.1em] text-dim">
+                Mounted usage
+              </p>
+              <p className="font-mono text-xs text-muted-foreground">
+                {Math.round(usagePercent)}% used
+              </p>
+            </div>
+            <MetricBar
+              className="mt-2"
+              label={`${disk.path} mounted usage`}
+              tone={getUsageTone(usagePercent)}
+              value={usagePercent}
+            />
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 font-mono text-[11px]">
+              <span>
+                <span className="text-dim">Used </span>
+                {formatBytes(usage.used)}
+              </span>
+              <span>
+                <span className="text-dim">Free </span>
+                {formatBytes(usage.available)}
+              </span>
+            </div>
+          </div>
+        ) : null}
 
         {disk.partitions.length ? (
           <div className="space-y-1.5">

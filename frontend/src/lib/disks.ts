@@ -8,6 +8,14 @@ export interface DiskPartition {
   mountpoint: string | null;
   uuid: string | null;
   label: string | null;
+  usage: DiskUsage | null;
+}
+
+export interface DiskUsage {
+  total: number | null;
+  used: number | null;
+  available: number | null;
+  percent: number | null;
 }
 
 export interface DiskInfo {
@@ -22,6 +30,7 @@ export interface DiskInfo {
   fstype: string | null;
   uuid: string | null;
   label: string | null;
+  usage: DiskUsage | null;
   partitions: DiskPartition[];
 }
 
@@ -54,6 +63,19 @@ export interface SmartHealth {
   error_message: string | null;
 }
 
+function normalizeUsage(raw: unknown): DiskUsage | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return null;
+  }
+  const usage = raw as Record<string, unknown>;
+  return {
+    total: toNullableNumber(usage.total),
+    used: toNullableNumber(usage.used),
+    available: toNullableNumber(usage.available),
+    percent: toNullableNumber(usage.percent),
+  };
+}
+
 function normalizePartition(raw: Record<string, unknown> | undefined): DiskPartition {
   return {
     name: String(raw?.name ?? ""),
@@ -63,6 +85,7 @@ function normalizePartition(raw: Record<string, unknown> | undefined): DiskParti
     mountpoint: toNullableString(raw?.mountpoint),
     uuid: toNullableString(raw?.uuid),
     label: toNullableString(raw?.label),
+    usage: normalizeUsage(raw?.usage),
   };
 }
 
@@ -80,6 +103,7 @@ function normalizeDisk(raw: Record<string, unknown> | undefined): DiskInfo {
     fstype: toNullableString(raw?.fstype),
     uuid: toNullableString(raw?.uuid),
     label: toNullableString(raw?.label),
+    usage: normalizeUsage(raw?.usage),
     partitions: partitions.map((part) => normalizePartition(part)),
   };
 }

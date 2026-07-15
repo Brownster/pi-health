@@ -545,6 +545,12 @@ def install_v2_disks_api_mocks():
                             "fstype": "ext4",
                             "mountpoint": "/mnt/storage",
                             "uuid": "abcd-1234",
+                            "usage": {
+                                "total": 8000000000000,
+                                "used": 5200000000000,
+                                "available": 2800000000000,
+                                "percent": "65",
+                            },
                         }
                     ],
                 }

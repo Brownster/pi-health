@@ -35,6 +35,11 @@ def test_v2_disks_inventory_renders(
 
     expect(page.get_by_text("/dev/sda").first).to_be_visible()
     expect(page.get_by_text("/mnt/storage").first).to_be_visible()
+    usage = page.locator("[data-disk-usage='sda']")
+    expect(usage).to_contain_text("65% used")
+    expect(usage).to_contain_text("Used 4.7 TB")
+    expect(usage).to_contain_text("Free 2.5 TB")
+    expect(usage.get_by_role("progressbar")).to_have_attribute("aria-valuenow", "65")
     # SMART summary badge merged onto the disk card.
     expect(page.get_by_text("healthy").first).to_be_visible()
     assert_no_horizontal_overflow(page, f"v2 disks ({viewport_profile_name})")
