@@ -132,6 +132,27 @@ def test_disabled_category_suppresses_recovery(tmp_path):
     ) == []
 
 
+def test_transition_callback_records_silenced_incident_and_recovery(tmp_path):
+    evaluator = _evaluator(tmp_path, threshold=1)
+    transitions = []
+
+    assert evaluator.evaluate(
+        [_fail()],
+        should_notify=lambda _signal, _event: False,
+        on_transition=transitions.append,
+    ) == []
+    assert evaluator.evaluate(
+        [_ok()],
+        should_notify=lambda _signal, _event: False,
+        on_transition=transitions.append,
+    ) == []
+
+    assert [(event.event, event.key) for event in transitions] == [
+        ("incident", "container:jellyfin"),
+        ("recovery", "container:jellyfin"),
+    ]
+
+
 def test_mattermost_notifier_posts_rendered_payload():
     from alert_evaluator import Notification
 

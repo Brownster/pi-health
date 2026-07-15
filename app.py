@@ -42,6 +42,7 @@ from catalog_service import CatalogService
 from integrations_manager import integrations_manager
 from mattermost_integration_service import MattermostIntegrationService
 from agent_integration_service import AgentIntegrationService
+from alert_history import AlertEventLedger
 from media_profile_service import MediaProfileService
 from media_quickstart_service import MediaQuickstartService
 from media_seed_service import MediaSeedService
@@ -330,12 +331,23 @@ def _default_agent_integration_service(mattermost_service, docker_port, stack_re
     )
 
 
-def _default_overview_service(system_service, container_service, stack_service, mattermost_service):
+def _default_overview_service(
+    system_service,
+    container_service,
+    stack_service,
+    mattermost_service,
+    *,
+    alert_history=None,
+):
+    alert_history = alert_history or AlertEventLedger(
+        RUNTIME_INTEGRATIONS_STATE_DIR / "alert-events.jsonl"
+    )
     return OverviewService(
         system_stats_provider=system_service.stats,
         container_provider=lambda: container_service.list_containers(include_stats=False),
         stack_provider=lambda: stack_service.list_with_status(include_status=True),
         alert_status_provider=mattermost_service.status,
+        recent_recoveries_provider=lambda: alert_history.recent(event="recovery", limit=5),
     )
 
 

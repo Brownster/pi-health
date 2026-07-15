@@ -141,6 +141,7 @@ class AlertEvaluator:
         signals: Iterable[Signal],
         *,
         should_notify: Callable[[Signal, str], bool] | None = None,
+        on_transition: Callable[[Notification], None] | None = None,
     ) -> list[Notification]:
         """Fold one round of signals into incident state; return what to notify.
 
@@ -157,21 +158,19 @@ class AlertEvaluator:
             if signal.ok:
                 self._state.streaks.pop(signal.key, None)
                 incident = self._state.incidents.pop(signal.key, None)
-                if (
-                    incident is not None
-                    and incident.delivered_at is not None
-                    and should_notify(signal, "recovery")
-                ):
-                    notifications.append(
-                        Notification(
-                            event="recovery",
-                            key=signal.key,
-                            kind=incident.kind,
-                            severity=incident.severity,
-                            summary=signal.summary,
-                            at=stamp,
-                        )
+                if incident is not None:
+                    recovery = Notification(
+                        event="recovery",
+                        key=signal.key,
+                        kind=incident.kind,
+                        severity=incident.severity,
+                        summary=signal.summary,
+                        at=stamp,
                     )
+                    if on_transition is not None:
+                        on_transition(recovery)
+                    if incident.delivered_at is not None and should_notify(signal, "recovery"):
+                        notifications.append(recovery)
                 continue
 
             existing = self._state.incidents.get(signal.key)
@@ -208,18 +207,19 @@ class AlertEvaluator:
                 updated_at=stamp,
             )
             self._state.incidents[signal.key] = incident
+            opened = Notification(
+                event="incident",
+                key=signal.key,
+                kind=signal.kind,
+                severity=signal.severity,
+                summary=signal.summary,
+                at=stamp,
+            )
+            if on_transition is not None:
+                on_transition(opened)
             if should_notify(signal, "incident"):
                 incident.delivered_at = stamp
-                notifications.append(
-                    Notification(
-                        event="incident",
-                        key=signal.key,
-                        kind=signal.kind,
-                        severity=signal.severity,
-                        summary=signal.summary,
-                        at=stamp,
-                    )
-                )
+                notifications.append(opened)
 
         self._persist()
         return notifications

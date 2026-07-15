@@ -47,6 +47,7 @@ class DaemonConfig:
     state_path: Path
     policy_path: Path | None = None
     status_path: Path | None = None
+    history_path: Path | None = None
 
 
 def config_from_env(environ: dict | None = None) -> DaemonConfig:
@@ -67,6 +68,7 @@ def config_from_env(environ: dict | None = None) -> DaemonConfig:
     state_dir = Path(STATE_DIR)
     policy_value = (environ.get("LIMEOS_ALERT_POLICY_PATH") or "").strip()
     status_value = (environ.get("LIMEOS_ALERT_STATUS_PATH") or "").strip()
+    history_value = (environ.get("LIMEOS_ALERT_HISTORY_PATH") or "").strip()
     return DaemonConfig(
         webhook_url=(environ.get("LIMEOS_ALERT_MATTERMOST_WEBHOOK") or "").strip() or None,
         poll_seconds=_int("LIMEOS_ALERT_POLL_SECONDS", 60),
@@ -75,6 +77,7 @@ def config_from_env(environ: dict | None = None) -> DaemonConfig:
         state_path=state_dir / "alerts.json",
         policy_path=Path(policy_value) if policy_value else None,
         status_path=Path(status_value) if status_value else state_dir / "alert-status.json",
+        history_path=Path(history_value) if history_value else state_dir / "alert-events.jsonl",
     )
 
 
@@ -98,11 +101,24 @@ def run_once(
     should_notify: Callable[[Signal, str], bool] | None = None,
     on_signals: Callable[[list[Signal]], None] | None = None,
     on_delivery: Callable[[Notification, Exception | None], None] | None = None,
+    on_event: Callable[[Notification], None] | None = None,
 ) -> list[Notification]:
     signals = provider()
     if on_signals is not None:
         on_signals(signals)
-    notifications = evaluator.evaluate(signals, should_notify=should_notify)
+    def record_transition(notification: Notification) -> None:
+        if on_event is None:
+            return
+        try:
+            on_event(notification)
+        except Exception:  # noqa: BLE001 - history must not block evaluation or delivery
+            logger.exception("failed to record alert event for %s", notification.key)
+
+    notifications = evaluator.evaluate(
+        signals,
+        should_notify=should_notify,
+        on_transition=record_transition if on_event is not None else None,
+    )
     for notification in notifications:
         try:
             notifier.send(notification)
@@ -223,6 +239,9 @@ def main() -> int:  # pragma: no cover - integration entrypoint, validated on th
         state_path=config.state_path,
         config=AlertEvaluatorConfig(fail_threshold=config.fail_threshold),
     )
+    from alert_history import AlertEventLedger
+
+    history = AlertEventLedger(config.history_path) if config.history_path is not None else None
 
     policy_holder = [_load_policy(config)]
     provider = _build_live_provider_from_environment(
@@ -245,6 +264,10 @@ def main() -> int:  # pragma: no cover - integration entrypoint, validated on th
             }
         )
 
+    def record_event(notification: Notification) -> None:
+        if history is not None:
+            history.record(notification)
+
     logger.info("limeos alertd started (interval=%ss, mounts=%s)", config.poll_seconds, config.required_mounts)
     while True:
         try:
@@ -258,6 +281,7 @@ def main() -> int:  # pragma: no cover - integration entrypoint, validated on th
                 ),
                 on_signals=record_signals,
                 on_delivery=record_delivery,
+                on_event=record_event,
             ):
                 logger.info("%s %s: %s", note.event, note.key, note.summary)
             _write_status(config, evaluator, latest_signals, delivery_status)

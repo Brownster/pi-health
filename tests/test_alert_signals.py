@@ -142,6 +142,27 @@ def test_run_once_retries_failed_incident_delivery_on_next_tick(tmp_path):
     assert [note.key for note in recorder.sent] == ["mount:/mnt/parity"]
 
 
+def test_run_once_history_failure_does_not_block_delivery(tmp_path):
+    evaluator = AlertEvaluator(
+        state_path=tmp_path / "alerts.json",
+        config=AlertEvaluatorConfig(fail_threshold=1),
+    )
+    notifier = RecordingNotifier()
+
+    def broken_history(_notification):
+        raise OSError("history unavailable")
+
+    notifications = run_once(
+        lambda: mount_signals(set(), ["/mnt/parity"]),
+        evaluator,
+        notifier,
+        on_event=broken_history,
+    )
+
+    assert [note.event for note in notifications] == ["incident"]
+    assert [note.event for note in notifier.sent] == ["incident"]
+
+
 def test_config_from_env_parses_and_defaults():
     config = config_from_env({
         "LIMEOS_ALERT_MATTERMOST_WEBHOOK": "https://mm/hook",
@@ -152,6 +173,7 @@ def test_config_from_env_parses_and_defaults():
     assert config.poll_seconds == 30
     assert config.fail_threshold == 2  # default
     assert config.required_mounts == ("/mnt/disk1", "/mnt/parity")
+    assert config.history_path.name == "alert-events.jsonl"
 
 
 def test_build_live_provider_combines_sources():

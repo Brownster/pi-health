@@ -121,6 +121,8 @@ def test_install_builds_stack_bootstraps_and_redacts_admin_password(tmp_path):
     assert "pi-health-dashboard:latest" not in compose
     assert "COPY alert_daemon.py" in alertd_dockerfile
     assert (tmp_path / "stacks" / "mattermost" / "alert_daemon.py").is_file()
+    assert (tmp_path / "stacks" / "mattermost" / "alert_history.py").is_file()
+    assert "LIMEOS_ALERT_HISTORY_PATH: /var/lib/limeos/alert-events.jsonl" in compose
     assert [
         "docker",
         "compose",

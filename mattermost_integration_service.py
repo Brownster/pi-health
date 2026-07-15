@@ -24,6 +24,7 @@ MATTERMOST_VERSION = "11.8.3"
 MATTERMOST_ARM64_SHA256 = "c784ca5d34cfe3793a31a6a7d17d209e0d916bb744a50df776c78aa318d5b98f"
 ALERTD_SOURCE_FILES = (
     "alert_daemon.py",
+    "alert_history.py",
     "alert_evaluator.py",
     "alert_notifier.py",
     "alert_policy.py",
@@ -447,6 +448,7 @@ class MattermostIntegrationService:
                         "LIMEOS_ALERT_FAIL_THRESHOLD": str(setup["fail_threshold"]),
                         "LIMEOS_ALERT_POLICY_PATH": "/etc/limeos/mattermost.json",
                         "LIMEOS_ALERT_STATUS_PATH": "/var/lib/limeos/mattermost-status.json",
+                        "LIMEOS_ALERT_HISTORY_PATH": "/var/lib/limeos/alert-events.jsonl",
                         "LIMEOS_STATE_DIR": "/var/lib/limeos",
                     },
                     "volumes": [
