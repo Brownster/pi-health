@@ -82,6 +82,7 @@ from helper_client import helper_call
 from operation_manager import OperationRegistry, OperationCapacityError
 from operation_sse import stream_operation_response
 from overview_service import OverviewService
+from metric_history import InvalidMetricRange, MetricHistoryStore
 from pihealth_update_service import stream_update as stream_pihealth_update
 from ports import (
     AuditPort,
@@ -136,6 +137,7 @@ from runtime_paths import (
     CONFIG_DIR as RUNTIME_CONFIG_DIR,
     INTEGRATIONS_CONFIG_DIR as RUNTIME_INTEGRATIONS_CONFIG_DIR,
     INTEGRATIONS_STATE_DIR as RUNTIME_INTEGRATIONS_STATE_DIR,
+    STATE_DIR as RUNTIME_STATE_DIR,
     STORAGE_PLUGIN_CONFIG_DIR as RUNTIME_STORAGE_PLUGIN_CONFIG_DIR,
 )
 from system_stats import (  # noqa: F401  (several names re-exported for tests)
@@ -219,6 +221,7 @@ class AppDependencies:
     mattermost_integration_service: MattermostIntegrationService | None = None
     agent_integration_service: AgentIntegrationService | None = None
     overview_service: OverviewService | None = None
+    metric_history_service: MetricHistoryStore | None = None
 
 
 def _default_system_service():
@@ -349,6 +352,10 @@ def _default_overview_service(
         alert_status_provider=mattermost_service.status,
         recent_recoveries_provider=lambda: alert_history.recent(event="recovery", limit=5),
     )
+
+
+def _default_metric_history_service():
+    return MetricHistoryStore(RUNTIME_STATE_DIR / "metrics.sqlite3")
 
 
 def _write_container_update(container_id, update_available):
@@ -804,6 +811,19 @@ def api_stats():
 def api_overview():
     """Return one bounded, partial-failure-safe Overview snapshot."""
     return jsonify(current_app.extensions["overview_service"].snapshot())
+
+
+@core_api.route('/api/system/history', methods=['GET'])
+@login_required
+def api_system_history():
+    """Return bounded metric history for one fixed reporting range."""
+    try:
+        history = current_app.extensions["metric_history_service"].query(
+            request.args.get("range", "24h")
+        )
+    except InvalidMetricRange as error:
+        return jsonify({"error": str(error)}), 400
+    return jsonify(history)
 
 
 @core_api.route('/api/containers', methods=['GET'])
@@ -1389,6 +1409,9 @@ def create_app(config=None, dependencies=None):
             application.extensions["stack_read_service"],
             application.extensions["mattermost_integration_service"],
         )
+    )
+    application.extensions["metric_history_service"] = (
+        resolved.metric_history_service or _default_metric_history_service()
     )
 
     application.register_blueprint(core_api)

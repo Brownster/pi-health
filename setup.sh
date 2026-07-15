@@ -13,6 +13,8 @@ LIMEOS_LOG_DIR="${LIMEOS_LOG_DIR:-/var/log/limeos}"
 CREDENTIALS_FILE="${LIMEOS_CREDENTIALS_FILE:-${LIMEOS_CONFIG_DIR}/credentials.env}"
 HELPER_SERVICE_FILE="/etc/systemd/system/pihealth-helper.service"
 HELPER_LINK="/usr/local/bin/pihealth_helper.py"
+METRICS_SERVICE_FILE="/etc/systemd/system/limeos-metrics-collector.service"
+METRICS_TIMER_FILE="/etc/systemd/system/limeos-metrics-collector.timer"
 
 CONFIG_DIR="${CONFIG_DIR:-/home/pi/docker}"
 DOCKER_COMPOSE_PATH="${DOCKER_COMPOSE_PATH:-${CONFIG_DIR}/docker-compose.yml}"
@@ -298,11 +300,56 @@ LogsDirectoryMode=0750
 WantedBy=multi-user.target
 EOF
 
+echo ">>> Installing metric history timer..."
+cat > "$METRICS_SERVICE_FILE" <<EOF
+[Unit]
+Description=LimeOS system metric collector
+After=local-fs.target
+
+[Service]
+Type=oneshot
+User=${RUN_USER}
+Group=pihealth
+WorkingDirectory=${REPO_DIR}
+EnvironmentFile=-${CREDENTIALS_FILE}
+Environment=LIMEOS_STATE_DIR=${LIMEOS_STATE_DIR}
+ExecStart=${VENV_DIR}/bin/python ${REPO_DIR}/metric_collector.py
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+ReadWritePaths=${LIMEOS_STATE_DIR}
+UMask=0027
+StateDirectory=limeos
+StateDirectoryMode=0750
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+cat > "$METRICS_TIMER_FILE" <<EOF
+[Unit]
+Description=Collect LimeOS system metrics every five minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=30s
+RandomizedDelaySec=15s
+Persistent=true
+Unit=limeos-metrics-collector.service
+
+[Install]
+WantedBy=timers.target
+EOF
+
 systemctl daemon-reload
 systemctl enable --now pi-health.service
 systemctl enable --now pihealth-helper.service
+systemctl enable --now limeos-metrics-collector.timer
 
 echo ">>> Pi-Health is running."
 echo "Open: http://$(hostname -I | awk '{print $1}'):8002"
 echo "Credentials: ${CREDENTIALS_FILE}"
 echo "Helper service: pihealth-helper.service"
+echo "Metrics timer: limeos-metrics-collector.timer"
