@@ -696,3 +696,39 @@ class TestPihealthUpdate:
         assert result["success"] is True
         assert result["new_commit"] == "b" * 40
         mock_rmtree.assert_called_once()
+
+
+class TestUpdateBuildStaleness:
+    _CTX = {"user": "pi", "repo_path": "/repo"}
+
+    @patch("pihealth_helper.os.path.isfile", return_value=False)
+    def test_bundle_fresh_when_tool_absent(self, _isfile):
+        assert helper._bundle_is_fresh("/repo") is True
+
+    @patch("pihealth_helper.run_command", return_value={"returncode": 1})
+    @patch("pihealth_helper.os.path.isfile", return_value=True)
+    def test_bundle_stale_on_nonzero_check(self, _isfile, _run):
+        assert helper._bundle_is_fresh("/repo") is False
+
+    @patch("pihealth_helper.os.path.isdir", return_value=True)
+    @patch("pihealth_helper._bundle_is_fresh", return_value=False)
+    @patch("pihealth_helper.shutil.which", return_value=None)
+    def test_no_npm_and_stale_bundle_flags_stale(self, _which, _fresh, _isdir):
+        result = helper._pihealth_update_build(self._CTX)
+        assert result["success"] and result.get("skipped") and result.get("stale") is True
+
+    @patch("pihealth_helper.os.path.isdir", return_value=True)
+    @patch("pihealth_helper._bundle_is_fresh", return_value=True)
+    @patch("pihealth_helper.shutil.which", return_value=None)
+    def test_no_npm_and_fresh_bundle_skips_cleanly(self, _which, _fresh, _isdir):
+        result = helper._pihealth_update_build(self._CTX)
+        assert result["success"] and result.get("skipped") and not result.get("stale")
+
+    @patch("pihealth_helper.run_command")
+    @patch("pihealth_helper.os.path.isdir", return_value=True)
+    @patch("pihealth_helper._bundle_is_fresh", return_value=True)
+    @patch("pihealth_helper.shutil.which", return_value="/usr/bin/npm")
+    def test_npm_present_but_fresh_does_not_rebuild(self, _which, _fresh, _isdir, run_command):
+        result = helper._pihealth_update_build(self._CTX)
+        assert result["success"] and result.get("skipped")
+        run_command.assert_not_called()

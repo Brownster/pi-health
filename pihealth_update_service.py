@@ -110,21 +110,22 @@ def stream_update(helper_call: HelperCall, config: Mapping[str, Any]):
         else "Runtime migration complete.",
     }
 
-    # -- UI bundle (only when the frontend changed) --------------------------
-    if any(path.startswith("frontend/") for path in changed):
-        yield {"step": "build", "line": "Rebuilding web UI…"}
-        build = call("build")
-        if not build.get("success"):
-            yield {"step": "build", "error": build.get("error", "UI build failed")}
-            return
-        yield {
-            "step": "build",
-            "line": f"UI build skipped ({build.get('reason', '')}); using committed bundle."
-            if build.get("skipped")
-            else "Web UI rebuilt.",
-        }
+    # -- UI bundle -----------------------------------------------------------
+    # Always ask the helper: it cheaply compares the committed bundle's digest to the source
+    # and only rebuilds when stale. This also catches a stale bundle that a prior pull left
+    # behind — the "only when frontend/ changed" gate used to miss that.
+    yield {"step": "build", "line": "Checking web UI bundle…"}
+    build = call("build")
+    if not build.get("success"):
+        yield {"step": "build", "error": build.get("error", "UI build failed")}
+        return
+    if build.get("stale"):
+        # No toolchain to rebuild and the committed bundle is stale — visible, non-fatal.
+        yield {"step": "build", "line": f"⚠ {build.get('reason', 'web UI bundle is stale')}"}
+    elif build.get("skipped"):
+        yield {"step": "build", "line": build.get("reason") or "Web UI already current."}
     else:
-        yield {"step": "build", "line": "No UI changes."}
+        yield {"step": "build", "line": "Web UI rebuilt."}
 
     # -- AI agent runtime (only when agent code/config/baseline changed) -----
     if any(path.startswith(_AGENT_UPDATE_PREFIXES) for path in changed):

@@ -71,25 +71,46 @@ def test_deps_skipped_when_requirements_unchanged():
             "pull": {"success": True, "old_commit": OLD, "new_commit": NEW,
                      "changed_files": ["app.py"]},
             "migrate": {"success": True},
+            "build": {"success": True, "skipped": True, "reason": "web UI already up to date"},
             "restart": {"success": True},
         }
     )
     assert "deps" not in helper.calls
-    assert "build" not in helper.calls
-    assert helper.calls == ["pull", "migrate", "restart"]
+    assert helper.calls == ["pull", "migrate", "build", "restart"]
 
 
-def test_build_runs_only_when_frontend_changed():
-    helper, _ = _run(
+def test_build_always_runs_and_reports_when_current():
+    # The build step now runs every update (the helper decides whether to rebuild), so a
+    # bundle left stale by an earlier pull is still caught rather than skipped.
+    helper, events = _run(
         {
             "pull": {"success": True, "old_commit": OLD, "new_commit": NEW,
-                     "changed_files": ["frontend/package.json"]},
+                     "changed_files": ["app.py"]},
             "migrate": {"success": True},
-            "build": {"success": True, "skipped": True, "reason": "npm not installed"},
+            "build": {"success": True, "skipped": True, "reason": "web UI already up to date"},
             "restart": {"success": True},
         }
     )
     assert "build" in helper.calls
+    assert any(e["step"] == "build" and "already up to date" in e.get("line", "") for e in events)
+
+
+def test_stale_bundle_without_toolchain_warns_but_continues():
+    helper, events = _run(
+        {
+            "pull": {"success": True, "old_commit": OLD, "new_commit": NEW,
+                     "changed_files": ["frontend/src/app.tsx"]},
+            "migrate": {"success": True},
+            "build": {"success": True, "skipped": True, "stale": True,
+                      "reason": "npm not installed and the committed web UI bundle is stale"},
+            "restart": {"success": True},
+        }
+    )
+    assert any(
+        e["step"] == "build" and "⚠" in e.get("line", "") and "stale" in e.get("line", "")
+        for e in events
+    )
+    assert helper.calls[-1] == "restart"  # non-fatal: the update still completes
 
 
 def test_pull_failure_stops_with_error():
@@ -127,11 +148,12 @@ def test_agent_step_runs_when_agent_files_change():
             "pull": {"success": True, "old_commit": OLD, "new_commit": NEW,
                      "changed_files": ["agent_gateway/gateway.py", "config/limeos-packages.json"]},
             "migrate": {"success": True},
+            "build": {"success": True, "skipped": True, "reason": "web UI already up to date"},
             "agent": {"success": True, "refreshed": True},
             "restart": {"success": True},
         }
     )
-    assert helper.calls == ["pull", "migrate", "agent", "restart"]
+    assert helper.calls == ["pull", "migrate", "build", "agent", "restart"]
     assert any(e["step"] == "agent" and "refreshed" in e.get("line", "") for e in events)
 
 
@@ -141,6 +163,7 @@ def test_agent_step_reports_skip_when_not_installed():
             "pull": {"success": True, "old_commit": OLD, "new_commit": NEW,
                      "changed_files": ["limeos_packages.py"]},
             "migrate": {"success": True},
+            "build": {"success": True, "skipped": True, "reason": "web UI already up to date"},
             "agent": {"success": True, "skipped": True, "reason": "agent not installed"},
             "restart": {"success": True},
         }
@@ -155,6 +178,7 @@ def test_agent_step_not_called_without_agent_changes():
             "pull": {"success": True, "old_commit": OLD, "new_commit": NEW,
                      "changed_files": ["app.py"]},
             "migrate": {"success": True},
+            "build": {"success": True, "skipped": True, "reason": "web UI already up to date"},
             "restart": {"success": True},
         }
     )
@@ -168,6 +192,7 @@ def test_agent_step_error_stops_before_restart():
             "pull": {"success": True, "old_commit": OLD, "new_commit": NEW,
                      "changed_files": ["agent_transport/listener.py"]},
             "migrate": {"success": True},
+            "build": {"success": True, "skipped": True, "reason": "web UI already up to date"},
             "agent": {"success": False, "error": "agent refresh failed"},
         }
     )

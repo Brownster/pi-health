@@ -2435,16 +2435,42 @@ def _pihealth_update_migrate(ctx):
     return {'success': True, 'stdout': result.get("stdout", "")}
 
 
+def _bundle_is_fresh(repo_path):
+    """True when the committed static/v2 bundle matches the frontend source.
+
+    Uses the digest marker written by build:publish. Missing tool/marker (older checkout)
+    is treated as fresh so it never blocks an update.
+    """
+    script = os.path.join(repo_path, "scripts", "bundle_source_digest.py")
+    if not os.path.isfile(script):
+        return True
+    proc = run_command([sys.executable, script, "--check"], timeout=60, cwd=repo_path)
+    return proc.get("returncode") == 0
+
+
 def _pihealth_update_build(ctx):
-    """Rebuild and publish the web UI bundle when a toolchain is available."""
+    """Rebuild the web UI when it is stale and a toolchain is available; else flag staleness."""
     user = ctx["user"]
     repo_path = ctx["repo_path"]
     frontend = os.path.join(repo_path, "frontend")
 
     if not os.path.isdir(frontend):
         return {'success': True, 'skipped': True, 'reason': 'no frontend directory'}
+
+    fresh = _bundle_is_fresh(repo_path)
+
     if not shutil.which("npm"):
-        return {'success': True, 'skipped': True, 'reason': 'npm not installed; committed bundle used'}
+        # No toolchain: the committed bundle is all we can serve. Surface staleness rather
+        # than silently serving old UI (it must be rebuilt and committed upstream).
+        if fresh:
+            return {'success': True, 'skipped': True,
+                    'reason': 'npm not installed; committed bundle is current'}
+        return {'success': True, 'skipped': True, 'stale': True,
+                'reason': 'npm not installed and the committed web UI bundle is stale; '
+                          'rebuild and commit static/v2 upstream'}
+
+    if fresh:
+        return {'success': True, 'skipped': True, 'reason': 'web UI already up to date'}
 
     if not os.path.isdir(os.path.join(frontend, "node_modules")):
         install = run_command(

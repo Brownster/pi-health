@@ -94,6 +94,9 @@ def test_update_streams_full_sequence_end_to_end(authenticated_client, monkeypat
                 "new_commit": "b" * 40,
                 "changed_files": ["app.py"],  # no deps/UI work
             }
+        if step == "build":
+            # build runs every update now; the helper reports the bundle already current
+            return {"success": True, "skipped": True, "reason": "web UI already up to date"}
         return {"success": True, "scheduled": True}
 
     monkeypatch.setattr("app.helper_call", fake_helper)
@@ -116,7 +119,7 @@ def test_update_streams_full_sequence_end_to_end(authenticated_client, monkeypat
 
     lines = {event.get("step"): event.get("line", "") for event in events}
     assert "No dependency changes." in lines["deps"]  # requirements.txt not in changed_files
-    assert "No UI changes." in lines["build"]  # frontend/ not in changed_files
+    assert "already up to date" in lines["build"]  # bundle current; nothing to rebuild
     assert "No agent changes." in lines["agent"]  # no agent paths in changed_files
 
     terminal = events[-1]
