@@ -22,6 +22,14 @@ def _agent_service():
     return current_app.extensions["agent_integration_service"]
 
 
+def _stack_notifications_service():
+    return current_app.extensions["stack_notifications_service"]
+
+
+#: *arr webhook bodies are small; reject anything implausibly large before parsing.
+_STACK_NOTIFICATION_MAX_BYTES = 256 * 1024
+
+
 def _start_agent_operation(*, kind, target, producer):
     try:
         operation = current_app.extensions["operation_registry"].create(
@@ -270,3 +278,93 @@ def agent_permissions():
         return jsonify(_agent_service().permissions())
     except AgentIntegrationError as exc:
         return jsonify({"error": str(exc)}), 503
+
+
+@integrations_manager.route("/api/integrations/stack-notifications", methods=["GET"])
+@login_required
+def stack_notifications_status():
+    return jsonify(_stack_notifications_service().status())
+
+
+@integrations_manager.route("/api/integrations/stack-notifications/mode", methods=["PUT"])
+@login_required
+@csrf_protect
+def stack_notifications_mode():
+    values = request.get_json(silent=True)
+    mode = values.get("mode") if isinstance(values, dict) else None
+    body, status = _stack_notifications_service().set_mode(str(mode or ""))
+    return jsonify(body), status
+
+
+@integrations_manager.route("/api/integrations/stack-notifications/enable", methods=["POST"])
+@login_required
+@csrf_protect
+def enable_stack_notifications():
+    """Provision the channel/webhook for an already-installed Mattermost (existing users).
+
+    Delegates to the Mattermost service, which owns the admin session; the admin password
+    supplied here is used only to authenticate and is never stored.
+    """
+    values = request.get_json(silent=True)
+    if not isinstance(values, dict):
+        return jsonify({"error": "Request body must be an object"}), 400
+    service = _service()
+
+    def produce_events():
+        yield from service.stream_enable_stack_notifications(values)
+
+    try:
+        operation = current_app.extensions["operation_registry"].create(
+            owner=session["csrf_token"],
+            username=session.get("username", "unknown"),
+            kind="stack-notifications-enable",
+            target="stack-notifications",
+            producer=produce_events,
+        )
+    except OperationCapacityError as exc:
+        return jsonify({"error": str(exc)}), 429
+    except RuntimeError as exc:
+        return jsonify({"error": f"Unable to enable stack notifications: {exc}"}), 500
+    return jsonify(
+        {
+            "operation_id": operation.operation_id,
+            "stream_url": (
+                f"/api/integrations/stack-notifications/operations/"
+                f"{operation.operation_id}/stream"
+            ),
+        }
+    ), 202
+
+
+@integrations_manager.route(
+    "/api/integrations/stack-notifications/operations/<operation_id>/stream",
+    methods=["GET"],
+)
+@login_required
+def stream_stack_notifications_enable(operation_id):
+    from operation_sse import stream_operation_response
+
+    return stream_operation_response(
+        current_app.extensions["operation_registry"],
+        operation_id,
+        expected_kind="stack-notifications-enable",
+    )
+
+
+@integrations_manager.route(
+    "/api/integrations/stack-notifications/hook/<token>", methods=["POST"]
+)
+def stack_notifications_ingest(token):
+    """Token-gated *arr webhook sink.
+
+    Deliberately without ``login_required``/``csrf_protect``: *arr apps post here directly
+    with only the per-install token in the path (constant-time compared inside the service).
+    The body is size-capped before parsing and always answered 200 for a valid token so an
+    *arr connection Test succeeds.
+    """
+    length = request.content_length
+    if length is not None and length > _STACK_NOTIFICATION_MAX_BYTES:
+        return jsonify({"error": "Payload too large"}), 413
+    payload = request.get_json(silent=True)
+    body, status = _stack_notifications_service().ingest(token, payload)
+    return jsonify(body), status

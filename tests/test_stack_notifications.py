@@ -154,3 +154,39 @@ def test_ingest_delivery_failure_is_non_fatal():
     )
     body, status = service.ingest("s3cret", _radarr("Download"))
     assert status == 200 and body["status"] == "delivery_failed"
+
+
+def test_status_reports_config_including_token_for_the_admin():
+    service, _ = _service(CONFIG)
+    status = service.status()
+    assert status == {
+        "enabled": True,
+        "configured": True,
+        "mode": "quiet",
+        "source_default": "stack",
+        "channel_name": None,
+        "token": "s3cret",
+    }
+
+
+def test_set_mode_persists_and_validates():
+    stored = dict(CONFIG)
+    service = StackNotificationsService(
+        config_provider=lambda: stored,
+        poster=lambda *_: None,
+        config_writer=lambda config: stored.update(config),
+    )
+    body, status = service.set_mode("verbose")
+    assert status == 200 and body["mode"] == "verbose" and stored["mode"] == "verbose"
+    _body, bad = service.set_mode("loud")
+    assert bad == 400
+
+
+def test_set_mode_404_when_not_configured():
+    service = StackNotificationsService(
+        config_provider=lambda: {"enabled": False},
+        poster=lambda *_: None,
+        config_writer=lambda config: None,
+    )
+    _body, status = service.set_mode("verbose")
+    assert status == 404

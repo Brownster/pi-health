@@ -41,6 +41,7 @@ from catalog_manager import CATALOG_DIR, _load_stack_compose, catalog_manager, d
 from catalog_service import CatalogService
 from integrations_manager import integrations_manager
 from mattermost_integration_service import MattermostIntegrationService
+from stack_notifications_service import StackNotificationsService
 from agent_integration_service import AgentIntegrationService
 from alert_history import AlertEventLedger
 from media_profile_service import MediaProfileService
@@ -219,6 +220,7 @@ class AppDependencies:
     catalog_service: CatalogService | None = None
     tools_service: ToolsService | None = None
     mattermost_integration_service: MattermostIntegrationService | None = None
+    stack_notifications_service: StackNotificationsService | None = None
     agent_integration_service: AgentIntegrationService | None = None
     overview_service: OverviewService | None = None
     metric_history_service: MetricHistoryStore | None = None
@@ -303,6 +305,27 @@ def _default_mattermost_integration_service(repository, docker_port):
         config_repository=repository,
         atomic_writer=atomic_write_text,
         container_status_provider=container_status,
+        stack_notifications_config_path=RUNTIME_INTEGRATIONS_CONFIG_DIR
+        / "stack-notifications.json",
+    )
+
+
+def _default_stack_notifications_service(repository):
+    from alert_notifier import _default_poster
+
+    config_path = RUNTIME_INTEGRATIONS_CONFIG_DIR / "stack-notifications.json"
+
+    def config_provider():
+        data = repository.read_json(config_path, default={})
+        return data if isinstance(data, dict) else {}
+
+    def config_writer(config):
+        repository.write_json(config_path, dict(config), mode=0o600)
+
+    return StackNotificationsService(
+        config_provider=config_provider,
+        poster=_default_poster,
+        config_writer=config_writer,
     )
 
 
@@ -1392,6 +1415,10 @@ def create_app(config=None, dependencies=None):
         or _default_mattermost_integration_service(
             application.extensions["config_repo"], application.extensions["docker"]
         )
+    )
+    application.extensions["stack_notifications_service"] = (
+        resolved.stack_notifications_service
+        or _default_stack_notifications_service(application.extensions["config_repo"])
     )
     application.extensions["agent_integration_service"] = (
         resolved.agent_integration_service

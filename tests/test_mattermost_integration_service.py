@@ -24,6 +24,10 @@ class FakeMattermostApi:
         self.calls.append(("admin", values["admin_username"] if "admin_username" in values else values["username"]))
         return "user-1"
 
+    def login(self, username, _password):
+        self.calls.append(("login", username))
+        return "user-1"
+
     def ensure_team(self, **values):
         self.calls.append(("team", values["name"]))
         return "team-1"
@@ -70,6 +74,7 @@ def make_service(tmp_path):
         notifier_factory=lambda url: RecordingNotifier(url, sent),
         sleep=lambda _seconds: None,
         clock=lambda: 1_784_275_200,
+        stack_notifications_config_path=tmp_path / "config" / "stack-notifications.json",
     )
     return service, api, sent, compose_calls
 
@@ -83,6 +88,70 @@ SETUP = {
     "team_name": "limeos",
     "channel_name": "limeos-alerts",
 }
+
+
+def _sn_config(tmp_path):
+    return json.loads((tmp_path / "config" / "stack-notifications.json").read_text())
+
+
+def test_install_provisions_the_stack_notifications_channel_and_config(tmp_path):
+    service, api, _sent, _compose = make_service(tmp_path)
+
+    list(service.stream_install(SETUP))
+
+    assert ("channel", "stack-notifications") in api.calls
+    config = _sn_config(tmp_path)
+    assert config["enabled"] is True
+    assert config["mode"] == "quiet"
+    assert config["channel_name"] == "stack-notifications"
+    assert config["token"] and config["webhook_url"].startswith("http")
+
+
+def test_install_preserves_an_existing_stack_notifications_token(tmp_path):
+    service, _api, _sent, _compose = make_service(tmp_path)
+    path = tmp_path / "config" / "stack-notifications.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"token": "keep-me", "mode": "verbose"}))
+
+    list(service.stream_install(SETUP))
+
+    config = _sn_config(tmp_path)
+    assert config["token"] == "keep-me"  # never rotate a token *arr already uses
+    assert config["mode"] == "verbose"
+
+
+def test_enable_stack_notifications_provisions_for_an_existing_install(tmp_path):
+    service, api, _sent, _compose = make_service(tmp_path)
+    list(service.stream_install(SETUP))
+    (tmp_path / "config" / "stack-notifications.json").unlink()
+
+    events = list(
+        service.stream_enable_stack_notifications({"admin_password": "long-test-password"})
+    )
+
+    assert events[-1]["done"] is True
+    assert ("login", "limeadmin") in api.calls
+    assert _sn_config(tmp_path)["enabled"] is True
+
+
+def test_enable_requires_the_admin_password(tmp_path):
+    service, _api, _sent, _compose = make_service(tmp_path)
+    list(service.stream_install(SETUP))
+
+    events = list(service.stream_enable_stack_notifications({}))
+
+    assert events[-1]["step"] == "error"
+    assert "password" in events[-1]["error"].lower()
+
+
+def test_enable_requires_an_installed_mattermost(tmp_path):
+    service, _api, _sent, _compose = make_service(tmp_path)
+
+    events = list(
+        service.stream_enable_stack_notifications({"admin_password": "pw"})
+    )
+
+    assert events[-1]["step"] == "error"
 
 
 def test_install_builds_stack_bootstraps_and_redacts_admin_password(tmp_path):

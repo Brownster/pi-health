@@ -35,6 +35,11 @@ ALERTD_SOURCE_FILES = (
 SLUG_PATTERN = re.compile(r"^[a-z][a-z0-9-]{1,62}$")
 USERNAME_PATTERN = re.compile(r"^[a-z0-9._-]{3,64}$")
 
+#: A single dedicated channel receives normalized *arr (Radarr/Sonarr/…) webhooks.
+STACK_NOTIFICATIONS_CHANNEL = "stack-notifications"
+STACK_NOTIFICATIONS_DISPLAY = "Stack Notifications"
+STACK_NOTIFICATIONS_WEBHOOK_NAME = "LimeOS Stack Notifications"
+
 
 class MattermostIntegrationError(Exception):
     """Raised when Mattermost setup or management fails."""
@@ -141,20 +146,29 @@ class MattermostApiClient:
             )
         return str(channel["id"])
 
-    def ensure_incoming_webhook(self, *, team_id: str, channel_id: str) -> str:
+    def ensure_incoming_webhook(
+        self,
+        *,
+        team_id: str,
+        channel_id: str,
+        display_name: str = "LimeOS Alerts",
+        description: str = "Health incidents from LimeOS",
+    ) -> str:
         hooks, _headers = self._request(
             "GET", f"/api/v4/hooks/incoming?team_id={team_id}&page=0&per_page=100"
         )
         for hook in hooks if isinstance(hooks, list) else []:
-            if hook.get("display_name") == "LimeOS Alerts" and hook.get("id"):
+            # Match on our display_name so distinct channels (alerts vs stack
+            # notifications) keep distinct webhooks rather than colliding.
+            if hook.get("display_name") == display_name and hook.get("id"):
                 return f"{self._site_url}/hooks/{hook['id']}"
         hook, _headers = self._request(
             "POST",
             "/api/v4/hooks/incoming",
             {
                 "channel_id": channel_id,
-                "display_name": "LimeOS Alerts",
-                "description": "Health incidents from LimeOS",
+                "display_name": display_name,
+                "description": description,
             },
         )
         return f"{self._site_url}/hooks/{hook['id']}"
@@ -209,8 +223,14 @@ class MattermostIntegrationService:
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.time,
         container_status_provider: Callable[[str], Mapping[str, Any] | None] | None = None,
+        stack_notifications_config_path: Path | None = None,
     ) -> None:
         self._config_path = Path(config_path)
+        self._stack_notifications_config_path = (
+            Path(stack_notifications_config_path)
+            if stack_notifications_config_path is not None
+            else None
+        )
         self._secrets_path = Path(secrets_path)
         self._status_path = Path(status_path)
         self._stack_path_provider = stack_path_provider
@@ -275,6 +295,85 @@ class MattermostIntegrationService:
         self._notifier_factory(webhook).send(notification)
         return {"status": "sent", "at": notification.at}
 
+    def _provision_stack_notifications(self, client: Any, team_id: str) -> str:
+        """Create the shared #stack-notifications channel + webhook and persist config.
+
+        Idempotent: the ``ensure_*`` calls no-op when the channel/webhook exist, and an
+        existing token/mode is preserved so re-running never rotates the token *arr apps
+        are already pointed at.
+        """
+        channel_id = client.ensure_channel(
+            team_id=team_id,
+            name=STACK_NOTIFICATIONS_CHANNEL,
+            display_name=STACK_NOTIFICATIONS_DISPLAY,
+        )
+        webhook = client.ensure_incoming_webhook(
+            team_id=team_id,
+            channel_id=channel_id,
+            display_name=STACK_NOTIFICATIONS_WEBHOOK_NAME,
+            description="Normalized Radarr/Sonarr/*arr notifications",
+        )
+        self._write_stack_notifications_config(webhook_url=webhook)
+        return webhook
+
+    def _write_stack_notifications_config(self, *, webhook_url: str) -> None:
+        if self._stack_notifications_config_path is None:
+            return
+        existing = (
+            self._repository.read_json(self._stack_notifications_config_path, default={}) or {}
+        )
+        config = {
+            "version": INTEGRATION_VERSION,
+            "enabled": True,
+            # A secret capability token gates the public *arr webhook endpoint; keep the
+            # one already handed to the *arr apps on re-provision.
+            "token": existing.get("token") or secrets.token_urlsafe(32),
+            "webhook_url": webhook_url,
+            "mode": existing.get("mode") or "quiet",
+            "source_default": existing.get("source_default") or "stack",
+            "channel_name": STACK_NOTIFICATIONS_CHANNEL,
+        }
+        self._repository.write_json(
+            self._stack_notifications_config_path, config, mode=0o600
+        )
+
+    def stream_enable_stack_notifications(
+        self, values: Mapping[str, Any]
+    ) -> Iterator[dict[str, Any]]:
+        """Provision stack notifications on an already-installed Mattermost (existing users).
+
+        Channel + webhook creation needs a Mattermost session; the admin password is never
+        stored, so it is re-supplied here (write-only) and used only for this login.
+        """
+        try:
+            config = self._load_config()
+            if not config.get("installed"):
+                raise MattermostIntegrationError(
+                    "Install Mattermost before enabling stack notifications"
+                )
+            site_url = config.get("site_url")
+            team_name = config.get("team_name")
+            admin_username = config.get("admin_username")
+            password = values.get("admin_password") if isinstance(values, Mapping) else None
+            if not (site_url and team_name and admin_username):
+                raise MattermostIntegrationError("Mattermost configuration is incomplete")
+            if not isinstance(password, str) or not password:
+                raise MattermostIntegrationError("Administrator password is required")
+            yield {"step": "auth", "line": "Authenticating with Mattermost"}
+            client = self._api_factory(site_url)
+            client.login(admin_username, password)
+            yield {"step": "team", "line": "Locating LimeOS team"}
+            team_id = client.ensure_team(name=team_name, display_name="LimeOS")
+            yield {"step": "stack-notifications", "line": "Creating stack notifications channel"}
+            self._provision_stack_notifications(client, team_id)
+            yield {
+                "step": "complete",
+                "line": "Stack notifications channel is ready",
+                "done": True,
+            }
+        except (MattermostIntegrationError, OSError) as exc:
+            yield {"step": "error", "error": str(exc)}
+
     def stream_install(self, values: Mapping[str, Any]) -> Iterator[dict[str, Any]]:
         try:
             setup = self._validate_setup(values)
@@ -334,6 +433,9 @@ class MattermostIntegrationService:
                 team_id=team_id, channel_id=channel_id
             )
             self._write_secrets(database_password=database_password, webhook_url=webhook)
+
+            yield {"step": "stack-notifications", "line": "Creating stack notifications channel"}
+            self._provision_stack_notifications(client, team_id)
 
             yield {"step": "alertd-image", "line": "Building LimeOS alert service"}
             self._run_compose(stack_dir, "build", "limeos-alertd")

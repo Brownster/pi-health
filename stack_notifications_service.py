@@ -176,9 +176,40 @@ class StackNotificationsService:
         *,
         config_provider: Callable[[], Mapping],
         poster: Callable[[str, dict], None],
+        config_writer: Callable[[Mapping], None] | None = None,
     ) -> None:
         self._config_provider = config_provider
         self._poster = poster
+        self._config_writer = config_writer
+
+    def status(self) -> dict:
+        """Non-secret-except-to-the-authed-admin status for the integrations card.
+
+        `token` is returned so the admin can build the ingest URL to paste into each *arr
+        app; the GET route that calls this is authenticated.
+        """
+        config = self._config_provider() or {}
+        return {
+            "enabled": bool(config.get("enabled")),
+            "configured": bool(config.get("webhook_url")),
+            "mode": config.get("mode") or "quiet",
+            "source_default": config.get("source_default") or "stack",
+            "channel_name": config.get("channel_name") or None,
+            "token": config.get("token") or None,
+        }
+
+    def set_mode(self, mode: str) -> tuple[dict, int]:
+        """Switch the forwarding policy between 'quiet' and 'verbose'."""
+        if mode not in {"quiet", "verbose"}:
+            return {"error": "mode must be 'quiet' or 'verbose'"}, 400
+        config = dict(self._config_provider() or {})
+        if not config.get("webhook_url"):
+            return {"error": "Stack notifications are not configured"}, 404
+        if self._config_writer is None:  # pragma: no cover - always wired in app
+            return {"error": "Configuration is read-only"}, 500
+        config["mode"] = mode
+        self._config_writer(config)
+        return self.status(), 200
 
     def ingest(self, token: str, payload: object) -> tuple[dict, int]:
         config = self._config_provider() or {}
