@@ -80,3 +80,15 @@ so it never collides with the alerts webhook (`LimeOS Alerts`) on the same team.
 Settings → Connect → add a **Webhook**: method `POST`, URL =
 `http://<limeos-host>:<port>/api/integrations/stack-notifications/hook/<token>` (copy it from
 the integrations card). Deliveries land in `~stack-notifications`.
+
+## Troubleshooting: webhook test hangs (VPN-namespaced *arr apps)
+
+If an *arr app runs behind gluetun (`network_mode: service:vpn`), it shares the VPN container's
+network namespace, so **all** its outbound traffic goes through the tunnel — and gluetun's
+firewall blocks the LAN by default. A webhook to the LimeOS host IP then hangs on "Test".
+
+Fix: allow the LAN out of the VPN by setting `FIREWALL_OUTBOUND_SUBNETS` (e.g.
+`192.168.0.0/24`) in gluetun's env, then **recreate the whole VPN group together** (gluetun +
+every `network_mode: service:vpn` client — recreating gluetun alone orphans the clients). The
+standard VPN setup (`/api/setup/vpn`) now seeds this automatically from the host's LAN /24, so
+new deployments work out of the box; existing installs that predate it need the manual edit.
