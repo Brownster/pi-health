@@ -104,7 +104,7 @@ host's units can't silently diverge from the release.
 |---|---|---|---|
 | PB-001 | Manifest schema + `config/limeos-packages.json` + validator/tests | The versioned baseline | ✅ `bb5e21e` |
 | PB-002 | `cmd_packages_reconcile` (helper) + `packages.status` limeops op | Read-only status + gated apply | ✅ done |
-| PB-003 | Nightly timer + drift→Mattermost incident + unattended-upgrades scoping | Controlled updates | Planned |
+| PB-003 | Nightly timer + drift→Mattermost incident + unattended-upgrades scoping | Controlled updates | 🚧 slice 1 done (timer + nightly run); report + approval next |
 | PB-004 | Deploy the agent runtime via self-update-from-repo; fix the module deploy gap | Reproducible installs | ✅ done |
 | PB-005 | Target signoff on Holly (pin holds across an apt upgrade; drift detected + reported) | Evidence | Planned |
 
@@ -127,6 +127,15 @@ compliance without any mutation authority; and `cmd_packages_reconcile(mode)` (h
 install missing, upgrade below `present-min`, remove `absent`), taking only `mode` and reading
 package names/versions solely from the validated manifest. Security-pocket updates stay with the
 nightly job (PB-003).
+
+PB-003 slice 1 landed: a `limeos-package-reconcile.timer` (systemd, daily, `RandomizedDelaySec`,
+`Persistent`) rendered by `render_package_reconcile_schedule` and installed idempotently during the
+update's migrate step (`cmd_configure_package_reconcile_schedule`). The timer runs
+`cmd_packages_nightly_reconcile` back through the helper socket (audited), which: (1) `apt-mark hold`s
+every *critical* manifest entry, (2) auto-applies non-critical security updates via
+`unattended-upgrade` (skipped cleanly when absent), (3) runs the manifest `reconcile apply`, and
+returns a structured report (`held`, `security`, `reconcile`). Remaining: post held/critical pending
+updates to a Mattermost updates channel (slice 2) and the single-use approval flow (slice 3).
 
 ## Review findings addressed (2026-07-15)
 A review of `2366e41..d4789e0` surfaced four convergence/reporting gaps; the high ones are

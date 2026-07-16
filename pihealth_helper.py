@@ -32,7 +32,12 @@ from typing import Optional
 import urllib.request
 import urllib.error
 import shlex
-from helper_templates import cron_to_oncalendar, render_snapraid_schedule, render_startup_files
+from helper_templates import (
+    cron_to_oncalendar,
+    render_package_reconcile_schedule,
+    render_snapraid_schedule,
+    render_startup_files,
+)
 from fstab_presets import get_fstab_preset, normalize_fstype
 from agent_provider.provisioning import (
     AGENT_CONFIG_PATH,
@@ -2432,6 +2437,14 @@ def _pihealth_update_migrate(ctx):
             'error': result.get("stderr") or result.get("error") or 'migration failed',
             'stdout': result.get("stdout", ""),
         }
+
+    # Ensure the nightly package-baseline reconcile timer is installed (idempotent;
+    # best-effort so a timer hiccup never blocks the update).
+    try:
+        cmd_configure_package_reconcile_schedule({"app_dir": repo_path, "user": user})
+    except Exception:
+        pass
+
     return {'success': True, 'stdout': result.get("stdout", "")}
 
 
@@ -3536,6 +3549,86 @@ def cmd_packages_reconcile(params):
     return {'success': not failed, 'mode': 'apply', 'applied': applied, 'failed': failed, **report}
 
 
+PACKAGE_RECONCILE_UNIT = 'limeos-package-reconcile'
+
+
+def cmd_packages_nightly_reconcile(params):
+    """Nightly baseline convergence. Accepts no parameters. In order:
+
+    1. `apt-mark hold` every *critical* manifest package so security/distro upgrades can't
+       move it, 2. auto-apply non-critical security updates via unattended-upgrades (security
+       pocket only, per its own config), 3. reconcile the declarative manifest. Package names
+       come only from the validated manifest, never from the caller.
+    """
+    if not isinstance(params, dict) or set(params):
+        return {'success': False, 'error': 'packages.nightly_reconcile accepts no parameters'}
+    try:
+        from limeos_packages import load_manifest
+        specs = load_manifest()
+    except Exception:
+        return {'success': False, 'error': 'Unable to read the package manifest'}
+
+    held, hold_failed = [], []
+    for spec in specs:
+        if getattr(spec, 'manager', None) == 'apt' and getattr(spec, 'critical', False):
+            rc = run_command(['apt-mark', 'hold', spec.name], timeout=30).get('returncode')
+            (held if rc == 0 else hold_failed).append(spec.name)
+
+    if shutil.which('unattended-upgrade'):
+        run_command(['apt-get', 'update'], timeout=300)
+        ua_rc = run_command(['unattended-upgrade'], timeout=1800).get('returncode')
+        security = {'skipped': False, 'ok': ua_rc == 0}
+    else:
+        security = {'skipped': True, 'reason': 'unattended-upgrade not installed'}
+
+    reconcile = cmd_packages_reconcile({'mode': 'apply'})
+
+    security_ok = security.get('skipped', False) or security.get('ok', False)
+    return {
+        'success': (not hold_failed) and security_ok and reconcile.get('success', False),
+        'held': held,
+        'hold_failed': hold_failed,
+        'security': security,
+        'reconcile': reconcile,
+    }
+
+
+def cmd_configure_package_reconcile_schedule(params):
+    """Install and enable the nightly package-reconcile timer. Params: {app_dir, user,
+    on_calendar?}. The timer runs the reconcile back through the helper socket (audited)."""
+    if not isinstance(params, dict):
+        return {'success': False, 'error': 'invalid parameters'}
+    app_dir = params.get('app_dir', '')
+    user = params.get('user', '')
+    on_calendar = params.get('on_calendar') or 'daily'
+    if not isinstance(app_dir, str) or not app_dir.startswith('/'):
+        return {'success': False, 'error': 'app_dir must be an absolute path'}
+    if not isinstance(user, str) or not re.match(r'^[a-z_][a-z0-9_-]*$', user):
+        return {'success': False, 'error': 'invalid user'}
+    if not isinstance(on_calendar, str) or not re.match(r'^[A-Za-z0-9 :*_.,+-]{1,64}$', on_calendar):
+        return {'success': False, 'error': 'invalid OnCalendar expression'}
+
+    exec_start = (
+        '/usr/bin/python3 -c '
+        "'import sys; from helper_client import helper_call; "
+        'sys.exit(0 if (helper_call("packages_nightly_reconcile", {}) or {}).get("success") else 1)\''
+    )
+    service, timer = render_package_reconcile_schedule(
+        on_calendar, exec_start, user=user, working_dir=app_dir, pythonpath=app_dir
+    )
+    service_path = f'/etc/systemd/system/{PACKAGE_RECONCILE_UNIT}.service'
+    timer_path = f'/etc/systemd/system/{PACKAGE_RECONCILE_UNIT}.timer'
+    for path, content in ((service_path, service), (timer_path, timer)):
+        result = _write_managed_file(path, content)
+        if not result.get('success'):
+            return result
+    run_command(['systemctl', 'daemon-reload'])
+    enable = run_command(['systemctl', 'enable', '--now', f'{PACKAGE_RECONCILE_UNIT}.timer'])
+    if enable.get('returncode') != 0:
+        return {'success': False, 'error': enable.get('stderr') or 'failed to enable timer'}
+    return {'success': True, 'service_path': service_path, 'timer_path': timer_path}
+
+
 # Command whitelist
 COMMANDS = {
     'lsblk': cmd_lsblk,
@@ -3603,6 +3696,8 @@ COMMANDS = {
     'agent_audit_read': cmd_agent_audit_read,
     'agent_delivery_test': cmd_agent_delivery_test,
     'packages_reconcile': cmd_packages_reconcile,
+    'packages_nightly_reconcile': cmd_packages_nightly_reconcile,
+    'configure_package_reconcile_schedule': cmd_configure_package_reconcile_schedule,
     'agent_converge_if_stale': cmd_agent_converge_if_stale,
     'ping': lambda p: {'success': True, 'message': 'pong'}
 }
@@ -3625,7 +3720,8 @@ _MUTATING_COMMANDS = frozenset({
     'agent_runtime_install', 'agent_runtime_disable', 'agent_provider_install',
     'agent_provider_auth_start', 'agent_provider_auth_submit', 'agent_provider_auth_cancel',
     'agent_bot_secret_write', 'agent_configure', 'agent_runtime_start',
-    'packages_reconcile', 'agent_converge_if_stale',
+    'packages_reconcile', 'packages_nightly_reconcile',
+    'configure_package_reconcile_schedule', 'agent_converge_if_stale',
 })
 
 _mutation_lock = threading.Lock()
