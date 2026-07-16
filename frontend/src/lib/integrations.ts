@@ -101,3 +101,53 @@ export function sendMattermostTest(): Promise<{ status: string; at: string }> {
     method: "POST",
   });
 }
+
+export interface StackNotificationsStatus {
+  enabled: boolean;
+  configured: boolean;
+  mode: "quiet" | "verbose";
+  source_default: string;
+  channel_name: string | null;
+  token: string | null;
+}
+
+export function getStackNotificationsStatus(
+  signal?: AbortSignal,
+): Promise<StackNotificationsStatus> {
+  return requestApi<StackNotificationsStatus>("/api/integrations/stack-notifications", {
+    method: "GET",
+    signal,
+  });
+}
+
+export function setStackNotificationsMode(
+  mode: "quiet" | "verbose",
+): Promise<StackNotificationsStatus> {
+  return requestApi<StackNotificationsStatus>("/api/integrations/stack-notifications/mode", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mode }),
+  });
+}
+
+export async function enableStackNotifications(
+  adminPassword: string,
+  onEvent: (event: OperationEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const operation = await createOperation(
+    "/api/integrations/stack-notifications/enable",
+    { admin_password: adminPassword },
+    signal,
+  );
+  await streamOperation(
+    operation.stream_url,
+    (event) => {
+      onEvent(event);
+      if (event.error) {
+        throw new Error(event.error);
+      }
+    },
+    signal,
+  );
+}
