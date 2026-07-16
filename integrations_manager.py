@@ -286,6 +286,44 @@ def stack_notifications_status():
     return jsonify(_stack_notifications_service().status())
 
 
+def pending_setup_actions(*, mattermost_status, stack_notifications_status):
+    """Outstanding one-time actions the user must complete (e.g. after an update).
+
+    Condition-based rather than "did an update just run": the unmet state itself is the
+    trigger, so an action disappears once the user completes it. Pure + testable.
+    """
+    actions = []
+    if mattermost_status.get("installed") and not stack_notifications_status.get("configured"):
+        actions.append(
+            {
+                "id": "stack-notifications-setup",
+                "title": "Finish setting up stack notifications",
+                "body": (
+                    "Your Radarr / Sonarr / *arr apps can post imports, upgrades, and health "
+                    "alerts to a dedicated Mattermost channel. Creating that channel needs your "
+                    "Mattermost admin password once, so it could not be done automatically "
+                    "during the update."
+                ),
+                "action_label": "Set up on Integrations",
+                "href": "/integrations",
+            }
+        )
+    return actions
+
+
+@integrations_manager.route("/api/setup/pending", methods=["GET"])
+@login_required
+def setup_pending():
+    return jsonify(
+        {
+            "actions": pending_setup_actions(
+                mattermost_status=_service().status(),
+                stack_notifications_status=_stack_notifications_service().status(),
+            )
+        }
+    )
+
+
 @integrations_manager.route("/api/integrations/stack-notifications/mode", methods=["PUT"])
 @login_required
 @csrf_protect

@@ -19,6 +19,7 @@ import { NavLink, useLocation } from "react-router-dom";
 
 import { navRoutes } from "@/app/routes";
 import { useAuth } from "@/components/auth/auth-provider";
+import { SetupTasksModal } from "@/components/setup/setup-tasks-modal";
 import { logoutToLogin } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
@@ -214,6 +215,7 @@ export function AppShell({ children }: PropsWithChildren) {
 
   return (
     <div className="min-h-screen overflow-x-hidden bg-background text-foreground">
+      <SetupTasksModal />
       <div
         aria-hidden={drawerOpen ? "true" : undefined}
         id="lime-os-app-background"

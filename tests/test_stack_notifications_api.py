@@ -113,3 +113,27 @@ def test_mode_route_passes_mode_to_service():
     )
     assert response.status_code == 200
     service.set_mode.assert_called_once_with("verbose")
+
+
+def test_pending_setup_actions_flags_unconfigured_stack_notifications():
+    from integrations_manager import pending_setup_actions
+
+    actions = pending_setup_actions(
+        mattermost_status={"installed": True},
+        stack_notifications_status={"configured": False},
+    )
+    assert [a["id"] for a in actions] == ["stack-notifications-setup"]
+    assert actions[0]["href"] == "/integrations"
+
+
+def test_pending_setup_actions_empty_when_configured_or_no_mattermost():
+    from integrations_manager import pending_setup_actions
+
+    assert pending_setup_actions(
+        mattermost_status={"installed": True},
+        stack_notifications_status={"configured": True},
+    ) == []
+    assert pending_setup_actions(
+        mattermost_status={"installed": False},
+        stack_notifications_status={"configured": False},
+    ) == []

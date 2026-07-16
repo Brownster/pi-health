@@ -64,7 +64,11 @@ password is **not stored**, which shapes two paths:
   writes the config right after the alerts channel, reusing the install-time admin session.
 - **Existing users (guided):** the integrations card's **Set up** action re-collects the admin
   password (write-only, used only to log in) and runs `stream_enable_stack_notifications`,
-  which idempotently ensures the channel + webhook + config.
+  which idempotently ensures the channel + webhook + config. Because this can't happen silently
+  during an update, it is surfaced actively: `GET /api/setup/pending` reports the outstanding
+  action and the app shows a **post-update modal** (`SetupTasksModal`) explaining what to do and
+  linking to the card. The action is condition-based (Mattermost installed + stack notifications
+  unconfigured), so it clears automatically once setup completes; dismissal is per-session.
 
 Provisioning is idempotent: `ensure_channel`/`ensure_incoming_webhook` no-op when the objects
 exist, and an existing token/mode is preserved so re-running never rotates a token the `*arr`
