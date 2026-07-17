@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://limeos.local/schemas/capability-provider-permissions-v1.json",
+  "title": "LimeOS capability provider permission request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "view", "configure", "lifecycle"],
+  "properties": {
+    "schema_version": {"const": "1"},
+    "view": {"const": "capability.view"},
+    "configure": {"const": "capability.configure"},
+    "lifecycle": {"const": "extensions.admin"}
+  }
+}

@@ -1,0 +1,162 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://limeos.local/schemas/capability-provider-actions-v1.json",
+  "title": "LimeOS capability provider action catalog",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "provider_id", "capability_id", "actions", "availability"],
+  "properties": {
+    "schema_version": {"const": "1"},
+    "provider_id": {"$ref": "#/definitions/id"},
+    "capability_id": {"$ref": "#/definitions/capabilityId"},
+    "actions": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {"$ref": "#/definitions/actionDeclaration"}
+    },
+    "availability": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {"$ref": "#/definitions/actionAvailability"}
+    }
+  },
+  "definitions": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+      "maxLength": 64
+    },
+    "capabilityId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:\\.[a-z][a-z0-9_-]*)+$",
+      "maxLength": 96
+    },
+    "choice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "label"],
+      "properties": {
+        "value": {"type": ["string", "number", "integer", "boolean"]},
+        "label": {"type": "string", "minLength": 1, "maxLength": 80}
+      }
+    },
+    "parameter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "label", "type", "required"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "maxLength": 64
+        },
+        "label": {"type": "string", "minLength": 1, "maxLength": 80},
+        "description": {"type": "string", "maxLength": 240},
+        "type": {"enum": ["text", "integer", "number", "boolean", "select", "path"]},
+        "required": {"type": "boolean"},
+        "default": {"type": ["string", "number", "integer", "boolean", "null"]},
+        "minimum": {"type": "number"},
+        "maximum": {"type": "number"},
+        "pattern": {"type": "string", "maxLength": 256},
+        "choices": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 128,
+          "uniqueItems": true,
+          "items": {"$ref": "#/definitions/choice"}
+        },
+        "source": {
+          "type": "string",
+          "pattern": "^status\\.(?:summary|details)(?:\\.[a-z][a-z0-9_]*)+(?:\\[\\])?(?:\\.[a-z][a-z0-9_]*)*$",
+          "maxLength": 160
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"type": {"const": "select"}}},
+          "then": {"anyOf": [{"required": ["choices"]}, {"required": ["source"]}]}
+        }
+      ]
+    },
+    "confirmation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title", "message", "confirm_label"],
+      "properties": {
+        "title": {"type": "string", "minLength": 1, "maxLength": 80},
+        "message": {"type": "string", "minLength": 1, "maxLength": 400},
+        "confirm_label": {"type": "string", "minLength": 1, "maxLength": 40}
+      }
+    },
+    "actionDeclaration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "label",
+        "intent",
+        "permission",
+        "timeout_seconds",
+        "parameters",
+        "result_mode"
+      ],
+      "properties": {
+        "id": {"$ref": "#/definitions/id"},
+        "label": {"type": "string", "minLength": 1, "maxLength": 80},
+        "description": {"type": "string", "maxLength": 240},
+        "intent": {"enum": ["read", "diagnostic", "mutation", "destructive"]},
+        "permission": {
+          "enum": ["capability.view", "capability.diagnose", "capability.operate", "extensions.admin"]
+        },
+        "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 3600},
+        "parameters": {
+          "type": "array",
+          "maxItems": 24,
+          "items": {"$ref": "#/definitions/parameter"}
+        },
+        "confirmation": {"$ref": "#/definitions/confirmation"},
+        "result_mode": {"enum": ["immediate", "stream"]}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"intent": {"enum": ["mutation", "destructive"]}}},
+          "then": {"required": ["confirmation"]}
+        },
+        {
+          "if": {"properties": {"intent": {"const": "read"}}},
+          "then": {"properties": {"permission": {"const": "capability.view"}}}
+        }
+      ]
+    },
+    "actionAvailability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "available"],
+      "properties": {
+        "id": {"$ref": "#/definitions/id"},
+        "available": {"type": "boolean"},
+        "unavailable_reason": {"type": "string", "maxLength": 240}
+      }
+    },
+    "actionEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "operation_id", "sequence", "type"],
+      "properties": {
+        "schema_version": {"const": "1"},
+        "operation_id": {"type": "string", "minLength": 1, "maxLength": 96},
+        "sequence": {"type": "integer", "minimum": 0},
+        "type": {"enum": ["output", "progress", "complete", "error"]},
+        "message": {"type": "string", "maxLength": 2000},
+        "percent": {"type": "number", "minimum": 0, "maximum": 100},
+        "success": {"type": "boolean"},
+        "code": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$",
+          "maxLength": 64
+        },
+        "result": {"type": ["object", "array", "string", "number", "boolean", "null"]}
+      }
+    }
+  }
+}

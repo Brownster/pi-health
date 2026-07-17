@@ -1,0 +1,149 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://limeos.local/schemas/capability-provider-status-v1.json",
+  "title": "LimeOS capability provider status",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "provider_id",
+    "capability_id",
+    "observed_at",
+    "lifecycle",
+    "health",
+    "summary",
+    "metrics",
+    "recent_activity",
+    "details"
+  ],
+  "properties": {
+    "schema_version": {"const": "1"},
+    "provider_id": {"$ref": "#/definitions/id"},
+    "capability_id": {"$ref": "#/definitions/capabilityId"},
+    "observed_at": {"type": "string", "format": "date-time"},
+    "lifecycle": {"$ref": "#/definitions/lifecycle"},
+    "health": {"$ref": "#/definitions/health"},
+    "summary": {
+      "type": "array",
+      "maxItems": 12,
+      "items": {"$ref": "#/definitions/summaryItem"}
+    },
+    "metrics": {
+      "type": "array",
+      "maxItems": 24,
+      "items": {"$ref": "#/definitions/metric"}
+    },
+    "recent_activity": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {"$ref": "#/definitions/activity"}
+    },
+    "details": {"type": "object", "maxProperties": 64}
+  },
+  "definitions": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+      "maxLength": 64
+    },
+    "capabilityId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:\\.[a-z][a-z0-9_-]*)+$",
+      "maxLength": 96
+    },
+    "lifecycle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "installed",
+        "enabled",
+        "configured",
+        "compatibility",
+        "availability"
+      ],
+      "properties": {
+        "installed": {"type": "boolean"},
+        "enabled": {"type": "boolean"},
+        "configured": {"type": "boolean"},
+        "compatibility": {"enum": ["compatible", "incompatible", "unknown"]},
+        "availability": {"enum": ["available", "unavailable", "unknown"]}
+      }
+    },
+    "issue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "severity", "message"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$",
+          "maxLength": 64
+        },
+        "severity": {"enum": ["info", "warning", "error"]},
+        "message": {"type": "string", "minLength": 1, "maxLength": 240},
+        "recovery": {"type": "string", "maxLength": 400}
+      }
+    },
+    "health": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "message", "issues"],
+      "properties": {
+        "state": {
+          "enum": [
+            "healthy",
+            "warning",
+            "error",
+            "unknown",
+            "disabled",
+            "unconfigured",
+            "incompatible",
+            "unavailable"
+          ]
+        },
+        "message": {"type": "string", "maxLength": 240},
+        "issues": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {"$ref": "#/definitions/issue"}
+        }
+      }
+    },
+    "summaryItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "value", "tone"],
+      "properties": {
+        "id": {"$ref": "#/definitions/id"},
+        "label": {"type": "string", "minLength": 1, "maxLength": 64},
+        "value": {"type": ["string", "number", "integer", "boolean", "null"]},
+        "unit": {"type": "string", "maxLength": 24},
+        "tone": {"enum": ["neutral", "success", "warning", "danger"]}
+      }
+    },
+    "metric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "value"],
+      "properties": {
+        "id": {"$ref": "#/definitions/id"},
+        "label": {"type": "string", "minLength": 1, "maxLength": 64},
+        "value": {"type": "number"},
+        "unit": {"type": "string", "maxLength": 24},
+        "minimum": {"type": "number"},
+        "maximum": {"type": "number"}
+      }
+    },
+    "activity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "occurred_at", "kind", "summary"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1, "maxLength": 96},
+        "occurred_at": {"type": "string", "format": "date-time"},
+        "kind": {"enum": ["info", "success", "warning", "error"]},
+        "summary": {"type": "string", "minLength": 1, "maxLength": 240}
+      }
+    }
+  }
+}

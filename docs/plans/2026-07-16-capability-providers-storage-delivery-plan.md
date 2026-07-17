@@ -1,7 +1,7 @@
 # Capability Providers and Storage Surfaces
 
 Date: 2026-07-16
-Status: In delivery; CP-000 complete, CP-001 next
+Status: In delivery; CP-000 and CP-001 complete, CP-002 next
 Tracking prefix: `CP`
 
 ## Goal
@@ -269,7 +269,7 @@ Goal: fix terminology, compatibility, and test fixtures before changing behaviou
 | ID | Work package | Depends on | Status | Deliverable |
 | --- | --- | --- | --- | --- |
 | CP-000 | Baseline and product contract | Current pages | Complete | [`Docs/LIMEOS_CAPABILITY_PROVIDERS_CP000_BASELINE.md`](../../Docs/LIMEOS_CAPABILITY_PROVIDERS_CP000_BASELINE.md) |
-| CP-001 | Capability manifest contract | CP-000 | Planned | Versioned manifest, permission, setup, status, action, and renderer schemas |
+| CP-001 | Capability manifest contract | CP-000 | Complete | [`Docs/LIMEOS_CAPABILITY_PROVIDERS_CP001_CONTRACT.md`](../../Docs/LIMEOS_CAPABILITY_PROVIDERS_CP001_CONTRACT.md) and versioned schemas under `config/schemas/` |
 | CP-002 | Provider fixtures and contract tests | CP-001 | Planned | MergerFS, SnapRAID, generic pooling, generic protection, invalid, and incompatible fixtures |
 
 Exit gate:

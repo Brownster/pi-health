@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://limeos.local/schemas/capability-provider-renderer-v1.json",
+  "title": "LimeOS capability provider renderer request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "mode", "fallback"],
+  "properties": {
+    "schema_version": {"const": "1"},
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+      "maxLength": 64
+    },
+    "mode": {"enum": ["generic", "tailored"]},
+    "fallback": {"enum": ["generic", "none"]}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"mode": {"const": "generic"}}},
+      "then": {
+        "properties": {
+          "id": {"const": "generic"},
+          "fallback": {"const": "none"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"mode": {"const": "tailored"}}},
+      "then": {"not": {"properties": {"id": {"const": "generic"}}}}
+    }
+  ]
+}

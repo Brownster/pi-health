@@ -1,0 +1,122 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://limeos.local/schemas/capability-provider-setup-v1.json",
+  "title": "LimeOS generic capability setup schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "schema_id", "title", "fields"],
+  "properties": {
+    "schema_version": {"const": "1"},
+    "schema_id": {"$ref": "#/definitions/schemaId"},
+    "title": {"type": "string", "minLength": 1, "maxLength": 80},
+    "description": {"type": "string", "maxLength": 400},
+    "fields": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": {"$ref": "#/definitions/field"}
+    },
+    "sections": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {"$ref": "#/definitions/section"}
+    }
+  },
+  "definitions": {
+    "schemaId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*-v[1-9][0-9]*$",
+      "maxLength": 96
+    },
+    "fieldKey": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)*$",
+      "maxLength": 128
+    },
+    "choice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "label"],
+      "properties": {
+        "value": {"type": ["string", "number", "integer", "boolean"]},
+        "label": {"type": "string", "minLength": 1, "maxLength": 80}
+      }
+    },
+    "field": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "label", "type", "required"],
+      "properties": {
+        "key": {"$ref": "#/definitions/fieldKey"},
+        "label": {"type": "string", "minLength": 1, "maxLength": 80},
+        "description": {"type": "string", "maxLength": 240},
+        "type": {
+          "enum": [
+            "text",
+            "integer",
+            "number",
+            "boolean",
+            "select",
+            "path",
+            "secret_reference"
+          ]
+        },
+        "required": {"type": "boolean"},
+        "read_only": {"type": "boolean", "default": false},
+        "default": {"type": ["string", "number", "integer", "boolean", "null"]},
+        "placeholder": {"type": "string", "maxLength": 120},
+        "minimum": {"type": "number"},
+        "maximum": {"type": "number"},
+        "min_length": {"type": "integer", "minimum": 0, "maximum": 4096},
+        "max_length": {"type": "integer", "minimum": 1, "maximum": 4096},
+        "pattern": {"type": "string", "maxLength": 256},
+        "choices": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 128,
+          "uniqueItems": true,
+          "items": {"$ref": "#/definitions/choice"}
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"type": {"const": "select"}}},
+          "then": {"required": ["choices"]}
+        },
+        {
+          "if": {"properties": {"type": {"const": "secret_reference"}}},
+          "then": {
+            "not": {
+              "anyOf": [
+                {"required": ["default"]},
+                {"required": ["placeholder"]},
+                {"required": ["pattern"]}
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "section": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "fields"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+          "maxLength": 64
+        },
+        "label": {"type": "string", "minLength": 1, "maxLength": 80},
+        "description": {"type": "string", "maxLength": 240},
+        "fields": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {"$ref": "#/definitions/fieldKey"}
+        }
+      }
+    }
+  }
+}
