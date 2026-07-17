@@ -8,6 +8,7 @@
     "build": "npm run check && vite build",
     "preview": "vite preview",
     "check": "tsc --project tsconfig.app.json --noEmit && tsc --project tsconfig.node.json --noEmit",
+    "test:capabilities": "node --experimental-strip-types --test tests/capability-renderer.test.ts tests/capability-renderer.ssr.test.mjs",
     "build:publish": "npm run build && rm -rf ../static/v2 && mkdir -p ../static/v2 && cp -R dist/* ../static/v2/ && python3 ../scripts/bundle_source_digest.py --write"
   },
   "dependencies": {
