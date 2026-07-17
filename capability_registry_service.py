@@ -662,7 +662,7 @@ def _redact_value(value: Any, key: str = "", depth: int = 0) -> Any:
             str(item_key): _redact_value(item_value, str(item_key), depth + 1)
             for item_key, item_value in value.items()
         }
-    if isinstance(value, list):
+    if isinstance(value, (list, tuple)):
         return [_redact_value(item, depth=depth + 1) for item in value]
     if isinstance(value, str):
         result = value
@@ -671,6 +671,11 @@ def _redact_value(value: Any, key: str = "", depth: int = 0) -> Any:
         result = SENSITIVE_TEXT_PATTERNS[2].sub(rf"\1{REDACTED}@", result)
         return SENSITIVE_TEXT_PATTERNS[3].sub(REDACTED, result)
     return value
+
+
+def redact_capability_value(value: Any) -> Any:
+    """Return a bounded public copy with capability secrets removed."""
+    return _redact_value(value)
 
 
 def _registry_error(code: str, provider_id: str | None = None) -> dict:

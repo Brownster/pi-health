@@ -70,7 +70,7 @@ def client(app):
 def authenticated_client(client):
     with client.session_transaction() as session:
         session["authenticated"] = True
-        session["username"] = "testuser"
+        session["username"] = TEST_USERNAME
         session["csrf_token"] = "test-csrf-token"
     client.environ_base["HTTP_X_CSRF_TOKEN"] = "test-csrf-token"
     return client

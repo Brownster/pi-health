@@ -39,8 +39,13 @@ from auth_utils import (
 )
 from catalog_manager import CATALOG_DIR, _load_stack_compose, catalog_manager, default_catalog_service
 from catalog_service import CatalogService
-from capability_api import UnavailableCapabilityAuthorizer, capability_api
+from capability_api import capability_api
 from capability_registry_service import CapabilityRegistryService
+from capability_security import (
+    CAPABILITY_PERMISSIONS,
+    CapabilityAuthorizer,
+    resolve_capability_roles,
+)
 from integrations_manager import integrations_manager
 from mattermost_integration_service import MattermostIntegrationService
 from stack_notifications_service import StackNotificationsService
@@ -227,6 +232,7 @@ class AppDependencies:
     overview_service: OverviewService | None = None
     metric_history_service: MetricHistoryStore | None = None
     capability_registry_service: CapabilityRegistryService | None = None
+    capability_roles: dict[str, str] | None = None
     capability_authorizer: object | None = None
     capability_lifecycle_service: object | None = None
 
@@ -763,6 +769,25 @@ def _login_client_key():
     return request.remote_addr or "unknown"
 
 
+def _capability_identity(username):
+    authorizer = _extension("capability_authorizer")
+    if authorizer is None:
+        return {"role": None, "permissions": []}
+    try:
+        role = authorizer.role_for(username)
+        permissions = tuple(authorizer.permissions_for(username))
+        return {
+            "role": role if isinstance(role, str) else None,
+            "permissions": sorted(
+                permission
+                for permission in permissions
+                if permission in CAPABILITY_PERMISSIONS
+            ),
+        }
+    except Exception:
+        return {"role": None, "permissions": []}
+
+
 @core_api.route('/api/login', methods=['POST'])
 def api_login():
     """API endpoint for user authentication."""
@@ -788,6 +813,7 @@ def api_login():
             'status': 'success',
             'username': username,
             'csrf_token': rotate_csrf_token(),
+            **_capability_identity(username),
         })
     else:
         retry_after = _login_rate_limiter().record_failure(client_key)
@@ -809,10 +835,12 @@ def api_logout():
 def api_auth_check():
     """API endpoint to check authentication status."""
     if session.get('authenticated'):
+        username = session.get('username', 'unknown')
         return jsonify({
             'authenticated': True,
-            'username': session.get('username', 'unknown'),
+            'username': username,
             'csrf_token': get_csrf_token(),
+            **_capability_identity(username),
         })
     return jsonify({'authenticated': False}), 401
 
@@ -1277,6 +1305,7 @@ def create_app(config=None, dependencies=None):
     static_folder = config.pop("STATIC_FOLDER", "static")
     application = Flask(__name__, static_folder=static_folder)
     application.config.from_mapping(
+        CAPABILITY_USER_ROLES=None,
         INIT_PLUGINS=True,
         LIMEOS_VERSION="0.1.0",
         START_SCHEDULERS=True,
@@ -1456,7 +1485,15 @@ def create_app(config=None, dependencies=None):
         )
     )
     application.extensions["capability_authorizer"] = (
-        resolved.capability_authorizer or UnavailableCapabilityAuthorizer()
+        resolved.capability_authorizer
+        or CapabilityAuthorizer(
+            resolve_capability_roles(
+                resolved.users,
+                application.config.get("CAPABILITY_USER_ROLES")
+                if application.config.get("CAPABILITY_USER_ROLES") is not None
+                else resolved.capability_roles,
+            )
+        )
     )
     application.extensions["capability_lifecycle_service"] = (
         resolved.capability_lifecycle_service

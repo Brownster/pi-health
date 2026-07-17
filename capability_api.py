@@ -10,6 +10,7 @@ from typing import Any
 from flask import Blueprint, current_app, jsonify, request, session
 
 from auth_utils import login_required
+from capability_registry_service import redact_capability_value
 
 
 logger = logging.getLogger(__name__)
@@ -22,6 +23,12 @@ CAPABILITY_ID_PATTERN = re.compile(
 )
 LIFECYCLE_ACTIONS = frozenset({"enable", "disable", "update", "repair"})
 MAX_LIFECYCLE_VALUES = 64
+INSTALL_FIELDS = frozenset({"type", "source", "id", "entry", "class_name"})
+INSTALL_SOURCE_TYPES = frozenset({"github", "pip"})
+PYTHON_ENTRY_PATTERN = re.compile(
+    r"^(?!/)(?!.*(?:^|/)\.\.(?:/|$))[A-Za-z0-9_./-]+\.py$"
+)
+PYTHON_CLASS_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 PUBLIC_ERROR_CODE_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 PUBLIC_ERROR_STATUS_CODES = frozenset({400, 404, 409, 422, 429, 503})
 
@@ -163,9 +170,73 @@ def _detail_response(collection: str, identity: str, *, public_name: str):
     return response
 
 
-def _require_extensions_admin():
+def _require_capability_view():
     authorizer = current_app.extensions.get("capability_authorizer")
     if authorizer is None:
+        return _error(
+            "authorization_unavailable",
+            "Capability authorization policy is unavailable.",
+            503,
+        )
+    try:
+        allowed = authorizer.allows(
+            session.get("username", "unknown"), "capability.view"
+        )
+    except Exception:
+        logger.error("Capability authorization policy failed")
+        return _error(
+            "authorization_unavailable",
+            "Capability authorization policy is unavailable.",
+            503,
+        )
+    if not allowed:
+        return _error(
+            "capability_read_forbidden",
+            "Capability view permission is required.",
+            403,
+        )
+    return None
+
+
+def _record_lifecycle_audit(
+    *,
+    action: str,
+    provider_id: str | None,
+    decision: str,
+    outcome: str,
+    code: str,
+) -> None:
+    audit = current_app.extensions.get("audit")
+    if audit is None:
+        return
+    event = {
+        "domain": "capability",
+        "event": "extension_lifecycle",
+        "actor": session.get("username", "unknown"),
+        "permission": "extensions.admin",
+        "action": action,
+        "decision": decision,
+        "outcome": outcome,
+        "code": code,
+    }
+    if provider_id is not None:
+        event["provider_id"] = provider_id
+    try:
+        audit.record(event)
+    except Exception:
+        logger.error("Extension lifecycle audit write failed")
+
+
+def _require_extensions_admin(*, action: str, provider_id: str | None):
+    authorizer = current_app.extensions.get("capability_authorizer")
+    if authorizer is None:
+        _record_lifecycle_audit(
+            action=action,
+            provider_id=provider_id,
+            decision="unavailable",
+            outcome="rejected",
+            code="authorization_unavailable",
+        )
         return _error(
             "authorization_unavailable",
             "Extension authorization policy is unavailable.",
@@ -177,12 +248,26 @@ def _require_extensions_admin():
         )
     except Exception:
         logger.error("Extension authorization policy failed")
+        _record_lifecycle_audit(
+            action=action,
+            provider_id=provider_id,
+            decision="unavailable",
+            outcome="rejected",
+            code="authorization_unavailable",
+        )
         return _error(
             "authorization_unavailable",
             "Extension authorization policy is unavailable.",
             503,
         )
     if not allowed:
+        _record_lifecycle_audit(
+            action=action,
+            provider_id=provider_id,
+            decision="denied",
+            outcome="rejected",
+            code="extension_lifecycle_forbidden",
+        )
         return _error(
             "extension_lifecycle_forbidden",
             "Administrator permission is required.",
@@ -191,26 +276,93 @@ def _require_extensions_admin():
     return None
 
 
-def _request_values():
+def _valid_install_values(values: Mapping[str, Any]) -> bool:
+    source_type = values.get("type")
+    source = values.get("source")
+    if source_type not in INSTALL_SOURCE_TYPES:
+        return False
+    if (
+        not isinstance(source, str)
+        or not source
+        or len(source) > 512
+        or any(ord(character) < 32 for character in source)
+    ):
+        return False
+    provider_id = values.get("id")
+    if provider_id is not None and (
+        not isinstance(provider_id, str)
+        or not PROVIDER_ID_PATTERN.fullmatch(provider_id)
+    ):
+        return False
+    entry = values.get("entry")
+    if entry is not None and (
+        not isinstance(entry, str)
+        or len(entry) > 160
+        or not PYTHON_ENTRY_PATTERN.fullmatch(entry)
+    ):
+        return False
+    class_name = values.get("class_name")
+    if class_name is not None and (
+        not isinstance(class_name, str)
+        or len(class_name) > 80
+        or not PYTHON_CLASS_PATTERN.fullmatch(class_name)
+    ):
+        return False
+    return True
+
+
+def _request_values(*, action: str):
     if not request.is_json:
         return None, _error(
-            "invalid_request", "Request body must be a JSON object.", 400
+            "invalid_lifecycle_parameters",
+            "Lifecycle parameters are invalid.",
+            400,
         )
     values = request.get_json(silent=True)
     if not isinstance(values, dict):
         return None, _error(
-            "invalid_request", "Request body must be a JSON object.", 400
+            "invalid_lifecycle_parameters",
+            "Lifecycle parameters are invalid.",
+            400,
         )
     if len(values) > MAX_LIFECYCLE_VALUES:
         return None, _error(
-            "invalid_request", "Request body contains too many values.", 400
+            "invalid_lifecycle_parameters",
+            "Lifecycle parameters are invalid.",
+            400,
+        )
+    if action == "install":
+        if set(values) - INSTALL_FIELDS or not _valid_install_values(values):
+            return None, _error(
+                "invalid_lifecycle_parameters",
+                "Lifecycle parameters are invalid.",
+                400,
+            )
+    elif values:
+        return None, _error(
+            "invalid_lifecycle_parameters",
+            "Lifecycle parameters are invalid.",
+            400,
         )
     return values, None
 
 
-def _lifecycle_response(operation, *args, **kwargs):
+def _lifecycle_response(
+    operation,
+    *args,
+    action: str,
+    provider_id: str | None,
+    **kwargs,
+):
     service = current_app.extensions.get("capability_lifecycle_service")
     if service is None:
+        _record_lifecycle_audit(
+            action=action,
+            provider_id=provider_id,
+            decision="allowed",
+            outcome="failed",
+            code="extension_lifecycle_unavailable",
+        )
         return _error(
             "extension_lifecycle_unavailable",
             "Extension lifecycle service is unavailable.",
@@ -219,9 +371,23 @@ def _lifecycle_response(operation, *args, **kwargs):
     try:
         result = operation(service, *args, **kwargs)
     except CapabilityLifecycleError as exc:
+        _record_lifecycle_audit(
+            action=action,
+            provider_id=provider_id,
+            decision="allowed",
+            outcome="rejected",
+            code=exc.code,
+        )
         return _error(exc.code, exc.message, exc.status_code)
     except Exception:
         logger.error("Extension lifecycle API operation failed")
+        _record_lifecycle_audit(
+            action=action,
+            provider_id=provider_id,
+            decision="allowed",
+            outcome="failed",
+            code="extension_lifecycle_failed",
+        )
         return _error(
             "extension_lifecycle_failed",
             "Extension lifecycle operation failed.",
@@ -234,27 +400,47 @@ def _lifecycle_response(operation, *args, **kwargs):
         payload, status_code = result
     if (
         not isinstance(payload, Mapping)
-        or not isinstance(status_code, int)
+        or type(status_code) is not int
         or status_code not in {200, 201, 202}
     ):
         logger.error("Extension lifecycle service returned an invalid result")
+        _record_lifecycle_audit(
+            action=action,
+            provider_id=provider_id,
+            decision="allowed",
+            outcome="failed",
+            code="extension_lifecycle_failed",
+        )
         return _error(
             "extension_lifecycle_failed",
             "Extension lifecycle operation failed.",
             500,
         )
-    return jsonify(dict(payload)), status_code
+    _record_lifecycle_audit(
+        action=action,
+        provider_id=provider_id,
+        decision="allowed",
+        outcome="accepted",
+        code="ok",
+    )
+    return jsonify(redact_capability_value(dict(payload))), status_code
 
 
 @capability_api.route("/api/capabilities", methods=["GET"])
 @login_required
 def list_capabilities():
+    denied = _require_capability_view()
+    if denied is not None:
+        return denied
     return _read_response("capabilities")
 
 
 @capability_api.route("/api/capabilities/<capability_id>", methods=["GET"])
 @login_required
 def capability_details(capability_id: str):
+    denied = _require_capability_view()
+    if denied is not None:
+        return denied
     if not CAPABILITY_ID_PATTERN.fullmatch(capability_id):
         return _error("invalid_capability_id", "Capability ID is invalid.", 400)
     return _detail_response("capabilities", capability_id, public_name="capability")
@@ -263,12 +449,18 @@ def capability_details(capability_id: str):
 @capability_api.route("/api/extensions", methods=["GET"])
 @login_required
 def list_extensions():
+    denied = _require_capability_view()
+    if denied is not None:
+        return denied
     return _read_response("providers", public_name="extensions")
 
 
 @capability_api.route("/api/extensions/<provider_id>", methods=["GET"])
 @login_required
 def extension_details(provider_id: str):
+    denied = _require_capability_view()
+    if denied is not None:
+        return denied
     if not PROVIDER_ID_PATTERN.fullmatch(provider_id):
         return _error("invalid_extension_id", "Extension ID is invalid.", 400)
     return _detail_response("providers", provider_id, public_name="extension")
@@ -277,16 +469,25 @@ def extension_details(provider_id: str):
 @capability_api.route("/api/extensions/install", methods=["POST"])
 @login_required
 def install_extension():
-    denied = _require_extensions_admin()
+    denied = _require_extensions_admin(action="install", provider_id=None)
     if denied is not None:
         return denied
-    values, invalid = _request_values()
+    values, invalid = _request_values(action="install")
     if invalid is not None:
+        _record_lifecycle_audit(
+            action="install",
+            provider_id=None,
+            decision="allowed",
+            outcome="rejected",
+            code="invalid_lifecycle_parameters",
+        )
         return invalid
     return _lifecycle_response(
         lambda service: service.install(
             values, username=session.get("username", "unknown")
-        )
+        ),
+        action="install",
+        provider_id=None,
     )
 
 
@@ -301,11 +502,18 @@ def transition_extension(provider_id: str, action: str):
         return _error(
             "invalid_lifecycle_action", "Extension lifecycle action is invalid.", 404
         )
-    denied = _require_extensions_admin()
+    denied = _require_extensions_admin(action=action, provider_id=provider_id)
     if denied is not None:
         return denied
-    values, invalid = _request_values()
+    values, invalid = _request_values(action=action)
     if invalid is not None:
+        _record_lifecycle_audit(
+            action=action,
+            provider_id=provider_id,
+            decision="allowed",
+            outcome="rejected",
+            code="invalid_lifecycle_parameters",
+        )
         return invalid
     return _lifecycle_response(
         lambda service: service.transition(
@@ -313,7 +521,9 @@ def transition_extension(provider_id: str, action: str):
             action,
             values,
             username=session.get("username", "unknown"),
-        )
+        ),
+        action=action,
+        provider_id=provider_id,
     )
 
 
@@ -322,7 +532,7 @@ def transition_extension(provider_id: str, action: str):
 def remove_extension(provider_id: str):
     if not PROVIDER_ID_PATTERN.fullmatch(provider_id):
         return _error("invalid_extension_id", "Extension ID is invalid.", 400)
-    denied = _require_extensions_admin()
+    denied = _require_extensions_admin(action="remove", provider_id=provider_id)
     if denied is not None:
         return denied
     return _lifecycle_response(
@@ -331,5 +541,7 @@ def remove_extension(provider_id: str):
             "remove",
             {},
             username=session.get("username", "unknown"),
-        )
+        ),
+        action="remove",
+        provider_id=provider_id,
     )

@@ -1,8 +1,12 @@
+import os
 from unittest.mock import Mock
 
 import pytest
 
 from capability_api import CapabilityLifecycleError
+
+
+AUTH_USERNAME = os.environ["PIHEALTH_USER"]
 
 
 SNAPSHOT = {
@@ -76,6 +80,15 @@ class LifecycleService:
         return {"status": action, "id": provider_id}
 
 
+class RecordingAudit:
+    def __init__(self):
+        self.events = []
+
+    def record(self, event):
+        self.events.append(dict(event))
+        return True
+
+
 @pytest.mark.parametrize(
     "method,path",
     [
@@ -125,6 +138,17 @@ def test_default_registry_is_available_before_provider_adapters(authenticated_cl
         "capabilities": [],
         "errors": [],
     }
+
+
+def test_capability_reads_deny_authenticated_user_without_assigned_role(client):
+    with client.session_transaction() as session:
+        session["authenticated"] = True
+        session["username"] = "removed-user"
+
+    response = client.get("/api/capabilities")
+
+    assert response.status_code == 403
+    assert response.get_json()["code"] == "capability_read_forbidden"
 
 
 def test_detail_routes_return_one_item_and_relevant_diagnostics(
@@ -211,11 +235,39 @@ def test_registry_diagnostics_remain_a_successful_partial_read(
     assert response.get_json()["errors"] == partial["errors"]
 
 
-def test_lifecycle_fails_closed_without_cp006_authorization(authenticated_client):
-    response = authenticated_client.post("/api/extensions/mergerfs/enable", json={})
+def test_lifecycle_denies_session_without_assigned_role(client):
+    with client.session_transaction() as session:
+        session["authenticated"] = True
+        session["username"] = "removed-user"
+        session["csrf_token"] = "test-csrf-token"
 
-    assert response.status_code == 503
-    assert response.get_json()["code"] == "authorization_unavailable"
+    response = client.post(
+        "/api/extensions/mergerfs/enable",
+        json={},
+        headers={"X-CSRF-Token": "test-csrf-token"},
+    )
+
+    assert response.status_code == 403
+    assert response.get_json()["code"] == "extension_lifecycle_forbidden"
+
+
+def test_default_configured_user_has_extension_admin_permission(client, app):
+    service = LifecycleService()
+    app.extensions["capability_lifecycle_service"] = service
+    username = next(iter(app.extensions["auth_users"]))
+    with client.session_transaction() as session:
+        session["authenticated"] = True
+        session["username"] = username
+        session["csrf_token"] = "test-csrf-token"
+
+    response = client.post(
+        "/api/extensions/mergerfs/enable",
+        json={},
+        headers={"X-CSRF-Token": "test-csrf-token"},
+    )
+
+    assert response.status_code == 200
+    assert service.calls == [("enable", "mergerfs", {}, username)]
 
 
 def test_lifecycle_denies_user_without_admin_permission(
@@ -229,7 +281,7 @@ def test_lifecycle_denies_user_without_admin_permission(
     response = authenticated_client.post("/api/extensions/mergerfs/enable", json={})
 
     assert response.status_code == 403
-    assert authorizer.calls == [("testuser", "extensions.admin")]
+    assert authorizer.calls == [(AUTH_USERNAME, "extensions.admin")]
     assert service.calls == []
 
 
@@ -246,7 +298,7 @@ def test_lifecycle_requires_json_object_after_authorization(
     )
 
     assert response.status_code == 400
-    assert response.get_json()["code"] == "invalid_request"
+    assert response.get_json()["code"] == "invalid_lifecycle_parameters"
 
 
 def test_lifecycle_fails_closed_when_implementation_is_missing(
@@ -270,12 +322,12 @@ def test_lifecycle_transitions_use_fixed_actions_and_actor(
     app.extensions["capability_lifecycle_service"] = service
 
     response = authenticated_client.post(
-        f"/api/extensions/mergerfs/{action}", json={"force": False}
+        f"/api/extensions/mergerfs/{action}", json={}
     )
 
     assert response.status_code == 200
     assert response.get_json() == {"id": "mergerfs", "status": action}
-    assert service.calls == [(action, "mergerfs", {"force": False}, "testuser")]
+    assert service.calls == [(action, "mergerfs", {}, AUTH_USERNAME)]
 
 
 def test_install_and_remove_use_bounded_lifecycle_transport(
@@ -287,7 +339,7 @@ def test_install_and_remove_use_bounded_lifecycle_transport(
 
     installed = authenticated_client.post(
         "/api/extensions/install",
-        json={"source": "https://example.invalid/provider"},
+        json={"type": "github", "source": "https://example.invalid/provider"},
     )
     removed = authenticated_client.delete("/api/extensions/mergerfs")
 
@@ -296,10 +348,10 @@ def test_install_and_remove_use_bounded_lifecycle_transport(
     assert service.calls == [
         (
             "install",
-            {"source": "https://example.invalid/provider"},
-            "testuser",
+            {"type": "github", "source": "https://example.invalid/provider"},
+            AUTH_USERNAME,
         ),
-        ("remove", "mergerfs", {}, "testuser"),
+        ("remove", "mergerfs", {}, AUTH_USERNAME),
     ]
 
 
@@ -314,6 +366,131 @@ def test_unknown_lifecycle_action_is_not_dispatched(authenticated_client, app):
 
     assert response.status_code == 404
     assert response.get_json()["code"] == "invalid_lifecycle_action"
+    assert service.calls == []
+
+
+def test_lifecycle_rejects_undeclared_parameters_without_dispatch(
+    authenticated_client, app
+):
+    service = LifecycleService()
+    audit = RecordingAudit()
+    app.extensions["capability_authorizer"] = Authorizer(True)
+    app.extensions["capability_lifecycle_service"] = service
+    app.extensions["audit"] = audit
+
+    response = authenticated_client.post(
+        "/api/extensions/mergerfs/repair",
+        json={"token": "must-not-leak"},
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["code"] == "invalid_lifecycle_parameters"
+    assert "must-not-leak" not in response.get_data(as_text=True)
+    assert service.calls == []
+    assert audit.events == [
+        {
+            "domain": "capability",
+            "event": "extension_lifecycle",
+            "actor": AUTH_USERNAME,
+            "permission": "extensions.admin",
+            "action": "repair",
+            "decision": "allowed",
+            "outcome": "rejected",
+            "code": "invalid_lifecycle_parameters",
+            "provider_id": "mergerfs",
+        }
+    ]
+    assert "must-not-leak" not in repr(audit.events)
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        {"source": "https://example.invalid/provider"},
+        {"type": "local", "source": "/tmp/provider"},
+        {"type": "github", "source": "https://example.invalid", "extra": True},
+        {
+            "type": "github",
+            "source": "https://example.invalid",
+            "entry": "../provider.py",
+        },
+        {
+            "type": "github",
+            "source": "https://example.invalid",
+            "class_name": "Provider;exit",
+        },
+    ],
+)
+def test_install_uses_fixed_parameter_schema(authenticated_client, app, values):
+    service = LifecycleService()
+    app.extensions["capability_authorizer"] = Authorizer(True)
+    app.extensions["capability_lifecycle_service"] = service
+
+    response = authenticated_client.post("/api/extensions/install", json=values)
+
+    assert response.status_code == 400
+    assert response.get_json()["code"] == "invalid_lifecycle_parameters"
+    assert service.calls == []
+
+
+def test_lifecycle_redacts_service_results_and_audits_only_bounded_metadata(
+    authenticated_client, app
+):
+    service = Mock()
+    service.install.return_value = {
+        "status": "installed",
+        "token": "must-not-leak",
+        "details": {"password": "also-secret"},
+        "messages": ("token=tuple-secret",),
+    }, 201
+    audit = RecordingAudit()
+    app.extensions["capability_authorizer"] = Authorizer(True)
+    app.extensions["capability_lifecycle_service"] = service
+    app.extensions["audit"] = audit
+
+    response = authenticated_client.post(
+        "/api/extensions/install",
+        json={
+            "type": "github",
+            "source": "https://user:secret@example.invalid/provider",
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.get_json() == {
+        "status": "installed",
+        "token": "[redacted]",
+        "details": {"password": "[redacted]"},
+        "messages": ["token=[redacted]"],
+    }
+    assert audit.events == [
+        {
+            "domain": "capability",
+            "event": "extension_lifecycle",
+            "actor": AUTH_USERNAME,
+            "permission": "extensions.admin",
+            "action": "install",
+            "decision": "allowed",
+            "outcome": "accepted",
+            "code": "ok",
+        }
+    ]
+    assert "secret" not in repr(audit.events)
+
+
+def test_lifecycle_requires_global_csrf_before_authorization(client, app):
+    service = LifecycleService()
+    app.extensions["capability_authorizer"] = Authorizer(True)
+    app.extensions["capability_lifecycle_service"] = service
+    with client.session_transaction() as session:
+        session["authenticated"] = True
+        session["username"] = next(iter(app.extensions["auth_users"]))
+        session["csrf_token"] = "expected-token"
+
+    response = client.post("/api/extensions/mergerfs/enable", json={})
+
+    assert response.status_code == 403
+    assert response.get_json() == {"error": "CSRF token missing or invalid"}
     assert service.calls == []
 
 

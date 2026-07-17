@@ -57,6 +57,8 @@ class TestAuthentication:
         data = json.loads(response.data)
         assert data['status'] == 'success'
         assert data['username'] == TEST_USERNAME
+        assert data['role'] == 'admin'
+        assert 'extensions.admin' in data['permissions']
         assert isinstance(data['csrf_token'], str)
         assert len(data['csrf_token']) >= 32
 
@@ -199,6 +201,8 @@ class TestAuthentication:
         assert response.status_code == 200
         data = json.loads(response.data)
         assert data['authenticated'] is True
+        assert data['role'] == 'admin'
+        assert 'extensions.admin' in data['permissions']
         assert isinstance(data['csrf_token'], str)
         assert len(data['csrf_token']) >= 32
 
@@ -211,7 +215,7 @@ class TestAuthentication:
         """Test logout clears authenticated session state."""
         with authenticated_client.session_transaction() as sess:
             assert sess.get('authenticated') is True
-            assert sess.get('username') == 'testuser'
+            assert sess.get('username') == TEST_USERNAME
 
         response = authenticated_client.post('/api/logout')
         assert response.status_code == 200

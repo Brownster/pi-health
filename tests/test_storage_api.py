@@ -334,7 +334,7 @@ def test_run_plugin_command_adds_authenticated_audit_user(authenticated_client, 
     assert response.status_code == 200
     assert plugin.params == {
         "force_reason": "confirmed",
-        "_audit_user": "testuser",
+        "_audit_user": os.environ["PIHEALTH_USER"],
         "stream_tags": True,
     }
 
