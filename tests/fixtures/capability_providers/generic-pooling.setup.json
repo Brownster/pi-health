@@ -1,0 +1,49 @@
+{
+  "schema_version": "1",
+  "schema_id": "unionfs-pool-v1",
+  "title": "Configure pool provider",
+  "description": "Set the mount point and allocation policy.",
+  "fields": [
+    {
+      "key": "pool_name",
+      "label": "Pool name",
+      "description": "A stable name for the pool.",
+      "type": "text",
+      "required": true,
+      "max_length": 64,
+      "pattern": "^[a-zA-Z0-9_-]+$"
+    },
+    {
+      "key": "mount_point",
+      "label": "Mount point",
+      "type": "path",
+      "required": true,
+      "pattern": "^/mnt/"
+    },
+    {
+      "key": "allocation_policy",
+      "label": "Allocation policy",
+      "type": "select",
+      "required": true,
+      "default": "most-free-space",
+      "choices": [
+        {"value": "most-free-space", "label": "Most free space"},
+        {"value": "least-used-space", "label": "Least used space"}
+      ]
+    },
+    {
+      "key": "credential_ref",
+      "label": "Credential",
+      "description": "Reference a credential stored by LimeOS.",
+      "type": "secret_reference",
+      "required": false
+    }
+  ],
+  "sections": [
+    {
+      "id": "pool",
+      "label": "Pool",
+      "fields": ["pool_name", "mount_point", "allocation_policy", "credential_ref"]
+    }
+  ]
+}

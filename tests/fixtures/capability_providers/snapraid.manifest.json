@@ -1,0 +1,80 @@
+{
+  "manifest_version": "1",
+  "id": "snapraid",
+  "name": "SnapRAID",
+  "description": "Protect data disks with scheduled parity.",
+  "version": "12.4.0",
+  "runtime": {
+    "kind": "builtin-python",
+    "entry": "storage_plugins/snapraid_plugin.py",
+    "class": "SnapRAIDPlugin"
+  },
+  "compatibility": {"capability_api": "1"},
+  "capabilities": [
+    {
+      "id": "storage.protection",
+      "surface": "protection",
+      "renderer": {
+        "schema_version": "1",
+        "id": "snapraid",
+        "mode": "tailored",
+        "fallback": "generic"
+      },
+      "permissions": {
+        "schema_version": "1",
+        "view": "capability.view",
+        "configure": "capability.configure",
+        "lifecycle": "extensions.admin"
+      },
+      "setup": {"contract_version": "1", "schema_id": "snapraid-protection-v1"},
+      "status": {"contract_version": "1", "schema_id": "protection-status-v1"},
+      "actions": [
+        {
+          "id": "status",
+          "label": "Check status",
+          "description": "Read parity and sync status.",
+          "intent": "read",
+          "permission": "capability.view",
+          "timeout_seconds": 60,
+          "parameters": [],
+          "result_mode": "stream"
+        },
+        {
+          "id": "scrub",
+          "label": "Scrub",
+          "description": "Verify a bounded percentage of protected data.",
+          "intent": "diagnostic",
+          "permission": "capability.diagnose",
+          "timeout_seconds": 3600,
+          "parameters": [
+            {
+              "name": "percent",
+              "label": "Percent to scrub",
+              "type": "integer",
+              "required": false,
+              "default": 8,
+              "minimum": 1,
+              "maximum": 100
+            }
+          ],
+          "result_mode": "stream"
+        },
+        {
+          "id": "sync",
+          "label": "Sync parity",
+          "description": "Update parity from current data.",
+          "intent": "mutation",
+          "permission": "capability.operate",
+          "timeout_seconds": 3600,
+          "parameters": [],
+          "confirmation": {
+            "title": "Sync parity?",
+            "message": "Update parity using the current data disks.",
+            "confirm_label": "Sync"
+          },
+          "result_mode": "stream"
+        }
+      ]
+    }
+  ]
+}

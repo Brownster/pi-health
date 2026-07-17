@@ -1,0 +1,46 @@
+{
+  "schema_version": "1",
+  "provider_id": "mergerfs",
+  "capability_id": "storage.pooling",
+  "observed_at": "2026-07-17T10:05:00Z",
+  "lifecycle": {
+    "installed": true,
+    "enabled": true,
+    "configured": true,
+    "compatibility": "compatible",
+    "availability": "available"
+  },
+  "health": {
+    "state": "warning",
+    "message": "One of two pools is unavailable.",
+    "issues": [
+      {
+        "code": "pool_unavailable",
+        "severity": "warning",
+        "message": "Archive pool is not mounted.",
+        "recovery": "Check its branches, then mount the pool."
+      }
+    ]
+  },
+  "summary": [
+    {"id": "pools", "label": "Pools", "value": "1/2 mounted", "tone": "warning"},
+    {"id": "capacity", "label": "Capacity", "value": 8000, "unit": "GB", "tone": "neutral"}
+  ],
+  "metrics": [
+    {"id": "used-percent", "label": "Used", "value": 63.4, "unit": "%", "minimum": 0, "maximum": 100}
+  ],
+  "recent_activity": [
+    {
+      "id": "mount-failed-1",
+      "occurred_at": "2026-07-17T10:04:00Z",
+      "kind": "warning",
+      "summary": "Archive pool mount failed."
+    }
+  ],
+  "details": {
+    "pools": [
+      {"name": "media", "mounted": true},
+      {"name": "archive", "mounted": false}
+    ]
+  }
+}

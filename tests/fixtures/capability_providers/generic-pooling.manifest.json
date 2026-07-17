@@ -1,0 +1,48 @@
+{
+  "manifest_version": "1",
+  "id": "unionfs-provider",
+  "name": "UnionFS Provider",
+  "description": "Example schema-rendered pooling provider.",
+  "version": "1.2.0",
+  "runtime": {
+    "kind": "github-python",
+    "entry": "provider.py",
+    "class": "UnionFSProvider"
+  },
+  "compatibility": {
+    "capability_api": "1",
+    "limeos_min": "1.0.0"
+  },
+  "capabilities": [
+    {
+      "id": "storage.pooling",
+      "surface": "pools",
+      "renderer": {
+        "schema_version": "1",
+        "id": "generic",
+        "mode": "generic",
+        "fallback": "none"
+      },
+      "permissions": {
+        "schema_version": "1",
+        "view": "capability.view",
+        "configure": "capability.configure",
+        "lifecycle": "extensions.admin"
+      },
+      "setup": {"contract_version": "1", "schema_id": "unionfs-pool-v1"},
+      "status": {"contract_version": "1", "schema_id": "pool-status-v1"},
+      "actions": [
+        {
+          "id": "status",
+          "label": "Check status",
+          "description": "Read pool status.",
+          "intent": "read",
+          "permission": "capability.view",
+          "timeout_seconds": 30,
+          "parameters": [],
+          "result_mode": "immediate"
+        }
+      ]
+    }
+  ]
+}

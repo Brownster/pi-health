@@ -1,0 +1,22 @@
+{
+  "schema_version": "1",
+  "provider_id": "unionfs-provider",
+  "capability_id": "storage.pooling",
+  "observed_at": "2026-07-17T10:00:00Z",
+  "lifecycle": {
+    "installed": true,
+    "enabled": false,
+    "configured": true,
+    "compatibility": "compatible",
+    "availability": "unknown"
+  },
+  "health": {
+    "state": "disabled",
+    "message": "Provider is disabled.",
+    "issues": []
+  },
+  "summary": [],
+  "metrics": [],
+  "recent_activity": [],
+  "details": {}
+}

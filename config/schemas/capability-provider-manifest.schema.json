@@ -124,15 +124,15 @@
         "surface": {
           "enum": ["pools", "protection", "mounts", "shares", "integrations", "other"]
         },
-        "renderer": {"$ref": "capability-provider-renderer.schema.json"},
-        "permissions": {"$ref": "capability-provider-permissions.schema.json"},
+        "renderer": {"$ref": "capability-provider-renderer-v1.json"},
+        "permissions": {"$ref": "capability-provider-permissions-v1.json"},
         "setup": {"$ref": "#/definitions/contractReference"},
         "status": {"$ref": "#/definitions/contractReference"},
         "actions": {
           "type": "array",
           "maxItems": 32,
           "items": {
-            "$ref": "capability-provider-actions.schema.json#/definitions/actionDeclaration"
+            "$ref": "capability-provider-actions-v1.json#/definitions/actionDeclaration"
           }
         }
       }

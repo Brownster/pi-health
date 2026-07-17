@@ -1,0 +1,34 @@
+{
+  "manifest_version": "1",
+  "id": "external-dashboard",
+  "name": "External Dashboard",
+  "description": "Manifest requesting an unregistered tailored renderer.",
+  "version": "1.0.0",
+  "runtime": {
+    "kind": "github-python",
+    "entry": "provider.py",
+    "class": "ExternalDashboardProvider"
+  },
+  "compatibility": {"capability_api": "1"},
+  "capabilities": [
+    {
+      "id": "storage.pooling",
+      "surface": "pools",
+      "renderer": {
+        "schema_version": "1",
+        "id": "external-dashboard",
+        "mode": "tailored",
+        "fallback": "generic"
+      },
+      "permissions": {
+        "schema_version": "1",
+        "view": "capability.view",
+        "configure": "capability.configure",
+        "lifecycle": "extensions.admin"
+      },
+      "setup": {"contract_version": "1", "schema_id": "external-pool-v1"},
+      "status": {"contract_version": "1", "schema_id": "pool-status-v1"},
+      "actions": []
+    }
+  ]
+}

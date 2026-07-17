@@ -1,0 +1,43 @@
+{
+  "manifest_version": "1",
+  "id": "duplicate-provider",
+  "name": "Duplicate Provider",
+  "description": "Manifest with duplicate capability IDs.",
+  "version": "1.0.0",
+  "runtime": {
+    "kind": "github-python",
+    "entry": "provider.py",
+    "class": "DuplicateProvider"
+  },
+  "compatibility": {"capability_api": "1"},
+  "capabilities": [
+    {
+      "id": "storage.pooling",
+      "surface": "pools",
+      "renderer": {"schema_version": "1", "id": "generic", "mode": "generic", "fallback": "none"},
+      "permissions": {
+        "schema_version": "1",
+        "view": "capability.view",
+        "configure": "capability.configure",
+        "lifecycle": "extensions.admin"
+      },
+      "setup": {"contract_version": "1", "schema_id": "duplicate-pool-v1"},
+      "status": {"contract_version": "1", "schema_id": "pool-status-v1"},
+      "actions": []
+    },
+    {
+      "id": "storage.pooling",
+      "surface": "pools",
+      "renderer": {"schema_version": "1", "id": "generic", "mode": "generic", "fallback": "none"},
+      "permissions": {
+        "schema_version": "1",
+        "view": "capability.view",
+        "configure": "capability.configure",
+        "lifecycle": "extensions.admin"
+      },
+      "setup": {"contract_version": "1", "schema_id": "second-pool-v1"},
+      "status": {"contract_version": "1", "schema_id": "pool-status-v1"},
+      "actions": []
+    }
+  ]
+}

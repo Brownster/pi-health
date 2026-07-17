@@ -1,0 +1,34 @@
+{
+  "manifest_version": "1",
+  "id": "backup-provider",
+  "name": "Backup Provider",
+  "description": "Example schema-rendered protection provider.",
+  "version": "1.0.1",
+  "runtime": {
+    "kind": "github-python",
+    "entry": "backup_provider.py",
+    "class": "BackupProvider"
+  },
+  "compatibility": {"capability_api": "1"},
+  "capabilities": [
+    {
+      "id": "storage.protection",
+      "surface": "protection",
+      "renderer": {
+        "schema_version": "1",
+        "id": "generic",
+        "mode": "generic",
+        "fallback": "none"
+      },
+      "permissions": {
+        "schema_version": "1",
+        "view": "capability.view",
+        "configure": "capability.configure",
+        "lifecycle": "extensions.admin"
+      },
+      "setup": {"contract_version": "1", "schema_id": "backup-protection-v1"},
+      "status": {"contract_version": "1", "schema_id": "protection-status-v1"},
+      "actions": []
+    }
+  ]
+}

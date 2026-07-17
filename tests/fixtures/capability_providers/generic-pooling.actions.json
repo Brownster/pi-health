@@ -1,0 +1,36 @@
+{
+  "schema_version": "1",
+  "provider_id": "unionfs-provider",
+  "capability_id": "storage.pooling",
+  "actions": [
+    {
+      "id": "status",
+      "label": "Check status",
+      "description": "Read pool status.",
+      "intent": "read",
+      "permission": "capability.view",
+      "timeout_seconds": 30,
+      "parameters": [],
+      "result_mode": "immediate"
+    },
+    {
+      "id": "mount",
+      "label": "Mount pool",
+      "description": "Mount the configured pool.",
+      "intent": "mutation",
+      "permission": "capability.operate",
+      "timeout_seconds": 60,
+      "parameters": [],
+      "confirmation": {
+        "title": "Mount pool?",
+        "message": "Mount this pool using the saved provider configuration.",
+        "confirm_label": "Mount"
+      },
+      "result_mode": "stream"
+    }
+  ],
+  "availability": [
+    {"id": "status", "available": true},
+    {"id": "mount", "available": false, "unavailable_reason": "Provider is not configured."}
+  ]
+}

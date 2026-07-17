@@ -1,0 +1,15 @@
+{
+  "manifest_version": "1",
+  "id": "unsafe-provider",
+  "name": "Unsafe Provider",
+  "description": "Manifest with a forbidden frontend field.",
+  "version": "1.0.0",
+  "runtime": {
+    "kind": "github-python",
+    "entry": "provider.py",
+    "class": "UnsafeProvider"
+  },
+  "compatibility": {"capability_api": "1"},
+  "capabilities": [],
+  "frontend_bundle": "https://example.invalid/provider.js"
+}
