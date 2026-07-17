@@ -27,10 +27,9 @@ the page is not available yet instead of linking to an unrelated workflow.
 
 ## Security and Lifecycle Boundary
 
-CP-007 is inspection-only. It does not expose install, update, enable, disable, repair,
-or removal controls. CP-008 owns those operations and their confirmation flows. The
-server-side CP-006 authorization policy remains the enforcement boundary for extension
-reads and future mutations.
+CP-007 was inspection-only. CP-008 now owns install, update, enable, disable, repair, and
+removal controls with confirmation flows. The server-side CP-006 authorization policy
+remains the enforcement boundary for extension reads and mutations.
 
 The shell now displays the authenticated user's server-provided role. The legacy
 `/plugins` route and primary-navigation entry remain unchanged until CP-009 completes

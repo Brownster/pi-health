@@ -55,8 +55,9 @@ Lifecycle requests use fixed schemas:
 - Unknown fields and malformed values return `invalid_lifecycle_parameters` without
   echoing field values.
 
-CP-008 will provide the lifecycle service and confirmation UI. Until then, an
-authorized request still fails closed with `extension_lifecycle_unavailable`.
+CP-008 provides the compatibility lifecycle service and administrator confirmation UI.
+An explicitly missing lifecycle dependency still fails closed with
+`extension_lifecycle_unavailable`.
 
 ## Redaction and Audit
 
