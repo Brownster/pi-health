@@ -170,6 +170,36 @@ def _load_manifest(plugin_path: str) -> dict:
         return json.load(f)
 
 
+def _github_entry(plugin_id: str, source: str, manifest: dict, existing=None) -> dict:
+    manifest_id = manifest.get("id", plugin_id)
+    if manifest_id != plugin_id:
+        raise ValueError("Plugin manifest ID does not match the installed directory")
+    return {
+        **(existing or {}),
+        "id": plugin_id,
+        "name": manifest.get("name", plugin_id),
+        "type": "github",
+        "source": source,
+        "entry": manifest.get("entry"),
+        "class_name": manifest.get("class"),
+        "category": manifest.get("category", "storage"),
+        "enabled": bool((existing or {}).get("enabled", False)),
+        "description": manifest.get("description", ""),
+        "version": manifest.get("version", ""),
+    }
+
+
+def _replace_plugin_entry(entry: dict) -> None:
+    config = load_plugins_config()
+    config["plugins"] = [
+        plugin
+        for plugin in config.get("plugins", [])
+        if plugin.get("id") != entry["id"]
+    ]
+    config["plugins"].append(entry)
+    _save_config(config)
+
+
 def install_plugin(
     source_type: str,
     source: str,
@@ -202,18 +232,10 @@ def install_plugin(
         except Exception as exc:
             return {"success": False, "error": f"Failed to read manifest: {exc}"}
 
-        entry = {
-            "id": manifest.get("id", plugin_id),
-            "name": manifest.get("name", plugin_id),
-            "type": "github",
-            "source": source,
-            "entry": manifest.get("entry"),
-            "class_name": manifest.get("class"),
-            "category": manifest.get("category", "storage"),
-            "enabled": False,
-            "description": manifest.get("description", ""),
-            "version": manifest.get("version", "")
-        }
+        try:
+            entry = _github_entry(plugin_id, source, manifest)
+        except ValueError as exc:
+            return {"success": False, "error": str(exc)}
     else:
         if not entry or not class_name:
             return {"success": False, "error": "Pip plugins require entry module and class name"}
@@ -228,11 +250,51 @@ def install_plugin(
             "enabled": False
         }
 
-    config = load_plugins_config()
-    config["plugins"] = [p for p in config.get("plugins", []) if p.get("id") != entry["id"]]
-    config["plugins"].append(entry)
-    _save_config(config)
+    _replace_plugin_entry(entry)
     return {"success": True, "plugin": entry}
+
+
+def _sync_github_plugin(plugin_id: str, helper_command: str) -> dict:
+    existing = get_plugin_entry(plugin_id)
+    if not existing:
+        return {"success": False, "error": "Plugin not found"}
+    if existing.get("type") != "github":
+        return {"success": False, "error": "Plugin is managed by LimeOS"}
+
+    try:
+        result = helper_call(
+            helper_command,
+            {
+                "id": plugin_id,
+                "type": "github",
+                "source": existing.get("source", ""),
+            },
+        )
+    except HelperError as exc:
+        return {"success": False, "error": str(exc)}
+    if not result.get("success"):
+        return {"success": False, "error": result.get("error", "Sync failed")}
+
+    try:
+        manifest = _load_manifest(os.path.join(PLUGIN_DIR, plugin_id))
+        refreshed = _github_entry(
+            plugin_id,
+            existing.get("source", ""),
+            manifest,
+            existing=existing,
+        )
+    except Exception as exc:
+        return {"success": False, "error": f"Failed to refresh manifest: {exc}"}
+    _replace_plugin_entry(refreshed)
+    return {"success": True, "plugin": refreshed}
+
+
+def update_plugin(plugin_id: str) -> dict:
+    return _sync_github_plugin(plugin_id, "plugin_update")
+
+
+def repair_plugin(plugin_id: str) -> dict:
+    return _sync_github_plugin(plugin_id, "plugin_repair")
 
 
 def remove_plugin(plugin_id: str) -> dict:

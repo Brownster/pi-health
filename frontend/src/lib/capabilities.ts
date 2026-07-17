@@ -218,6 +218,22 @@ export interface ExtensionDetails {
   errors: CapabilityRegistryDiagnostic[];
 }
 
+export type ExtensionLifecycleAction = "enable" | "disable" | "update" | "repair";
+
+export interface ExtensionLifecycleResult {
+  status: string;
+  id?: string | null;
+  enabled?: boolean;
+  removed?: boolean;
+  restart_required?: boolean;
+}
+
+export interface ExtensionInstallValues {
+  type: "github";
+  source: string;
+  id?: string;
+}
+
 export async function fetchCapabilities(): Promise<CapabilityDescriptor[]> {
   const response = await requestApi<{ capabilities: CapabilityDescriptor[] }>(
     "/api/capabilities",
@@ -256,4 +272,35 @@ export async function fetchExtensionDetails(id: string): Promise<ExtensionDetail
     extension: response.extension,
     errors: Array.isArray(response.errors) ? response.errors : [],
   };
+}
+
+export async function installExtension(
+  values: ExtensionInstallValues,
+): Promise<ExtensionLifecycleResult> {
+  return requestApi<ExtensionLifecycleResult>("/api/extensions/install", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(values),
+  });
+}
+
+export async function transitionExtension(
+  id: string,
+  action: ExtensionLifecycleAction,
+): Promise<ExtensionLifecycleResult> {
+  return requestApi<ExtensionLifecycleResult>(
+    `/api/extensions/${encodeURIComponent(id)}/${action}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    },
+  );
+}
+
+export async function removeExtension(id: string): Promise<ExtensionLifecycleResult> {
+  return requestApi<ExtensionLifecycleResult>(
+    `/api/extensions/${encodeURIComponent(id)}`,
+    { method: "DELETE" },
+  );
 }

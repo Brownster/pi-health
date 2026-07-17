@@ -40,6 +40,7 @@ from auth_utils import (
 from catalog_manager import CATALOG_DIR, _load_stack_compose, catalog_manager, default_catalog_service
 from catalog_service import CatalogService
 from capability_api import capability_api
+from capability_lifecycle_service import ExtensionLifecycleService
 from capability_registry_service import CapabilityRegistryService
 from capability_security import (
     CAPABILITY_PERMISSIONS,
@@ -1496,7 +1497,7 @@ def create_app(config=None, dependencies=None):
         )
     )
     application.extensions["capability_lifecycle_service"] = (
-        resolved.capability_lifecycle_service
+        resolved.capability_lifecycle_service or ExtensionLifecycleService()
     )
 
     application.register_blueprint(core_api)

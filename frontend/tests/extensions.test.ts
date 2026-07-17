@@ -5,6 +5,7 @@ import type { ExtensionDescriptor } from "../src/lib/capabilities.ts";
 import {
   capabilitySurfaceLink,
   extensionUpdateLabel,
+  extensionLifecycleActions,
   groupExtensions,
   healthTone,
   humanizeCapabilityId,
@@ -90,4 +91,22 @@ test("health and update labels remain bounded", () => {
   assert.equal(healthTone("incompatible"), "danger");
   assert.equal(extensionUpdateLabel(provider), "not reported");
   assert.equal(extensionUpdateLabel({ ...provider, update_state: "available" }), "update available");
+});
+
+test("lifecycle actions follow the package runtime and state", () => {
+  const builtin = extension("mergerfs", "MergerFS", "storage.pooling");
+  const github = {
+    ...extension("openpool", "OpenPool", "storage.pooling"),
+    runtime_kind: "github-python",
+    source: "owner/openpool",
+    enabled: false,
+  };
+  const integration = {
+    ...extension("mattermost", "Mattermost", "integration.chat"),
+    runtime_kind: "integration-adapter",
+  };
+
+  assert.deepEqual(extensionLifecycleActions(builtin), ["disable"]);
+  assert.deepEqual(extensionLifecycleActions(github), ["enable", "update", "repair", "remove"]);
+  assert.deepEqual(extensionLifecycleActions(integration), []);
 });

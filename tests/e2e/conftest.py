@@ -1181,27 +1181,80 @@ def install_v2_extensions_api_mocks():
             _status("mattermost", "integration.chat", "integrations", "warning", "Delivery status is delayed."),
         ],
     }
+    openpool = {
+        "id": "openpool",
+        "name": "OpenPool",
+        "description": "Third-party pooling provider.",
+        "version": "1.4.0",
+        "runtime_kind": "github-python",
+        "source": "owner/openpool",
+        "installed": True,
+        "enabled": False,
+        "contract_state": "valid",
+        "compatibility": "compatible",
+        "health": {"state": "disabled", "message": "Provider is disabled.", "counts": {"disabled": 1}},
+        "capabilities": [
+            _status("openpool", "storage.pooling", "pools", "disabled", "Provider is disabled."),
+        ],
+    }
     diagnostic = {
         "code": "provider_status_unavailable",
         "provider_id": "mattermost",
         "message": "Provider status is unavailable.",
     }
-    extensions = [mattermost, mergerfs]
+    extensions = [mattermost, mergerfs, openpool]
 
     def _install(page: Page, fail: bool = False) -> None:
         def _handler(route):
             parsed = urlparse(route.request.url)
             path = parsed.path
             method = route.request.method
-            if method != "GET" or not path.startswith("/api/extensions"):
+            if not path.startswith("/api/extensions"):
                 route.continue_()
                 return
-            if fail:
+            if fail and method == "GET":
                 _json_fulfill(
                     route,
                     {"code": "capability_registry_unavailable", "error": "Capability registry is unavailable."},
                     status=503,
                 )
+                return
+            if path == "/api/extensions/install" and method == "POST":
+                values = route.request.post_data_json
+                _json_fulfill(
+                    route,
+                    {
+                        "status": "installed",
+                        "id": values.get("id") or "installed-extension",
+                        "restart_required": True,
+                    },
+                    status=201,
+                )
+                return
+            if method == "POST":
+                provider_id, action = path.rsplit("/", 2)[-2:]
+                extension = next((item for item in extensions if item["id"] == provider_id), None)
+                if extension is None:
+                    _json_fulfill(route, {"code": "extension_not_found", "error": "Extension was not found."}, status=404)
+                    return
+                if action in {"enable", "disable"}:
+                    extension["enabled"] = action == "enable"
+                _json_fulfill(route, {"status": action, "id": provider_id, "restart_required": True})
+                return
+            if method == "DELETE":
+                provider_id = path.rsplit("/", 1)[-1]
+                extension = next((item for item in extensions if item["id"] == provider_id), None)
+                if extension is None:
+                    _json_fulfill(route, {"code": "extension_not_found", "error": "Extension was not found."}, status=404)
+                    return
+                if extension["enabled"]:
+                    _json_fulfill(route, {"code": "extension_must_be_disabled", "error": "Disable the extension before removing it."}, status=409)
+                    return
+                extensions.remove(extension)
+                _json_fulfill(route, {"status": "remove", "id": provider_id, "removed": True})
+                return
+            if method != "GET":
+                route.continue_()
                 return
             if path == "/api/extensions":
                 _json_fulfill(route, {"schema_version": "1", "extensions": extensions, "errors": [diagnostic]})

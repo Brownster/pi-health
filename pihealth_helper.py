@@ -2124,7 +2124,16 @@ def _derive_plugin_id(source: str) -> str:
 
 
 def _validate_plugin_id(plugin_id: str) -> bool:
-    return bool(PLUGIN_ID_PATTERN.match(plugin_id))
+    return plugin_id not in {'.', '..'} and bool(PLUGIN_ID_PATTERN.match(plugin_id))
+
+
+def _plugin_manifest_matches(plugin_path: str, plugin_id: str) -> bool:
+    try:
+        with open(os.path.join(plugin_path, 'pihealth_plugin.json')) as handle:
+            manifest = json.load(handle)
+        return isinstance(manifest, dict) and manifest.get('id') == plugin_id
+    except Exception:
+        return False
 
 
 def _fetch_latest_copyparty_asset() -> str:
@@ -2697,6 +2706,9 @@ def cmd_plugin_install(params):
         result = run_command(['git', 'clone', '--depth', '1', normalized, plugin_path], timeout=600)
         if result.get('returncode') != 0:
             return {'success': False, 'error': result.get('stderr', 'Failed to clone repo')}
+        if not _plugin_manifest_matches(plugin_path, plugin_id):
+            shutil.rmtree(plugin_path, ignore_errors=True)
+            return {'success': False, 'error': 'Plugin manifest is invalid'}
 
         return {'success': True, 'id': plugin_id}
 
@@ -2736,6 +2748,85 @@ def cmd_plugin_remove(params):
         return {'success': True}
 
     return {'success': False, 'error': 'Unsupported plugin type'}
+
+
+def _sync_github_plugin(params, *, repair: bool):
+    plugin_id = params.get('id', '').strip()
+    source = params.get('source', '').strip()
+    source_type = params.get('type', '').strip()
+    if source_type != 'github' or not plugin_id or not _validate_plugin_id(plugin_id):
+        return {'success': False, 'error': 'Invalid GitHub plugin'}
+
+    normalized = _normalize_github_source(source)
+    if not normalized:
+        return {'success': False, 'error': 'Invalid GitHub source'}
+
+    os.makedirs(PLUGIN_DIR, exist_ok=True)
+    plugin_path = os.path.join(PLUGIN_DIR, plugin_id)
+    if not os.path.exists(plugin_path):
+        if not repair:
+            return {'success': False, 'error': 'Plugin is not installed'}
+        deps = _ensure_dependencies(
+            ['git'],
+            {
+                'apt-get': ['git'],
+                'dnf': ['git'],
+                'pacman': ['git'],
+            },
+        )
+        if not deps.get('success'):
+            return deps
+        result = run_command(
+            ['git', 'clone', '--depth', '1', normalized, plugin_path],
+            timeout=600,
+        )
+        if result.get('returncode') != 0:
+            return {'success': False, 'error': result.get('stderr', 'Failed to clone repo')}
+        if not _plugin_manifest_matches(plugin_path, plugin_id):
+            shutil.rmtree(plugin_path, ignore_errors=True)
+            return {'success': False, 'error': 'Plugin manifest is invalid'}
+        return {'success': True, 'reinstalled': True}
+
+    if not os.path.isdir(plugin_path) or not os.path.isdir(os.path.join(plugin_path, '.git')):
+        return {'success': False, 'error': 'Plugin directory is not a Git repository'}
+
+    fetch = run_command(
+        ['git', '-C', plugin_path, 'fetch', '--depth', '1', normalized],
+        timeout=600,
+    )
+    if fetch.get('returncode') != 0:
+        return {'success': False, 'error': fetch.get('stderr', 'Failed to fetch plugin')}
+    manifest_result = run_command(
+        ['git', '-C', plugin_path, 'show', 'FETCH_HEAD:pihealth_plugin.json'],
+        timeout=30,
+    )
+    try:
+        manifest = json.loads(manifest_result.get('stdout', ''))
+    except (TypeError, ValueError):
+        manifest = None
+    if (
+        manifest_result.get('returncode') != 0
+        or not isinstance(manifest, dict)
+        or manifest.get('id') != plugin_id
+    ):
+        return {'success': False, 'error': 'Fetched plugin manifest is invalid'}
+    reset = run_command(
+        ['git', '-C', plugin_path, 'reset', '--hard', 'FETCH_HEAD'],
+        timeout=120,
+    )
+    if reset.get('returncode') != 0:
+        return {'success': False, 'error': reset.get('stderr', 'Failed to update plugin')}
+    return {'success': True, 'reinstalled': False}
+
+
+def cmd_plugin_update(params):
+    """Update an installed GitHub plugin from its configured source."""
+    return _sync_github_plugin(params, repair=False)
+
+
+def cmd_plugin_repair(params):
+    """Restore a GitHub plugin checkout without changing LimeOS configuration."""
+    return _sync_github_plugin(params, repair=True)
 
 
 def _agent_params_are_empty(params):
@@ -3749,6 +3840,8 @@ COMMANDS = {
     'pihealth_update': cmd_pihealth_update,
     'plugin_install': cmd_plugin_install,
     'plugin_remove': cmd_plugin_remove,
+    'plugin_update': cmd_plugin_update,
+    'plugin_repair': cmd_plugin_repair,
     'agent_runtime_install': cmd_agent_runtime_install,
     'agent_runtime_status': cmd_agent_runtime_status,
     'agent_runtime_disable': cmd_agent_runtime_disable,
@@ -3785,6 +3878,7 @@ _MUTATING_COMMANDS = frozenset({
     'sshfs_configure', 'sshfs_remove', 'sshfs_mount', 'sshfs_unmount',
     'rclone_configure', 'rclone_remove', 'rclone_mount', 'rclone_unmount',
     'copyparty_configure',
+    'plugin_install', 'plugin_remove', 'plugin_update', 'plugin_repair',
     'agent_runtime_install', 'agent_runtime_disable', 'agent_provider_install',
     'agent_provider_auth_start', 'agent_provider_auth_submit', 'agent_provider_auth_cancel',
     'agent_bot_secret_write', 'agent_configure', 'agent_runtime_start',

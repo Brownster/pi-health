@@ -5,12 +5,24 @@ import {
   Box,
   ChevronRight,
   CircleAlert,
+  Download,
+  Loader2,
   PackageOpen,
+  Plus,
+  Power,
   RefreshCw,
+  Trash2,
   TriangleAlert,
+  Wrench,
 } from "lucide-react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 
+import {
+  ExtensionInstallDialog,
+  ExtensionLifecycleDialog,
+  type ExtensionDialogAction,
+} from "@/components/extensions/extension-lifecycle-dialogs";
+import { useAuth } from "@/components/auth/auth-provider";
 import { Badge, StatusBadge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
@@ -19,9 +31,13 @@ import {
   type ExtensionDescriptor,
   fetchExtensionDetails,
   fetchExtensionIndex,
+  installExtension,
+  removeExtension,
+  transitionExtension,
 } from "@/lib/capabilities";
 import {
   capabilitySurfaceLink,
+  extensionLifecycleActions,
   extensionUpdateLabel,
   groupExtensions,
   healthTone,
@@ -101,10 +117,15 @@ function ExtensionRow({ extension }: { extension: ExtensionDescriptor }) {
 }
 
 function ExtensionListPage() {
+  const { permissions } = useAuth();
   const [extensions, setExtensions] = useState<ExtensionDescriptor[]>([]);
   const [diagnostics, setDiagnostics] = useState<CapabilityRegistryDiagnostic[]>([]);
   const [phase, setPhase] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState("");
+  const [installOpen, setInstallOpen] = useState(false);
+  const [installPending, setInstallPending] = useState(false);
+  const [operationNotice, setOperationNotice] = useState<{ tone: "success" | "danger"; message: string } | null>(null);
+  const canAdmin = permissions.includes("extensions.admin");
 
   const load = useCallback(async () => {
     setPhase("loading");
@@ -127,14 +148,36 @@ function ExtensionListPage() {
   const groups = groupExtensions(extensions);
   const attentionCount = extensions.filter((extension) => !["healthy", "disabled"].includes(extension.health.state)).length;
 
+  const runInstall = async (values: { type: "github"; source: string; id?: string }) => {
+    setInstallPending(true);
+    setOperationNotice(null);
+    try {
+      const result = await installExtension(values);
+      setInstallOpen(false);
+      setOperationNotice({
+        tone: "success",
+        message: `Extension ${result.id || "package"} installed. Restart LimeOS to load the provider.`,
+      });
+      await load();
+    } catch (caughtError) {
+      setInstallOpen(false);
+      setOperationNotice({ tone: "danger", message: getErrorMessage(caughtError) });
+    } finally {
+      setInstallPending(false);
+    }
+  };
+
   return (
     <section className="space-y-5 sm:space-y-6">
       <PageHeader
         actions={
-          <Button className="gap-2" disabled={phase === "loading"} onClick={() => void load()} variant="secondary">
-            <RefreshCw aria-hidden="true" className={cn("h-4 w-4", phase === "loading" ? "animate-spin" : "")} />
-            refresh
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            {canAdmin ? <Button className="gap-2" data-extension-install-open onClick={() => setInstallOpen(true)}><Plus aria-hidden="true" className="h-4 w-4" />Install</Button> : null}
+            <Button className="gap-2" disabled={phase === "loading"} onClick={() => void load()} variant="secondary">
+              <RefreshCw aria-hidden="true" className={cn("h-4 w-4", phase === "loading" ? "animate-spin" : "")} />
+              refresh
+            </Button>
+          </div>
         }
         description="Settings / Advanced · installed capability providers"
         status={phase === "ready" ? <StatusBadge label={`${extensions.length} installed`} tone={attentionCount ? "warning" : "success"} /> : undefined}
@@ -142,6 +185,12 @@ function ExtensionListPage() {
       />
 
       <Diagnostics errors={diagnostics} />
+
+      {operationNotice ? (
+        <div aria-live={operationNotice.tone === "danger" ? "assertive" : "polite"} className={cn("border-l-2 px-4 py-3 text-sm", operationNotice.tone === "danger" ? "border-danger bg-danger/5 text-danger" : "border-success bg-success/5 text-success")} data-extension-operation-notice role={operationNotice.tone === "danger" ? "alert" : "status"}>
+          {operationNotice.message}
+        </div>
+      ) : null}
 
       {phase === "loading" ? (
         <div aria-live="polite" className="flex min-h-56 items-center justify-center gap-2 rounded-md border border-border text-sm text-muted-foreground" role="status">
@@ -185,6 +234,8 @@ function ExtensionListPage() {
           ))}
         </div>
       ) : null}
+
+      {installOpen ? <ExtensionInstallDialog onClose={() => setInstallOpen(false)} onConfirm={(values) => void runInstall(values)} pending={installPending} /> : null}
     </section>
   );
 }
@@ -199,10 +250,16 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
 }
 
 function ExtensionDetailPage({ extensionId }: { extensionId: string }) {
+  const navigate = useNavigate();
+  const { permissions } = useAuth();
   const [extension, setExtension] = useState<ExtensionDescriptor | null>(null);
   const [diagnostics, setDiagnostics] = useState<CapabilityRegistryDiagnostic[]>([]);
   const [phase, setPhase] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState("");
+  const [dialogAction, setDialogAction] = useState<ExtensionDialogAction | null>(null);
+  const [operationPending, setOperationPending] = useState(false);
+  const [operationNotice, setOperationNotice] = useState<{ tone: "success" | "danger"; message: string } | null>(null);
+  const canAdmin = permissions.includes("extensions.admin");
 
   const load = useCallback(async () => {
     setPhase("loading");
@@ -222,6 +279,32 @@ function ExtensionDetailPage({ extensionId }: { extensionId: string }) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const runLifecycle = async (action: ExtensionDialogAction) => {
+    if (!extension) return;
+    setOperationPending(true);
+    setOperationNotice(null);
+    try {
+      if (action === "remove") {
+        await removeExtension(extension.id);
+        setDialogAction(null);
+        navigate("/settings/extensions", { replace: true });
+        return;
+      }
+      const result = await transitionExtension(extension.id, action);
+      setDialogAction(null);
+      setOperationNotice({
+        tone: "success",
+        message: `${extension.name} ${action} completed.${result.restart_required ? " Restart LimeOS to apply the change." : ""}`,
+      });
+      await load();
+    } catch (caughtError) {
+      setDialogAction(null);
+      setOperationNotice({ tone: "danger", message: getErrorMessage(caughtError) });
+    } finally {
+      setOperationPending(false);
+    }
+  };
 
   if (phase === "loading") {
     return <div aria-live="polite" className="flex min-h-56 items-center justify-center gap-2 text-sm text-muted-foreground" role="status"><RefreshCw aria-hidden="true" className="h-4 w-4 animate-spin text-primary" />Loading extension...</div>;
@@ -248,6 +331,12 @@ function ExtensionDetailPage({ extensionId }: { extensionId: string }) {
 
       <Diagnostics errors={diagnostics} />
 
+      {operationNotice ? (
+        <div aria-live={operationNotice.tone === "danger" ? "assertive" : "polite"} className={cn("border-l-2 px-4 py-3 text-sm", operationNotice.tone === "danger" ? "border-danger bg-danger/5 text-danger" : "border-success bg-success/5 text-success")} data-extension-operation-notice role={operationNotice.tone === "danger" ? "alert" : "status"}>
+          {operationNotice.message}
+        </div>
+      ) : null}
+
       <section aria-labelledby="extension-package-title">
         <h2 className="mb-2 font-mono text-xs font-semibold uppercase text-muted-foreground" id="extension-package-title">Package</h2>
         <dl className="grid gap-px overflow-hidden rounded-md border border-border bg-border sm:grid-cols-2 lg:grid-cols-4">
@@ -263,6 +352,40 @@ function ExtensionDetailPage({ extensionId }: { extensionId: string }) {
           <StatusBadge label={`contract ${extension.contract_state}`} tone={extension.contract_state === "valid" ? "success" : "danger"} />
         </div>
         <p className="mt-3 text-sm text-muted-foreground">{extension.health.message}</p>
+      </section>
+
+      <section aria-labelledby="extension-administration-title">
+        <h2 className="mb-2 font-mono text-xs font-semibold uppercase text-muted-foreground" id="extension-administration-title">Administration</h2>
+        <div className="rounded-md border border-border bg-card px-4 py-4">
+          {extensionLifecycleActions(extension).length ? (
+            canAdmin ? (
+              <div className="flex flex-wrap gap-2">
+                {extensionLifecycleActions(extension).map((action) => {
+                  const Icon = action === "remove" ? Trash2 : action === "repair" ? Wrench : action === "update" ? Download : Power;
+                  const removeBlocked = action === "remove" && extension.enabled;
+                  return (
+                    <Button
+                      className={cn("gap-2", action === "remove" ? "border-danger/30 text-danger hover:bg-danger/10" : "")}
+                      data-extension-action={action}
+                      disabled={operationPending || removeBlocked}
+                      key={action}
+                      onClick={() => setDialogAction(action)}
+                      title={removeBlocked ? "Disable this extension before removing it" : undefined}
+                      variant="outline"
+                    >
+                      {operationPending ? <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" /> : <Icon aria-hidden="true" className="h-4 w-4" />}
+                      {action.charAt(0).toUpperCase() + action.slice(1)}
+                    </Button>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">Administrator access is required to change extension packages.</p>
+            )
+          ) : (
+            <p className="text-sm text-muted-foreground">This provider is managed from its owning LimeOS page.</p>
+          )}
+        </div>
       </section>
 
       <section aria-labelledby="extension-capabilities-title">
@@ -300,6 +423,8 @@ function ExtensionDetailPage({ extensionId }: { extensionId: string }) {
           <div className="rounded-md border border-dashed border-border px-4 py-6 text-sm text-muted-foreground">No usable capabilities were declared. Review the diagnostics above.</div>
         )}
       </section>
+
+      {dialogAction ? <ExtensionLifecycleDialog action={dialogAction} extension={extension} onClose={() => setDialogAction(null)} onConfirm={() => void runLifecycle(dialogAction)} pending={operationPending} /> : null}
     </section>
   );
 }

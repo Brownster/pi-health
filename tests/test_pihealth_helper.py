@@ -216,6 +216,126 @@ class TestValidationFailures:
         assert result["success"] is False
         assert "not supported" in result["error"]
 
+    def test_cmd_plugin_install_rejects_mismatched_manifest(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(helper, "PLUGIN_DIR", str(tmp_path))
+        monkeypatch.setattr(helper, "_ensure_dependencies", lambda *_args: {"success": True})
+
+        def run(command, timeout):
+            plugin_path = tmp_path / "thirdparty"
+            plugin_path.mkdir()
+            (plugin_path / "pihealth_plugin.json").write_text(
+                json.dumps({"id": "different"})
+            )
+            return {"returncode": 0}
+
+        monkeypatch.setattr(helper, "run_command", run)
+
+        result = helper.cmd_plugin_install({
+            "id": "thirdparty",
+            "type": "github",
+            "source": "owner/repo",
+        })
+
+        assert result["success"] is False
+        assert not (tmp_path / "thirdparty").exists()
+
+    def test_cmd_plugin_update_fetches_and_resets_existing_checkout(self, tmp_path, monkeypatch):
+        plugin_path = tmp_path / "thirdparty"
+        (plugin_path / ".git").mkdir(parents=True)
+        monkeypatch.setattr(helper, "PLUGIN_DIR", str(tmp_path))
+        calls = []
+
+        def run(command, timeout):
+            calls.append((command, timeout))
+            if "show" in command:
+                return {"returncode": 0, "stdout": json.dumps({"id": "thirdparty"})}
+            return {"returncode": 0}
+
+        monkeypatch.setattr(helper, "run_command", run)
+
+        result = helper.cmd_plugin_update({
+            "id": "thirdparty",
+            "type": "github",
+            "source": "owner/repo",
+        })
+
+        assert result == {"success": True, "reinstalled": False}
+        assert calls == [
+            (["git", "-C", str(plugin_path), "fetch", "--depth", "1", "https://github.com/owner/repo.git"], 600),
+            (["git", "-C", str(plugin_path), "show", "FETCH_HEAD:pihealth_plugin.json"], 30),
+            (["git", "-C", str(plugin_path), "reset", "--hard", "FETCH_HEAD"], 120),
+        ]
+
+    def test_cmd_plugin_repair_reinstalls_missing_checkout(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(helper, "PLUGIN_DIR", str(tmp_path))
+        monkeypatch.setattr(helper, "_ensure_dependencies", lambda *_args: {"success": True})
+        calls = []
+
+        def run(command, timeout):
+            calls.append((command, timeout))
+            plugin_path = tmp_path / "thirdparty"
+            plugin_path.mkdir()
+            (plugin_path / "pihealth_plugin.json").write_text(
+                json.dumps({"id": "thirdparty"})
+            )
+            return {"returncode": 0}
+
+        monkeypatch.setattr(helper, "run_command", run)
+
+        result = helper.cmd_plugin_repair({
+            "id": "thirdparty",
+            "type": "github",
+            "source": "owner/repo",
+        })
+
+        assert result == {"success": True, "reinstalled": True}
+        assert calls == [
+            (["git", "clone", "--depth", "1", "https://github.com/owner/repo.git", str(tmp_path / "thirdparty")], 600)
+        ]
+
+    def test_cmd_plugin_update_rejects_mismatched_fetched_manifest(self, tmp_path, monkeypatch):
+        plugin_path = tmp_path / "thirdparty"
+        (plugin_path / ".git").mkdir(parents=True)
+        monkeypatch.setattr(helper, "PLUGIN_DIR", str(tmp_path))
+        calls = []
+
+        def run(command, timeout):
+            calls.append(command)
+            if "show" in command:
+                return {"returncode": 0, "stdout": json.dumps({"id": "different"})}
+            return {"returncode": 0}
+
+        monkeypatch.setattr(helper, "run_command", run)
+
+        result = helper.cmd_plugin_update({
+            "id": "thirdparty",
+            "type": "github",
+            "source": "owner/repo",
+        })
+
+        assert result["success"] is False
+        assert not any("reset" in command for command in calls)
+
+    def test_cmd_plugin_sync_rejects_parent_directory_id(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(helper, "PLUGIN_DIR", str(tmp_path))
+
+        result = helper.cmd_plugin_repair({
+            "id": "..",
+            "type": "github",
+            "source": "owner/repo",
+        })
+
+        assert result["success"] is False
+        assert not (tmp_path.parent / ".git").exists()
+
+    def test_plugin_lifecycle_commands_share_helper_mutation_lock(self):
+        assert {
+            "plugin_install",
+            "plugin_remove",
+            "plugin_update",
+            "plugin_repair",
+        } <= helper._MUTATING_COMMANDS
+
     @patch("pihealth_helper.os.path.isfile", return_value=True)
     @patch("pihealth_helper.run_command")
     def test_pihealth_update_deps_runs_pip_as_service_user(self, mock_run, mock_isfile):

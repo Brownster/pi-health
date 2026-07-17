@@ -91,3 +91,53 @@ def test_remove_plugin_success(monkeypatch, tmp_path):
     result = plugin_manager.remove_plugin(plugin_id)
     assert result["success"] is True
     assert plugin_manager.get_plugin_entry(plugin_id) is None
+
+
+def test_update_plugin_preserves_existing_state(monkeypatch, tmp_path):
+    _, plugin_dir = setup_temp_config(monkeypatch, tmp_path)
+    plugin_id = "thirdparty"
+    plugin_path = plugin_dir / plugin_id
+    plugin_path.mkdir()
+    (plugin_path / "pihealth_plugin.json").write_text(json.dumps({
+        "id": plugin_id,
+        "name": "Updated Third Party",
+        "entry": "updated.py",
+        "class": "UpdatedPlugin",
+        "version": "2.0.0",
+    }))
+    config = plugin_manager.load_plugins_config()
+    config["plugins"].append({
+        "id": plugin_id,
+        "type": "github",
+        "source": "owner/repo",
+        "enabled": True,
+        "configured_path": "/preserved",
+    })
+    with open(plugin_manager.CONFIG_FILE, "w") as handle:
+        json.dump(config, handle)
+    calls = []
+    monkeypatch.setattr(
+        plugin_manager,
+        "helper_call",
+        lambda command, values: calls.append((command, values)) or {"success": True},
+    )
+
+    result = plugin_manager.update_plugin(plugin_id)
+
+    assert result["success"] is True
+    entry = plugin_manager.get_plugin_entry(plugin_id)
+    assert entry["enabled"] is True
+    assert entry["configured_path"] == "/preserved"
+    assert entry["version"] == "2.0.0"
+    assert calls == [("plugin_update", {"id": plugin_id, "type": "github", "source": "owner/repo"})]
+
+
+def test_repair_plugin_rejects_builtin_without_helper_call(monkeypatch, tmp_path):
+    setup_temp_config(monkeypatch, tmp_path)
+    calls = []
+    monkeypatch.setattr(plugin_manager, "helper_call", lambda *args: calls.append(args))
+
+    result = plugin_manager.repair_plugin("mergerfs")
+
+    assert result["success"] is False
+    assert calls == []

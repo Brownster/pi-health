@@ -65,3 +65,85 @@ def test_v2_extensions_registry_failure_is_bounded(
 
     expect(page.get_by_role("alert")).to_contain_text("Extension registry is unavailable")
     expect(page.get_by_role("alert")).to_contain_text("Capability registry is unavailable.")
+
+
+def test_v2_extensions_admin_can_install_reviewed_github_source(
+    page: Page,
+    v2_server,
+    v2_login,
+    install_v2_extensions_api_mocks,
+):
+    _open_extensions(page, v2_server["base_url"], v2_login, install_v2_extensions_api_mocks)
+
+    page.locator("[data-extension-install-open]").click()
+    dialog = page.get_by_role("dialog", name="Install extension")
+    expect(dialog).to_be_visible()
+    dialog.locator("[data-extension-install-source]").fill("owner/reviewed-provider")
+    dialog.locator("[data-extension-install-id]").fill("reviewed-provider")
+    dialog.locator("[data-extension-install-confirm]").click()
+
+    expect(page.locator("[data-extension-operation-notice]")).to_contain_text("reviewed-provider installed")
+
+
+def test_v2_extension_lifecycle_controls_across_viewports(
+    profiled_page: Page,
+    viewport_profile_name: str,
+    assert_no_horizontal_overflow,
+    v2_server,
+    v2_login,
+    install_v2_extensions_api_mocks,
+):
+    page = profiled_page
+    base_url = v2_server["base_url"]
+    _open_extensions(page, base_url, v2_login, install_v2_extensions_api_mocks)
+    page.click("[data-extension-id='openpool']")
+
+    expect(page.locator("[data-extension-action='enable']")).to_be_visible()
+    expect(page.locator("[data-extension-action='update']")).to_be_visible()
+    expect(page.locator("[data-extension-action='repair']")).to_be_visible()
+    expect(page.locator("[data-extension-action='remove']")).to_be_visible()
+    assert_no_horizontal_overflow(page, f"v2 extension lifecycle ({viewport_profile_name})")
+
+    page.locator("[data-extension-action='enable']").click()
+    page.locator("[data-extension-confirm='enable']").click()
+    expect(page.locator("[data-extension-action='disable']")).to_be_visible()
+    expect(page.locator("[data-extension-action='remove']")).to_be_disabled()
+
+    page.locator("[data-extension-action='repair']").click()
+    page.locator("[data-extension-confirm='repair']").click()
+    expect(page.locator("[data-extension-operation-notice]")).to_contain_text("repair completed")
+
+    page.locator("[data-extension-action='disable']").click()
+    page.locator("[data-extension-confirm='disable']").click()
+    expect(page.locator("[data-extension-action='remove']")).to_be_enabled()
+
+    page.locator("[data-extension-action='remove']").click()
+    dialog = page.get_by_role("dialog", name="Remove extension")
+    expect(dialog.locator("[data-extension-confirm='remove']")).to_be_disabled()
+    dialog.locator("[data-extension-remove-confirmation]").fill("openpool")
+    dialog.locator("[data-extension-confirm='remove']").click()
+    expect(page).to_have_url(f"{base_url}/v2/settings/extensions")
+
+
+def test_v2_extension_lifecycle_controls_are_hidden_from_viewers(
+    page: Page,
+    v2_server,
+    v2_login,
+    install_v2_extensions_api_mocks,
+):
+    base_url = v2_server["base_url"]
+    _open_extensions(page, base_url, v2_login, install_v2_extensions_api_mocks)
+    page.route(
+        "**/api/auth/check",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body='{"authenticated":true,"username":"viewer","role":"viewer","permissions":["capability.view"],"csrf_token":"viewer-token"}',
+        ),
+    )
+    page.reload()
+
+    expect(page.locator("[data-extension-install-open]")).to_have_count(0)
+    page.click("[data-extension-id='openpool']")
+    expect(page.get_by_text("Administrator access is required")).to_be_visible()
+    expect(page.locator("[data-extension-action]")).to_have_count(0)

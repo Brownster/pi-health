@@ -2,6 +2,7 @@ import type {
   CapabilityHealthState,
   CapabilityTone,
   ExtensionDescriptor,
+  ExtensionLifecycleAction,
 } from "./capabilities";
 
 export interface ExtensionGroup {
@@ -62,4 +63,15 @@ export function extensionUpdateLabel(extension: ExtensionDescriptor): string {
   if (extension.update_state === "available") return "update available";
   if (extension.update_state === "current") return "current";
   return "not reported";
+}
+
+export function extensionLifecycleActions(
+  extension: ExtensionDescriptor,
+): Array<ExtensionLifecycleAction | "remove"> {
+  if (extension.runtime_kind === "integration-adapter") return [];
+  const toggle: ExtensionLifecycleAction = extension.enabled ? "disable" : "enable";
+  if (extension.runtime_kind === "github-python") {
+    return [toggle, "update", "repair", "remove"];
+  }
+  return [toggle];
 }
