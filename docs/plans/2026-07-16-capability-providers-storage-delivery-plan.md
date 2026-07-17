@@ -1,7 +1,7 @@
 # Capability Providers and Storage Surfaces
 
 Date: 2026-07-16
-Status: Sprint 1 complete; CP-006 complete, CP-007 next
+Status: Sprint 2 in delivery; CP-007 complete, CP-008 next
 Tracking prefix: `CP`
 
 ## Goal
@@ -301,7 +301,7 @@ Goal: move package management out of the normal storage workflow.
 
 | ID | Work package | Depends on | Status | Deliverable |
 | --- | --- | --- | --- | --- |
-| CP-007 | Extensions list and details | CP-004 | Planned | Settings > Advanced list, compatibility, diagnostics, source, version, and capability links |
+| CP-007 | Extensions list and details | CP-004 | Complete | [`Docs/LIMEOS_CAPABILITY_PROVIDERS_CP007_EXTENSIONS.md`](../../Docs/LIMEOS_CAPABILITY_PROVIDERS_CP007_EXTENSIONS.md): Settings > Advanced list, compatibility, diagnostics, source, version, and capability links |
 | CP-008 | Extension lifecycle controls | CP-004, CP-006 | Planned | Admin install, enable, disable, update, remove, repair, and confirmation flows |
 | CP-009 | Navigation and route compatibility | CP-007 | Planned | Advanced navigation, stable deep links, and `/plugins` redirect preparation |
 
