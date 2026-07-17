@@ -1,6 +1,7 @@
 flask
 psutil
 docker
+jsonschema>=4.23,<5
 pyyaml
 ruamel.yaml>=0.18,<0.19
 apscheduler>=3.10.0

@@ -1,7 +1,7 @@
 # Capability Providers and Storage Surfaces
 
 Date: 2026-07-16
-Status: Sprint 0 complete; CP-003 next
+Status: Sprint 1 in delivery; CP-003 complete, CP-004 next
 Tracking prefix: `CP`
 
 ## Goal
@@ -284,7 +284,7 @@ Goal: expose capabilities without replacing current pages.
 
 | ID | Work package | Depends on | Status | Deliverable |
 | --- | --- | --- | --- | --- |
-| CP-003 | Capability registry service | CP-001 | Planned | Provider discovery, capability index, compatibility state, and health aggregation |
+| CP-003 | Capability registry service | CP-001 | Complete | Framework-neutral `capability_registry_service.py` with offline contract validation, isolated discovery, compatibility, lifecycle normalization, redaction, and capability health aggregation |
 | CP-004 | Capability API | CP-003 | Planned | Authenticated read endpoints and administrator-only lifecycle endpoints |
 | CP-005 | Generic renderer foundation | CP-001, CP-002 | Planned | Schema forms, field errors, status metrics, action confirmation, and progress handling |
 | CP-006 | Security and audit boundary | CP-003, CP-004 | Planned | Role checks, CSRF, manifest validation, parameter allowlists, redaction, and audit tests |

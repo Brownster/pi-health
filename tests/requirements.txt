@@ -2,5 +2,4 @@ pytest
 pytest-playwright
 pytest-base-url
 docker
-jsonschema>=4.23,<5
 ruff
