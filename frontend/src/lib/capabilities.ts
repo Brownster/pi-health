@@ -170,10 +170,52 @@ export interface CapabilityDescriptor {
   [key: string]: unknown;
 }
 
+export interface CapabilityRegistryDiagnostic {
+  code: string;
+  message: string;
+  provider_id?: string;
+}
+
+export interface ExtensionCapabilityDescriptor {
+  id: string;
+  provider_id: string;
+  surface: string;
+  operational: boolean;
+  status: CapabilityStatus;
+  [key: string]: unknown;
+}
+
+export interface ExtensionHealthSummary {
+  state: CapabilityHealthState;
+  message: string;
+  counts: Partial<Record<CapabilityHealthState, number>>;
+}
+
 export interface ExtensionDescriptor {
   id: string;
   name: string;
+  description: string;
+  version: string;
+  runtime_kind: string;
+  source: string;
+  installed: boolean;
+  enabled: boolean;
+  contract_state: "valid" | "invalid" | "incompatible";
+  compatibility: "compatible" | "incompatible" | "unknown";
+  health: ExtensionHealthSummary;
+  capabilities: ExtensionCapabilityDescriptor[];
+  update_state?: "available" | "current" | "unknown";
   [key: string]: unknown;
+}
+
+export interface ExtensionIndex {
+  extensions: ExtensionDescriptor[];
+  errors: CapabilityRegistryDiagnostic[];
+}
+
+export interface ExtensionDetails {
+  extension: ExtensionDescriptor;
+  errors: CapabilityRegistryDiagnostic[];
 }
 
 export async function fetchCapabilities(): Promise<CapabilityDescriptor[]> {
@@ -191,15 +233,27 @@ export async function fetchCapability(id: string): Promise<CapabilityDescriptor>
 }
 
 export async function fetchExtensions(): Promise<ExtensionDescriptor[]> {
-  const response = await requestApi<{ extensions: ExtensionDescriptor[] }>(
-    "/api/extensions",
-  );
-  return response.extensions ?? [];
+  return (await fetchExtensionIndex()).extensions;
 }
 
 export async function fetchExtension(id: string): Promise<ExtensionDescriptor> {
-  const response = await requestApi<{ extension: ExtensionDescriptor }>(
+  return (await fetchExtensionDetails(id)).extension;
+}
+
+export async function fetchExtensionIndex(): Promise<ExtensionIndex> {
+  const response = await requestApi<ExtensionIndex>("/api/extensions");
+  return {
+    extensions: Array.isArray(response.extensions) ? response.extensions : [],
+    errors: Array.isArray(response.errors) ? response.errors : [],
+  };
+}
+
+export async function fetchExtensionDetails(id: string): Promise<ExtensionDetails> {
+  const response = await requestApi<ExtensionDetails>(
     `/api/extensions/${encodeURIComponent(id)}`,
   );
-  return response.extension;
+  return {
+    extension: response.extension,
+    errors: Array.isArray(response.errors) ? response.errors : [],
+  };
 }

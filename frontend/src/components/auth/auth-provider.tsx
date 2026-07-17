@@ -16,6 +16,8 @@ export type AuthState = "loading" | "authenticated" | "unauthenticated" | "error
 interface AuthContextValue {
   state: AuthState;
   username: string | null;
+  role: "admin" | "operator" | "viewer" | null;
+  permissions: string[];
   error: string | null;
   refresh: () => Promise<void>;
 }
@@ -25,6 +27,8 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 export function AuthProvider({ children }: PropsWithChildren) {
   const [state, setState] = useState<AuthState>("loading");
   const [username, setUsername] = useState<string | null>(null);
+  const [role, setRole] = useState<AuthContextValue["role"]>(null);
+  const [permissions, setPermissions] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const isMountedRef = useRef(true);
 
@@ -47,11 +51,15 @@ export function AuthProvider({ children }: PropsWithChildren) {
       if (session.authenticated) {
         setState("authenticated");
         setUsername(session.username || "unknown");
+        setRole(session.role);
+        setPermissions(session.permissions);
         return;
       }
 
       setState("unauthenticated");
       setUsername(null);
+      setRole(null);
+      setPermissions([]);
     } catch (caughtError) {
       if (!isMountedRef.current) {
         return;
@@ -59,6 +67,8 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
       setState("error");
       setUsername(null);
+      setRole(null);
+      setPermissions([]);
       setError(
         caughtError instanceof Error
           ? caughtError.message
@@ -72,8 +82,8 @@ export function AuthProvider({ children }: PropsWithChildren) {
   }, [refresh]);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ state, username, error, refresh }),
-    [state, username, error, refresh],
+    () => ({ state, username, role, permissions, error, refresh }),
+    [state, username, role, permissions, error, refresh],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

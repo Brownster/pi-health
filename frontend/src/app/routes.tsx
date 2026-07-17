@@ -4,6 +4,7 @@ import { CatalogPage } from "@/pages/catalog-page";
 import { ContainersPage } from "@/pages/containers-page";
 import { DashboardHomePage } from "@/pages/dashboard-home";
 import { DisksPage } from "@/pages/disks-page";
+import { ExtensionsPage } from "@/pages/extensions-page";
 import { MountsPage } from "@/pages/mounts-page";
 import { IntegrationsPage } from "@/pages/integrations-page";
 import { NetworkPage } from "@/pages/network-page";
@@ -126,6 +127,22 @@ export const appRoutes: AppRoute[] = [
     requiresAuth: true,
     showInNav: true,
     component: SettingsPage,
+  },
+  {
+    path: "/settings/extensions",
+    label: "Extensions",
+    navGroup: "System",
+    requiresAuth: true,
+    showInNav: false,
+    component: ExtensionsPage,
+  },
+  {
+    path: "/settings/extensions/:extensionId",
+    label: "Extension details",
+    navGroup: "System",
+    requiresAuth: true,
+    showInNav: false,
+    component: ExtensionsPage,
   },
 ];
 

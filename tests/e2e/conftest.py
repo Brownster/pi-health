@@ -1116,6 +1116,110 @@ def install_v2_settings_api_mocks():
 
 
 @pytest.fixture(scope="function")
+def install_v2_extensions_api_mocks():
+    """Install deterministic capability extension list and detail responses."""
+
+    def _json_fulfill(route, payload, status: int = 200) -> None:
+        route.fulfill(status=status, content_type="application/json", body=json.dumps(payload))
+
+    def _status(provider_id, capability_id, surface, state="healthy", message="Ready"):
+        return {
+            "id": capability_id,
+            "provider_id": provider_id,
+            "surface": surface,
+            "operational": state == "healthy",
+            "status": {
+                "schema_version": "1",
+                "provider_id": provider_id,
+                "capability_id": capability_id,
+                "observed_at": "2026-07-17T20:00:00+00:00",
+                "lifecycle": {
+                    "installed": True,
+                    "enabled": True,
+                    "configured": True,
+                    "compatibility": "compatible",
+                    "availability": "available",
+                },
+                "health": {"state": state, "message": message, "issues": []},
+                "summary": [],
+                "metrics": [],
+                "recent_activity": [],
+                "details": {},
+            },
+        }
+
+    mergerfs = {
+        "id": "mergerfs",
+        "name": "MergerFS",
+        "description": "Combine filesystem branches into a storage pool.",
+        "version": "2.40.2",
+        "runtime_kind": "builtin-python",
+        "source": "builtin",
+        "installed": True,
+        "enabled": True,
+        "contract_state": "valid",
+        "compatibility": "compatible",
+        "health": {"state": "healthy", "message": "2 providers healthy.", "counts": {"healthy": 2}},
+        "capabilities": [
+            _status("mergerfs", "storage.pooling", "pools"),
+            _status("mergerfs", "storage.protection", "protection", "warning", "Protection page is pending."),
+        ],
+    }
+    mattermost = {
+        "id": "mattermost",
+        "name": "Mattermost",
+        "description": "Private chat and incident collaboration.",
+        "version": "1.0.0",
+        "runtime_kind": "integration-adapter",
+        "source": "builtin",
+        "installed": True,
+        "enabled": True,
+        "contract_state": "valid",
+        "compatibility": "compatible",
+        "health": {"state": "warning", "message": "Provider health requires attention: warning.", "counts": {"warning": 1}},
+        "capabilities": [
+            _status("mattermost", "integration.chat", "integrations", "warning", "Delivery status is delayed."),
+        ],
+    }
+    diagnostic = {
+        "code": "provider_status_unavailable",
+        "provider_id": "mattermost",
+        "message": "Provider status is unavailable.",
+    }
+    extensions = [mattermost, mergerfs]
+
+    def _install(page: Page, fail: bool = False) -> None:
+        def _handler(route):
+            parsed = urlparse(route.request.url)
+            path = parsed.path
+            method = route.request.method
+            if method != "GET" or not path.startswith("/api/extensions"):
+                route.continue_()
+                return
+            if fail:
+                _json_fulfill(
+                    route,
+                    {"code": "capability_registry_unavailable", "error": "Capability registry is unavailable."},
+                    status=503,
+                )
+                return
+            if path == "/api/extensions":
+                _json_fulfill(route, {"schema_version": "1", "extensions": extensions, "errors": [diagnostic]})
+                return
+            provider_id = path.rsplit("/", 1)[-1]
+            extension = next((item for item in extensions if item["id"] == provider_id), None)
+            if extension is None:
+                _json_fulfill(route, {"code": "extension_not_found", "error": "Extension was not found."}, status=404)
+                return
+            errors = [diagnostic] if provider_id == "mattermost" else []
+            _json_fulfill(route, {"schema_version": "1", "extension": extension, "errors": errors})
+
+        page.route("**/api/extensions**", _handler)
+
+    return _install
+
+
+@pytest.fixture(scope="function")
 def install_v2_system_api_mocks():
     """Returns a callable(page) installing a deterministic /api/stats mock."""
 

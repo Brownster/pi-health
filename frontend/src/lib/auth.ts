@@ -4,6 +4,8 @@ export interface AuthSession {
   authenticated: boolean;
   username: string | null;
   csrfToken: string | null;
+  role: "admin" | "operator" | "viewer" | null;
+  permissions: string[];
 }
 
 export async function fetchAuthSession(signal?: AbortSignal): Promise<AuthSession> {
@@ -21,6 +23,8 @@ export async function fetchAuthSession(signal?: AbortSignal): Promise<AuthSessio
       authenticated: false,
       username: null,
       csrfToken: null,
+      role: null,
+      permissions: [],
     };
   }
 
@@ -32,6 +36,8 @@ export async function fetchAuthSession(signal?: AbortSignal): Promise<AuthSessio
     authenticated?: boolean;
     username?: string;
     csrf_token?: string;
+    role?: "admin" | "operator" | "viewer" | null;
+    permissions?: unknown;
   };
 
   const token = payload.csrf_token ?? null;
@@ -40,6 +46,10 @@ export async function fetchAuthSession(signal?: AbortSignal): Promise<AuthSessio
     authenticated: Boolean(payload.authenticated),
     username: payload.username ?? null,
     csrfToken: token,
+    role: payload.role ?? null,
+    permissions: Array.isArray(payload.permissions)
+      ? payload.permissions.filter((permission): permission is string => typeof permission === "string")
+      : [],
   };
 }
 

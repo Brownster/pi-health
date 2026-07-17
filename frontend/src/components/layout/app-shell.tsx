@@ -54,7 +54,7 @@ function Brand() {
 }
 
 export function AppShell({ children }: PropsWithChildren) {
-  const { state, username } = useAuth();
+  const { state, username, role } = useAuth();
   const location = useLocation();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const backgroundRef = useRef<HTMLDivElement>(null);
@@ -194,7 +194,7 @@ export function AppShell({ children }: PropsWithChildren) {
             </span>
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-semibold text-foreground">{username || "unknown"}</p>
-              <p className="font-mono text-[11px] text-dim">admin</p>
+              <p className="font-mono text-[11px] text-dim">{role ?? "user"}</p>
             </div>
             <button
               aria-label="Sign out"

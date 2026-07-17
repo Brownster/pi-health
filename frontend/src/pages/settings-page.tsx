@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Activity, CheckCircle2, Loader2, RefreshCw, TriangleAlert } from "lucide-react";
+import { Activity, ArrowRight, CheckCircle2, Loader2, PackageOpen, RefreshCw, TriangleAlert } from "lucide-react";
+import { Link } from "react-router-dom";
 
 import { StatusBadge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import {
@@ -622,6 +623,28 @@ export function SettingsPage() {
                   Run now
                 </Button>
               </div>
+            </CardContent>
+          </Card>
+
+          <Card className="transition-colors duration-200 hover:border-primary/25 xl:col-span-3" id="v2-settings-advanced">
+            <CardHeader>
+              <CardTitle className="text-base sm:text-lg">Advanced</CardTitle>
+              <CardDescription>Inspect installed capability extensions and provider diagnostics.</CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex min-w-0 items-start gap-3">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-border bg-muted/30 text-primary">
+                  <PackageOpen aria-hidden="true" className="h-5 w-5" />
+                </span>
+                <div className="min-w-0">
+                  <p className="font-mono text-sm font-semibold">Extensions</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Versions, compatibility, capabilities, sources, and registry health.</p>
+                </div>
+              </div>
+              <Link className={cn(buttonVariants({ variant: "outline" }), "shrink-0 gap-2")} to="/settings/extensions">
+                Open extensions
+                <ArrowRight aria-hidden="true" className="h-4 w-4" />
+              </Link>
             </CardContent>
           </Card>
         </div>

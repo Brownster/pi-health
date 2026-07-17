@@ -28,6 +28,8 @@ def test_v2_settings_render(
     expect(page.locator("input[data-setting='pihealth-repo']")).to_have_value("/opt/pi-health")
     expect(page.locator("#v2-settings-backups")).to_be_visible()
     expect(page.locator("#v2-settings-auto-update")).to_be_visible()
+    expect(page.locator("#v2-settings-advanced")).to_be_visible()
+    expect(page.get_by_role("link", name="Open extensions")).to_have_attribute("href", "/v2/settings/extensions")
     assert_no_horizontal_overflow(page, f"v2 settings ({viewport_profile_name})")
 
 
