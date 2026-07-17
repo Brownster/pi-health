@@ -1,7 +1,7 @@
 # Capability Providers and Storage Surfaces
 
 Date: 2026-07-16
-Status: Sprint 1 in delivery; CP-005 complete, CP-006 next
+Status: Sprint 1 complete; CP-006 complete, CP-007 next
 Tracking prefix: `CP`
 
 ## Goal
@@ -285,9 +285,9 @@ Goal: expose capabilities without replacing current pages.
 | ID | Work package | Depends on | Status | Deliverable |
 | --- | --- | --- | --- | --- |
 | CP-003 | Capability registry service | CP-001 | Complete | Framework-neutral `capability_registry_service.py` with offline contract validation, isolated discovery, compatibility, lifecycle normalization, redaction, and capability health aggregation |
-| CP-004 | Capability API | CP-003 | Complete | [`Docs/LIMEOS_CAPABILITY_PROVIDERS_CP004_API.md`](../../Docs/LIMEOS_CAPABILITY_PROVIDERS_CP004_API.md): authenticated list/detail APIs with stable failures and lifecycle transport that fails closed until CP-006 supplies `extensions.admin` authorization |
+| CP-004 | Capability API | CP-003 | Complete | [`Docs/LIMEOS_CAPABILITY_PROVIDERS_CP004_API.md`](../../Docs/LIMEOS_CAPABILITY_PROVIDERS_CP004_API.md): authenticated list/detail APIs with stable failures and lifecycle transport secured by the CP-006 `extensions.admin` policy |
 | CP-005 | Generic renderer foundation | CP-001, CP-002 | Complete | [`Docs/LIMEOS_CAPABILITY_PROVIDERS_CP005_RENDERER.md`](../../Docs/LIMEOS_CAPABILITY_PROVIDERS_CP005_RENDERER.md): typed schema forms, field errors, bounded status rendering, declared action confirmation, and monotonic progress handling |
-| CP-006 | Security and audit boundary | CP-003, CP-004 | Planned | Role checks, CSRF, manifest validation, parameter allowlists, redaction, and audit tests |
+| CP-006 | Security and audit boundary | CP-003, CP-004 | Complete | [`Docs/LIMEOS_CAPABILITY_PROVIDERS_CP006_SECURITY.md`](../../Docs/LIMEOS_CAPABILITY_PROVIDERS_CP006_SECURITY.md): fixed roles and permissions, authenticated read checks, admin lifecycle policy, CSRF coverage, request allowlists, recursive redaction, and value-free audit events |
 
 Exit gate:
 

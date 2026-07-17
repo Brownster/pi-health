@@ -153,8 +153,8 @@ The manifest requests fixed permission names:
 | `capability.operate` | Run an approved capability mutation |
 
 The manifest cannot create permissions, grant them to a user, or change role mappings.
-CP-006 owns the server-side role and authorization model. Until CP-006 is complete, new
-extension lifecycle APIs cannot claim administrator-only enforcement.
+CP-006 implements the server-side `admin`, `operator`, and `viewer` roles documented in
+[`LIMEOS_CAPABILITY_PROVIDERS_CP006_SECURITY.md`](LIMEOS_CAPABILITY_PROVIDERS_CP006_SECURITY.md).
 
 ## Renderer Contract
 

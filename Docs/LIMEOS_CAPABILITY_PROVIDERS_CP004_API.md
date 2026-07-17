@@ -38,16 +38,15 @@ remain unchanged.
 | `POST` | `/api/extensions/:providerId/repair` | Repair an extension |
 | `DELETE` | `/api/extensions/:providerId` | Remove an extension |
 
-Lifecycle routes require authentication, the global CSRF boundary, and an injected
-authorizer granting the server-owned `extensions.admin` permission. Unknown actions are
-not dispatched. Request bodies must be JSON objects and are bounded to 64 top-level
-values.
+Lifecycle routes require authentication, the global CSRF boundary, and the server-owned
+CP-006 role policy granting `extensions.admin`. Unknown actions are not dispatched.
+Install fields use a fixed allowlist; transitions accept an empty JSON object. Service
+responses are redacted and every lifecycle decision emits a bounded audit event.
 
-CP-006 owns the role mapping, complete parameter allowlists, audit policy, and concrete
-administrator authorization. Until that policy is installed, the default authorizer
-fails closed with `authorization_unavailable`. CP-008 will connect these routes to the
-extension lifecycle implementation and UI; a missing lifecycle service also fails
-closed.
+[`LIMEOS_CAPABILITY_PROVIDERS_CP006_SECURITY.md`](LIMEOS_CAPABILITY_PROVIDERS_CP006_SECURITY.md)
+defines role mapping, parameter validation, redaction, and audit behavior. CP-008 will
+connect these routes to the extension lifecycle implementation and UI; a missing
+lifecycle service still fails closed.
 
 ## Stable Errors
 
@@ -55,12 +54,14 @@ Errors contain a machine-readable `code` and bounded `error` message. Relevant c
 include:
 
 - `capability_registry_unavailable`
+- `capability_read_forbidden`
 - `capability_not_found`
 - `extension_not_found`
 - `authorization_unavailable`
 - `extension_lifecycle_forbidden`
 - `extension_lifecycle_unavailable`
 - `invalid_lifecycle_action`
+- `invalid_lifecycle_parameters`
 - `extension_lifecycle_failed`
 
 Provider exception text, credentials, and request secrets are never included in API
