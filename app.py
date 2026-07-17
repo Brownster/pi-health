@@ -307,6 +307,8 @@ def _default_mattermost_integration_service(repository, docker_port):
         container_status_provider=container_status,
         stack_notifications_config_path=RUNTIME_INTEGRATIONS_CONFIG_DIR
         / "stack-notifications.json",
+        package_updates_config_path=RUNTIME_INTEGRATIONS_CONFIG_DIR
+        / "package-updates.json",
     )
 
 

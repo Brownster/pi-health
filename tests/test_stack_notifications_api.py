@@ -115,22 +115,29 @@ def test_mode_route_passes_mode_to_service():
     service.set_mode.assert_called_once_with("verbose")
 
 
-def test_pending_setup_actions_flags_unconfigured_stack_notifications():
+def test_pending_setup_actions_flags_missing_stack_or_updates_channel():
     from integrations_manager import pending_setup_actions
 
+    # stack notifications missing (updates present)
     actions = pending_setup_actions(
-        mattermost_status={"installed": True},
+        mattermost_status={"installed": True, "updates_channel_configured": True},
         stack_notifications_status={"configured": False},
     )
-    assert [a["id"] for a in actions] == ["stack-notifications-setup"]
+    assert [a["id"] for a in actions] == ["limeos-channels-setup"]
     assert actions[0]["href"] == "/integrations"
+    # updates channel missing (stack present) — e.g. an install that predates the updates channel
+    actions = pending_setup_actions(
+        mattermost_status={"installed": True, "updates_channel_configured": False},
+        stack_notifications_status={"configured": True},
+    )
+    assert [a["id"] for a in actions] == ["limeos-channels-setup"]
 
 
-def test_pending_setup_actions_empty_when_configured_or_no_mattermost():
+def test_pending_setup_actions_empty_when_all_configured_or_no_mattermost():
     from integrations_manager import pending_setup_actions
 
     assert pending_setup_actions(
-        mattermost_status={"installed": True},
+        mattermost_status={"installed": True, "updates_channel_configured": True},
         stack_notifications_status={"configured": True},
     ) == []
     assert pending_setup_actions(

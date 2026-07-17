@@ -3550,6 +3550,67 @@ def cmd_packages_reconcile(params):
 
 
 PACKAGE_RECONCILE_UNIT = 'limeos-package-reconcile'
+PACKAGE_UPDATES_CONFIG = '/etc/limeos/integrations/package-updates.json'
+
+
+def _dpkg_installed_version(name):
+    result = run_command(['dpkg-query', '-W', '-f', '${Version}', name], timeout=10)
+    if result.get('returncode') != 0:
+        return None
+    return (result.get('stdout') or '').strip() or None
+
+
+def _apt_candidate_version(name):
+    """The repo candidate version for an apt package, or None."""
+    result = run_command(['apt-cache', 'policy', name], timeout=30)
+    if result.get('returncode') != 0:
+        return None
+    for line in (result.get('stdout') or '').splitlines():
+        line = line.strip()
+        if line.startswith('Candidate:'):
+            value = line.split(':', 1)[1].strip()
+            return None if value in ('', '(none)') else value
+    return None
+
+
+def _post_webhook(url, payload):
+    """POST a Mattermost incoming-webhook payload (best-effort, stdlib only)."""
+    import urllib.error
+    import urllib.request
+    data = json.dumps(payload).encode()
+    req = urllib.request.Request(
+        url, data=data, headers={'Content-Type': 'application/json'}, method='POST'
+    )
+    try:
+        urllib.request.urlopen(req, timeout=15)
+        return {'posted': True}
+    except (urllib.error.URLError, OSError) as exc:
+        return {'posted': False, 'error': str(exc)}
+
+
+def _post_package_updates(specs):
+    """Compute held/critical pending updates and post them to the updates channel.
+
+    Best-effort and non-fatal: returns a small status dict, never raises into the run.
+    """
+    from limeos_packages import pending_updates, render_updates_message
+    pending = pending_updates(
+        specs,
+        lambda spec: _dpkg_installed_version(spec.name),
+        lambda spec: _apt_candidate_version(spec.name),
+    )
+    payload = render_updates_message(pending)
+    names = [update.name for update in pending]
+    if payload is None:
+        return {'pending': names, 'skipped': True, 'reason': 'no held updates'}
+    try:
+        with open(PACKAGE_UPDATES_CONFIG) as handle:
+            config = json.load(handle)
+    except (OSError, ValueError):
+        return {'pending': names, 'skipped': True, 'reason': 'updates channel not configured'}
+    if not config.get('enabled') or not config.get('webhook_url'):
+        return {'pending': names, 'skipped': True, 'reason': 'updates channel not configured'}
+    return {'pending': names, **_post_webhook(config['webhook_url'], payload)}
 
 
 def cmd_packages_nightly_reconcile(params):
@@ -3583,6 +3644,12 @@ def cmd_packages_nightly_reconcile(params):
 
     reconcile = cmd_packages_reconcile({'mode': 'apply'})
 
+    # Surface held/critical updates that were NOT auto-applied to the updates channel.
+    try:
+        updates = _post_package_updates(specs)
+    except Exception:
+        updates = {'skipped': True, 'reason': 'update report failed'}
+
     security_ok = security.get('skipped', False) or security.get('ok', False)
     return {
         'success': (not hold_failed) and security_ok and reconcile.get('success', False),
@@ -3590,6 +3657,7 @@ def cmd_packages_nightly_reconcile(params):
         'hold_failed': hold_failed,
         'security': security,
         'reconcile': reconcile,
+        'updates': updates,
     }
 
 

@@ -253,3 +253,72 @@ def plan_actions(
             if installed is None:
                 actions.append(ReconcileAction(spec.name, spec.manager, "install"))
     return actions
+
+
+# -- pending updates for held/critical packages (nightly report) -----------------
+@dataclass(frozen=True)
+class PendingUpdate:
+    name: str
+    installed: str | None
+    candidate: str
+    critical: bool
+
+
+def pending_updates(
+    specs: list[PackageSpec],
+    version_of: VersionOf,
+    candidate_of: VersionOf,
+    *,
+    version_ge: VersionGe = default_version_ge,
+) -> list[PendingUpdate]:
+    """Newer versions available for packages the nightly job holds back (critical or pinned).
+
+    The nightly job auto-applies non-critical security updates but never moves a held entry;
+    those are surfaced here for review/approval. `candidate_of` gives the repo candidate.
+    """
+    updates: list[PendingUpdate] = []
+    for spec in specs:
+        if not (spec.critical or spec.policy == "pinned"):
+            continue
+        candidate = candidate_of(spec)
+        if not candidate:
+            continue
+        installed = version_of(spec)
+        if installed is not None and (
+            upstream_version(candidate) == upstream_version(installed)
+            or version_ge(installed, candidate)
+        ):
+            continue  # already at or above the candidate
+        updates.append(
+            PendingUpdate(
+                name=spec.name,
+                installed=installed,
+                candidate=candidate,
+                critical=spec.critical,
+            )
+        )
+    return updates
+
+
+def render_updates_message(updates: list[PendingUpdate]) -> dict | None:
+    """A Mattermost incoming-webhook payload listing held updates, or None when there are none.
+
+    Text is data only (versions from apt), never markup; the list is bounded by the manifest.
+    """
+    if not updates:
+        return None
+    lines = [
+        f"• **{u.name}** {u.installed or '—'} → {u.candidate}"
+        + ("  _(critical)_" if u.critical else "")
+        for u in updates
+    ]
+    return {
+        "attachments": [
+            {
+                "color": "#e0a13b",
+                "title": f"📦 {len(updates)} held package update(s) available",
+                "text": "\n".join(lines)
+                + "\n\nThese are held back from the nightly job. Approve to apply on the next run.",
+            }
+        ]
+    }

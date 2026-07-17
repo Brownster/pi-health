@@ -14,7 +14,9 @@ from limeos_packages import (
     default_version_ge,
     load_manifest,
     parse_manifest,
+    pending_updates,
     plan_actions,
+    render_updates_message,
 )
 
 
@@ -30,6 +32,48 @@ def _pkg(**overrides):
     base = {"name": "claude-code", "manager": "apt", "policy": "present", "critical": False}
     base.update(overrides)
     return base
+
+
+# -- pending updates for held/critical packages ----------------------------------
+def test_pending_updates_reports_only_held_or_critical_with_newer_candidate():
+    specs = _specs(
+        {"name": "claude-code", "manager": "apt", "policy": "pinned", "version": "2.1.207", "critical": True},
+        {"name": "unattended-upgrades", "manager": "apt", "policy": "present", "critical": False},
+        {"name": "python3-psutil", "manager": "apt", "policy": "present-min", "version": "5.9.0", "critical": False},
+    )
+    installed = {"claude-code": "2.1.207-1", "unattended-upgrades": "2.9", "python3-psutil": "5.9.0"}
+    candidate = {"claude-code": "2.1.210-1", "unattended-upgrades": "3.0", "python3-psutil": "6.0.0"}
+    updates = pending_updates(specs, lambda s: installed.get(s.name), lambda s: candidate.get(s.name))
+    # only the pinned/critical claude-code is surfaced; non-critical present entries are not
+    assert [u.name for u in updates] == ["claude-code"]
+    assert updates[0].installed == "2.1.207-1" and updates[0].candidate == "2.1.210-1"
+    assert updates[0].critical is True
+
+
+def test_pending_updates_skips_when_candidate_not_newer():
+    specs = _specs({"name": "claude-code", "manager": "apt", "policy": "pinned", "version": "2.1.207", "critical": True})
+    # candidate equals installed upstream (revision-only difference) -> not pending
+    updates = pending_updates(specs, lambda s: "2.1.207-1", lambda s: "2.1.207-2")
+    assert updates == []
+
+
+def test_pending_updates_ignores_missing_candidate():
+    specs = _specs({"name": "claude-code", "manager": "apt", "policy": "pinned", "version": "2.1.207", "critical": True})
+    assert pending_updates(specs, lambda s: "2.1.207-1", lambda s: None) == []
+
+
+def test_render_updates_message_is_none_when_empty():
+    assert render_updates_message([]) is None
+
+
+def test_render_updates_message_lists_versions_and_flags_critical():
+    specs = _specs({"name": "claude-code", "manager": "apt", "policy": "pinned", "version": "2.1.207", "critical": True})
+    updates = pending_updates(specs, lambda s: "2.1.207-1", lambda s: "2.1.210-1")
+    payload = render_updates_message(updates)
+    attachment = payload["attachments"][0]
+    assert "claude-code" in attachment["text"] and "2.1.210-1" in attachment["text"]
+    assert "critical" in attachment["text"]
+    assert "1 held package update" in attachment["title"]
 
 
 # -- the shipped manifest ---------------------------------------------------------

@@ -75,6 +75,7 @@ def make_service(tmp_path):
         sleep=lambda _seconds: None,
         clock=lambda: 1_784_275_200,
         stack_notifications_config_path=tmp_path / "config" / "stack-notifications.json",
+        package_updates_config_path=tmp_path / "config" / "package-updates.json",
     )
     return service, api, sent, compose_calls
 
@@ -105,6 +106,31 @@ def test_install_provisions_the_stack_notifications_channel_and_config(tmp_path)
     assert config["mode"] == "quiet"
     assert config["channel_name"] == "stack-notifications"
     assert config["token"] and config["webhook_url"].startswith("http")
+
+
+def test_install_provisions_the_updates_channel_and_config(tmp_path):
+    service, api, _sent, _compose = make_service(tmp_path)
+
+    list(service.stream_install(SETUP))
+
+    assert ("channel", "limeos-updates") in api.calls
+    config = json.loads((tmp_path / "config" / "package-updates.json").read_text())
+    assert config["enabled"] is True
+    assert config["channel_name"] == "limeos-updates"
+    assert config["webhook_url"].startswith("http")
+
+
+def test_enable_flow_provisions_both_channels_for_existing_install(tmp_path):
+    service, api, _sent, _compose = make_service(tmp_path)
+    list(service.stream_install(SETUP))
+    (tmp_path / "config" / "package-updates.json").unlink()
+
+    events = list(
+        service.stream_enable_stack_notifications({"admin_password": "long-test-password"})
+    )
+
+    assert events[-1]["done"] is True
+    assert (tmp_path / "config" / "package-updates.json").exists()
 
 
 def test_install_preserves_an_existing_stack_notifications_token(tmp_path):

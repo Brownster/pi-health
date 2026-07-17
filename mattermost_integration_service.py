@@ -40,6 +40,11 @@ STACK_NOTIFICATIONS_CHANNEL = "stack-notifications"
 STACK_NOTIFICATIONS_DISPLAY = "Stack Notifications"
 STACK_NOTIFICATIONS_WEBHOOK_NAME = "LimeOS Stack Notifications"
 
+#: The nightly package job posts held/critical pending updates here for review/approval.
+PACKAGE_UPDATES_CHANNEL = "limeos-updates"
+PACKAGE_UPDATES_DISPLAY = "LimeOS Updates"
+PACKAGE_UPDATES_WEBHOOK_NAME = "LimeOS Updates"
+
 
 class MattermostIntegrationError(Exception):
     """Raised when Mattermost setup or management fails."""
@@ -224,11 +229,17 @@ class MattermostIntegrationService:
         clock: Callable[[], float] = time.time,
         container_status_provider: Callable[[str], Mapping[str, Any] | None] | None = None,
         stack_notifications_config_path: Path | None = None,
+        package_updates_config_path: Path | None = None,
     ) -> None:
         self._config_path = Path(config_path)
         self._stack_notifications_config_path = (
             Path(stack_notifications_config_path)
             if stack_notifications_config_path is not None
+            else None
+        )
+        self._package_updates_config_path = (
+            Path(package_updates_config_path)
+            if package_updates_config_path is not None
             else None
         )
         self._secrets_path = Path(secrets_path)
@@ -264,6 +275,7 @@ class MattermostIntegrationService:
             "team": config.get("team_name", "limeos"),
             "channel": config.get("channel_name", "limeos-alerts"),
             "webhook_configured": self._read_secret("LIMEOS_ALERT_MATTERMOST_WEBHOOK") is not None,
+            "updates_channel_configured": self._updates_channel_configured(),
             "policy": self._policy(config),
             "resources": daemon.get("resources", []),
             "incidents": daemon.get("incidents", []),
@@ -271,6 +283,12 @@ class MattermostIntegrationService:
             "updated_at": daemon.get("updated_at"),
             "services": services,
         }
+
+    def _updates_channel_configured(self) -> bool:
+        if self._package_updates_config_path is None:
+            return False
+        config = self._repository.read_json(self._package_updates_config_path, default={}) or {}
+        return bool(config.get("webhook_url"))
 
     def update_policy(self, raw: Mapping[str, Any]) -> dict[str, Any]:
         policy = normalize_alert_policy(raw)
@@ -315,6 +333,33 @@ class MattermostIntegrationService:
         )
         self._write_stack_notifications_config(webhook_url=webhook)
         return webhook
+
+    def _provision_package_updates(self, client: Any, team_id: str) -> str:
+        """Create the #limeos-updates channel + webhook and persist its config. Idempotent."""
+        channel_id = client.ensure_channel(
+            team_id=team_id,
+            name=PACKAGE_UPDATES_CHANNEL,
+            display_name=PACKAGE_UPDATES_DISPLAY,
+        )
+        webhook = client.ensure_incoming_webhook(
+            team_id=team_id,
+            channel_id=channel_id,
+            display_name=PACKAGE_UPDATES_WEBHOOK_NAME,
+            description="Held/critical package updates awaiting review",
+        )
+        self._write_package_updates_config(webhook_url=webhook)
+        return webhook
+
+    def _write_package_updates_config(self, *, webhook_url: str) -> None:
+        if self._package_updates_config_path is None:
+            return
+        config = {
+            "version": INTEGRATION_VERSION,
+            "enabled": True,
+            "webhook_url": webhook_url,
+            "channel_name": PACKAGE_UPDATES_CHANNEL,
+        }
+        self._repository.write_json(self._package_updates_config_path, config, mode=0o600)
 
     def _write_stack_notifications_config(self, *, webhook_url: str) -> None:
         if self._stack_notifications_config_path is None:
@@ -366,9 +411,11 @@ class MattermostIntegrationService:
             team_id = client.ensure_team(name=team_name, display_name="LimeOS")
             yield {"step": "stack-notifications", "line": "Creating stack notifications channel"}
             self._provision_stack_notifications(client, team_id)
+            yield {"step": "updates-channel", "line": "Creating updates channel"}
+            self._provision_package_updates(client, team_id)
             yield {
                 "step": "complete",
-                "line": "Stack notifications channel is ready",
+                "line": "LimeOS channels are ready",
                 "done": True,
             }
         except (MattermostIntegrationError, OSError) as exc:
@@ -436,6 +483,8 @@ class MattermostIntegrationService:
 
             yield {"step": "stack-notifications", "line": "Creating stack notifications channel"}
             self._provision_stack_notifications(client, team_id)
+            yield {"step": "updates-channel", "line": "Creating updates channel"}
+            self._provision_package_updates(client, team_id)
 
             yield {"step": "alertd-image", "line": "Building LimeOS alert service"}
             self._run_compose(stack_dir, "build", "limeos-alertd")

@@ -93,6 +93,45 @@ def test_nightly_fails_when_reconcile_fails():
     assert result["success"] is False
 
 
+# -- held-update reporting to the updates channel -------------------------------
+def _held_specs():
+    return [SimpleNamespace(name="claude-code", manager="apt", policy="pinned", critical=True)]
+
+
+def test_post_updates_posts_to_webhook_when_a_held_update_exists(tmp_path):
+    config = tmp_path / "package-updates.json"
+    config.write_text('{"enabled": true, "webhook_url": "https://mm/hooks/x"}')
+    with patch("pihealth_helper.PACKAGE_UPDATES_CONFIG", str(config)):
+        with patch("pihealth_helper._dpkg_installed_version", return_value="2.1.207-1"):
+            with patch("pihealth_helper._apt_candidate_version", return_value="2.1.210-1"):
+                with patch("pihealth_helper._post_webhook", return_value={"posted": True}) as post:
+                    result = helper._post_package_updates(_held_specs())
+    assert result["pending"] == ["claude-code"] and result["posted"] is True
+    assert post.call_args.args[0] == "https://mm/hooks/x"
+    assert "2.1.210-1" in post.call_args.args[1]["attachments"][0]["text"]
+
+
+def test_post_updates_skips_when_no_held_update():
+    with patch("pihealth_helper._dpkg_installed_version", return_value="2.1.210-1"):
+        with patch("pihealth_helper._apt_candidate_version", return_value="2.1.210-1"):
+            result = helper._post_package_updates(_held_specs())
+    assert result["skipped"] is True and result["pending"] == []
+
+
+def test_post_updates_skips_when_channel_not_configured(tmp_path):
+    with patch("pihealth_helper.PACKAGE_UPDATES_CONFIG", str(tmp_path / "missing.json")):
+        with patch("pihealth_helper._dpkg_installed_version", return_value="2.1.207-1"):
+            with patch("pihealth_helper._apt_candidate_version", return_value="2.1.210-1"):
+                result = helper._post_package_updates(_held_specs())
+    assert result["skipped"] is True and result["pending"] == ["claude-code"]
+
+
+def test_apt_candidate_version_parses_policy_output():
+    policy = "claude-code:\n  Installed: 2.1.207-1\n  Candidate: 2.1.210-1\n"
+    with patch("pihealth_helper.run_command", return_value={"returncode": 0, "stdout": policy}):
+        assert helper._apt_candidate_version("claude-code") == "2.1.210-1"
+
+
 # -- schedule installer ---------------------------------------------------------
 def test_configure_schedule_writes_units_and_enables_timer():
     with patch("pihealth_helper._write_managed_file", return_value={"success": True}) as write:

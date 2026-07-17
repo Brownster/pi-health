@@ -293,16 +293,19 @@ def pending_setup_actions(*, mattermost_status, stack_notifications_status):
     trigger, so an action disappears once the user completes it. Pure + testable.
     """
     actions = []
-    if mattermost_status.get("installed") and not stack_notifications_status.get("configured"):
+    if not mattermost_status.get("installed"):
+        return actions
+    missing_stack = not stack_notifications_status.get("configured")
+    missing_updates = not mattermost_status.get("updates_channel_configured")
+    if missing_stack or missing_updates:
         actions.append(
             {
-                "id": "stack-notifications-setup",
-                "title": "Finish setting up stack notifications",
+                "id": "limeos-channels-setup",
+                "title": "Finish setting up LimeOS Mattermost channels",
                 "body": (
-                    "Your Radarr / Sonarr / *arr apps can post imports, upgrades, and health "
-                    "alerts to a dedicated Mattermost channel. Creating that channel needs your "
-                    "Mattermost admin password once, so it could not be done automatically "
-                    "during the update."
+                    "LimeOS can post Radarr / Sonarr / *arr events and held package updates to "
+                    "dedicated Mattermost channels. Creating channels needs your Mattermost "
+                    "admin password once, so it could not be done automatically during the update."
                 ),
                 "action_label": "Set up on Integrations",
                 "href": "/integrations",
