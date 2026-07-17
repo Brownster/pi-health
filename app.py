@@ -39,6 +39,8 @@ from auth_utils import (
 )
 from catalog_manager import CATALOG_DIR, _load_stack_compose, catalog_manager, default_catalog_service
 from catalog_service import CatalogService
+from capability_api import UnavailableCapabilityAuthorizer, capability_api
+from capability_registry_service import CapabilityRegistryService
 from integrations_manager import integrations_manager
 from mattermost_integration_service import MattermostIntegrationService
 from stack_notifications_service import StackNotificationsService
@@ -224,6 +226,9 @@ class AppDependencies:
     agent_integration_service: AgentIntegrationService | None = None
     overview_service: OverviewService | None = None
     metric_history_service: MetricHistoryStore | None = None
+    capability_registry_service: CapabilityRegistryService | None = None
+    capability_authorizer: object | None = None
+    capability_lifecycle_service: object | None = None
 
 
 def _default_system_service():
@@ -1273,6 +1278,7 @@ def create_app(config=None, dependencies=None):
     application = Flask(__name__, static_folder=static_folder)
     application.config.from_mapping(
         INIT_PLUGINS=True,
+        LIMEOS_VERSION="0.1.0",
         START_SCHEDULERS=True,
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
@@ -1442,6 +1448,19 @@ def create_app(config=None, dependencies=None):
     application.extensions["metric_history_service"] = (
         resolved.metric_history_service or _default_metric_history_service()
     )
+    application.extensions["capability_registry_service"] = (
+        resolved.capability_registry_service
+        or CapabilityRegistryService(
+            candidate_reader=lambda: (),
+            limeos_version=application.config["LIMEOS_VERSION"],
+        )
+    )
+    application.extensions["capability_authorizer"] = (
+        resolved.capability_authorizer or UnavailableCapabilityAuthorizer()
+    )
+    application.extensions["capability_lifecycle_service"] = (
+        resolved.capability_lifecycle_service
+    )
 
     application.register_blueprint(core_api)
     application.register_blueprint(stack_manager)
@@ -1453,6 +1472,7 @@ def create_app(config=None, dependencies=None):
     application.register_blueprint(backup_scheduler)
     application.register_blueprint(disk_manager)
     application.register_blueprint(setup_manager)
+    application.register_blueprint(capability_api)
 
     if application.config["INIT_PLUGINS"]:
         init_plugins(STORAGE_PLUGIN_CONFIG_DIR)
