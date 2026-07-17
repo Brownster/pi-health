@@ -129,6 +129,10 @@ PLUGIN_DIR = os.getenv("PIHEALTH_PLUGIN_DIR", os.path.join(os.path.dirname(os.pa
 PIHEALTH_REPO_DIR = os.getenv("PIHEALTH_REPO_DIR")
 PIHEALTH_SERVICE_NAME = os.getenv("PIHEALTH_SERVICE_NAME", "pi-health")
 PIHEALTH_HELPER_SERVICE_NAME = "pihealth-helper.service"
+PIHEALTH_UPDATE_CHECKPOINT = os.path.join(
+    os.getenv("LIMEOS_STATE_DIR", "/var/lib/limeos"),
+    "self-update-checkpoint.json",
+)
 
 CLAUDE_APT_KEY_URL = 'https://downloads.claude.ai/keys/claude-code.asc'
 CLAUDE_APT_KEY_PATH = '/etc/apt/keyrings/claude-code.asc'
@@ -2320,6 +2324,70 @@ def _git_as(user, repo_path, *args, timeout=30):
     )
 
 
+def _load_pihealth_update_checkpoint(repo_path, new_commit):
+    try:
+        with open(PIHEALTH_UPDATE_CHECKPOINT) as handle:
+            checkpoint = json.load(handle)
+    except (OSError, ValueError):
+        return None
+
+    changed_files = checkpoint.get("changed_files")
+    if (
+        checkpoint.get("repo_path") != repo_path
+        or checkpoint.get("new_commit") != new_commit
+        or not isinstance(checkpoint.get("old_commit"), str)
+        or not isinstance(changed_files, list)
+        or not all(isinstance(path, str) for path in changed_files)
+    ):
+        return None
+    return checkpoint
+
+
+def _save_pihealth_update_checkpoint(repo_path, old_commit, new_commit, changed_files):
+    directory = os.path.dirname(PIHEALTH_UPDATE_CHECKPOINT)
+    temp_path = None
+    try:
+        os.makedirs(directory, mode=0o750, exist_ok=True)
+        fd, temp_path = tempfile.mkstemp(
+            dir=directory,
+            prefix=".self-update-checkpoint.",
+            suffix=".tmp",
+        )
+        with os.fdopen(fd, "w") as handle:
+            json.dump(
+                {
+                    "repo_path": repo_path,
+                    "old_commit": old_commit,
+                    "new_commit": new_commit,
+                    "changed_files": changed_files,
+                },
+                handle,
+                separators=(",", ":"),
+            )
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temp_path, 0o600)
+        os.replace(temp_path, PIHEALTH_UPDATE_CHECKPOINT)
+        return {'success': True}
+    except OSError as exc:
+        if temp_path:
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
+        return {'success': False, 'error': str(exc)}
+
+
+def _clear_pihealth_update_checkpoint():
+    try:
+        os.unlink(PIHEALTH_UPDATE_CHECKPOINT)
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        return {'success': False, 'error': str(exc)}
+    return {'success': True}
+
+
 def _pihealth_update_pull(ctx):
     """Fast-forward the checkout and report the commit range and changed files."""
     user = ctx["user"]
@@ -2359,6 +2427,30 @@ def _pihealth_update_pull(ctx):
         if diff.get("returncode") == 0:
             changed_files = [line for line in (diff.get("stdout") or "").splitlines() if line.strip()]
 
+        checkpoint = _save_pihealth_update_checkpoint(
+            repo_path, old_commit, new_commit, changed_files
+        )
+        if not checkpoint.get('success'):
+            return {
+                'success': False,
+                'error': 'Code was updated but the recovery checkpoint could not be saved: '
+                + checkpoint.get('error', 'unknown error'),
+                'old_commit': old_commit,
+                'new_commit': new_commit,
+                'changed_files': changed_files,
+            }
+    elif old_commit and new_commit and old_commit == new_commit:
+        checkpoint = _load_pihealth_update_checkpoint(repo_path, new_commit)
+        if checkpoint:
+            return {
+                'success': True,
+                'old_commit': checkpoint['old_commit'],
+                'new_commit': new_commit,
+                'changed_files': checkpoint['changed_files'],
+                'stdout': pull.get("stdout", ""),
+                'resumed': True,
+            }
+
     return {
         'success': True,
         'old_commit': old_commit,
@@ -2372,13 +2464,28 @@ def _pihealth_update_deps(ctx):
     """Install Python dependencies into the service virtualenv."""
     user = ctx["user"]
     repo_path = ctx["repo_path"]
-    venv_py = os.path.join(repo_path, ".venv", "bin", "python")
+    venv_dir = os.path.join(repo_path, ".venv")
+    venv_py = os.path.join(venv_dir, "bin", "python")
     requirements = os.path.join(repo_path, "requirements.txt")
 
     if not os.path.isfile(venv_py):
         return {'success': True, 'skipped': True, 'reason': 'no virtualenv found'}
     if not os.path.isfile(requirements):
         return {'success': True, 'skipped': True, 'reason': 'no requirements.txt'}
+
+    # setup.sh historically created the virtualenv as root. Converge legacy
+    # installs before dropping privileges so pip can replace existing packages.
+    ownership = run_command(
+        ["chown", "-R", "--no-dereference", f"{user}:", venv_dir],
+        timeout=120,
+    )
+    if ownership.get("returncode") != 0:
+        return {
+            'success': False,
+            'error': ownership.get("stderr")
+            or ownership.get("error")
+            or 'virtualenv ownership repair failed',
+        }
 
     # Run as the service user (like the git/npm steps) so the venv doesn't end up
     # with root-owned files that later break manual pip runs as the user.
@@ -2530,6 +2637,7 @@ def _pihealth_update_restart(ctx):
             "systemctl", "restart", *service_names,
         ])
         if result.get("returncode") == 0:
+            _clear_pihealth_update_checkpoint()
             return {'success': True, 'scheduled': True}
 
     try:
@@ -2540,6 +2648,7 @@ def _pihealth_update_restart(ctx):
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
+        _clear_pihealth_update_checkpoint()
         return {'success': True, 'scheduled': True}
     except Exception as exc:
         return {'success': False, 'error': str(exc)}

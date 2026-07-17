@@ -342,9 +342,30 @@ class TestValidationFailures:
         mock_run.return_value = {"returncode": 0, "stdout": ""}
         result = helper._pihealth_update_deps({"user": "pi", "repo_path": "/home/pi/pi-health"})
         assert result["success"] is True
-        cmd = mock_run.call_args[0][0]
-        assert cmd[:4] == ["runuser", "-u", "pi", "--"]
-        assert "pip" in cmd
+        commands = [call.args[0] for call in mock_run.call_args_list]
+        assert commands[0] == [
+            "chown",
+            "-R",
+            "--no-dereference",
+            "pi:",
+            "/home/pi/pi-health/.venv",
+        ]
+        assert commands[1][:4] == ["runuser", "-u", "pi", "--"]
+        assert "pip" in commands[1]
+
+    @patch("pihealth_helper.os.path.isfile", return_value=True)
+    @patch("pihealth_helper.run_command")
+    def test_pihealth_update_deps_stops_when_venv_ownership_repair_fails(
+        self, mock_run, mock_isfile
+    ):
+        mock_run.return_value = {"returncode": 1, "stderr": "ownership repair failed"}
+
+        result = helper._pihealth_update_deps(
+            {"user": "pi", "repo_path": "/home/pi/pi-health"}
+        )
+
+        assert result == {"success": False, "error": "ownership repair failed"}
+        assert mock_run.call_count == 1
 
     @patch("pihealth_helper.run_command")
     @patch(
@@ -816,6 +837,40 @@ class TestPihealthUpdate:
         assert result["success"] is True
         assert result["new_commit"] == "b" * 40
         mock_rmtree.assert_called_once()
+
+    @patch("pihealth_helper._git_as")
+    def test_pull_resumes_pending_checkpoint_when_git_is_already_current(
+        self, mock_git, tmp_path, monkeypatch
+    ):
+        old_commit = "a" * 40
+        new_commit = "b" * 40
+        checkpoint = tmp_path / "self-update-checkpoint.json"
+        monkeypatch.setattr(helper, "PIHEALTH_UPDATE_CHECKPOINT", str(checkpoint))
+        mock_git.side_effect = [
+            {"returncode": 0, "stdout": old_commit},
+            {"returncode": 0, "stdout": "Updating"},
+            {"returncode": 0, "stdout": new_commit},
+            {"returncode": 0, "stdout": "requirements.txt\nagent_gateway/gateway.py\n"},
+            {"returncode": 0, "stdout": new_commit},
+            {"returncode": 0, "stdout": "Already up to date"},
+            {"returncode": 0, "stdout": new_commit},
+        ]
+
+        first = helper._pihealth_update_pull(
+            {"user": "pi", "repo_path": "/home/pi/pi-health"}
+        )
+        resumed = helper._pihealth_update_pull(
+            {"user": "pi", "repo_path": "/home/pi/pi-health"}
+        )
+
+        assert first["old_commit"] == old_commit
+        assert resumed["old_commit"] == old_commit
+        assert resumed["new_commit"] == new_commit
+        assert resumed["changed_files"] == [
+            "requirements.txt",
+            "agent_gateway/gateway.py",
+        ]
+        assert resumed["resumed"] is True
 
 
 class TestUpdateBuildStaleness:
