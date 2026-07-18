@@ -31,9 +31,10 @@ CP-007 was inspection-only. CP-008 now owns install, update, enable, disable, re
 removal controls with confirmation flows. The server-side CP-006 authorization policy
 remains the enforcement boundary for extension reads and mutations.
 
-The shell now displays the authenticated user's server-provided role. The legacy
-`/plugins` route and primary-navigation entry remain unchanged until CP-009 completes
-the compatibility migration.
+The shell now displays the authenticated user's server-provided role. CP-009 prepares
+the route compatibility contract, but the legacy `/plugins` route and primary-navigation
+entry remain unchanged until CP-019 activates the final navigation migration after the
+Pools and Protection domain pages are complete.
 
 ## Compatibility
 
