@@ -79,7 +79,7 @@ test("extensions group by primary capability with other providers last", () => {
 test("capability links expose only currently owned domain pages", () => {
   assert.equal(capabilitySurfaceLink("pools"), "/pools");
   assert.equal(capabilitySurfaceLink("integrations"), "/integrations");
-  assert.equal(capabilitySurfaceLink("protection"), null);
+  assert.equal(capabilitySurfaceLink("protection"), "/protection");
   assert.equal(capabilitySurfaceLink("unknown"), null);
   assert.equal(humanizeCapabilityId("storage.remote_mount"), "Storage remote mount");
 });

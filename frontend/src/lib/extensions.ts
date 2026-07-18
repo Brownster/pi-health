@@ -16,6 +16,7 @@ const SURFACE_LINKS: Record<string, string> = {
   integrations: APP_PATHS.integrations,
   mounts: APP_PATHS.mounts,
   pools: APP_PATHS.pools,
+  protection: APP_PATHS.protection,
   shares: APP_PATHS.shares,
 };
 

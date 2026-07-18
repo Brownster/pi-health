@@ -34,9 +34,8 @@ export function protectionProviderPath(providerId: string): string {
   return `${APP_PATHS.protection}/${encodeURIComponent(providerId)}`;
 }
 
-// CP-019 activates this redirect after Pools and Protection own provider workflows.
 export const PLUGINS_ROUTE_COMPATIBILITY = {
   legacyPath: APP_PATHS.plugins,
   redirectTarget: APP_PATHS.extensions,
-  redirectEnabled: false,
+  redirectEnabled: true,
 } as const;

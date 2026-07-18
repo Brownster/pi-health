@@ -1,4 +1,5 @@
 import type { ComponentType } from "react";
+import { Navigate } from "react-router-dom";
 
 import {
   APP_PATHS,
@@ -18,8 +19,11 @@ import { ProtectionPage } from "@/pages/protection-page";
 import { SettingsPage } from "@/pages/settings-page";
 import { SharesPage } from "@/pages/shares-page";
 import { StacksPage } from "@/pages/stacks-page";
-import { StoragePage } from "@/pages/storage-page";
 import { SystemPage } from "@/pages/system-page";
+
+function PluginsCompatibilityRedirect() {
+  return <Navigate replace to={PLUGINS_ROUTE_COMPATIBILITY.redirectTarget} />;
+}
 
 export interface AppRoute {
   path: string;
@@ -76,8 +80,8 @@ export const appRoutes: AppRoute[] = [
     label: "Plugins",
     navGroup: "Storage",
     requiresAuth: true,
-    showInNav: true,
-    component: StoragePage,
+    showInNav: false,
+    component: PluginsCompatibilityRedirect,
   },
   {
     path: APP_PATHS.pools,

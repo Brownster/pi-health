@@ -47,7 +47,7 @@ def test_v2_extension_details_link_to_owned_capabilities(
     expect(page.get_by_text("2.40.2", exact=True)).to_be_visible()
     expect(page.get_by_text("not reported", exact=True)).to_be_visible()
     expect(page.locator("[data-capability-id='storage.pooling']").get_by_role("link", name="Open")).to_have_attribute("href", "/v2/pools")
-    expect(page.locator("[data-capability-id='storage.protection']")).to_contain_text("page not available yet")
+    expect(page.locator("[data-capability-id='storage.protection']").get_by_role("link", name="Open")).to_have_attribute("href", "/v2/protection")
     expect(page.get_by_role("button", name="Install")).to_have_count(0)
     expect(page.get_by_role("button", name="Remove")).to_have_count(0)
 

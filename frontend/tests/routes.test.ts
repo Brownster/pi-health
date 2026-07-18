@@ -20,10 +20,10 @@ test("extension paths are canonical and safe for direct navigation", () => {
   assert.equal(protectionProviderPath("provider with/slash"), "/protection/provider%20with%2Fslash");
 });
 
-test("plugins stays operational until the final compatibility cutover", () => {
+test("plugins redirects to Advanced extensions after the final cutover", () => {
   assert.deepEqual(PLUGINS_ROUTE_COMPATIBILITY, {
     legacyPath: "/plugins",
     redirectTarget: "/settings/extensions",
-    redirectEnabled: false,
+    redirectEnabled: true,
   });
 });

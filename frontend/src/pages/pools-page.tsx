@@ -99,7 +99,7 @@ function ProviderDetails({
   onRefresh: () => Promise<void>;
 }) {
   const pools = poolCapabilityView({ id: "storage.pooling", surface: "pools", providers: [{ ...provider, renderer: { id: provider.rendererId, mode: provider.rendererMode } }] }).pools;
-  const configurePath = provider.source === "legacy" ? APP_PATHS.plugins : extensionDetailsPath(provider.id);
+  const configurePath = extensionDetailsPath(provider.id);
   const tailoredMergerfs = provider.id === "mergerfs" && detail !== null;
   return (
     <div className="space-y-5" data-pool-provider-details={provider.id}>

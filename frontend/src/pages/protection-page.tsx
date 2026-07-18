@@ -95,7 +95,7 @@ function ProviderRow({ provider, actionLabel = "Set up" }: { provider: Protectio
 
 function ProviderDetails({ provider, canAdmin, detail, onRefresh }: { provider: ProtectionProviderView; canAdmin: boolean; detail: PluginDetail | null; onRefresh: () => Promise<void> }) {
   const protectionSets = protectionCapabilityView({ id: "storage.protection", surface: "protection", providers: [{ ...provider, renderer: { id: provider.rendererId, mode: provider.rendererMode } }] }).protectionSets;
-  const configurePath = provider.source === "legacy" ? APP_PATHS.plugins : extensionDetailsPath(provider.id);
+  const configurePath = extensionDetailsPath(provider.id);
   const tailoredSnapraid = provider.id === "snapraid" && detail !== null;
   return (
     <div className="space-y-5" data-protection-provider-details={provider.id}>
