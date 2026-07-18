@@ -245,12 +245,36 @@ def test_production_registry_uses_storage_adapter(monkeypatch):
             calls.append(("candidates",))
             return []
 
+    class IntegrationAdapter:
+        def __init__(self, *, mattermost_status, agent_status):
+            calls.append(("integration-init", mattermost_status(), agent_status()))
+
+        def candidates(self):
+            calls.append(("integration-candidates",))
+            return []
+
     monkeypatch.setattr(app_module, "LegacyStorageCapabilityAdapter", Adapter)
+    monkeypatch.setattr(app_module, "IntegrationCapabilityAdapter", IntegrationAdapter)
     application = Flask(__name__)
     application.config.update(INIT_PLUGINS=True, LIMEOS_VERSION="1.0.0")
+    application.extensions["mattermost_integration_service"] = type(
+        "Mattermost", (), {"status": staticmethod(lambda: {"id": "mattermost"})}
+    )()
+    application.extensions["agent_integration_service"] = type(
+        "Agents", (), {"status": staticmethod(lambda: {"id": "agents"})}
+    )()
 
     service = app_module._default_capability_registry_service(application)
 
     assert service.snapshot()["providers"] == []
-    assert calls == [("init", app_module.STORAGE_PLUGIN_CONFIG_DIR), ("candidates",)]
+    assert calls == [
+        ("init", app_module.STORAGE_PLUGIN_CONFIG_DIR),
+        ("integration-init", {"id": "mattermost"}, {"id": "agents"}),
+        ("candidates",),
+        ("integration-candidates",),
+    ]
     assert application.extensions["storage_capability_adapter"].__class__ is Adapter
+    assert (
+        application.extensions["integration_capability_adapter"].__class__
+        is IntegrationAdapter
+    )

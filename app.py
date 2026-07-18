@@ -60,6 +60,7 @@ from tools_service import ToolsService
 from storage_plugins import default_storage_read_service, storage_bp
 from storage_plugins.registry import init_plugins
 from storage_capability_adapters import LegacyStorageCapabilityAdapter
+from integration_capability_adapters import IntegrationCapabilityAdapter
 from pi_monitor import get_pi_metrics
 from update_scheduler import update_scheduler, init_scheduler, default_update_service
 from update_service import AutoUpdateService
@@ -253,14 +254,24 @@ def _default_system_service():
 def _default_capability_registry_service(application):
     if not application.config["INIT_PLUGINS"]:
         application.extensions["storage_capability_adapter"] = None
+        application.extensions["integration_capability_adapter"] = None
         return CapabilityRegistryService(
             candidate_reader=lambda: (),
             limeos_version=application.config["LIMEOS_VERSION"],
         )
-    adapter = LegacyStorageCapabilityAdapter(STORAGE_PLUGIN_CONFIG_DIR)
-    application.extensions["storage_capability_adapter"] = adapter
+    storage_adapter = LegacyStorageCapabilityAdapter(STORAGE_PLUGIN_CONFIG_DIR)
+    integration_adapter = IntegrationCapabilityAdapter(
+        mattermost_status=application.extensions["mattermost_integration_service"].status,
+        agent_status=application.extensions["agent_integration_service"].status,
+    )
+    application.extensions["storage_capability_adapter"] = storage_adapter
+    application.extensions["integration_capability_adapter"] = integration_adapter
+
+    def candidates():
+        return [*storage_adapter.candidates(), *integration_adapter.candidates()]
+
     return CapabilityRegistryService(
-        candidate_reader=adapter.candidates,
+        candidate_reader=candidates,
         limeos_version=application.config["LIMEOS_VERSION"],
     )
 

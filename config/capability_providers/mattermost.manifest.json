@@ -1,0 +1,51 @@
+{
+  "manifest_version": "1",
+  "id": "mattermost",
+  "name": "Mattermost",
+  "description": "Private chat, alert delivery, and incident collaboration.",
+  "version": "1.0.0",
+  "runtime": {
+    "kind": "integration-adapter"
+  },
+  "compatibility": {
+    "capability_api": "1"
+  },
+  "capabilities": [
+    {
+      "id": "integration.chat",
+      "surface": "integrations",
+      "renderer": {
+        "schema_version": "1",
+        "id": "mattermost",
+        "mode": "tailored",
+        "fallback": "none"
+      },
+      "permissions": {
+        "schema_version": "1",
+        "view": "capability.view",
+        "configure": "capability.configure",
+        "lifecycle": "extensions.admin"
+      },
+      "setup": {
+        "contract_version": "1",
+        "schema_id": "mattermost-setup-v1"
+      },
+      "status": {
+        "contract_version": "1",
+        "schema_id": "integration-status-v1"
+      },
+      "actions": [
+        {
+          "id": "test-delivery",
+          "label": "Send test message",
+          "description": "Send a test message to the configured channel.",
+          "intent": "diagnostic",
+          "permission": "capability.diagnose",
+          "timeout_seconds": 30,
+          "parameters": [],
+          "result_mode": "immediate"
+        }
+      ]
+    }
+  ]
+}

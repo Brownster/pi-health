@@ -1,0 +1,51 @@
+{
+  "manifest_version": "1",
+  "id": "ai-agents",
+  "name": "AI Agents",
+  "description": "Provider-neutral assistance for Mattermost investigations.",
+  "version": "1.0.0",
+  "runtime": {
+    "kind": "integration-adapter"
+  },
+  "compatibility": {
+    "capability_api": "1"
+  },
+  "capabilities": [
+    {
+      "id": "agent.provider",
+      "surface": "integrations",
+      "renderer": {
+        "schema_version": "1",
+        "id": "ai-agent",
+        "mode": "tailored",
+        "fallback": "none"
+      },
+      "permissions": {
+        "schema_version": "1",
+        "view": "capability.view",
+        "configure": "capability.configure",
+        "lifecycle": "extensions.admin"
+      },
+      "setup": {
+        "contract_version": "1",
+        "schema_id": "ai-agents-setup-v1"
+      },
+      "status": {
+        "contract_version": "1",
+        "schema_id": "agent-status-v1"
+      },
+      "actions": [
+        {
+          "id": "test-assistant",
+          "label": "Test assistant",
+          "description": "Send a connectivity check to the configured channel.",
+          "intent": "diagnostic",
+          "permission": "capability.diagnose",
+          "timeout_seconds": 30,
+          "parameters": [],
+          "result_mode": "immediate"
+        }
+      ]
+    }
+  ]
+}
