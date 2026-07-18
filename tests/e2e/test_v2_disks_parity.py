@@ -51,11 +51,14 @@ def test_v2_disks_inventory_renders(
 
 
 def test_v2_disks_smart_modal(
-    page: Page,
+    profiled_page: Page,
+    viewport_profile_name: str,
+    assert_no_horizontal_overflow,
     v2_server,
     v2_login,
     install_v2_disks_api_mocks,
 ):
+    page = profiled_page
     base_url = v2_server["base_url"]
     _open_v2_disks(page, base_url, v2_login, install_v2_disks_api_mocks)
 
@@ -64,6 +67,7 @@ def test_v2_disks_smart_modal(
     expect(modal).to_be_visible()
     expect(page.locator("#v2-disk-smart-content")).to_contain_text("38 °C")
     expect(page.locator("#v2-disk-smart-content")).to_contain_text("1234")
+    assert_no_horizontal_overflow(page, f"v2 SMART details ({viewport_profile_name})")
     page.click("#v2-disk-smart-close")
     expect(page.locator("#v2-disk-smart-modal")).to_have_count(0)
 
@@ -105,7 +109,9 @@ def test_v2_disks_suggested_mount_with_confirm(
     page.on("request", lambda request: requests.append(request))
     _open_v2_disks(page, base_url, v2_login, install_v2_disks_api_mocks)
 
-    expect(page.locator("#v2-disk-suggestions")).to_be_visible()
+    suggestions = page.get_by_role("region", name="Suggested mounts")
+    expect(suggestions).to_be_visible()
+    expect(suggestions).to_contain_text("1 suggested mount")
     page.click("button[data-mount='sdb-uuid-1']")
     page.click("button[data-confirm-mount='sdb-uuid-1']")
     expect(page.get_by_text("Mounted /dev/sdb1 at /mnt/backup")).to_be_visible(timeout=10000)
@@ -119,6 +125,26 @@ def test_v2_disks_suggested_mount_with_confirm(
         "fstype": "ext4",
         "add_to_fstab": True,
     }
+
+
+def test_v2_disks_mount_confirmation_can_be_cancelled(
+    page: Page,
+    v2_server,
+    v2_login,
+    install_v2_disks_api_mocks,
+):
+    base_url = v2_server["base_url"]
+    requests = []
+    page.on("request", lambda request: requests.append(request))
+    _open_v2_disks(page, base_url, v2_login, install_v2_disks_api_mocks)
+
+    page.click("button[data-mount='sdb-uuid-1']")
+    page.get_by_role("button", name="Cancel").click()
+
+    assert not any(
+        request.method == "POST" and request.url.endswith("/api/disks/mount")
+        for request in requests
+    )
 
 
 def test_v2_disks_unmount_with_confirm(
@@ -207,10 +233,84 @@ def test_v2_disks_smart_self_test_with_confirm(
     install_v2_disks_api_mocks,
 ):
     base_url = v2_server["base_url"]
+    requests = []
+    page.on("request", lambda request: requests.append(request))
     _open_v2_disks(page, base_url, v2_login, install_v2_disks_api_mocks)
 
     page.locator("button[data-disk-action='smart'][data-disk='sda']:visible").first.click()
     expect(page.locator("#v2-disk-smart-modal")).to_be_visible()
     page.click("button[data-smarttest='short']")
     page.click("button[data-confirm-smarttest='short']")
-    expect(page.get_by_text("SMART short self-test started")).to_be_visible(timeout=10000)
+    modal = page.locator("#v2-disk-smart-modal")
+    expect(modal.get_by_text("SMART short self-test started")).to_be_visible(timeout=10000)
+    assert sum(
+        request.method == "GET" and urlparse(request.url).path == "/api/disks"
+        for request in requests
+    ) == 1
+
+
+def test_v2_disks_smart_failure_can_retry_in_place(
+    page: Page,
+    v2_server,
+    v2_login,
+    install_v2_disks_api_mocks,
+):
+    base_url = v2_server["base_url"]
+    _open_v2_disks(page, base_url, v2_login, install_v2_disks_api_mocks)
+    attempts = 0
+
+    def _smart_handler(route):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            route.fulfill(
+                status=503,
+                content_type="application/json",
+                body=json.dumps({"error": "SMART helper is unavailable"}),
+            )
+            return
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "device": "/dev/sda",
+                    "model": "WDC WD80EDAZ-11CEWB0",
+                    "health_status": "healthy",
+                    "temperature_c": 38,
+                }
+            ),
+        )
+
+    page.route("**/api/disks/sda/smart", _smart_handler)
+    page.locator("button[data-disk-action='smart'][data-disk='sda']:visible").first.click()
+
+    modal = page.locator("#v2-disk-smart-modal")
+    expect(modal.get_by_text("SMART helper is unavailable")).to_be_visible()
+    modal.get_by_role("button", name="Retry SMART details").click()
+    expect(page.locator("#v2-disk-smart-content")).to_contain_text("38 °C")
+    assert attempts == 2
+
+
+def test_v2_disks_failed_refresh_keeps_visible_inventory_with_warning(
+    page: Page,
+    v2_server,
+    v2_login,
+    install_v2_disks_api_mocks,
+):
+    base_url = v2_server["base_url"]
+    _open_v2_disks(page, base_url, v2_login, install_v2_disks_api_mocks)
+    expect(page.get_by_text("/dev/sda").first).to_be_visible()
+
+    page.route(
+        "**/api/disks",
+        lambda route: route.fulfill(
+            status=503,
+            content_type="application/json",
+            body=json.dumps({"error": "Disk inventory is temporarily unavailable"}),
+        ),
+    )
+    page.get_by_role("button", name="refresh").click()
+
+    expect(page.get_by_text("Refresh failed. Showing data synced")).to_be_visible()
+    expect(page.get_by_text("/dev/sda").first).to_be_visible()

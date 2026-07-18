@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import {
   Activity,
   ExternalLink,
+  FolderInput,
   HardDrive,
   Loader2,
   RefreshCw,
@@ -10,12 +11,13 @@ import {
   Thermometer,
   TriangleAlert,
   Unplug,
+  X,
 } from "lucide-react";
 
 import { ActionMenu } from "@/components/ui/action-menu";
 import { StatusBadge, type BadgeProps } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { MetricBar } from "@/components/ui/metric-bar";
 import { ModalOverlay } from "@/components/ui/modal-overlay";
 import { PageHeader } from "@/components/ui/page-header";
@@ -233,6 +235,7 @@ function ConfirmButton({
     return (
       <span className="flex items-center gap-1.5">
         <Button
+          autoFocus
           className={cn("text-xs sm:text-sm", className)}
           onClick={onConfirm}
           size="sm"
@@ -309,9 +312,14 @@ function DiskCard({
               className="h-9 min-h-9 w-9 px-0"
               data-disk={disk.name}
               data-disk-action="smart"
+              disabled={helperAvailable === false}
               onClick={() => onSmart(disk)}
               size="sm"
-              title={`SMART details for ${disk.path}`}
+              title={
+                helperAvailable === false
+                  ? "SMART helper unavailable"
+                  : `SMART details for ${disk.path}`
+              }
               variant="outline"
             >
               <ShieldCheck aria-hidden="true" className="h-4 w-4" />
@@ -473,6 +481,7 @@ export function DisksPage() {
   });
   const [suggestions, setSuggestions] = useState<SuggestedMount[]>([]);
   const [actionNotice, setActionNotice] = useState<ActionNotice | null>(null);
+  const [smartTestNotice, setSmartTestNotice] = useState<ActionNotice | null>(null);
   const [pendingKey, setPendingKey] = useState<string | null>(null);
   const [confirmKey, setConfirmKey] = useState<string | null>(null);
   const isMountedRef = useRef(true);
@@ -591,18 +600,39 @@ export function DisksPage() {
   );
 
   const onSmartTest = useCallback(
-    (deviceName: string, testType: SmartTestType) =>
-      runDiskAction(`test:${deviceName}:${testType}`, () => runSmartTest(deviceName, testType)),
-    [runDiskAction],
+    async (deviceName: string, testType: SmartTestType) => {
+      if (pendingKey) return;
+      const key = `test:${deviceName}:${testType}`;
+      setPendingKey(key);
+      setConfirmKey(null);
+      setSmartTestNotice(null);
+      try {
+        const message = await runSmartTest(deviceName, testType);
+        if (isMountedRef.current) {
+          setSmartTestNotice({ tone: "success", message });
+        }
+      } catch (caughtError) {
+        if (isMountedRef.current) {
+          setSmartTestNotice({ tone: "error", message: getErrorMessage(caughtError) });
+        }
+      } finally {
+        if (isMountedRef.current) {
+          setPendingKey(null);
+        }
+      }
+    },
+    [pendingKey],
   );
 
   const onSmart = useCallback(async (disk: DiskInfo) => {
+    setSmartTestNotice(null);
     setSmartModal({ open: true, status: "loading", device: disk.path, result: null, error: null });
     try {
       const result = await fetchDiskSmart(disk.name);
       if (!isMountedRef.current) {
         return;
       }
+      setSmart((current) => ({ ...current, [disk.path]: result }));
       setSmartModal({ open: true, status: "ready", device: disk.path, result, error: null });
     } catch (caughtError) {
       if (!isMountedRef.current) {
@@ -613,8 +643,16 @@ export function DisksPage() {
   }, []);
 
   const closeSmart = useCallback(() => {
+    setSmartTestNotice(null);
+    setConfirmKey(null);
     setSmartModal((current) => ({ ...current, open: false }));
   }, []);
+
+  useEffect(() => {
+    if (!actionNotice || actionNotice.tone === "error") return undefined;
+    const timeoutId = window.setTimeout(() => setActionNotice(null), 4500);
+    return () => window.clearTimeout(timeoutId);
+  }, [actionNotice]);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -669,23 +707,62 @@ export function DisksPage() {
             ) : (
               <Activity aria-hidden="true" className="h-4 w-4" />
             )}
-            {actionNotice.message}
+            <span>{actionNotice.message}</span>
+            <Button
+              aria-label="Dismiss disk notification"
+              className="ml-auto h-8 min-h-8 w-8 px-0"
+              onClick={() => setActionNotice(null)}
+              size="sm"
+              title="Dismiss"
+              variant="ghost"
+            >
+              <X aria-hidden="true" className="h-4 w-4" />
+            </Button>
           </CardContent>
         </Card>
+      ) : null}
+
+      {error && disks.length ? (
+        <div
+          aria-live="polite"
+          className="flex flex-wrap items-center gap-2 border-l-2 border-warning bg-warning/5 px-4 py-3 text-sm text-warning"
+          role="status"
+        >
+          <TriangleAlert aria-hidden="true" className="h-4 w-4 shrink-0" />
+          <span>Refresh failed. Showing data synced {lastUpdated}.</span>
+          <span className="text-muted-foreground">{error}</span>
+          <Button
+            className="ml-auto gap-1.5"
+            disabled={isRefreshing}
+            onClick={() => void loadAll("manual")}
+            size="sm"
+            variant="outline"
+          >
+            <RefreshCw aria-hidden="true" className={cn("h-3.5 w-3.5", isRefreshing ? "animate-spin" : "")} />
+            Retry
+          </Button>
+        </div>
       ) : null}
 
       {mergedSummary && disks.length ? <DiskSummaryBand summary={mergedSummary} /> : null}
 
       {suggestions.length && helperAvailable !== false ? (
-        <Card id="v2-disk-suggestions">
-          <CardHeader>
-            <CardTitle className="text-base sm:text-lg">Suggested mounts</CardTitle>
-            <CardDescription>Unmounted partitions detected with a recommended mount point.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-2">
+        <section
+          aria-label="Suggested mounts"
+          className="border-y border-border bg-card/45 px-3 py-2.5 sm:px-4"
+          id="v2-disk-suggestions"
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            <FolderInput aria-hidden="true" className="h-4 w-4 shrink-0 text-primary" />
+            <p className="text-sm font-medium">
+              {suggestions.length} suggested {suggestions.length === 1 ? "mount" : "mounts"}
+            </p>
+            <span className="text-xs text-muted-foreground">Unmounted filesystems detected</span>
+          </div>
+          <div className="mt-2 divide-y divide-border/70 border-t border-border/70">
             {suggestions.map((suggestion) => (
               <div
-                className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/20 p-3 text-xs"
+                className="flex flex-wrap items-center justify-between gap-2 py-2.5 text-xs"
                 key={suggestion.uuid}
               >
                 <div className="min-w-0">
@@ -709,8 +786,8 @@ export function DisksPage() {
                 />
               </div>
             ))}
-          </CardContent>
-        </Card>
+          </div>
+        </section>
       ) : null}
 
       {error && !disks.length ? (
@@ -774,21 +851,44 @@ export function DisksPage() {
             role="dialog"
           >
             <CardHeader className="flex flex-row items-start justify-between gap-3 border-b border-border/70 p-4 sm:p-5">
-              <div className="space-y-1">
+              <div>
                 <CardTitle className="text-base sm:text-lg" id="v2-disk-smart-title">
                   SMART: {smartModal.device}
                 </CardTitle>
-                <CardDescription>Health detail from `/api/disks/&lt;device&gt;/smart`.</CardDescription>
               </div>
-              <Button id="v2-disk-smart-close" onClick={closeSmart} variant="outline">
-                Close
+              <Button
+                aria-label="Close SMART details"
+                className="h-9 min-h-9 w-9 px-0"
+                id="v2-disk-smart-close"
+                onClick={closeSmart}
+                size="sm"
+                title="Close"
+                variant="outline"
+              >
+                <X aria-hidden="true" className="h-4 w-4" />
               </Button>
             </CardHeader>
             <CardContent className="space-y-3 overflow-auto p-4" id="v2-disk-smart-content">
               {smartModal.status === "loading" ? (
                 <p className="text-sm text-muted-foreground">Loading SMART data...</p>
               ) : smartModal.status === "error" ? (
-                <p className="text-sm text-danger">{smartModal.error || "Failed to load SMART data"}</p>
+                <div className="flex flex-wrap items-center gap-3 text-sm text-danger" role="alert">
+                  <TriangleAlert aria-hidden="true" className="h-4 w-4" />
+                  <span>{smartModal.error || "Failed to load SMART data"}</span>
+                  <Button
+                    aria-label="Retry SMART details"
+                    className="ml-auto gap-1.5"
+                    onClick={() => {
+                      const disk = disks.find((item) => item.path === smartModal.device);
+                      if (disk) void onSmart(disk);
+                    }}
+                    size="sm"
+                    variant="outline"
+                  >
+                    <RefreshCw aria-hidden="true" className="h-3.5 w-3.5" />
+                    Retry
+                  </Button>
+                </div>
               ) : smartModal.result ? (
                 <>
                   <div className="flex flex-wrap items-center gap-2">
@@ -824,7 +924,28 @@ export function DisksPage() {
                     />
                     <SmartDetailRow label="Media errors" value={smartModal.result.media_errors} />
                   </div>
-                  {helperAvailable !== false ? (
+                  {smartTestNotice ? (
+                    <div
+                      aria-live={smartTestNotice.tone === "error" ? "assertive" : "polite"}
+                      className={cn(
+                        "flex items-center gap-2 border-l-2 px-3 py-2 text-sm",
+                        smartTestNotice.tone === "error"
+                          ? "border-danger bg-danger/5 text-danger"
+                          : "border-success bg-success/5 text-success",
+                      )}
+                      role="status"
+                    >
+                      {smartTestNotice.tone === "error" ? (
+                        <TriangleAlert aria-hidden="true" className="h-4 w-4" />
+                      ) : (
+                        <Activity aria-hidden="true" className="h-4 w-4" />
+                      )}
+                      {smartTestNotice.message}
+                    </div>
+                  ) : null}
+                  {helperAvailable !== false &&
+                  smartModal.result.smart_available &&
+                  smartModal.result.smart_enabled ? (
                     <div className="flex flex-wrap items-center gap-2" id="v2-disk-smart-test">
                       <span className="text-xs uppercase tracking-wide text-muted-foreground">Self-test</span>
                       {(["short", "long"] as SmartTestType[]).map((testType) => {
