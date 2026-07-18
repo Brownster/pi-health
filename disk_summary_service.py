@@ -120,18 +120,23 @@ class DiskSummaryService:
         self._assignment_provider = assignment_provider
         self._clock = clock
 
-    def snapshot(self) -> dict:
+    def snapshot(
+        self,
+        *,
+        inventory: Mapping | None = None,
+        include_smart: bool = True,
+    ) -> dict:
         warnings: list[dict] = []
-        inventory = self._inventory(warnings)
-        if inventory is None:
+        inventory_result = self._inventory(warnings, inventory)
+        if inventory_result is None:
             return self._empty(warnings)
 
         devices = [
             item
-            for item in inventory.get("disks", [])[:MAX_DEVICES]
+            for item in inventory_result.get("disks", [])[:MAX_DEVICES]
             if isinstance(item, Mapping)
         ]
-        smart, smart_source = self._smart(warnings)
+        smart, smart_source = self._smart(warnings) if include_smart else ({}, "not_checked")
         assignments, assignment_source = self._assignments(warnings)
         device_records = [
             self._device_record(device, smart, assignments) for device in devices
@@ -187,9 +192,11 @@ class DiskSummaryService:
             "collected_at": _timestamp(self._clock()),
         }
 
-    def _inventory(self, warnings: list[dict]) -> Mapping | None:
+    def _inventory(
+        self, warnings: list[dict], supplied: Mapping | None = None
+    ) -> Mapping | None:
         try:
-            inventory = self._inventory_provider()
+            inventory = supplied if supplied is not None else self._inventory_provider()
             if not isinstance(inventory, Mapping):
                 raise TypeError("inventory must be an object")
             if (

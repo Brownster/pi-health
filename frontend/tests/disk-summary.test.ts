@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { normalizeDiskSummary } from "../src/lib/disk-summary.ts";
+import { mergeDiskSummaryHealth, normalizeDiskSummary } from "../src/lib/disk-summary.ts";
 
 
 test("normalizes the CP-010 disk summary contract", () => {
@@ -54,4 +54,29 @@ test("malformed data fails closed instead of reporting healthy zeroes", () => {
   assert.equal(result.sources.smart, "unavailable");
   assert.equal(result.devices[0]?.health, "unknown");
   assert.equal(result.devices[0]?.mounted, false);
+});
+
+test("merges independently loaded SMART health into an embedded summary", () => {
+  const summary = normalizeDiskSummary({
+    state: "attention",
+    counts: {total: 2, unknown: 2, mounted: 1, unmounted: 1},
+    capacity: {mounted_total_bytes: 1000, mounted_used_bytes: 400, mounted_available_bytes: 600},
+    sources: {inventory: "available", smart: "not_checked", assignments: "available"},
+    devices: [
+      {name: "sda", path: "/dev/sda", health: "unknown", assignments: []},
+      {name: "sdb", path: "/dev/sdb", health: "unknown", assignments: []},
+    ],
+  });
+
+  const merged = mergeDiskSummaryHealth(summary, {
+    "/dev/sda": {health_status: "healthy", temperature_c: 38},
+    "/dev/sdb": {health_status: "warning", temperature_c: 56},
+  });
+
+  assert.equal(merged.state, "attention");
+  assert.equal(merged.sources.smart, "available");
+  assert.equal(merged.counts.healthy, 1);
+  assert.equal(merged.counts.warning, 1);
+  assert.equal(merged.counts.unknown, 0);
+  assert.equal(merged.devices[0]?.temperature_c, 38);
 });

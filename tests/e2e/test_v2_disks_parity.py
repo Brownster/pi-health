@@ -42,6 +42,11 @@ def test_v2_disks_inventory_renders(
     expect(usage.get_by_role("progressbar")).to_have_attribute("aria-valuenow", "65")
     # SMART summary badge merged onto the disk card.
     expect(page.get_by_text("healthy").first).to_be_visible()
+    summary = page.locator("[data-disk-summary]")
+    expect(summary).to_contain_text("1 healthy")
+    expect(summary).to_contain_text("4.7 TB used")
+    expect(summary).to_contain_text("2.5 TB free")
+    expect(page.get_by_role("link", name="Media")).to_have_attribute("href", "/v2/pools")
     assert_no_horizontal_overflow(page, f"v2 disks ({viewport_profile_name})")
 
 
@@ -125,6 +130,7 @@ def test_v2_disks_unmount_with_confirm(
     base_url = v2_server["base_url"]
     _open_v2_disks(page, base_url, v2_login, install_v2_disks_api_mocks)
 
+    page.click("button[data-disk-menu='sda']")
     page.click("button[data-unmount='/mnt/storage']")
     page.click("button[data-confirm-unmount='/mnt/storage']")
     expect(page.get_by_text("Unmounted /mnt/storage")).to_be_visible(timeout=10000)
@@ -155,6 +161,7 @@ def test_v2_disks_preserves_json_error_guidance(
     )
     page.goto(f"{base_url}/v2/disks")
 
+    page.click("button[data-disk-menu='sda']")
     page.click("button[data-unmount='/mnt/storage']")
     page.click("button[data-confirm-unmount='/mnt/storage']")
 

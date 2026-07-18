@@ -1,6 +1,7 @@
 """CP-010 disk summary contract and provider-assignment coverage."""
 
 from datetime import datetime, timezone
+from unittest.mock import Mock
 
 import pytest
 
@@ -186,6 +187,24 @@ def test_optional_source_failures_are_degraded_without_false_unassigned_counts()
         },
     ]
     assert "private source detail" not in str(result)
+
+
+def test_embedded_summary_reuses_inventory_without_reading_smart():
+    inventory_provider = Mock()
+    smart_provider = Mock()
+    service = _service(
+        inventory_provider=inventory_provider,
+        smart_provider=smart_provider,
+    )
+
+    result = service.snapshot(inventory=_inventory(), include_smart=False)
+
+    inventory_provider.assert_not_called()
+    smart_provider.assert_not_called()
+    assert result["sources"]["smart"] == "not_checked"
+    assert result["counts"]["unknown"] == 3
+    assert result["counts"]["assigned"] == 2
+    assert result["devices"][0]["assignments"][0]["provider_id"] == "mergerfs"
 
 
 @pytest.mark.parametrize(

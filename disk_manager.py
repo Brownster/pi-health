@@ -259,7 +259,11 @@ def api_disk_list():
     """Get disk inventory."""
     try:
         inventory = get_disk_inventory()
-        return jsonify(inventory)
+        payload = dict(inventory)
+        payload["summary"] = _disk_summary().snapshot(
+            inventory=inventory, include_smart=False
+        )
+        return jsonify(payload)
     except HelperError as e:
         return jsonify({'error': str(e), 'helper_available': False}), 503
 

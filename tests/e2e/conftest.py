@@ -526,6 +526,41 @@ def install_v2_disks_api_mocks():
         failures = failures or {}
         inventory = {
             "helper_available": True,
+            "summary": {
+                "state": "attention",
+                "counts": {
+                    "total": 1, "healthy": 0, "warning": 0, "failing": 0,
+                    "unknown": 1, "mounted": 1, "unmounted": 0,
+                    "assigned": 1, "unassigned": 0, "unused": 0,
+                },
+                "capacity": {
+                    "mounted_total_bytes": 8000000000000,
+                    "mounted_used_bytes": 5200000000000,
+                    "mounted_available_bytes": 2800000000000,
+                    "mounted_percent": 65,
+                },
+                "sources": {
+                    "inventory": "available",
+                    "smart": "not_checked",
+                    "assignments": "available",
+                },
+                "devices": [{
+                    "name": "sda", "path": "/dev/sda", "health": "unknown",
+                    "temperature_c": None, "mounted": True,
+                    "mounted_capacity": {
+                        "mounted_total_bytes": 8000000000000,
+                        "mounted_used_bytes": 5200000000000,
+                        "mounted_available_bytes": 2800000000000,
+                    },
+                    "assignments": [{
+                        "provider_id": "mergerfs", "capability_id": "storage.pooling",
+                        "role": "branch", "resource_id": "media", "resource_name": "Media",
+                        "href": "/pools/mergerfs", "device_path": "/dev/sda1",
+                    }],
+                }],
+                "warnings": [],
+                "collected_at": "2026-07-18T12:30:00Z",
+            },
             "disks": [
                 {
                     "name": "sda",

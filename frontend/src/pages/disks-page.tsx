@@ -1,6 +1,18 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Activity, Loader2, RefreshCw, ShieldCheck, TriangleAlert } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
+import {
+  Activity,
+  ExternalLink,
+  HardDrive,
+  Loader2,
+  RefreshCw,
+  ShieldCheck,
+  Thermometer,
+  TriangleAlert,
+  Unplug,
+} from "lucide-react";
 
+import { ActionMenu } from "@/components/ui/action-menu";
 import { StatusBadge, type BadgeProps } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,6 +21,8 @@ import { ModalOverlay } from "@/components/ui/modal-overlay";
 import { PageHeader } from "@/components/ui/page-header";
 import {
   type DiskInfo,
+  type DiskSummary,
+  type DiskSummaryDevice,
   type DiskUsage,
   type SmartHealth,
   type SmartTestType,
@@ -22,6 +36,7 @@ import {
   runSmartTest,
   unmountDisk,
 } from "@/lib/disks";
+import { mergeDiskSummaryHealth } from "@/lib/disk-summary";
 import { formatBytes, formatClockTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -98,6 +113,76 @@ function getDiskUsage(disk: DiskInfo): DiskUsage | null {
     available,
     percent: total > 0 ? (used / total) * 100 : 0,
   };
+}
+
+function providerRoute(href: string): string {
+  if (href.startsWith("/pools/") || href.startsWith("/protection/")) return "/pools";
+  return href.startsWith("/") ? href : "/pools";
+}
+
+function DiskSummaryBand({ summary }: { summary: DiskSummary }) {
+  const { counts, capacity } = summary;
+  const healthDetail = [
+    counts.warning ? `${counts.warning} warning` : "",
+    counts.failing ? `${counts.failing} failing` : "",
+    counts.unknown ? `${counts.unknown} unknown` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const allocationDetail =
+    counts.assigned === null
+      ? "Provider assignments unavailable"
+      : `${counts.assigned} assigned · ${counts.unassigned ?? 0} unassigned`;
+
+  return (
+    <section
+      aria-label="Disk summary"
+      className="grid overflow-hidden rounded-md border border-border bg-card sm:grid-cols-2 xl:grid-cols-4"
+      data-disk-summary
+    >
+      <div className="border-b border-border p-3 sm:border-r xl:border-b-0">
+        <p className="font-mono text-[10px] uppercase tracking-[0.1em] text-dim">Health</p>
+        <p className="mt-1 text-sm font-medium">{counts.healthy} healthy</p>
+        <p className={cn("mt-0.5 text-xs", healthDetail ? "text-warning" : "text-muted-foreground")}>
+          {healthDetail || `${counts.total} devices reporting`}
+        </p>
+      </div>
+      <div className="border-b border-border p-3 xl:border-b-0 xl:border-r">
+        <p className="font-mono text-[10px] uppercase tracking-[0.1em] text-dim">Mount state</p>
+        <p className="mt-1 text-sm font-medium">{counts.mounted} mounted</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">{counts.unmounted} unmounted</p>
+      </div>
+      <div className="border-b border-border p-3 sm:border-b-0 sm:border-r">
+        <div className="flex items-baseline justify-between gap-2">
+          <p className="font-mono text-[10px] uppercase tracking-[0.1em] text-dim">Mounted capacity</p>
+          <span className="font-mono text-[11px] text-muted-foreground">
+            {capacity.mounted_percent === null ? "—" : `${Math.round(capacity.mounted_percent)}%`}
+          </span>
+        </div>
+        <p className="mt-1 text-sm font-medium">{formatBytes(capacity.mounted_used_bytes)} used</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          {formatBytes(capacity.mounted_available_bytes)} free
+        </p>
+        {capacity.mounted_percent !== null ? (
+          <MetricBar
+            className="mt-2"
+            label="Mounted disk capacity"
+            tone={getUsageTone(capacity.mounted_percent)}
+            value={capacity.mounted_percent}
+          />
+        ) : null}
+      </div>
+      <div className="p-3">
+        <p className="font-mono text-[10px] uppercase tracking-[0.1em] text-dim">Providers</p>
+        <p className="mt-1 text-sm font-medium">
+          {counts.assigned === null ? "Not checked" : `${counts.assigned} assigned`}
+        </p>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          {counts.unused === null ? allocationDetail : `${counts.unused} unused · ${allocationDetail}`}
+        </p>
+      </div>
+    </section>
+  );
 }
 
 function SmartDetailRow({ label, value }: { label: string; value: string | number | null }) {
@@ -178,6 +263,7 @@ function ConfirmButton({
 
 function DiskCard({
   disk,
+  summary,
   smart,
   helperAvailable,
   pendingKey,
@@ -187,6 +273,7 @@ function DiskCard({
   onUnmount,
 }: {
   disk: DiskInfo;
+  summary?: DiskSummaryDevice;
   smart?: SmartHealth;
   helperAvailable: boolean | null;
   pendingKey: string | null;
@@ -197,36 +284,70 @@ function DiskCard({
 }) {
   const usage = getDiskUsage(disk);
   const usagePercent = usage?.percent ?? null;
+  const health = smart?.health_status ?? summary?.health ?? "unknown";
+  const temperature = smart?.temperature_c ?? summary?.temperature_c ?? null;
+  const unmountTargets = [
+    ...(disk.mountpoint ? [disk.mountpoint] : []),
+    ...disk.partitions.flatMap((partition) => (partition.mountpoint ? [partition.mountpoint] : [])),
+  ];
+  const confirmedUnmount = unmountTargets.find((mountpoint) => confirmKey === `unmount:${mountpoint}`);
   return (
     <Card className="transition-colors duration-200 hover:border-primary/25">
-      <CardContent className="space-y-3 p-4">
+      <CardContent className="space-y-4 p-4">
         <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="truncate font-mono text-sm font-semibold">{disk.path}</p>
-            <p className="truncate text-xs text-muted-foreground">{disk.model || "Unknown model"}</p>
+          <div className="flex min-w-0 items-start gap-2.5">
+            <HardDrive aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+            <div className="min-w-0">
+              <p className="truncate font-mono text-sm font-semibold">{disk.path}</p>
+              <p className="truncate text-xs text-muted-foreground">{disk.model || "Unknown model"}</p>
+            </div>
           </div>
-          {smart ? (
-            <StatusBadge
-              className="shrink-0"
-              label={smart.health_status}
-              tone={getHealthTone(smart.health_status)}
-            />
+          <div className="flex shrink-0 items-center gap-1.5">
+            <StatusBadge label={health} tone={getHealthTone(health)} />
+            <Button
+              aria-label={`SMART details for ${disk.path}`}
+              className="h-9 min-h-9 w-9 px-0"
+              data-disk={disk.name}
+              data-disk-action="smart"
+              onClick={() => onSmart(disk)}
+              size="sm"
+              title={`SMART details for ${disk.path}`}
+              variant="outline"
+            >
+              <ShieldCheck aria-hidden="true" className="h-4 w-4" />
+            </Button>
+            {unmountTargets.length && helperAvailable !== false ? (
+              <ActionMenu
+                disabled={Boolean(pendingKey)}
+                items={unmountTargets.map((mountpoint) => ({
+                  id: `unmount:${mountpoint}`,
+                  label: `Unmount ${mountpoint}`,
+                  Icon: Unplug,
+                  onSelect: () => setConfirmKey(`unmount:${mountpoint}`),
+                  tone: "danger" as const,
+                  data: { "data-unmount": mountpoint },
+                }))}
+                label={`More actions for ${disk.path}`}
+                pending={Boolean(pendingKey?.startsWith("unmount:"))}
+                triggerData={{ "data-disk-menu": disk.name }}
+              />
+            ) : null}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-y border-border/70 py-2 font-mono text-xs text-muted-foreground">
+          <span><span className="text-dim">Size </span>{disk.size || "—"}</span>
+          <span><span className="text-dim">Bus </span>{[disk.transport, disk.type].filter(Boolean).join(" · ") || "—"}</span>
+          {temperature !== null ? (
+            <span className="inline-flex items-center gap-1">
+              <Thermometer aria-hidden="true" className="h-3.5 w-3.5 text-dim" />
+              {temperature} °C
+            </span>
           ) : null}
         </div>
 
-        <div className="grid grid-cols-2 gap-2 text-xs">
-          <div className="rounded-md border border-border bg-muted/20 p-2">
-            <p className="font-mono text-[10px] uppercase tracking-[0.1em] text-dim">Size</p>
-            <p className="font-mono">{disk.size || "—"}</p>
-          </div>
-          <div className="rounded-md border border-border bg-muted/20 p-2">
-            <p className="font-mono text-[10px] uppercase tracking-[0.1em] text-dim">Bus</p>
-            <p className="font-mono">{[disk.transport, disk.type].filter(Boolean).join(" · ") || "—"}</p>
-          </div>
-        </div>
-
         {usage && usagePercent !== null ? (
-          <div className="rounded-md border border-border bg-muted/20 p-2" data-disk-usage={disk.name}>
+          <div data-disk-usage={disk.name}>
             <div className="flex items-baseline justify-between gap-3">
               <p className="font-mono text-[10px] uppercase tracking-[0.1em] text-dim">
                 Mounted usage
@@ -255,59 +376,80 @@ function DiskCard({
         ) : null}
 
         {disk.partitions.length ? (
-          <div className="space-y-1.5">
+          <div>
             <p className="font-mono text-[10px] uppercase tracking-[0.1em] text-dim">Partitions</p>
-            {disk.partitions.map((part) => (
-              <div
-                className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/20 p-2 text-xs"
-                key={part.path}
+            <div className="mt-1 divide-y divide-border/70 border-y border-border/70">
+              {disk.partitions.map((part) => {
+                const partPercent = part.usage?.percent ?? null;
+                return (
+                  <div className="space-y-1.5 py-2.5 text-xs" key={part.path}>
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <span className="break-all font-mono font-medium">{part.path}</span>
+                      {part.fstype ? (
+                        <span className="rounded bg-info/10 px-1.5 py-0.5 font-mono text-info">{part.fstype}</span>
+                      ) : null}
+                      <span className="ml-auto font-mono text-muted-foreground">{part.size || "—"}</span>
+                    </div>
+                    <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                      {part.mountpoint ? (
+                        <span className="break-all font-mono text-success">{part.mountpoint}</span>
+                      ) : (
+                        <span className="text-muted-foreground">Unmounted</span>
+                      )}
+                      {part.usage && partPercent !== null ? (
+                        <span className="font-mono text-[11px] text-muted-foreground">
+                          {Math.round(partPercent)}% · {formatBytes(part.usage.used)} used · {formatBytes(part.usage.available)} free
+                        </span>
+                      ) : null}
+                    </div>
+                    {partPercent !== null ? (
+                      <MetricBar
+                        label={`${part.path} usage`}
+                        tone={getUsageTone(partPercent)}
+                        value={partPercent}
+                      />
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
+
+        {summary?.assignments.length ? (
+          <div className="flex flex-wrap items-center gap-2 border-t border-border/70 pt-3">
+            <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-dim">Providers</span>
+            {summary.assignments.map((assignment) => (
+              <Link
+                className="inline-flex min-h-8 items-center gap-1 rounded border border-border bg-muted/20 px-2 text-xs text-primary hover:border-primary/40 hover:bg-muted/40"
+                key={`${assignment.provider_id}:${assignment.resource_id}:${assignment.device_path}`}
+                to={providerRoute(assignment.href)}
               >
-                <span className="break-all font-mono">{part.path}</span>
-                <span className="flex flex-wrap items-center gap-2">
-                  {part.fstype ? (
-                    <span className="rounded bg-info/10 px-1.5 py-0.5 font-mono text-info">{part.fstype}</span>
-                  ) : null}
-                  {part.mountpoint ? (
-                    <span className="font-mono text-success">{part.mountpoint}</span>
-                  ) : (
-                    <span className="text-muted-foreground">unmounted</span>
-                  )}
-                  {part.size ? <span className="font-mono text-muted-foreground">{part.size}</span> : null}
-                  {part.mountpoint && helperAvailable !== false ? (
-                    <ConfirmButton
-                      actionKey={`unmount:${part.mountpoint}`}
-                      className="border-danger/30 bg-danger/10 text-danger hover:bg-danger/15"
-                      confirmData={{ "data-confirm-unmount": part.mountpoint }}
-                      confirmKey={confirmKey}
-                      confirmLabel="Confirm unmount"
-                      label="Unmount"
-                      onConfirm={() => onUnmount(part.mountpoint as string)}
-                      pendingKey={pendingKey}
-                      pendingLabel="Unmounting..."
-                      requestData={{ "data-unmount": part.mountpoint }}
-                      setConfirmKey={setConfirmKey}
-                    />
-                  ) : null}
-                </span>
-              </div>
+                <span>{assignment.resource_name || assignment.provider_id}</span>
+                <span className="text-muted-foreground">· {assignment.role}</span>
+                <ExternalLink aria-hidden="true" className="h-3 w-3" />
+              </Link>
             ))}
           </div>
         ) : null}
 
-        <div className="flex flex-wrap gap-2">
-          <Button
-            aria-label={`SMART details for ${disk.path}`}
-            className="gap-1.5 text-xs sm:text-sm"
-            data-disk={disk.name}
-            data-disk-action="smart"
-            onClick={() => onSmart(disk)}
-            size="sm"
-            variant="outline"
-          >
-            <ShieldCheck aria-hidden="true" className="h-3.5 w-3.5" />
-            SMART
-          </Button>
-        </div>
+        {confirmedUnmount ? (
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-danger/20 pt-3 text-xs text-danger">
+            <span>Unmount {confirmedUnmount}?</span>
+            <ConfirmButton
+              actionKey={`unmount:${confirmedUnmount}`}
+              className="border-danger/30 bg-danger/10 text-danger hover:bg-danger/15"
+              confirmData={{ "data-confirm-unmount": confirmedUnmount }}
+              confirmKey={confirmKey}
+              confirmLabel="Confirm unmount"
+              label="Unmount"
+              onConfirm={() => onUnmount(confirmedUnmount)}
+              pendingKey={pendingKey}
+              pendingLabel="Unmounting..."
+              setConfirmKey={setConfirmKey}
+            />
+          </div>
+        ) : null}
       </CardContent>
     </Card>
   );
@@ -317,6 +459,7 @@ export function DisksPage() {
   const [disks, setDisks] = useState<DiskInfo[]>([]);
   const [helperAvailable, setHelperAvailable] = useState<boolean | null>(null);
   const [smart, setSmart] = useState<Record<string, SmartHealth>>({});
+  const [diskSummary, setDiskSummary] = useState<DiskSummary | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -350,6 +493,7 @@ export function DisksPage() {
         return;
       }
       setDisks(inventory.disks);
+      setDiskSummary(inventory.summary);
       setHelperAvailable(inventory.helper_available);
       setError(null);
       setLastUpdated(formatClockTime(new Date()));
@@ -391,6 +535,11 @@ export function DisksPage() {
       })
       .catch(() => {});
   }, []);
+
+  const mergedSummary = useMemo(
+    () => (diskSummary ? mergeDiskSummaryHealth(diskSummary, smart) : null),
+    [diskSummary, smart],
+  );
 
   const runDiskAction = useCallback(
     async (key: string, action: () => Promise<string>) => {
@@ -525,6 +674,8 @@ export function DisksPage() {
         </Card>
       ) : null}
 
+      {mergedSummary && disks.length ? <DiskSummaryBand summary={mergedSummary} /> : null}
+
       {suggestions.length && helperAvailable !== false ? (
         <Card id="v2-disk-suggestions">
           <CardHeader>
@@ -595,7 +746,7 @@ export function DisksPage() {
       ) : null}
 
       {!isLoading && disks.length ? (
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
           {disks.map((disk) => (
             <DiskCard
               confirmKey={confirmKey}
@@ -607,6 +758,7 @@ export function DisksPage() {
               pendingKey={pendingKey}
               setConfirmKey={setConfirmKey}
               smart={smart[disk.path]}
+              summary={mergedSummary?.devices.find((device) => device.path === disk.path)}
             />
           ))}
         </div>

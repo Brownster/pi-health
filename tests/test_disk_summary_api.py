@@ -28,3 +28,33 @@ def test_disk_summary_delegates_to_injected_service(app, authenticated_client):
     assert response.status_code == 200
     assert response.get_json() == snapshot
     service.snapshot.assert_called_once_with()
+
+
+def test_disk_inventory_embeds_summary_without_repeating_privileged_reads(
+    app, authenticated_client
+):
+    inventory = {"helper_available": True, "disks": [{"name": "sda"}]}
+    summary = {
+        "state": "attention",
+        "counts": {"total": 1, "unknown": 1},
+        "capacity": {"mounted_total_bytes": 0},
+        "sources": {"inventory": "available", "smart": "not_checked"},
+        "devices": [],
+        "warnings": [],
+        "collected_at": "2026-07-18T12:30:00Z",
+    }
+    inventory_service = Mock()
+    inventory_service.inventory.return_value = inventory
+    summary_service = Mock()
+    summary_service.snapshot.return_value = summary
+    app.extensions["disk_inventory_service"] = inventory_service
+    app.extensions["disk_summary_service"] = summary_service
+
+    response = authenticated_client.get("/api/disks")
+
+    assert response.status_code == 200
+    assert response.get_json() == {**inventory, "summary": summary}
+    inventory_service.inventory.assert_called_once_with()
+    summary_service.snapshot.assert_called_once_with(
+        inventory=inventory, include_smart=False
+    )

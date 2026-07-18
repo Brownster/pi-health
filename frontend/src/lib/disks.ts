@@ -47,6 +47,7 @@ export interface DiskInfo {
 export interface DiskInventory {
   disks: DiskInfo[];
   helper_available: boolean;
+  summary: DiskSummary | null;
 }
 
 export interface HelperStatus {
@@ -142,7 +143,7 @@ function normalizeSmart(raw: Record<string, unknown> | undefined, fallbackDevice
 }
 
 export async function fetchDiskInventory(signal?: AbortSignal): Promise<DiskInventory> {
-  const payload = await requestApi<{ disks?: Record<string, unknown>[]; helper_available?: boolean; error?: string }>(
+  const payload = await requestApi<{ disks?: Record<string, unknown>[]; helper_available?: boolean; summary?: unknown; error?: string }>(
     "/api/disks",
     { method: "GET", signal },
   );
@@ -152,6 +153,7 @@ export async function fetchDiskInventory(signal?: AbortSignal): Promise<DiskInve
   return {
     disks: Array.isArray(payload.disks) ? payload.disks.map((disk) => normalizeDisk(disk)) : [],
     helper_available: Boolean(payload.helper_available),
+    summary: payload.summary ? normalizeDiskSummary(payload.summary) : null,
   };
 }
 
