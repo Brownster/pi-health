@@ -52,6 +52,37 @@ def test_v2_extension_details_link_to_owned_capabilities(
     expect(page.get_by_role("button", name="Remove")).to_have_count(0)
 
 
+def test_v2_extension_deep_link_keeps_settings_navigation_after_reload(
+    page: Page,
+    v2_server,
+    v2_login,
+    install_v2_extensions_api_mocks,
+):
+    base_url = v2_server["base_url"]
+    v2_login(page, base_url)
+    install_v2_extensions_api_mocks(page)
+
+    page.goto(f"{base_url}/v2/settings/extensions/mergerfs")
+    expect(page.get_by_role("heading", name="MergerFS")).to_be_visible()
+
+    settings_nav = page.get_by_role("navigation", name="Settings sections")
+    expect(settings_nav.get_by_role("link", name="Overview")).to_have_attribute(
+        "href", "/v2/settings"
+    )
+    expect(settings_nav.get_by_role("link", name="Extensions")).to_have_attribute(
+        "aria-current", "page"
+    )
+    expect(
+        page.get_by_role("navigation", name="Primary").get_by_role(
+            "link", name="Settings"
+        )
+    ).to_have_attribute("aria-current", "page")
+
+    page.reload()
+    expect(page).to_have_url(f"{base_url}/v2/settings/extensions/mergerfs")
+    expect(page.get_by_role("heading", name="MergerFS")).to_be_visible()
+
+
 def test_v2_extensions_registry_failure_is_bounded(
     page: Page,
     v2_server,

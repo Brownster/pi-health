@@ -1,5 +1,10 @@
 import type { ComponentType } from "react";
 
+import {
+  APP_PATHS,
+  APP_ROUTE_PATTERNS,
+  PLUGINS_ROUTE_COMPATIBILITY,
+} from "@/app/route-contract";
 import { CatalogPage } from "@/pages/catalog-page";
 import { ContainersPage } from "@/pages/containers-page";
 import { DashboardHomePage } from "@/pages/dashboard-home";
@@ -25,7 +30,7 @@ export interface AppRoute {
 
 export const appRoutes: AppRoute[] = [
   {
-    path: "/",
+    path: APP_PATHS.home,
     label: "Home",
     navGroup: "Main",
     requiresAuth: true,
@@ -33,7 +38,7 @@ export const appRoutes: AppRoute[] = [
     component: DashboardHomePage,
   },
   {
-    path: "/containers",
+    path: APP_PATHS.containers,
     label: "Containers",
     navGroup: "My Apps",
     requiresAuth: true,
@@ -41,7 +46,7 @@ export const appRoutes: AppRoute[] = [
     component: ContainersPage,
   },
   {
-    path: "/stacks",
+    path: APP_PATHS.stacks,
     label: "Stacks",
     navGroup: "My Apps",
     requiresAuth: true,
@@ -49,7 +54,7 @@ export const appRoutes: AppRoute[] = [
     component: StacksPage,
   },
   {
-    path: "/apps",
+    path: APP_PATHS.apps,
     label: "App Catalog",
     navGroup: "My Apps",
     requiresAuth: true,
@@ -57,7 +62,7 @@ export const appRoutes: AppRoute[] = [
     component: CatalogPage,
   },
   {
-    path: "/disks",
+    path: APP_PATHS.disks,
     label: "Disks",
     navGroup: "Storage",
     requiresAuth: true,
@@ -65,7 +70,7 @@ export const appRoutes: AppRoute[] = [
     component: DisksPage,
   },
   {
-    path: "/plugins",
+    path: PLUGINS_ROUTE_COMPATIBILITY.legacyPath,
     label: "Plugins",
     navGroup: "Storage",
     requiresAuth: true,
@@ -73,7 +78,7 @@ export const appRoutes: AppRoute[] = [
     component: StoragePage,
   },
   {
-    path: "/pools",
+    path: APP_PATHS.pools,
     label: "Pools",
     navGroup: "Storage",
     requiresAuth: true,
@@ -81,7 +86,7 @@ export const appRoutes: AppRoute[] = [
     component: StoragePage,
   },
   {
-    path: "/mounts",
+    path: APP_PATHS.mounts,
     label: "Mounts",
     navGroup: "Storage",
     requiresAuth: true,
@@ -89,7 +94,7 @@ export const appRoutes: AppRoute[] = [
     component: MountsPage,
   },
   {
-    path: "/shares",
+    path: APP_PATHS.shares,
     label: "Shares",
     navGroup: "Storage",
     requiresAuth: true,
@@ -97,7 +102,7 @@ export const appRoutes: AppRoute[] = [
     component: SharesPage,
   },
   {
-    path: "/system",
+    path: APP_PATHS.system,
     label: "System Health",
     navGroup: "System",
     requiresAuth: true,
@@ -105,7 +110,7 @@ export const appRoutes: AppRoute[] = [
     component: SystemPage,
   },
   {
-    path: "/network",
+    path: APP_PATHS.network,
     label: "Network",
     navGroup: "System",
     requiresAuth: true,
@@ -113,7 +118,7 @@ export const appRoutes: AppRoute[] = [
     component: NetworkPage,
   },
   {
-    path: "/integrations",
+    path: APP_PATHS.integrations,
     label: "Integrations",
     navGroup: "System",
     requiresAuth: true,
@@ -121,7 +126,7 @@ export const appRoutes: AppRoute[] = [
     component: IntegrationsPage,
   },
   {
-    path: "/settings",
+    path: APP_PATHS.settings,
     label: "Settings",
     navGroup: "System",
     requiresAuth: true,
@@ -129,7 +134,7 @@ export const appRoutes: AppRoute[] = [
     component: SettingsPage,
   },
   {
-    path: "/settings/extensions",
+    path: APP_PATHS.extensions,
     label: "Extensions",
     navGroup: "System",
     requiresAuth: true,
@@ -137,7 +142,7 @@ export const appRoutes: AppRoute[] = [
     component: ExtensionsPage,
   },
   {
-    path: "/settings/extensions/:extensionId",
+    path: APP_ROUTE_PATTERNS.extensionDetails,
     label: "Extension details",
     navGroup: "System",
     requiresAuth: true,

@@ -4,6 +4,7 @@ import type {
   ExtensionDescriptor,
   ExtensionLifecycleAction,
 } from "./capabilities";
+import { APP_PATHS } from "../app/route-contract.ts";
 
 export interface ExtensionGroup {
   id: string;
@@ -12,10 +13,10 @@ export interface ExtensionGroup {
 }
 
 const SURFACE_LINKS: Record<string, string> = {
-  integrations: "/integrations",
-  mounts: "/mounts",
-  pools: "/pools",
-  shares: "/shares",
+  integrations: APP_PATHS.integrations,
+  mounts: APP_PATHS.mounts,
+  pools: APP_PATHS.pools,
+  shares: APP_PATHS.shares,
 };
 
 export function humanizeCapabilityId(value: string): string {

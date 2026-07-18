@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+
+import { APP_PATHS } from "@/app/route-contract";
 import {
   Activity,
   Loader2,
@@ -536,7 +538,7 @@ export function StoragePage() {
             aria-pressed={tab === item}
             data-storage-tab={item}
             key={item}
-            onClick={() => navigate(item === "pools" ? "/pools" : "/plugins")}
+            onClick={() => navigate(item === "pools" ? APP_PATHS.pools : APP_PATHS.plugins)}
             size="sm"
             variant={tab === item ? "default" : "outline"}
           >

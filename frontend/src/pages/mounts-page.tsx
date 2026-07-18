@@ -206,7 +206,7 @@ export function MountsPage() {
       pluginId: group.pluginId,
       pluginName: group.pluginName,
       mountId: null,
-      text: "{\n  \n}",
+      text: JSON.stringify({}),
       status: "idle",
       error: null,
     });

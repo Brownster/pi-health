@@ -30,6 +30,9 @@ def test_v2_settings_render(
     expect(page.locator("#v2-settings-auto-update")).to_be_visible()
     expect(page.locator("#v2-settings-advanced")).to_be_visible()
     expect(page.get_by_role("link", name="Open extensions")).to_have_attribute("href", "/v2/settings/extensions")
+    settings_nav = page.get_by_role("navigation", name="Settings sections")
+    expect(settings_nav.get_by_role("link", name="Overview")).to_have_attribute("aria-current", "page")
+    expect(settings_nav.get_by_role("link", name="Extensions")).to_have_attribute("href", "/v2/settings/extensions")
     assert_no_horizontal_overflow(page, f"v2 settings ({viewport_profile_name})")
 
 

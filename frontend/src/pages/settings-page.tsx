@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Activity, ArrowRight, CheckCircle2, Loader2, PackageOpen, RefreshCw, TriangleAlert } from "lucide-react";
 import { Link } from "react-router-dom";
 
+import { APP_PATHS } from "@/app/route-contract";
+import { SettingsNavigation } from "@/components/settings/settings-navigation";
 import { StatusBadge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -371,6 +373,8 @@ export function SettingsPage() {
         title="system_settings"
       />
 
+      <SettingsNavigation />
+
       {actionNotice ? (
         <Card
           aria-live={actionNotice.tone === "error" ? "assertive" : "polite"}
@@ -641,7 +645,7 @@ export function SettingsPage() {
                   <p className="mt-1 text-xs text-muted-foreground">Versions, compatibility, capabilities, sources, and registry health.</p>
                 </div>
               </div>
-              <Link className={cn(buttonVariants({ variant: "outline" }), "shrink-0 gap-2")} to="/settings/extensions">
+              <Link className={cn(buttonVariants({ variant: "outline" }), "shrink-0 gap-2")} to={APP_PATHS.extensions}>
                 Open extensions
                 <ArrowRight aria-hidden="true" className="h-4 w-4" />
               </Link>

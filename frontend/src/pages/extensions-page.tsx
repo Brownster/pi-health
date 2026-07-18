@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
+import { APP_PATHS, extensionDetailsPath } from "@/app/route-contract";
 import {
   ExtensionInstallDialog,
   ExtensionLifecycleDialog,
@@ -26,6 +27,7 @@ import { useAuth } from "@/components/auth/auth-provider";
 import { Badge, StatusBadge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
+import { SettingsNavigation } from "@/components/settings/settings-navigation";
 import {
   type CapabilityRegistryDiagnostic,
   type ExtensionDescriptor,
@@ -83,7 +85,7 @@ function ExtensionRow({ extension }: { extension: ExtensionDescriptor }) {
     <Link
       className="group grid min-h-20 cursor-pointer gap-3 px-4 py-3 transition-colors duration-200 hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:grid-cols-[minmax(12rem,1.15fr)_minmax(9rem,0.65fr)_minmax(9rem,0.65fr)_auto] sm:items-center"
       data-extension-id={extension.id}
-      to={`/settings/extensions/${encodeURIComponent(extension.id)}`}
+      to={extensionDetailsPath(extension.id)}
     >
       <div className="flex min-w-0 items-start gap-3">
         <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border bg-muted/30 text-muted-foreground">
@@ -288,7 +290,7 @@ function ExtensionDetailPage({ extensionId }: { extensionId: string }) {
       if (action === "remove") {
         await removeExtension(extension.id);
         setDialogAction(null);
-        navigate("/settings/extensions", { replace: true });
+        navigate(APP_PATHS.extensions, { replace: true });
         return;
       }
       const result = await transitionExtension(extension.id, action);
@@ -313,7 +315,7 @@ function ExtensionDetailPage({ extensionId }: { extensionId: string }) {
   if (phase === "error" || !extension) {
     return (
       <section className="space-y-5">
-        <Link className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "gap-2")} to="/settings/extensions"><ArrowLeft aria-hidden="true" className="h-4 w-4" />Extensions</Link>
+        <Link className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "gap-2")} to={APP_PATHS.extensions}><ArrowLeft aria-hidden="true" className="h-4 w-4" />Extensions</Link>
         <div className="border-l-2 border-danger bg-danger/5 px-4 py-4 text-sm text-danger" role="alert"><p className="font-medium">Unable to load extension</p><p className="mt-1 text-muted-foreground">{error}</p></div>
       </section>
     );
@@ -321,7 +323,7 @@ function ExtensionDetailPage({ extensionId }: { extensionId: string }) {
 
   return (
     <section className="space-y-5 sm:space-y-6">
-      <Link className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "gap-2 px-2")} to="/settings/extensions"><ArrowLeft aria-hidden="true" className="h-4 w-4" />Extensions</Link>
+      <Link className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "gap-2 px-2")} to={APP_PATHS.extensions}><ArrowLeft aria-hidden="true" className="h-4 w-4" />Extensions</Link>
       <PageHeader
         actions={<Button className="gap-2" onClick={() => void load()} variant="secondary"><RefreshCw aria-hidden="true" className="h-4 w-4" />refresh</Button>}
         description={extension.description || "Capability provider extension"}
@@ -431,5 +433,10 @@ function ExtensionDetailPage({ extensionId }: { extensionId: string }) {
 
 export function ExtensionsPage() {
   const { extensionId } = useParams<{ extensionId: string }>();
-  return extensionId ? <ExtensionDetailPage extensionId={extensionId} /> : <ExtensionListPage />;
+  return (
+    <div className="space-y-5 sm:space-y-6">
+      <SettingsNavigation />
+      {extensionId ? <ExtensionDetailPage extensionId={extensionId} /> : <ExtensionListPage />}
+    </div>
+  );
 }
