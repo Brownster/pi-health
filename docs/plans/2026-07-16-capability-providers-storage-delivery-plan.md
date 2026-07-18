@@ -1,7 +1,7 @@
 # Capability Providers and Storage Surfaces
 
 Date: 2026-07-16
-Status: Sprint 4 active; CP-016 complete, CP-017 next
+Status: Sprint 4 complete; CP-017 complete, CP-018 next
 Tracking prefix: `CP`
 
 ## Goal
@@ -337,7 +337,7 @@ Goal: operate enabled capabilities through provider-driven pages.
 | CP-014 | MergerFS tailored renderer | CP-013 | Complete | [`Docs/LIMEOS_CAPABILITY_PROVIDERS_CP014_MERGERFS.md`](../../Docs/LIMEOS_CAPABILITY_PROVIDERS_CP014_MERGERFS.md): branch editor, policy, fstab preview, apply, pool operations, and lazy diagnostics |
 | CP-015 | Protection capability page | CP-003..CP-006 | Complete | [`Docs/LIMEOS_CAPABILITY_PROVIDERS_CP015_PROTECTION.md`](../../Docs/LIMEOS_CAPABILITY_PROVIDERS_CP015_PROTECTION.md): summary, protection-set cards, empty/setup states, generic rendering, SnapRAID compatibility data, and protection routes |
 | CP-016 | SnapRAID tailored renderer | CP-015 | Complete | [`Docs/LIMEOS_CAPABILITY_PROVIDERS_CP016_SNAPRAID.md`](../../Docs/LIMEOS_CAPABILITY_PROVIDERS_CP016_SNAPRAID.md): assignment, schedule, guarded parity operations, recovery status, and lazy diagnostics |
-| CP-017 | Provider migration adapters | CP-014, CP-016 | Planned | Existing plugin/config/status payloads mapped to capability contracts without reinstall |
+| CP-017 | Provider migration adapters | CP-014, CP-016 | Complete | [`Docs/LIMEOS_CAPABILITY_PROVIDERS_CP017_ADAPTERS.md`](../../Docs/LIMEOS_CAPABILITY_PROVIDERS_CP017_ADAPTERS.md): read-only MergerFS and SnapRAID registry adapters with unchanged plugin/config/status payloads |
 
 Exit gate:
 
