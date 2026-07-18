@@ -299,6 +299,30 @@ class TestMergerFSCommands:
 
 
 class TestMergerFSApplyConfig:
+    def test_preview_config_renders_managed_section_without_writing(
+        self, mergerfs_plugin, valid_config
+    ):
+        preview = mergerfs_plugin.preview_config(valid_config)
+
+        assert "# pi-health mergerfs start" in preview
+        assert "/mnt/disk1:/mnt/disk2:/mnt/disk3" in preview
+        assert "category.create=epmfs" in preview
+        assert not os.path.exists(mergerfs_plugin.config_path)
+
+    def test_preview_config_rejects_invalid_candidate(
+        self, mergerfs_plugin, valid_config
+    ):
+        invalid = dict(valid_config)
+        invalid["pools"] = [dict(valid_config["pools"][0], branches=["/mnt/disk1"])]
+
+        with pytest.raises(ValueError, match="at least 2 branches"):
+            mergerfs_plugin.preview_config(invalid)
+
+    def test_preview_config_explains_empty_managed_section(self, mergerfs_plugin):
+        preview = mergerfs_plugin.preview_config({"pools": []})
+
+        assert "managed fstab section will be removed" in preview
+
     def test_apply_config_writes_fstab_section(self, mergerfs_plugin, valid_config, tmp_path, monkeypatch):
         fstab_path = tmp_path / "fstab"
         fstab_path.write_text("UUID=abc /mnt/data ext4 defaults 0 2\n")

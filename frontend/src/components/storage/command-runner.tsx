@@ -60,11 +60,13 @@ export function CommandRunner({
   commands,
   poolNames,
   onCompleted,
+  heading = "Commands",
 }: {
   pluginId: string;
   commands: PluginCommand[];
   poolNames: string[];
   onCompleted?: () => void;
+  heading?: string;
 }) {
   const [openId, setOpenId] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
@@ -170,10 +172,13 @@ export function CommandRunner({
   }
 
   const openCommand = openId ? commands.find((c) => c.id === openId) ?? null : null;
+  const confirmationMessage = openCommand?.id === "unmount"
+    ? "Unmounting can interrupt applications using this pool. Continue?"
+    : "This action can change provider state. Continue?";
 
   return (
     <div className="space-y-3">
-      <p className="text-xs uppercase tracking-wide text-muted-foreground">Commands</p>
+      <p className="font-mono text-xs uppercase text-muted-foreground">{heading}</p>
       <div className="flex flex-wrap gap-2">
         {commands.map((command) => (
           <Button
@@ -202,13 +207,16 @@ export function CommandRunner({
           >
             <Terminal aria-hidden="true" className="h-3.5 w-3.5" />
             {command.label}
-            {command.dangerous ? " ⚠" : ""}
+            {command.dangerous ? <AlertTriangle aria-hidden="true" className="h-3.5 w-3.5" /> : null}
           </Button>
         ))}
       </div>
 
       {openCommand ? (
         <div className="space-y-3 rounded-lg border border-border/70 bg-muted/20 p-3">
+          {openCommand.description ? (
+            <p className="text-xs text-muted-foreground">{openCommand.description}</p>
+          ) : null}
           {(openCommand.param_schema ?? []).map((param) => (
             <label className="block space-y-1 text-xs" key={param.name}>
               <span className="text-muted-foreground">{param.label ?? param.name}</span>
@@ -248,7 +256,7 @@ export function CommandRunner({
             <div className="space-y-2 rounded-md border border-danger/40 bg-danger/10 p-3 text-xs">
               <p className="flex items-center gap-1.5 font-medium text-danger">
                 <AlertTriangle aria-hidden="true" className="h-4 w-4" />
-                This can modify or delete data. Continue?
+                {confirmationMessage}
               </p>
               <div className="flex gap-2">
                 <Button

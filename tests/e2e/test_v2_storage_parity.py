@@ -146,24 +146,34 @@ def test_v2_snapraid_pre_sync_threshold_gate(
     expect(page.locator("[data-command-summary]")).to_contain_text("Completed", timeout=10000)
 
 
-def test_v2_mergerfs_pool_editor(
+def test_v2_mergerfs_provider_editor_preview_and_apply(
     page: Page,
     v2_server,
     v2_login,
     install_v2_storage_api_mocks,
 ):
     base_url = v2_server["base_url"]
-    _open_v2_storage(page, base_url, "plugins", v2_login, install_v2_storage_api_mocks)
+    v2_login(page, base_url)
+    install_v2_storage_api_mocks(page)
+    page.goto(f"{base_url}/v2/pools/mergerfs")
 
-    # Unconfigured MergerFS -> Set up opens the modal on the guided pool editor.
-    page.click("button[data-plugin-action='details'][data-plugin='mergerfs']")
+    expect(page.locator("[data-capability-renderer='mergerfs']")).to_be_visible()
+    expect(page.locator("button[data-mergerfs-tab='configuration'][aria-selected='true']")).to_be_visible()
     expect(page.locator("[data-mergerfs-editor]")).to_be_visible()
 
-    # Build a two-branch pool without JSON.
+    # Build a two-branch pool, verify branch ordering, and preview fstab without writing it.
     page.click("button[data-pool-add]")
     page.locator("input[data-pool-name]").fill("media")
     page.click("button[data-pool-branch-add$=':/mnt/disk1']")
     page.click("button[data-pool-branch-add$=':/mnt/parity']")
+    branches = page.locator("[data-pool-branches] li")
+    expect(branches.nth(0)).to_contain_text("/mnt/disk1")
+    expect(branches.nth(1)).to_contain_text("/mnt/parity")
+    page.get_by_role("button", name="Move /mnt/parity up").click()
+    expect(branches.nth(0)).to_contain_text("/mnt/parity")
+    page.click("button[data-mergerfs-preview-open]")
+    expect(page.locator("[data-mergerfs-preview]")).to_contain_text("pi-health mergerfs start", timeout=10000)
+
     page.click("button[data-mergerfs-save]")
     expect(page.get_by_text("Saved.")).to_be_visible(timeout=10000)
 
@@ -172,6 +182,42 @@ def test_v2_mergerfs_pool_editor(
     expect(page.locator("[data-apply-confirm]")).to_contain_text("fstab")
     page.click("button[data-apply-confirm-yes]")
     expect(page.get_by_text("Applied")).to_be_visible(timeout=10000)
+
+
+def test_v2_mergerfs_provider_operations_and_diagnostics(
+    page: Page,
+    v2_server,
+    v2_login,
+    install_v2_storage_configured_mocks,
+):
+    base_url = v2_server["base_url"]
+    v2_login(page, base_url)
+    install_v2_storage_configured_mocks(page)
+    page.goto(f"{base_url}/v2/pools/mergerfs")
+
+    expect(page.locator("[data-capability-renderer='mergerfs']")).to_be_visible()
+    expect(page.locator("[data-pool-card='media']")).to_contain_text("mounted")
+    expect(page.locator("[data-pool-card='backup']")).to_contain_text("unmounted")
+
+    # Pool operations use the provider's declared pool selector. Unmount adds a
+    # resource-specific interruption warning before the command can run.
+    page.click("button[data-plugin-command='mount']")
+    expect(page.locator("select[data-command-param='pool_name']")).to_have_value("backup")
+    page.click("button[data-command-run='mount']")
+    expect(page.locator("[data-command-summary]")).to_contain_text("Completed", timeout=10000)
+
+    page.click("button[data-plugin-command='unmount']")
+    page.locator("select[data-command-param='pool_name']").select_option("media")
+    page.click("button[data-command-run='unmount']")
+    expect(page.get_by_text("Unmounting can interrupt applications using this pool.")).to_be_visible()
+    page.click("button[data-command-confirm='unmount']")
+    expect(page.locator("[data-command-summary]")).to_contain_text("Completed", timeout=10000)
+
+    expect(page.locator("button[data-plugin-command='balance']")).to_be_visible()
+    page.click("button[data-mergerfs-tab='diagnostics']")
+    expect(page.locator("[data-mergerfs-log]")).to_contain_text("log line", timeout=10000)
+    page.click("button[data-plugin-command='status']")
+    expect(page.locator("[data-command-summary]")).to_contain_text("Completed", timeout=10000)
 
 
 def test_v2_storage_tab_syncs_with_shell_nav(

@@ -199,6 +199,22 @@ class MergerFSPlugin(StoragePlugin):
         except Exception as exc:
             return CommandResult(success=False, message="", error=str(exc))
 
+    def preview_config(self, config: dict) -> str:
+        """Render the managed fstab section without writing configuration."""
+        errors = self.validate_config(config)
+        if errors:
+            raise ValueError("; ".join(errors))
+
+        enabled_pools = [
+            pool for pool in config.get("pools", []) if pool.get("enabled", True)
+        ]
+        lines = self._build_fstab_lines(enabled_pools)
+        if not lines:
+            return "# No enabled MergerFS pools; the managed fstab section will be removed.\n"
+        return "\n".join(
+            ["# pi-health mergerfs start", *lines, "# pi-health mergerfs end", ""]
+        )
+
     def _apply_message(self, enabled_pools: list[dict]) -> str:
         if not enabled_pools:
             return "MergerFS entries removed from fstab"

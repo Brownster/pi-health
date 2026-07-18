@@ -708,9 +708,24 @@ def install_v2_storage_api_mocks():
             "id": "mergerfs", "name": "MergerFS", "description": "Union filesystem pooling",
             "version": "1.0", "installed": True,
             "status": {"status": "ok", "message": "Pool active"},
-            "commands": [{"id": "status", "label": "Pool Status", "params": []}],
+            "commands": [
+                {"id": "mount", "name": "Mount Pool", "description": "Mount a MergerFS pool",
+                 "dangerous": False, "params": ["pool_name"],
+                 "param_schema": [{"name": "pool_name", "label": "Pool", "type": "select",
+                                   "source": "status.details.pools[].name", "required": True}]},
+                {"id": "unmount", "name": "Unmount Pool", "description": "Unmount a MergerFS pool",
+                 "dangerous": True, "params": ["pool_name"],
+                 "param_schema": [{"name": "pool_name", "label": "Pool", "type": "select",
+                                   "source": "status.details.pools[].name", "required": True}]},
+                {"id": "balance", "name": "Balance", "description": "Rebalance files across branches",
+                 "dangerous": False, "params": ["pool_name"],
+                 "param_schema": [{"name": "pool_name", "label": "Pool", "type": "select",
+                                   "source": "status.details.pools[].name", "required": True}]},
+                {"id": "status", "name": "Status", "description": "Show pool status",
+                 "dangerous": False, "params": []},
+            ],
             "schema": {"properties": {"mountpoint": {"type": "string", "description": "Pool mount point"}}},
-            "config": {"mountpoint": "/mnt/pool"},
+            "config": {"enabled": True, "mountpoint": "/mnt/pool", "pools": []},
             "install_instructions": "",
         }
         snapraid_detail = {
@@ -772,6 +787,12 @@ def install_v2_storage_api_mocks():
             if path == "/api/storage/plugins/snapraid/config-preview" and method == "POST":
                 _json_fulfill(route, {"preview": "parity /mnt/parity/snapraid.parity\ndata d1 /mnt/disk1/\n"})
                 return
+            if path == "/api/storage/plugins/mergerfs/config-preview" and method == "POST":
+                _json_fulfill(
+                    route,
+                    {"preview": "# pi-health mergerfs start\n/mnt/disk1:/mnt/parity /mnt/media fuse.mergerfs category.create=epmfs 0 0\n# pi-health mergerfs end\n"},
+                )
+                return
             if path == "/api/storage/plugins/snapraid/recovery" and method == "GET":
                 _json_fulfill(route, {"error": "Recovery not supported"}, status=404)
                 return
@@ -817,7 +838,7 @@ def install_v2_storage_api_mocks():
             if path == "/api/storage/plugins/mergerfs/logs/latest" and method == "GET":
                 route.fulfill(status=200, content_type="text/plain", body="mergerfs pool log line")
                 return
-            if path == "/api/storage/plugins/mergerfs/commands/status" and method == "POST":
+            if path.startswith("/api/storage/plugins/mergerfs/commands/") and method == "POST":
                 route.fulfill(status=200, content_type="text/event-stream", body=command_sse)
                 return
             if path == "/api/storage/plugins/mergerfs/config" and method == "POST":
@@ -880,7 +901,18 @@ def install_v2_storage_configured_mocks():
                     {"name": "backup", "mount_point": "/mnt/backup", "mounted": False, "branches": 2},
                 ]},
             },
-            "commands": [{"id": "status", "name": "Status", "dangerous": False}],
+            "commands": [
+                {"id": command_id, "name": label, "description": description,
+                 "dangerous": command_id == "unmount", "params": ["pool_name"],
+                 "param_schema": [{"name": "pool_name", "label": "Pool", "type": "select",
+                                   "source": "status.details.pools[].name", "required": True}]}
+                for command_id, label, description in [
+                    ("mount", "Mount Pool", "Mount a MergerFS pool"),
+                    ("unmount", "Unmount Pool", "Unmount a MergerFS pool"),
+                    ("balance", "Balance", "Rebalance files across branches"),
+                ]
+            ] + [{"id": "status", "name": "Status", "description": "Show pool status",
+                  "dangerous": False, "params": []}],
             "schema": {"properties": {}}, "config": {"pools": []}, "install_instructions": "",
         }
 
@@ -901,6 +933,16 @@ def install_v2_storage_configured_mocks():
                 return
             if path.endswith("/logs/latest") and method == "GET":
                 route.fulfill(status=200, content_type="text/plain", body="log line")
+                return
+            if path.startswith("/api/storage/plugins/mergerfs/commands/") and method == "POST":
+                route.fulfill(
+                    status=200,
+                    content_type="text/event-stream",
+                    body=(
+                        'data: {"type": "output", "line": "mergerfs operation complete"}\n\n'
+                        'data: {"type": "complete", "success": true, "message": "done"}\n\n'
+                    ),
+                )
                 return
             route.continue_()
 

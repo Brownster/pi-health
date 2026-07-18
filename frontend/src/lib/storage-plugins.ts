@@ -30,6 +30,7 @@ export interface PluginCommandParam {
 export interface PluginCommand {
   id: string;
   label: string;
+  description?: string;
   params: string[];
   dangerous?: boolean;
   param_schema?: PluginCommandParam[];
@@ -107,6 +108,7 @@ export async function fetchPluginDetail(pluginId: string, signal?: AbortSignal):
     commands: commands.map((cmd) => ({
       id: String(cmd.id ?? ""),
       label: String(cmd.name ?? cmd.label ?? cmd.id ?? ""),
+      description: cmd.description != null ? String(cmd.description) : undefined,
       params: Array.isArray(cmd.params) ? cmd.params.map((p) => String(p)) : [],
       dangerous: Boolean(cmd.dangerous),
       param_schema: Array.isArray(cmd.param_schema)

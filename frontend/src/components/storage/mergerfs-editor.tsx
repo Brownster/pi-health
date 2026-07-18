@@ -1,9 +1,22 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Loader2, Plus, Trash2 } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowDown,
+  ArrowUp,
+  Eye,
+  Loader2,
+  Plus,
+  Trash2,
+  X,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { fetchDiskInventory } from "@/lib/disks";
-import { applyPluginConfig, savePluginConfig } from "@/lib/storage-plugins";
+import {
+  applyPluginConfig,
+  previewPluginConfig,
+  savePluginConfig,
+} from "@/lib/storage-plugins";
 
 const CREATE_POLICIES: { value: string; label: string }[] = [
   { value: "epmfs", label: "epmfs — existing path, most free space (default)" },
@@ -62,7 +75,9 @@ export function MergerfsEditor({
   const [custom, setCustom] = useState<Record<string, string>>({});
   const [errors, setErrors] = useState<string[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
-  const [busy, setBusy] = useState<"" | "save" | "apply">("");
+  const [preview, setPreview] = useState<string | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const [busy, setBusy] = useState<"" | "preview" | "save" | "apply">("");
   const [confirmApply, setConfirmApply] = useState(false);
 
   useEffect(() => {
@@ -80,6 +95,9 @@ export function MergerfsEditor({
       enabled: pool.enabled !== false,
     }));
     setPools(existing);
+    setDirty(false);
+    setPreview(null);
+    setErrors([]);
 
     fetchDiskInventory()
       .then((inventory) => {
@@ -99,6 +117,9 @@ export function MergerfsEditor({
   }, [config]);
 
   const updatePool = (id: string, patch: Partial<PoolDraft>) => {
+    setDirty(true);
+    setPreview(null);
+    setNotice(null);
     setPools((prev) =>
       prev.map((pool) => {
         if (pool.id !== id) return pool;
@@ -113,6 +134,9 @@ export function MergerfsEditor({
   };
 
   const toggleBranch = (id: string, branch: string) => {
+    setDirty(true);
+    setPreview(null);
+    setNotice(null);
     setPools((prev) =>
       prev.map((pool) =>
         pool.id === id
@@ -127,12 +151,43 @@ export function MergerfsEditor({
     );
   };
 
+  const moveBranch = (id: string, index: number, direction: -1 | 1) => {
+    setDirty(true);
+    setPreview(null);
+    setNotice(null);
+    setPools((prev) => prev.map((pool) => {
+      if (pool.id !== id) return pool;
+      const target = index + direction;
+      if (target < 0 || target >= pool.branches.length) return pool;
+      const branches = [...pool.branches];
+      [branches[index], branches[target]] = [branches[target], branches[index]];
+      return { ...pool, branches };
+    }));
+  };
+
+  const addPool = () => {
+    setDirty(true);
+    setPreview(null);
+    setNotice(null);
+    setPools((prev) => [...prev, emptyPool()]);
+  };
+
+  const removePool = (id: string) => {
+    setDirty(true);
+    setPreview(null);
+    setNotice(null);
+    setPools((prev) => prev.filter((pool) => pool.id !== id));
+  };
+
   const poolErrors = useMemo(() => {
     const map: Record<string, string[]> = {};
     for (const pool of pools) {
       const list: string[] = [];
       if (!pool.name.trim()) list.push("Name is required.");
       if (new Set(pool.branches).size < 2) list.push("Add at least two distinct branches.");
+      if (!pool.mount_point.startsWith("/mnt/") || pool.mount_point.includes("..")) {
+        list.push("Mount point must be a safe path under /mnt/.");
+      }
       if (!MIN_FREE_RE.test(pool.min_free_space.trim())) list.push("Min free space must look like 4G, 500M, 1T.");
       if (list.length) map[pool.id] = list;
     }
@@ -155,13 +210,37 @@ export function MergerfsEditor({
     })),
   });
 
+  const draftErrors = Object.values(poolErrors).flat();
+
+  const onPreview = async () => {
+    if (draftErrors.length) {
+      setErrors(draftErrors);
+      return;
+    }
+    setBusy("preview");
+    setErrors([]);
+    setNotice(null);
+    try {
+      setPreview(await previewPluginConfig(pluginId, buildConfig()));
+    } catch (error) {
+      setErrors([error instanceof Error ? error.message : "Preview failed"]);
+    } finally {
+      setBusy("");
+    }
+  };
+
   const onSave = async () => {
+    if (draftErrors.length) {
+      setErrors(draftErrors);
+      return;
+    }
     setBusy("save");
     setErrors([]);
     setNotice(null);
     const result = await savePluginConfig(pluginId, buildConfig());
     setBusy("");
     if (result.ok) {
+      setDirty(false);
       setNotice("Saved. Apply to (re)mount pools.");
       onSaved();
     } else {
@@ -217,8 +296,9 @@ export function MergerfsEditor({
             <Button
               aria-label="Remove pool"
               data-pool-remove={pool.id}
-              onClick={() => setPools((prev) => prev.filter((p) => p.id !== pool.id))}
-              size="sm"
+              onClick={() => removePool(pool.id)}
+              size="icon"
+              title="Remove pool"
               variant="ghost"
             >
               <Trash2 aria-hidden="true" className="h-4 w-4" />
@@ -234,25 +314,22 @@ export function MergerfsEditor({
           />
 
           <div className="space-y-1">
-            <p className="text-xs text-muted-foreground">Branches (≥ 2)</p>
-            <div className="flex flex-wrap gap-1.5">
-              {pool.branches.map((branch) => (
-                <span
-                  className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs"
-                  key={branch}
-                >
-                  {branch}
-                  <button
-                    aria-label={`Remove ${branch}`}
-                    className="text-muted-foreground hover:text-danger"
-                    onClick={() => toggleBranch(pool.id, branch)}
-                    type="button"
-                  >
-                    ×
-                  </button>
-                </span>
-              ))}
-            </div>
+            <p className="text-xs text-muted-foreground">Branches (at least 2, in priority order)</p>
+            {pool.branches.length ? (
+              <ol className="divide-y divide-border overflow-hidden rounded-md border border-border" data-pool-branches={pool.id}>
+                {pool.branches.map((branch, index) => (
+                  <li className="flex min-h-10 items-center gap-2 bg-muted/15 px-2" key={branch}>
+                    <span className="w-5 shrink-0 text-center font-mono text-[10px] text-dim">{index + 1}</span>
+                    <code className="min-w-0 flex-1 truncate text-xs" title={branch}>{branch}</code>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <Button aria-label={`Move ${branch} up`} disabled={index === 0} onClick={() => moveBranch(pool.id, index, -1)} size="icon" title="Move branch up" variant="ghost"><ArrowUp aria-hidden="true" className="h-3.5 w-3.5" /></Button>
+                      <Button aria-label={`Move ${branch} down`} disabled={index === pool.branches.length - 1} onClick={() => moveBranch(pool.id, index, 1)} size="icon" title="Move branch down" variant="ghost"><ArrowDown aria-hidden="true" className="h-3.5 w-3.5" /></Button>
+                      <Button aria-label={`Remove ${branch}`} onClick={() => toggleBranch(pool.id, branch)} size="icon" title="Remove branch" variant="ghost"><X aria-hidden="true" className="h-3.5 w-3.5" /></Button>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            ) : null}
             <div className="flex flex-wrap gap-1.5 pt-1">
               {candidates
                 .filter((mount) => !pool.branches.includes(mount))
@@ -264,7 +341,8 @@ export function MergerfsEditor({
                     size="sm"
                     variant="outline"
                   >
-                    + {mount}
+                    <Plus aria-hidden="true" className="mr-1 h-3.5 w-3.5" />
+                    {mount}
                   </Button>
                 ))}
             </div>
@@ -356,7 +434,7 @@ export function MergerfsEditor({
       <Button
         className="gap-1.5"
         data-pool-add
-        onClick={() => setPools((prev) => [...prev, emptyPool()])}
+        onClick={addPool}
         size="sm"
         variant="outline"
       >
@@ -380,6 +458,15 @@ export function MergerfsEditor({
         </p>
       ) : null}
 
+      {preview ? (
+        <section aria-labelledby="mergerfs-preview-title" className="overflow-hidden rounded-md border border-border" data-mergerfs-preview>
+          <div className="border-b border-border bg-muted/20 px-3 py-2">
+            <h3 className="font-mono text-xs font-semibold" id="mergerfs-preview-title">Managed fstab preview</h3>
+          </div>
+          <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-all p-3 text-xs text-muted-foreground">{preview}</pre>
+        </section>
+      ) : null}
+
       {confirmApply ? (
         <div className="space-y-2 rounded-md border border-warning/40 bg-warning/10 p-3 text-xs" data-apply-confirm>
           <p className="flex items-center gap-1.5 font-medium text-warning">
@@ -399,18 +486,23 @@ export function MergerfsEditor({
       ) : null}
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button data-mergerfs-save disabled={busy !== ""} onClick={() => void onSave()} size="sm">
+        <Button className="gap-1.5" data-mergerfs-preview-open disabled={busy !== "" || Boolean(draftErrors.length)} onClick={() => void onPreview()} size="sm" variant="outline">
+          <Eye aria-hidden="true" className="h-3.5 w-3.5" />
+          {busy === "preview" ? "Previewing..." : "Preview"}
+        </Button>
+        <Button data-mergerfs-save disabled={busy !== "" || Boolean(draftErrors.length)} onClick={() => void onSave()} size="sm">
           {busy === "save" ? "Saving..." : "Save"}
         </Button>
         <Button
           data-mergerfs-apply
-          disabled={busy !== ""}
+          disabled={busy !== "" || dirty || Boolean(draftErrors.length)}
           onClick={() => setConfirmApply(true)}
           size="sm"
           variant="secondary"
         >
           {busy === "apply" ? "Applying..." : "Apply"}
         </Button>
+        {dirty ? <span className="text-xs text-warning">Save changes before applying.</span> : null}
       </div>
     </div>
   );
