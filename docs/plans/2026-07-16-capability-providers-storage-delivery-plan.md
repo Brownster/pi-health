@@ -1,7 +1,7 @@
 # Capability Providers and Storage Surfaces
 
 Date: 2026-07-16
-Status: Sprint 3 in delivery; CP-010 complete, CP-011 next
+Status: Sprint 3 in delivery; CP-011 complete, CP-012 next
 Tracking prefix: `CP`
 
 ## Goal
@@ -318,7 +318,7 @@ Goal: make physical storage health and allocation glanceable.
 | ID | Work package | Depends on | Status | Deliverable |
 | --- | --- | --- | --- | --- |
 | CP-010 | Disk summary contract | CP-000 | Complete | [`Docs/LIMEOS_CAPABILITY_PROVIDERS_CP010_DISK_SUMMARY.md`](../../Docs/LIMEOS_CAPABILITY_PROVIDERS_CP010_DISK_SUMMARY.md): bounded health, capacity, allocation, provider-assignment, and partial-failure contract |
-| CP-011 | Disk card and partition redesign | CP-010 | Planned | Compact device cards, partition usage, provider assignment links, and action menus |
+| CP-011 | Disk card and partition redesign | CP-010 | Complete | [`Docs/LIMEOS_CAPABILITY_PROVIDERS_CP011_DISK_CARDS.md`](../../Docs/LIMEOS_CAPABILITY_PROVIDERS_CP011_DISK_CARDS.md): fleet summary, compact device and partition usage, provider links, and overflow actions |
 | CP-012 | Disk workflow hardening | CP-011 | Planned | Suggested mounts, SMART tests, mount/unmount confirmation, responsive and failure coverage |
 
 Exit gate:
