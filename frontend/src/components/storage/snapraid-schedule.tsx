@@ -79,7 +79,7 @@ export function SnapraidSchedule({
 }) {
   return (
     <div className="space-y-3" data-snapraid-schedule>
-      <p className="text-xs uppercase tracking-wide text-muted-foreground">Schedule</p>
+      <p className="font-mono text-xs uppercase text-muted-foreground">Schedule</p>
       <CronRow
         cron={value.sync_cron}
         enabled={value.sync_enabled}

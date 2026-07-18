@@ -733,10 +733,16 @@ def install_v2_storage_api_mocks():
             "version": "1.0", "installed": True, "kind": "pool",
             "status": {"status": "unconfigured", "message": "No drives", "details": {"sync_required": False}},
             "commands": [
-                {"id": "sync", "name": "Sync", "dangerous": False},
-                {"id": "scrub", "name": "Scrub", "dangerous": False,
-                 "param_schema": [{"name": "percent", "type": "number", "default": 8}]},
-                {"id": "fix", "name": "Fix", "dangerous": True},
+                {"id": "status", "name": "Status", "description": "Show array status", "dangerous": False},
+                {"id": "diff", "name": "Diff", "description": "Show pending changes", "dangerous": False},
+                {"id": "sync", "name": "Sync", "description": "Update parity", "dangerous": False},
+                {"id": "scrub", "name": "Scrub", "description": "Verify protected data", "dangerous": False,
+                 "param_schema": [
+                     {"name": "percent", "label": "Data percentage", "type": "number", "default": 8},
+                     {"name": "age_days", "label": "Minimum age (days)", "type": "number", "default": 10},
+                 ]},
+                {"id": "check", "name": "Check", "description": "Check data and parity", "dangerous": False},
+                {"id": "fix", "name": "Fix", "description": "Recover files from parity", "dangerous": True},
             ],
             "schema": {"properties": {}},
             "config": {"enabled": False, "drives": []},
@@ -820,6 +826,16 @@ def install_v2_storage_api_mocks():
                     )
                 route.fulfill(status=200, content_type="text/event-stream", body=sse)
                 return
+            if path.startswith("/api/storage/plugins/snapraid/commands/") and method == "POST":
+                route.fulfill(
+                    status=200,
+                    content_type="text/event-stream",
+                    body=(
+                        'data: {"type": "output", "line": "snapraid operation complete"}\n\n'
+                        'data: {"type": "complete", "success": true, "message": "done"}\n\n'
+                    ),
+                )
+                return
             if path == "/api/disks" and method == "GET":
                 _json_fulfill(route, disks_inventory)
                 return
@@ -887,8 +903,32 @@ def install_v2_storage_configured_mocks():
                     "last_summary": {"added": 3, "removed": 1, "updated": 2},
                 },
             },
-            "commands": [{"id": "sync", "name": "Sync", "dangerous": False}],
-            "schema": {"properties": {}}, "config": {"enabled": True, "drives": []},
+            "commands": [
+                {"id": "status", "name": "Status", "description": "Show array status", "dangerous": False},
+                {"id": "diff", "name": "Diff", "description": "Show pending changes", "dangerous": False},
+                {"id": "sync", "name": "Sync", "description": "Update parity", "dangerous": False},
+                {"id": "scrub", "name": "Scrub", "description": "Verify protected data", "dangerous": False,
+                 "param_schema": [
+                     {"name": "percent", "label": "Data percentage", "type": "number", "default": 8},
+                     {"name": "age_days", "label": "Minimum age (days)", "type": "number", "default": 10},
+                 ]},
+                {"id": "check", "name": "Check", "description": "Check data and parity", "dangerous": False},
+                {"id": "fix", "name": "Fix", "description": "Recover files from parity", "dangerous": True},
+            ],
+            "schema": {"properties": {}},
+            "config": {
+                "enabled": True,
+                "drives": [
+                    {"path": "/mnt/disk1", "role": "data", "content": True, "uuid": "uuid-1"},
+                    {"path": "/mnt/parity", "role": "parity", "content": True, "uuid": "uuid-2"},
+                ],
+                "schedule": {
+                    "sync": {"enabled": True, "cron": "0 2 * * *"},
+                    "scrub": {"enabled": True, "cron": "0 3 * * 0"},
+                },
+                "scrub_percent": 8,
+                "scrub_age_days": 10,
+            },
             "install_instructions": "",
         }
         mergerfs_detail = {
@@ -915,6 +955,29 @@ def install_v2_storage_configured_mocks():
                   "dangerous": False, "params": []}],
             "schema": {"properties": {}}, "config": {"pools": []}, "install_instructions": "",
         }
+        disks_inventory = {
+            "helper_available": True,
+            "disks": [
+                {
+                    "name": "sda", "path": "/dev/sda", "type": "disk", "size": "1T",
+                    "model": "Data Disk", "serial": "data-1", "transport": "sata",
+                    "mountpoint": None, "fstype": None, "uuid": None, "label": None,
+                    "partitions": [{
+                        "name": "sda1", "path": "/dev/sda1", "size": "1T", "fstype": "ext4",
+                        "mountpoint": "/mnt/disk1", "uuid": "uuid-1", "label": "data",
+                    }],
+                },
+                {
+                    "name": "sdb", "path": "/dev/sdb", "type": "disk", "size": "2T",
+                    "model": "Parity Disk", "serial": "parity-1", "transport": "sata",
+                    "mountpoint": None, "fstype": None, "uuid": None, "label": None,
+                    "partitions": [{
+                        "name": "sdb1", "path": "/dev/sdb1", "size": "2T", "fstype": "ext4",
+                        "mountpoint": "/mnt/parity", "uuid": "uuid-2", "label": "parity",
+                    }],
+                },
+            ],
+        }
 
         def _handler(route):
             path = urlparse(route.request.url).path
@@ -928,6 +991,21 @@ def install_v2_storage_configured_mocks():
             if path == "/api/storage/plugins/mergerfs" and method == "GET":
                 _json_fulfill(route, mergerfs_detail)
                 return
+            if path == "/api/disks" and method == "GET":
+                _json_fulfill(route, disks_inventory)
+                return
+            if path == "/api/storage/plugins/snapraid/recovery" and method == "GET":
+                _json_fulfill(route, {
+                    "recoverable": True,
+                    "failed_drives": ["data2"],
+                    "missing_files": 3,
+                    "damaged_files": 1,
+                    "recovery_options": [{
+                        "id": "fix_missing", "name": "Recover missing files",
+                        "command": "fix", "params": {"filter": "missing"},
+                    }],
+                })
+                return
             if path.endswith("/recovery") and method == "GET":
                 _json_fulfill(route, {"error": "Recovery not supported"}, status=404)
                 return
@@ -940,6 +1018,16 @@ def install_v2_storage_configured_mocks():
                     content_type="text/event-stream",
                     body=(
                         'data: {"type": "output", "line": "mergerfs operation complete"}\n\n'
+                        'data: {"type": "complete", "success": true, "message": "done"}\n\n'
+                    ),
+                )
+                return
+            if path.startswith("/api/storage/plugins/snapraid/commands/") and method == "POST":
+                route.fulfill(
+                    status=200,
+                    content_type="text/event-stream",
+                    body=(
+                        'data: {"type": "output", "line": "snapraid operation complete"}\n\n'
                         'data: {"type": "complete", "success": true, "message": "done"}\n\n'
                     ),
                 )

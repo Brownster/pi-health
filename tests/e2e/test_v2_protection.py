@@ -1,4 +1,4 @@
-"""CP-015 provider-neutral Protection capability coverage."""
+"""Protection capability and tailored SnapRAID provider coverage."""
 
 import json
 
@@ -15,7 +15,7 @@ def _open_protection(page, base_url, v2_login, install_mocks):
     expect(page.get_by_role("heading", name="storage_protection")).to_be_visible()
 
 
-def test_v2_protection_legacy_snapraid_setup_and_deep_link(
+def test_v2_protection_snapraid_guided_setup_and_deep_link(
     page: Page,
     v2_server,
     v2_login,
@@ -29,9 +29,25 @@ def test_v2_protection_legacy_snapraid_setup_and_deep_link(
     expect(page.get_by_text("MergerFS")).to_have_count(0)
     setup.get_by_role("link", name="Set up").click()
     expect(page).to_have_url(f"{base_url}/v2/protection/snapraid")
-    expect(page.locator("[data-capability-renderer='generic']")).to_be_visible()
-    expect(page.get_by_text("Provider setup is required")).to_be_visible()
-    expect(page.get_by_role("link", name="Configure provider")).to_have_attribute("href", "/v2/plugins")
+    expect(page.locator("[data-capability-renderer='snapraid']")).to_be_visible()
+    expect(page.locator("button[data-snapraid-tab='configuration'][aria-selected='true']")).to_be_visible()
+    expect(page.locator("[data-snapraid-editor]")).to_be_visible()
+    expect(page.get_by_role("link", name="Configure provider")).to_have_count(0)
+
+    # A new setup must be saved before Apply is available. Preview remains a
+    # read-only check of the generated snapraid.conf.
+    page.select_option("select[data-drive-role='/mnt/disk1']", "data")
+    page.select_option("select[data-drive-role='/mnt/parity']", "parity")
+    expect(page.locator("button[data-snapraid-apply]")).to_be_disabled()
+    page.click("button[data-snapraid-preview-open]")
+    expect(page.locator("[data-snapraid-preview]")).to_contain_text("parity", timeout=10000)
+    page.click("button[data-snapraid-save]")
+    expect(page.get_by_text("Saved.")).to_be_visible(timeout=10000)
+    expect(page.locator("button[data-snapraid-apply]")).to_be_enabled()
+    page.click("button[data-snapraid-apply]")
+    expect(page.locator("[data-snapraid-apply-confirm]")).to_contain_text("/etc/snapraid.conf")
+    page.click("button[data-snapraid-apply-confirm-yes]")
+    expect(page.get_by_text("Applied")).to_be_visible(timeout=10000)
 
 
 def test_v2_protection_configured_cards_across_viewports(
@@ -57,6 +73,54 @@ def test_v2_protection_configured_cards_across_viewports(
     expect(protection_set).to_contain_text("SnapRAID")
     expect(page.get_by_text("MergerFS")).to_have_count(0)
     assert_no_horizontal_overflow(page, f"v2 protection configured ({viewport_profile_name})")
+
+
+def test_v2_snapraid_tailored_operations_recovery_and_diagnostics(
+    page: Page,
+    v2_server,
+    v2_login,
+    install_v2_storage_configured_mocks,
+):
+    base_url = v2_server["base_url"]
+    v2_login(page, base_url)
+    install_v2_storage_configured_mocks(page)
+    page.goto(f"{base_url}/v2/protection/snapraid")
+
+    expect(page.locator("[data-capability-renderer='snapraid']")).to_be_visible()
+    expect(page.locator("button[data-snapraid-tab='overview'][aria-selected='true']")).to_be_visible()
+    expect(page.locator("[data-protection-set='SnapRAID parity']")).to_contain_text("healthy")
+
+    # Sync is always explicitly confirmed because it writes parity. Scrub keeps
+    # its bounded percentage and age controls visible before execution.
+    page.click("button[data-snapraid-tab='operations']")
+    page.click("button[data-plugin-command='sync']")
+    expect(page.get_by_text("Sync updates parity from the current data drives.")).to_be_visible()
+    page.click("button[data-command-confirm='sync']")
+    expect(page.locator("[data-command-summary]")).to_contain_text("Completed", timeout=10000)
+
+    page.click("button[data-plugin-command='scrub']")
+    expect(page.locator("input[data-command-param='percent']")).to_have_value("8")
+    expect(page.locator("input[data-command-param='age_days']")).to_have_value("10")
+    page.click("button[data-command-run='scrub']")
+    expect(page.locator("[data-command-summary]")).to_contain_text("Completed", timeout=10000)
+
+    # Recovery is fetched only when its tab opens and keeps the provider's
+    # declared options visible beside the guarded Fix command.
+    page.click("button[data-snapraid-tab='recovery']")
+    recovery = page.locator("[data-snapraid-recovery-status]")
+    expect(recovery).to_contain_text("data2", timeout=10000)
+    expect(recovery).to_contain_text("Recover missing files")
+    expect(recovery).to_contain_text("3")
+    page.click("button[data-plugin-command='fix']")
+    expect(page.get_by_text("Fix can overwrite damaged files using parity.")).to_be_visible()
+    page.click("button[data-command-confirm='fix']")
+    expect(page.locator("[data-command-summary]")).to_contain_text("Completed", timeout=10000)
+
+    # Diagnostics exposes safe status commands and lazily loads the latest log.
+    page.click("button[data-snapraid-tab='diagnostics']")
+    expect(page.locator("[data-snapraid-log]")).to_contain_text("log line", timeout=10000)
+    page.click("button[data-plugin-command='status']")
+    expect(page.locator("[data-command-summary]")).to_contain_text("Completed", timeout=10000)
 
 
 def test_v2_protection_empty_state_keeps_provider_discovery_visible(

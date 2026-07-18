@@ -174,7 +174,11 @@ export function CommandRunner({
   const openCommand = openId ? commands.find((c) => c.id === openId) ?? null : null;
   const confirmationMessage = openCommand?.id === "unmount"
     ? "Unmounting can interrupt applications using this pool. Continue?"
-    : "This action can change provider state. Continue?";
+    : openCommand?.id === "sync"
+      ? "Sync updates parity from the current data drives. Continue?"
+      : openCommand?.id === "fix"
+        ? "Fix can overwrite damaged files using parity. Review recovery status before continuing?"
+        : "This action can change provider state. Continue?";
 
   return (
     <div className="space-y-3">

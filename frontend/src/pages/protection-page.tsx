@@ -18,6 +18,7 @@ import {
 import { useAuth } from "@/components/auth/auth-provider";
 import { GenericCapabilityRenderer } from "@/components/capabilities/generic-capability-renderer";
 import { ProtectionSetCard } from "@/components/storage/protection-set-card";
+import { SnapraidProviderRenderer } from "@/components/storage/snapraid-provider-renderer";
 import { StatusBadge, type BadgeProps } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
@@ -92,21 +93,20 @@ function ProviderRow({ provider, actionLabel = "Set up" }: { provider: Protectio
   );
 }
 
-function ProviderDetails({ provider, canAdmin, detail }: { provider: ProtectionProviderView; canAdmin: boolean; detail: PluginDetail | null }) {
+function ProviderDetails({ provider, canAdmin, detail, onRefresh }: { provider: ProtectionProviderView; canAdmin: boolean; detail: PluginDetail | null; onRefresh: () => Promise<void> }) {
   const protectionSets = protectionCapabilityView({ id: "storage.protection", surface: "protection", providers: [{ ...provider, renderer: { id: provider.rendererId, mode: provider.rendererMode } }] }).protectionSets;
   const configurePath = provider.source === "legacy" ? APP_PATHS.plugins : extensionDetailsPath(provider.id);
+  const tailoredSnapraid = provider.id === "snapraid" && detail !== null;
   return (
     <div className="space-y-5" data-protection-provider-details={provider.id}>
       <Link className={cn(buttonVariants({ size: "sm", variant: "ghost" }), "gap-2 px-0 hover:bg-transparent")} to={APP_PATHS.protection}><ArrowLeft aria-hidden="true" className="h-4 w-4" />Back to protection</Link>
       <PageHeader
-        actions={canAdmin ? <Link className={cn(buttonVariants({ variant: "secondary" }), "gap-2")} to={configurePath}><Settings2 aria-hidden="true" className="h-4 w-4" />Configure provider</Link> : undefined}
+        actions={canAdmin && !tailoredSnapraid ? <Link className={cn(buttonVariants({ variant: "secondary" }), "gap-2")} to={configurePath}><Settings2 aria-hidden="true" className="h-4 w-4" />Configure provider</Link> : undefined}
         description={detail?.description || "Storage protection provider"}
         status={<StatusBadge label={provider.status.health.state} tone={healthTone(provider.status.health.state)} />}
         title={provider.name}
       />
-      <GenericCapabilityRenderer status={provider.status} />
-      {protectionSets.length ? <section aria-labelledby="provider-protection-title"><h2 className="mb-3 font-mono text-sm font-semibold" id="provider-protection-title">Protection sets</h2><div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{protectionSets.map((item) => <ProtectionSetCard key={item.id} protectionSet={item} />)}</div></section> : null}
-      {!provider.status.lifecycle.configured ? <div className="border-l-2 border-warning bg-warning/5 px-4 py-3 text-sm"><p className="font-medium text-warning">Provider setup is required</p><p className="mt-1 text-muted-foreground">Configure this provider before it can report protected targets.</p></div> : null}
+      {tailoredSnapraid ? <SnapraidProviderRenderer canConfigure={canAdmin} detail={detail} onRefresh={onRefresh} protectionSets={protectionSets} status={provider.status} /> : <><GenericCapabilityRenderer status={provider.status} />{protectionSets.length ? <section aria-labelledby="provider-protection-title"><h2 className="mb-3 font-mono text-sm font-semibold" id="provider-protection-title">Protection sets</h2><div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{protectionSets.map((item) => <ProtectionSetCard key={item.id} protectionSet={item} />)}</div></section> : null}{!provider.status.lifecycle.configured ? <div className="border-l-2 border-warning bg-warning/5 px-4 py-3 text-sm"><p className="font-medium text-warning">Provider setup is required</p><p className="mt-1 text-muted-foreground">Configure this provider before it can report protected targets.</p></div> : null}</>}
     </div>
   );
 }
@@ -122,19 +122,31 @@ export function ProtectionPage() {
   const [registryWarning, setRegistryWarning] = useState("");
   const [lastUpdated, setLastUpdated] = useState("Never");
 
-  const load = useCallback(async () => {
-    setPhase("loading");
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setPhase("loading");
     const [registryResult, pluginsResult] = await Promise.allSettled([
       fetchCapability("storage.protection"),
       fetchPlugins(),
     ]);
     const plugins = pluginsResult.status === "fulfilled" ? pluginsResult.value : [];
     const detailEntries: Array<[string, PluginDetail | null]> = [];
+    let detailWarning = "";
     const snapraid = plugins.find((plugin) => plugin.id === "snapraid" && plugin.installed);
-    if (snapraid) detailEntries.push(["snapraid", await fetchPluginDetail("snapraid").catch(() => null)]);
+    if (snapraid) {
+      try {
+        detailEntries.push(["snapraid", await fetchPluginDetail("snapraid")]);
+      } catch {
+        detailEntries.push(["snapraid", null]);
+        detailWarning = "SnapRAID details could not be refreshed.";
+      }
+    }
     const legacy = adaptLegacyProtectionProviders(plugins, Object.fromEntries(detailEntries), new Date().toISOString());
 
     if (registryResult.status === "rejected" && pluginsResult.status === "rejected") {
+      if (silent) {
+        setRegistryWarning("Refresh failed; showing the last successful protection state.");
+        return;
+      }
       setError(getErrorMessage(registryResult.reason));
       setPhase("error");
       return;
@@ -143,18 +155,25 @@ export function ProtectionPage() {
       ? enrichProtectionCapability(registryResult.value, legacy)
       : legacy;
     setCapability(next);
-    setPluginDetails(Object.fromEntries(detailEntries));
+    const nextDetails = Object.fromEntries(detailEntries);
+    setPluginDetails((current) => {
+      if (!silent || pluginsResult.status === "fulfilled" && !snapraid) return nextDetails;
+      if (nextDetails.snapraid !== null && nextDetails.snapraid !== undefined) return nextDetails;
+      return current;
+    });
     setRegistryWarning(
       registryResult.status === "rejected" && legacy.providers.length
         ? "Capability registry unavailable; showing compatibility data from the existing SnapRAID provider."
-        : "",
+        : detailWarning
+          ? `${detailWarning}${silent ? " Showing the last successful provider state." : ""}`
+          : "",
     );
     setError("");
     setLastUpdated(formatClockTime(new Date()));
     setPhase("ready");
   }, []);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void load(false); }, [load]);
 
   const view = useMemo(() => protectionCapabilityView(capability), [capability]);
   const selectedProvider = providerId
@@ -162,7 +181,7 @@ export function ProtectionPage() {
     : null;
 
   if (providerId && phase === "ready" && selectedProvider) {
-    return <ProviderDetails canAdmin={canAdmin} detail={pluginDetails[selectedProvider.id] ?? null} provider={selectedProvider} />;
+    return <ProviderDetails canAdmin={canAdmin} detail={pluginDetails[selectedProvider.id] ?? null} onRefresh={() => load(true)} provider={selectedProvider} />;
   }
 
   if (providerId && phase === "ready" && !selectedProvider) {
@@ -175,14 +194,14 @@ export function ProtectionPage() {
   return (
     <section className="space-y-5 sm:space-y-6">
       <PageHeader
-        actions={<>{canAdmin ? <Link className={cn(buttonVariants({ variant: "secondary" }), "gap-2")} to={APP_PATHS.extensions}><Plus aria-hidden="true" className="h-4 w-4" />Add provider</Link> : null}<Button className="gap-2" disabled={phase === "loading"} onClick={() => void load()} variant="secondary"><RefreshCw aria-hidden="true" className={cn("h-4 w-4", phase === "loading" && "animate-spin")} />refresh</Button></>}
+        actions={<>{canAdmin ? <Link className={cn(buttonVariants({ variant: "secondary" }), "gap-2")} to={APP_PATHS.extensions}><Plus aria-hidden="true" className="h-4 w-4" />Add provider</Link> : null}<Button className="gap-2" disabled={phase === "loading"} onClick={() => void load(false)} variant="secondary"><RefreshCw aria-hidden="true" className={cn("h-4 w-4", phase === "loading" && "animate-spin")} />refresh</Button></>}
         description={`${view.summary.totalSets} protection sets · synced ${lastUpdated}`}
         status={phase === "ready" ? <StatusBadge label={view.summary.warnings ? `${view.summary.warnings} warning${view.summary.warnings === 1 ? "" : "s"}` : "protection ready"} tone={view.summary.warnings ? "warning" : "success"} /> : undefined}
         title="storage_protection"
       />
 
       {phase === "loading" ? <div aria-live="polite" className="flex min-h-56 items-center justify-center gap-2 rounded-md border border-border text-sm text-muted-foreground" role="status"><RefreshCw aria-hidden="true" className="h-4 w-4 animate-spin text-primary" />Loading protection providers...</div> : null}
-      {phase === "error" ? <div aria-live="assertive" className="border-l-2 border-danger bg-danger/5 px-4 py-4 text-sm text-danger" role="alert"><div className="flex items-center gap-2 font-medium"><TriangleAlert aria-hidden="true" className="h-4 w-4" />Protection is unavailable</div><p className="mt-1 text-muted-foreground">{error}</p><Button className="mt-3" onClick={() => void load()} size="sm" variant="outline">Retry</Button></div> : null}
+      {phase === "error" ? <div aria-live="assertive" className="border-l-2 border-danger bg-danger/5 px-4 py-4 text-sm text-danger" role="alert"><div className="flex items-center gap-2 font-medium"><TriangleAlert aria-hidden="true" className="h-4 w-4" />Protection is unavailable</div><p className="mt-1 text-muted-foreground">{error}</p><Button className="mt-3" onClick={() => void load(false)} size="sm" variant="outline">Retry</Button></div> : null}
       {phase === "ready" ? <ProtectionSummary view={view} /> : null}
       {registryWarning ? <div className="border-l-2 border-warning bg-warning/5 px-4 py-3 text-sm text-muted-foreground" data-protection-compatibility-warning>{registryWarning}</div> : null}
 

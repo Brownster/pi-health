@@ -67,6 +67,7 @@ export function SnapraidEditor({
   const [errors, setErrors] = useState<string[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [confirmApply, setConfirmApply] = useState(false);
+  const [dirty, setDirty] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -93,6 +94,9 @@ export function SnapraidEditor({
       }
     }
     setAssignments(existing);
+    setDirty(false);
+    setPreview(null);
+    setErrors([]);
 
     fetchDiskInventory()
       .then((inventory) => {
@@ -141,6 +145,9 @@ export function SnapraidEditor({
   }, [config]);
 
   const setAssignment = (path: string, patch: Partial<Assignment>) => {
+    setDirty(true);
+    setPreview(null);
+    setNotice(null);
     setAssignments((prev) => {
       const base: Assignment = prev[path] ?? { role: "none", content: false };
       return { ...prev, [path]: { ...base, ...patch } };
@@ -216,6 +223,7 @@ export function SnapraidEditor({
     const result = await savePluginConfig(pluginId, buildConfig());
     setBusy("");
     if (result.ok) {
+      setDirty(false);
       setNotice("Saved. Apply to write the SnapRAID config.");
       onSaved();
     } else {
@@ -252,7 +260,7 @@ export function SnapraidEditor({
   return (
     <div className="space-y-4" data-snapraid-editor>
       <div className="space-y-2">
-        <p className="text-xs uppercase tracking-wide text-muted-foreground">Drives</p>
+        <p className="font-mono text-xs uppercase text-muted-foreground">Drives</p>
         {candidates.length ? (
           <ul className="space-y-2">
             {candidates.map((candidate) => {
@@ -325,7 +333,12 @@ export function SnapraidEditor({
             className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
             max={100}
             min={0}
-            onChange={(e) => setPercent(e.target.value)}
+            onChange={(e) => {
+              setDirty(true);
+              setPreview(null);
+              setNotice(null);
+              setPercent(e.target.value);
+            }}
             placeholder="8"
             type="number"
             value={percent}
@@ -336,7 +349,12 @@ export function SnapraidEditor({
           <input
             className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
             min={0}
-            onChange={(e) => setAgeDays(e.target.value)}
+            onChange={(e) => {
+              setDirty(true);
+              setPreview(null);
+              setNotice(null);
+              setAgeDays(e.target.value);
+            }}
             placeholder="10"
             type="number"
             value={ageDays}
@@ -344,7 +362,15 @@ export function SnapraidEditor({
         </label>
       </div>
 
-      <SnapraidSchedule onChange={setSchedule} value={schedule} />
+      <SnapraidSchedule
+        onChange={(next) => {
+          setDirty(true);
+          setPreview(null);
+          setNotice(null);
+          setSchedule(next);
+        }}
+        value={schedule}
+      />
 
       {errors.length ? (
         <ul className="space-y-1 rounded-md bg-danger/10 p-2" data-snapraid-errors>
@@ -363,7 +389,7 @@ export function SnapraidEditor({
       ) : null}
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button className="gap-1.5" disabled={busy !== ""} onClick={() => void onPreview()} size="sm" variant="outline">
+        <Button className="gap-1.5" data-snapraid-preview-open disabled={busy !== ""} onClick={() => void onPreview()} size="sm" variant="outline">
           <Eye aria-hidden="true" className="h-3.5 w-3.5" />
           Preview
         </Button>
@@ -372,13 +398,14 @@ export function SnapraidEditor({
         </Button>
         <Button
           data-snapraid-apply
-          disabled={busy !== ""}
+          disabled={busy !== "" || dirty}
           onClick={() => setConfirmApply(true)}
           size="sm"
           variant="secondary"
         >
           {busy === "apply" ? "Applying..." : "Apply"}
         </Button>
+        {dirty ? <span className="text-xs text-warning">Save changes before applying.</span> : null}
       </div>
 
       {confirmApply ? (
@@ -401,7 +428,7 @@ export function SnapraidEditor({
 
       {preview !== null ? (
         <div className="space-y-1" data-snapraid-preview>
-          <p className="text-xs uppercase tracking-wide text-muted-foreground">snapraid.conf preview</p>
+          <p className="font-mono text-xs uppercase text-muted-foreground">snapraid.conf preview</p>
           <pre className="max-h-[24vh] overflow-auto whitespace-pre-wrap break-words rounded-md border border-border/70 bg-muted/20 p-3 text-xs">
             {preview || "(empty)"}
           </pre>
