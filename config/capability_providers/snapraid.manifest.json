@@ -1,0 +1,131 @@
+{
+  "manifest_version": "1",
+  "id": "snapraid",
+  "name": "SnapRAID",
+  "description": "Protect data disks with scheduled parity.",
+  "version": "1.0.0",
+  "runtime": {
+    "kind": "builtin-python",
+    "entry": "storage_plugins/snapraid_plugin.py",
+    "class": "SnapRAIDPlugin"
+  },
+  "compatibility": {
+    "capability_api": "1"
+  },
+  "capabilities": [
+    {
+      "id": "storage.protection",
+      "surface": "protection",
+      "renderer": {
+        "schema_version": "1",
+        "id": "snapraid",
+        "mode": "tailored",
+        "fallback": "generic"
+      },
+      "permissions": {
+        "schema_version": "1",
+        "view": "capability.view",
+        "configure": "capability.configure",
+        "lifecycle": "extensions.admin"
+      },
+      "setup": {
+        "contract_version": "1",
+        "schema_id": "snapraid-protection-v1"
+      },
+      "status": {
+        "contract_version": "1",
+        "schema_id": "protection-status-v1"
+      },
+      "actions": [
+        {
+          "id": "status",
+          "label": "Check status",
+          "description": "Read parity and sync status.",
+          "intent": "read",
+          "permission": "capability.view",
+          "timeout_seconds": 60,
+          "parameters": [],
+          "result_mode": "stream"
+        },
+        {
+          "id": "diff",
+          "label": "Check changes",
+          "description": "Read changes since the last parity sync.",
+          "intent": "read",
+          "permission": "capability.view",
+          "timeout_seconds": 120,
+          "parameters": [],
+          "result_mode": "stream"
+        },
+        {
+          "id": "sync",
+          "label": "Sync parity",
+          "description": "Update parity from current data.",
+          "intent": "mutation",
+          "permission": "capability.operate",
+          "timeout_seconds": 3600,
+          "parameters": [],
+          "confirmation": {
+            "title": "Sync parity?",
+            "message": "Update parity using the current data disks.",
+            "confirm_label": "Sync"
+          },
+          "result_mode": "stream"
+        },
+        {
+          "id": "scrub",
+          "label": "Scrub",
+          "description": "Verify a bounded percentage of protected data.",
+          "intent": "diagnostic",
+          "permission": "capability.diagnose",
+          "timeout_seconds": 3600,
+          "parameters": [
+            {
+              "name": "percent",
+              "label": "Percent to scrub",
+              "type": "number",
+              "required": false,
+              "default": 8,
+              "minimum": 0,
+              "maximum": 100
+            },
+            {
+              "name": "age_days",
+              "label": "Minimum age (days)",
+              "type": "number",
+              "required": false,
+              "default": 10,
+              "minimum": 0
+            }
+          ],
+          "result_mode": "stream"
+        },
+        {
+          "id": "check",
+          "label": "Check parity",
+          "description": "Verify data and parity without repairing files.",
+          "intent": "diagnostic",
+          "permission": "capability.diagnose",
+          "timeout_seconds": 3600,
+          "parameters": [],
+          "result_mode": "stream"
+        },
+        {
+          "id": "fix",
+          "label": "Fix from parity",
+          "description": "Recover damaged or missing files from parity.",
+          "intent": "destructive",
+          "permission": "capability.operate",
+          "timeout_seconds": 3600,
+          "parameters": [],
+          "confirmation": {
+            "title": "Fix from parity?",
+            "message": "Recovery can overwrite damaged files. Review recovery status first.",
+            "confirm_label": "Fix"
+          },
+          "result_mode": "stream"
+        }
+      ]
+    }
+  ]
+}

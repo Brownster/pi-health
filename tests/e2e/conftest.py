@@ -672,6 +672,92 @@ def install_v2_disks_api_mocks():
     return _install
 
 
+def _storage_capability_payload(plugin, detail, capability_id, surface, renderer_id):
+    raw_status = detail.get("status", {}) if isinstance(detail, dict) else {}
+    raw_details = raw_status.get("details", {}) if isinstance(raw_status, dict) else {}
+    details = dict(raw_details) if isinstance(raw_details, dict) else {}
+    configured = bool(plugin.get("configured"))
+    enabled = bool(plugin.get("enabled"))
+    legacy_state = str(raw_status.get("status", plugin.get("status", "unknown")))
+    if not enabled:
+        health = "disabled"
+    elif not configured:
+        health = "unconfigured"
+    elif legacy_state in {"healthy", "ok", "active", "ready"}:
+        health = "healthy"
+    elif legacy_state in {"degraded", "warning", "unmounted", "sync_required"}:
+        health = "warning"
+    elif legacy_state in {"error", "failed"}:
+        health = "error"
+    else:
+        health = "unknown"
+    if capability_id == "storage.protection":
+        config = detail.get("config", {}) if isinstance(detail, dict) else {}
+        drives = config.get("drives", []) if isinstance(config, dict) else []
+        data_drives = details.get(
+            "data_drives", sum(drive.get("role") == "data" for drive in drives)
+        )
+        parity_drives = details.get(
+            "parity_drives", sum(drive.get("role") == "parity" for drive in drives)
+        )
+        details["protection_sets"] = [{
+            "name": "SnapRAID parity",
+            "kind": "parity",
+            "health": health,
+            "protected_targets": data_drives,
+            "unprotected_targets": None,
+            "parity_targets": parity_drives,
+            "last_run_at": details.get("last_run_at"),
+            "next_run_at": None,
+            "schedule": None,
+            "sync_required": details.get("sync_required") is True,
+            "required_action": (
+                "Sync required" if details.get("sync_required") is True else None
+            ),
+        }] if configured else []
+    status = {
+        "schema_version": "1",
+        "provider_id": plugin["id"],
+        "capability_id": capability_id,
+        "observed_at": "2026-07-18T20:00:00+00:00",
+        "lifecycle": {
+            "installed": bool(plugin.get("installed")),
+            "enabled": enabled,
+            "configured": configured,
+            "compatibility": "compatible",
+            "availability": "available" if detail else "unknown",
+        },
+        "health": {
+            "state": health,
+            "message": str(raw_status.get(
+                "message", plugin.get("status_message", "Provider status is available.")
+            )),
+            "issues": [],
+        },
+        "summary": [],
+        "metrics": [],
+        "recent_activity": [],
+        "details": details,
+    }
+    return {
+        "schema_version": "1",
+        "capability": {
+            "id": capability_id,
+            "surface": surface,
+            "providers": [{
+                "id": plugin["id"],
+                "name": plugin["name"],
+                "installed": bool(plugin.get("installed")),
+                "enabled": enabled,
+                "operational": bool(enabled and configured and health == "healthy"),
+                "renderer": {"id": renderer_id, "mode": "tailored"},
+                "status": status,
+            }],
+        },
+        "errors": [],
+    }
+
+
 @pytest.fixture(scope="function")
 def install_v2_storage_api_mocks():
     """Returns a callable(page) installing deterministic /api/storage/plugins* mocks."""
@@ -783,6 +869,18 @@ def install_v2_storage_api_mocks():
 
             if path == "/api/storage/plugins" and method == "GET":
                 _json_fulfill(route, {"plugins": plugins})
+                return
+            if path == "/api/capabilities/storage.pooling" and method == "GET":
+                mergerfs = next(plugin for plugin in plugins if plugin["id"] == "mergerfs")
+                _json_fulfill(route, _storage_capability_payload(
+                    mergerfs, mergerfs_detail, "storage.pooling", "pools", "mergerfs",
+                ))
+                return
+            if path == "/api/capabilities/storage.protection" and method == "GET":
+                snapraid = next(plugin for plugin in plugins if plugin["id"] == "snapraid")
+                _json_fulfill(route, _storage_capability_payload(
+                    snapraid, snapraid_detail, "storage.protection", "protection", "snapraid",
+                ))
                 return
             if path == "/api/storage/plugins/mergerfs" and method == "GET":
                 _json_fulfill(route, mergerfs_detail)
@@ -984,6 +1082,18 @@ def install_v2_storage_configured_mocks():
             method = route.request.method
             if path == "/api/storage/plugins" and method == "GET":
                 _json_fulfill(route, {"plugins": plugins})
+                return
+            if path == "/api/capabilities/storage.pooling" and method == "GET":
+                mergerfs = next(plugin for plugin in plugins if plugin["id"] == "mergerfs")
+                _json_fulfill(route, _storage_capability_payload(
+                    mergerfs, mergerfs_detail, "storage.pooling", "pools", "mergerfs",
+                ))
+                return
+            if path == "/api/capabilities/storage.protection" and method == "GET":
+                snapraid = next(plugin for plugin in plugins if plugin["id"] == "snapraid")
+                _json_fulfill(route, _storage_capability_payload(
+                    snapraid, snapraid_detail, "storage.protection", "protection", "snapraid",
+                ))
                 return
             if path == "/api/storage/plugins/snapraid" and method == "GET":
                 _json_fulfill(route, snapraid_detail)

@@ -1,0 +1,122 @@
+{
+  "manifest_version": "1",
+  "id": "mergerfs",
+  "name": "MergerFS",
+  "description": "Combine filesystem branches into a storage pool.",
+  "version": "1.0.0",
+  "runtime": {
+    "kind": "builtin-python",
+    "entry": "storage_plugins/mergerfs_plugin.py",
+    "class": "MergerFSPlugin"
+  },
+  "compatibility": {
+    "capability_api": "1"
+  },
+  "capabilities": [
+    {
+      "id": "storage.pooling",
+      "surface": "pools",
+      "renderer": {
+        "schema_version": "1",
+        "id": "mergerfs",
+        "mode": "tailored",
+        "fallback": "generic"
+      },
+      "permissions": {
+        "schema_version": "1",
+        "view": "capability.view",
+        "configure": "capability.configure",
+        "lifecycle": "extensions.admin"
+      },
+      "setup": {
+        "contract_version": "1",
+        "schema_id": "mergerfs-pool-v1"
+      },
+      "status": {
+        "contract_version": "1",
+        "schema_id": "pool-status-v1"
+      },
+      "actions": [
+        {
+          "id": "status",
+          "label": "Check status",
+          "description": "Read current pool status.",
+          "intent": "read",
+          "permission": "capability.view",
+          "timeout_seconds": 30,
+          "parameters": [],
+          "result_mode": "stream"
+        },
+        {
+          "id": "mount",
+          "label": "Mount pool",
+          "description": "Mount the selected pool.",
+          "intent": "mutation",
+          "permission": "capability.operate",
+          "timeout_seconds": 60,
+          "parameters": [
+            {
+              "name": "pool_name",
+              "label": "Pool",
+              "type": "select",
+              "required": true,
+              "source": "status.details.pools[].name"
+            }
+          ],
+          "confirmation": {
+            "title": "Mount pool?",
+            "message": "Mount the selected pool using its saved configuration.",
+            "confirm_label": "Mount"
+          },
+          "result_mode": "stream"
+        },
+        {
+          "id": "unmount",
+          "label": "Unmount pool",
+          "description": "Unmount the selected pool.",
+          "intent": "destructive",
+          "permission": "capability.operate",
+          "timeout_seconds": 60,
+          "parameters": [
+            {
+              "name": "pool_name",
+              "label": "Pool",
+              "type": "select",
+              "required": true,
+              "source": "status.details.pools[].name"
+            }
+          ],
+          "confirmation": {
+            "title": "Unmount pool?",
+            "message": "Applications using this pool may lose access to their files.",
+            "confirm_label": "Unmount"
+          },
+          "result_mode": "stream"
+        },
+        {
+          "id": "balance",
+          "label": "Balance pool",
+          "description": "Rebalance files across the selected pool branches.",
+          "intent": "mutation",
+          "permission": "capability.operate",
+          "timeout_seconds": 3600,
+          "parameters": [
+            {
+              "name": "pool_name",
+              "label": "Pool",
+              "type": "select",
+              "required": true,
+              "source": "status.details.pools[].name"
+            }
+          ],
+          "confirmation": {
+            "title": "Balance pool?",
+            "message": "Move files between branches using the saved pool policy.",
+            "confirm_label": "Balance"
+          },
+          "result_mode": "stream"
+        }
+      ]
+    }
+  ]
+}

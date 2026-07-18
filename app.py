@@ -59,6 +59,7 @@ from tools_manager import tools_manager, default_tools_service
 from tools_service import ToolsService
 from storage_plugins import default_storage_read_service, storage_bp
 from storage_plugins.registry import init_plugins
+from storage_capability_adapters import LegacyStorageCapabilityAdapter
 from pi_monitor import get_pi_metrics
 from update_scheduler import update_scheduler, init_scheduler, default_update_service
 from update_service import AutoUpdateService
@@ -246,6 +247,21 @@ def _default_system_service():
         cpu_reader=get_cpu_usage_delta,
         disk_collector=_collect_disk_usage,
         pi_metrics_reader=get_pi_metrics,
+    )
+
+
+def _default_capability_registry_service(application):
+    if not application.config["INIT_PLUGINS"]:
+        application.extensions["storage_capability_adapter"] = None
+        return CapabilityRegistryService(
+            candidate_reader=lambda: (),
+            limeos_version=application.config["LIMEOS_VERSION"],
+        )
+    adapter = LegacyStorageCapabilityAdapter(STORAGE_PLUGIN_CONFIG_DIR)
+    application.extensions["storage_capability_adapter"] = adapter
+    return CapabilityRegistryService(
+        candidate_reader=adapter.candidates,
+        limeos_version=application.config["LIMEOS_VERSION"],
     )
 
 
@@ -1490,10 +1506,7 @@ def create_app(config=None, dependencies=None):
     )
     application.extensions["capability_registry_service"] = (
         resolved.capability_registry_service
-        or CapabilityRegistryService(
-            candidate_reader=lambda: (),
-            limeos_version=application.config["LIMEOS_VERSION"],
-        )
+        or _default_capability_registry_service(application)
     )
     application.extensions["capability_authorizer"] = (
         resolved.capability_authorizer
