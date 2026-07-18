@@ -10,6 +10,7 @@
     "check": "tsc --project tsconfig.app.json --noEmit && tsc --project tsconfig.node.json --noEmit",
     "test:capabilities": "node --experimental-strip-types --test tests/capability-renderer.test.ts tests/capability-renderer.ssr.test.mjs",
     "test:extensions": "node --experimental-strip-types tests/extensions.test.ts",
+    "test:pools": "node --experimental-strip-types --test tests/pools.test.ts",
     "test:routes": "node --experimental-strip-types tests/routes.test.ts",
     "test:disks": "node --experimental-strip-types --test tests/disk-summary.test.ts",
     "build:publish": "npm run build && rm -rf ../static/v2 && mkdir -p ../static/v2 && cp -R dist/* ../static/v2/ && python3 ../scripts/bundle_source_digest.py --write"

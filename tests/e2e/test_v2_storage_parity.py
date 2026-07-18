@@ -1,8 +1,10 @@
-"""PH3-006: v2 storage plugins + pools tabbed surface.
+"""Storage extension compatibility and CP-013 Pools capability coverage.
 
 Pinned to v2 UI mode; deterministic /api/storage/plugins* mocks (list, toggle,
 detail, recovery 404, latest log, SSE command) keep the page reproducible.
 """
+
+import json
 
 import pytest
 from playwright.sync_api import Page, expect
@@ -36,11 +38,11 @@ def test_v2_storage_plugins_list_and_pools_tab(
     expect(page.get_by_text("Samba").first).to_be_visible()
     assert_no_horizontal_overflow(page, f"v2 storage plugins ({viewport_profile_name})")
 
-    # Pools tab filters to pool-capable plugins (mergerfs), hiding samba.
+    # Pools is now a capability-owned route, while the Plugins tab remains as a
+    # compatibility path until CP-019.
     page.click("button[data-storage-tab='pools']")
     expect(page).to_have_url(f"{base_url}/v2/pools")
-    expect(page.locator("button[data-storage-tab='pools']")).to_have_attribute("aria-pressed", "true")
-    expect(page.locator("button[data-storage-tab='plugins']")).to_have_attribute("aria-pressed", "false")
+    expect(page.get_by_role("heading", name="storage_pools")).to_be_visible()
     expect(page.get_by_text("MergerFS").first).to_be_visible()
     expect(page.get_by_text("Samba")).to_have_count(0)
 
@@ -53,14 +55,12 @@ def test_v2_storage_pools_route_defaults_to_pools_tab(
 ):
     base_url = v2_server["base_url"]
     _open_v2_storage(page, base_url, "pools", v2_login, install_v2_storage_api_mocks)
-    # /v2/pools opens with the Pools tab active -> only mergerfs.
-    expect(page.locator("button[data-storage-tab='pools'][aria-pressed='true']")).to_be_visible()
+    # The disabled legacy MergerFS adapter is discoverable, but does not create an
+    # operational pool card or expose SnapRAID as pooling.
+    expect(page.locator("[data-pools-empty]")).to_be_visible()
     expect(page.get_by_text("Samba")).to_have_count(0)
-    # The pool-aware MergerFS card renders (unconfigured -> Set up CTA).
-    expect(page.locator("[data-pool-plugin='mergerfs']")).to_be_visible()
-    expect(
-        page.locator("button[data-pool-action='setup'][data-plugin='mergerfs']")
-    ).to_be_visible()
+    expect(page.locator("[data-pool-provider-row='mergerfs']")).to_contain_text("disabled")
+    expect(page.get_by_text("SnapRAID")).to_have_count(0)
 
 
 def test_v2_pools_configured_cards_across_viewports(
@@ -78,16 +78,13 @@ def test_v2_pools_configured_cards_across_viewports(
     page.goto(f"{base_url}/v2/pools")
     expect(page.get_by_role("heading", name="storage_pools")).to_be_visible()
 
-    # Healthy SnapRAID card: protection badge, drive counts, last-run summary chips.
-    snap = page.locator("[data-pool-plugin='snapraid']")
-    expect(snap).to_contain_text("protected")
-    expect(snap).to_contain_text("Data drives")
-    expect(page.locator("[data-pool-summary='snapraid']")).to_contain_text("removed")
-
-    # MergerFS: a mounted pool (with capacity) and a degraded (unmounted) pool.
+    # MergerFS remains operational through the read-only compatibility adapter;
+    # SnapRAID is reserved for the Protection domain.
+    expect(page.locator("[data-pool-summary]")).to_contain_text("2")
+    expect(page.get_by_text("SnapRAID")).to_have_count(0)
     mounted = page.locator("[data-pool-card='media']")
     expect(mounted).to_contain_text("mounted")
-    expect(mounted).to_contain_text("3 branches")
+    expect(mounted.get_by_text("3", exact=True)).to_be_visible()
     expect(mounted.locator("[role='progressbar']")).to_have_attribute("aria-valuenow", "42")
     expect(page.locator("[data-pool-card='backup']")).to_contain_text("unmounted")
 
@@ -101,10 +98,10 @@ def test_v2_snapraid_guided_editor(
     install_v2_storage_api_mocks,
 ):
     base_url = v2_server["base_url"]
-    _open_v2_storage(page, base_url, "pools", v2_login, install_v2_storage_api_mocks)
+    _open_v2_storage(page, base_url, "plugins", v2_login, install_v2_storage_api_mocks)
 
     # Unconfigured SnapRAID -> Set up opens the modal on the guided editor.
-    page.click("button[data-pool-action='setup'][data-plugin='snapraid']")
+    page.click("button[data-plugin-action='details'][data-plugin='snapraid']")
     expect(page.locator("[data-snapraid-editor]")).to_be_visible()
 
     # Mounted /mnt/* disks from /api/disks are listed as assignable drives.
@@ -134,10 +131,10 @@ def test_v2_snapraid_pre_sync_threshold_gate(
     install_v2_storage_api_mocks,
 ):
     base_url = v2_server["base_url"]
-    _open_v2_storage(page, base_url, "pools", v2_login, install_v2_storage_api_mocks)
+    _open_v2_storage(page, base_url, "plugins", v2_login, install_v2_storage_api_mocks)
 
     # Open the SnapRAID detail and run Sync; the mock aborts over the delete threshold.
-    page.click("button[data-pool-action='details'][data-plugin='snapraid']")
+    page.click("button[data-plugin-action='details'][data-plugin='snapraid']")
     page.click("button[data-plugin-command='sync']")
     expect(page.locator("[data-command-threshold]")).to_be_visible(timeout=10000)
     expect(page.locator("#v2-plugin-command-output")).to_contain_text("51 files removed")
@@ -156,10 +153,10 @@ def test_v2_mergerfs_pool_editor(
     install_v2_storage_api_mocks,
 ):
     base_url = v2_server["base_url"]
-    _open_v2_storage(page, base_url, "pools", v2_login, install_v2_storage_api_mocks)
+    _open_v2_storage(page, base_url, "plugins", v2_login, install_v2_storage_api_mocks)
 
     # Unconfigured MergerFS -> Set up opens the modal on the guided pool editor.
-    page.click("button[data-pool-action='setup'][data-plugin='mergerfs']")
+    page.click("button[data-plugin-action='details'][data-plugin='mergerfs']")
     expect(page.locator("[data-mergerfs-editor]")).to_be_visible()
 
     # Build a two-branch pool without JSON.
@@ -190,8 +187,79 @@ def test_v2_storage_tab_syncs_with_shell_nav(
     # Client-side nav via the shell nav link must switch the active tab.
     page.get_by_role("link", name="Pools").click()
     expect(page).to_have_url(f"{base_url}/v2/pools")
-    expect(page.locator("button[data-storage-tab='pools'][aria-pressed='true']")).to_be_visible()
+    expect(page.get_by_role("heading", name="storage_pools")).to_be_visible()
     expect(page.get_by_text("Samba")).to_have_count(0)
+
+
+def test_v2_pools_generic_capability_provider_and_deep_link(
+    page: Page,
+    v2_server,
+    v2_login,
+    install_v2_storage_api_mocks,
+):
+    base_url = v2_server["base_url"]
+    v2_login(page, base_url)
+    install_v2_storage_api_mocks(page)
+
+    status = {
+        "schema_version": "1",
+        "provider_id": "openpool",
+        "capability_id": "storage.pooling",
+        "observed_at": "2026-07-18T12:00:00Z",
+        "lifecycle": {
+            "installed": True,
+            "enabled": True,
+            "configured": True,
+            "compatibility": "compatible",
+            "availability": "available",
+        },
+        "health": {"state": "healthy", "message": "Pool is available.", "issues": []},
+        "summary": [{"id": "pools", "label": "Pools", "value": 1, "tone": "success"}],
+        "metrics": [],
+        "recent_activity": [],
+        "details": {"pools": [{
+            "name": "archive",
+            "mount_point": "/mnt/archive",
+            "mounted": True,
+            "branches": 2,
+            "policy": "most-free-space",
+            "total_bytes": 2000000000000,
+            "free_bytes": 1500000000000,
+        }]},
+    }
+
+    def capability(route):
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps({
+                "schema_version": "1",
+                "capability": {
+                    "id": "storage.pooling",
+                    "surface": "pools",
+                    "providers": [{
+                        "id": "openpool",
+                        "name": "OpenPool",
+                        "enabled": True,
+                        "operational": True,
+                        "renderer": {"id": "generic", "mode": "generic"},
+                        "status": status,
+                    }],
+                },
+                "errors": [],
+            }),
+        )
+
+    page.route("**/api/capabilities/storage.pooling", capability)
+    page.goto(f"{base_url}/v2/pools")
+
+    archive = page.locator("[data-pool-card='archive']")
+    expect(archive).to_contain_text("most-free-space")
+    expect(archive).to_contain_text("OpenPool")
+    archive.get_by_role("link", name="Manage archive").click()
+    expect(page).to_have_url(f"{base_url}/v2/pools/openpool")
+    expect(page.locator("[data-capability-renderer='generic']")).to_be_visible()
+    expect(page.get_by_role("heading", name="OpenPool")).to_be_visible()
 
 
 def test_v2_storage_remove_only_for_non_builtin(

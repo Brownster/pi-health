@@ -13,6 +13,7 @@ import { ExtensionsPage } from "@/pages/extensions-page";
 import { MountsPage } from "@/pages/mounts-page";
 import { IntegrationsPage } from "@/pages/integrations-page";
 import { NetworkPage } from "@/pages/network-page";
+import { PoolsPage } from "@/pages/pools-page";
 import { SettingsPage } from "@/pages/settings-page";
 import { SharesPage } from "@/pages/shares-page";
 import { StacksPage } from "@/pages/stacks-page";
@@ -83,7 +84,15 @@ export const appRoutes: AppRoute[] = [
     navGroup: "Storage",
     requiresAuth: true,
     showInNav: true,
-    component: StoragePage,
+    component: PoolsPage,
+  },
+  {
+    path: APP_ROUTE_PATTERNS.poolProviderDetails,
+    label: "Pool provider",
+    navGroup: "Storage",
+    requiresAuth: true,
+    showInNav: false,
+    component: PoolsPage,
   },
   {
     path: APP_PATHS.mounts,
