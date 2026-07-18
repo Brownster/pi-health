@@ -1,7 +1,7 @@
 # Capability Providers and Storage Surfaces
 
 Date: 2026-07-16
-Status: Sprint 5 active; CP-018 complete, CP-019 next
+Status: Sprint 5 active; CP-019 complete, CP-020 next
 Tracking prefix: `CP`
 
 ## Goal
@@ -353,7 +353,7 @@ Goal: prove the shared framework without merging the user-facing domains.
 | ID | Work package | Depends on | Status | Deliverable |
 | --- | --- | --- | --- | --- |
 | CP-018 | Integration provider adapter | CP-003..CP-006 | Complete | [`Docs/LIMEOS_CAPABILITY_PROVIDERS_CP018_INTEGRATIONS.md`](../../Docs/LIMEOS_CAPABILITY_PROVIDERS_CP018_INTEGRATIONS.md): read-only Mattermost and AI Agents registry adapters with unchanged Integrations setup and operations |
-| CP-019 | Final navigation migration | CP-007, CP-013, CP-015 | Planned | Plugins removed from primary nav, Extensions enabled under Advanced, redirects activated |
+| CP-019 | Final navigation migration | CP-007, CP-013, CP-015 | Complete | [`Docs/LIMEOS_CAPABILITY_PROVIDERS_CP019_NAVIGATION.md`](../../Docs/LIMEOS_CAPABILITY_PROVIDERS_CP019_NAVIGATION.md): Plugins retired from primary navigation, compatibility redirects activated, and provider links assigned to completed owning pages |
 | CP-020 | Cross-domain hardening | CP-010..CP-019 | Planned | Accessibility, responsive, recovery, compatibility, security, and bundle tests |
 | CP-021 | Holly canary and release signoff | CP-020 | Planned | Upgrade, operation, rollback, and evidence checklist on `holly@192.168.0.45` |
 
