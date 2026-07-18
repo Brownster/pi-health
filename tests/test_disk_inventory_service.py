@@ -97,6 +97,7 @@ def test_inventory_composes_helper_reads():
     assert partition["fstype"] == "ext4"
     assert partition["mounted"] is True
     assert partition["mountpoint"] == "/mnt/storage"
+    assert partition["configured_mountpoint"] == "/mnt/storage"
     assert partition["in_fstab"] is True
     assert partition["usage"] == {
         "total": 100,
@@ -118,3 +119,4 @@ def test_process_device_matches_fstab_by_uuid_when_unmounted():
     disk = process_device(device, blkid_map, {}, {}, fstab_uuid_map, {})
     assert disk["mounted"] is False
     assert disk["in_fstab"] is True
+    assert disk["configured_mountpoint"] == "/mnt/backup"

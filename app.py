@@ -67,6 +67,7 @@ from backup_service import BackupService
 from disk_manager import (
     default_disk_inventory_service,
     default_disk_mount_service,
+    default_disk_summary_service,
     default_disk_suggestion_service,
     default_media_paths_service,
     default_seedbox_service,
@@ -74,6 +75,7 @@ from disk_manager import (
     disk_manager,
 )
 from disk_inventory_service import DiskInventoryService
+from disk_summary_service import DiskSummaryService
 from disk_mount_service import DiskMountService
 from media_layout import DOWNLOAD_CATEGORIES, LIBRARY_KINDS
 from media_paths_service import MediaPathsService
@@ -213,6 +215,7 @@ class AppDependencies:
     stack_mutation_service: StackMutationService | None = None
     stack_operations_service: StackOperationsService | None = None
     disk_inventory_service: DiskInventoryService | None = None
+    disk_summary_service: DiskSummaryService | None = None
     disk_mount_service: DiskMountService | None = None
     media_paths_service: MediaPathsService | None = None
     media_layout_service: MediaLayoutService | None = None
@@ -1419,6 +1422,13 @@ def create_app(config=None, dependencies=None):
     )
     application.extensions["smart_service"] = (
         resolved.smart_service or default_smart_service(application.extensions["helper"])
+    )
+    application.extensions["disk_summary_service"] = (
+        resolved.disk_summary_service
+        or default_disk_summary_service(
+            application.extensions["disk_inventory_service"],
+            application.extensions["smart_service"],
+        )
     )
     application.extensions["storage_read_service"] = (
         resolved.storage_read_service or default_storage_read_service()

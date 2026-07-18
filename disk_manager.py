@@ -10,6 +10,8 @@ from flask import Blueprint, current_app, has_app_context, jsonify, request
 from auth_utils import login_required
 from helper_client import helper_available, HelperError, HELPER_SOCKET
 from disk_inventory_service import DiskInventoryService
+from disk_provider_assignments import StorageProviderAssignmentReader
+from disk_summary_service import DiskSummaryService
 from ports import HelperClientAdapter, JsonFileRepository
 from helper_templates import render_startup_files
 from fstab_presets import FSTAB_PRESETS
@@ -147,12 +149,37 @@ def default_smart_service(helper=None):
     )
 
 
+def default_disk_summary_service(
+    inventory_service=None,
+    smart_service=None,
+    assignment_reader=None,
+):
+    inventory_service = inventory_service or default_disk_inventory_service()
+    smart_service = smart_service or default_smart_service()
+    assignment_reader = assignment_reader or StorageProviderAssignmentReader(
+        STORAGE_PLUGIN_CONFIG_DIR
+    )
+    return DiskSummaryService(
+        inventory_provider=inventory_service.inventory,
+        smart_provider=smart_service.all_devices,
+        assignment_provider=assignment_reader.read,
+    )
+
+
 def _disk_inventory():
     if has_app_context():
         service = current_app.extensions.get("disk_inventory_service")
         if service is not None:
             return service
     return default_disk_inventory_service()
+
+
+def _disk_summary():
+    if has_app_context():
+        service = current_app.extensions.get("disk_summary_service")
+        if service is not None:
+            return service
+    return default_disk_summary_service()
 
 
 def _disk_mounts():
@@ -235,6 +262,13 @@ def api_disk_list():
         return jsonify(inventory)
     except HelperError as e:
         return jsonify({'error': str(e), 'helper_available': False}), 503
+
+
+@disk_manager.route('/api/disks/summary', methods=['GET'])
+@login_required
+def api_disk_summary():
+    """Return the bounded disk health, capacity, and assignment summary."""
+    return jsonify(_disk_summary().snapshot())
 
 
 @disk_manager.route('/api/disks/helper-status', methods=['GET'])

@@ -1,4 +1,12 @@
 import { requestApi, toNullableNumber, toNullableString } from "@/lib/api";
+import { normalizeDiskSummary, type DiskSummary } from "@/lib/disk-summary";
+
+export type {
+  DiskProviderAssignment,
+  DiskSummary,
+  DiskSummaryDevice,
+  DiskSummarySourceState,
+} from "@/lib/disk-summary";
 
 export interface DiskPartition {
   name: string;
@@ -6,6 +14,7 @@ export interface DiskPartition {
   size: string | null;
   fstype: string | null;
   mountpoint: string | null;
+  configured_mountpoint: string | null;
   uuid: string | null;
   label: string | null;
   usage: DiskUsage | null;
@@ -27,6 +36,7 @@ export interface DiskInfo {
   serial: string | null;
   transport: string | null;
   mountpoint: string | null;
+  configured_mountpoint: string | null;
   fstype: string | null;
   uuid: string | null;
   label: string | null;
@@ -83,6 +93,7 @@ function normalizePartition(raw: Record<string, unknown> | undefined): DiskParti
     size: toNullableString(raw?.size),
     fstype: toNullableString(raw?.fstype),
     mountpoint: toNullableString(raw?.mountpoint),
+    configured_mountpoint: toNullableString(raw?.configured_mountpoint),
     uuid: toNullableString(raw?.uuid),
     label: toNullableString(raw?.label),
     usage: normalizeUsage(raw?.usage),
@@ -100,6 +111,7 @@ function normalizeDisk(raw: Record<string, unknown> | undefined): DiskInfo {
     serial: toNullableString(raw?.serial),
     transport: toNullableString(raw?.transport),
     mountpoint: toNullableString(raw?.mountpoint),
+    configured_mountpoint: toNullableString(raw?.configured_mountpoint),
     fstype: toNullableString(raw?.fstype),
     uuid: toNullableString(raw?.uuid),
     label: toNullableString(raw?.label),
@@ -141,6 +153,11 @@ export async function fetchDiskInventory(signal?: AbortSignal): Promise<DiskInve
     disks: Array.isArray(payload.disks) ? payload.disks.map((disk) => normalizeDisk(disk)) : [],
     helper_available: Boolean(payload.helper_available),
   };
+}
+
+export async function fetchDiskSummary(signal?: AbortSignal): Promise<DiskSummary> {
+  const payload = await requestApi<unknown>("/api/disks/summary", { method: "GET", signal });
+  return normalizeDiskSummary(payload);
 }
 
 export async function fetchHelperStatus(signal?: AbortSignal): Promise<HelperStatus> {

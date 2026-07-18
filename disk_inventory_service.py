@@ -50,9 +50,13 @@ def process_device(device, blkid_map, mounts_map, fstab_map, fstab_uuid_map, df_
 
     # Check fstab status
     mountpoint = disk_info.get('mountpoint', '')
-    disk_info['in_fstab'] = mountpoint in fstab_map
-    if not disk_info['in_fstab'] and disk_info.get('uuid'):
-        disk_info['in_fstab'] = disk_info['uuid'] in fstab_uuid_map
+    fstab_entry = fstab_map.get(mountpoint)
+    if fstab_entry is None and disk_info.get('uuid'):
+        fstab_entry = fstab_uuid_map.get(disk_info['uuid'])
+    disk_info['in_fstab'] = fstab_entry is not None
+    disk_info['configured_mountpoint'] = (
+        fstab_entry.get('mountpoint', '') if fstab_entry else ''
+    )
 
     # Add usage info if mounted
     if disk_info.get('mountpoint') and disk_info['mountpoint'] in df_map:
