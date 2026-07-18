@@ -1,7 +1,7 @@
 # Capability Providers and Storage Surfaces
 
 Date: 2026-07-16
-Status: Sprint 3 complete; CP-012 complete, CP-013 next
+Status: Sprint 4 active; CP-013 complete, CP-014 next
 Tracking prefix: `CP`
 
 ## Goal
@@ -333,7 +333,7 @@ Goal: operate enabled capabilities through provider-driven pages.
 
 | ID | Work package | Depends on | Status | Deliverable |
 | --- | --- | --- | --- | --- |
-| CP-013 | Pools capability page | CP-003..CP-006 | Planned | Summary, empty/setup states, generic provider rendering, and pool routes |
+| CP-013 | Pools capability page | CP-003..CP-006 | Complete | [`Docs/LIMEOS_CAPABILITY_PROVIDERS_CP013_POOLS.md`](../../Docs/LIMEOS_CAPABILITY_PROVIDERS_CP013_POOLS.md): summary, empty/setup states, generic provider rendering, compatibility data, and pool routes |
 | CP-014 | MergerFS tailored renderer | CP-013 | Planned | Branch editor, policy, preview, apply, mount, unmount, balance, and diagnostics |
 | CP-015 | Protection capability page | CP-003..CP-006 | Planned | Summary, empty/setup states, generic protection rendering, and protection routes |
 | CP-016 | SnapRAID tailored renderer | CP-015 | Planned | Assignment, schedule, sync, scrub, status, recovery, and diagnostics |
