@@ -118,7 +118,8 @@ function getDiskUsage(disk: DiskInfo): DiskUsage | null {
 }
 
 function providerRoute(href: string): string {
-  if (href.startsWith("/pools/") || href.startsWith("/protection/")) return "/pools";
+  if (href.startsWith("/pools/")) return "/pools";
+  if (href.startsWith("/protection/")) return "/protection";
   return href.startsWith("/") ? href : "/pools";
 }
 

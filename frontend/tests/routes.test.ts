@@ -5,6 +5,7 @@ import {
   APP_PATHS,
   extensionDetailsPath,
   poolProviderPath,
+  protectionProviderPath,
   PLUGINS_ROUTE_COMPATIBILITY,
 } from "../src/app/route-contract.ts";
 
@@ -16,6 +17,7 @@ test("extension paths are canonical and safe for direct navigation", () => {
     "/settings/extensions/provider%20with%2Fslash",
   );
   assert.equal(poolProviderPath("provider with/slash"), "/pools/provider%20with%2Fslash");
+  assert.equal(protectionProviderPath("provider with/slash"), "/protection/provider%20with%2Fslash");
 });
 
 test("plugins stays operational until the final compatibility cutover", () => {

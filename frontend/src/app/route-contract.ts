@@ -6,6 +6,7 @@ export const APP_PATHS = {
   disks: "/disks",
   plugins: "/plugins",
   pools: "/pools",
+  protection: "/protection",
   mounts: "/mounts",
   shares: "/shares",
   system: "/system",
@@ -18,6 +19,7 @@ export const APP_PATHS = {
 export const APP_ROUTE_PATTERNS = {
   extensionDetails: `${APP_PATHS.extensions}/:extensionId`,
   poolProviderDetails: `${APP_PATHS.pools}/:providerId`,
+  protectionProviderDetails: `${APP_PATHS.protection}/:providerId`,
 } as const;
 
 export function extensionDetailsPath(extensionId: string): string {
@@ -26,6 +28,10 @@ export function extensionDetailsPath(extensionId: string): string {
 
 export function poolProviderPath(providerId: string): string {
   return `${APP_PATHS.pools}/${encodeURIComponent(providerId)}`;
+}
+
+export function protectionProviderPath(providerId: string): string {
+  return `${APP_PATHS.protection}/${encodeURIComponent(providerId)}`;
 }
 
 // CP-019 activates this redirect after Pools and Protection own provider workflows.

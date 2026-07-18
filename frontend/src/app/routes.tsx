@@ -14,6 +14,7 @@ import { MountsPage } from "@/pages/mounts-page";
 import { IntegrationsPage } from "@/pages/integrations-page";
 import { NetworkPage } from "@/pages/network-page";
 import { PoolsPage } from "@/pages/pools-page";
+import { ProtectionPage } from "@/pages/protection-page";
 import { SettingsPage } from "@/pages/settings-page";
 import { SharesPage } from "@/pages/shares-page";
 import { StacksPage } from "@/pages/stacks-page";
@@ -93,6 +94,22 @@ export const appRoutes: AppRoute[] = [
     requiresAuth: true,
     showInNav: false,
     component: PoolsPage,
+  },
+  {
+    path: APP_PATHS.protection,
+    label: "Protection",
+    navGroup: "Storage",
+    requiresAuth: true,
+    showInNav: true,
+    component: ProtectionPage,
+  },
+  {
+    path: APP_ROUTE_PATTERNS.protectionProviderDetails,
+    label: "Protection provider",
+    navGroup: "Storage",
+    requiresAuth: true,
+    showInNav: false,
+    component: ProtectionPage,
   },
   {
     path: APP_PATHS.mounts,

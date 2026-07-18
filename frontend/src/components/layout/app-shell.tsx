@@ -12,6 +12,7 @@ import {
   PackageOpen,
   Settings,
   Share2,
+  ShieldCheck,
   X,
   type LucideProps,
 } from "lucide-react";
@@ -34,6 +35,7 @@ const routeIcons: Record<string, ComponentType<LucideProps>> = {
   "/disks": HardDrive,
   "/plugins": PackageOpen,
   "/pools": Database,
+  "/protection": ShieldCheck,
   "/mounts": FolderTree,
   "/shares": Share2,
   "/integrations": PlugZap,
