@@ -28,6 +28,8 @@ def test_v2_extensions_grouped_list_across_viewports(
     expect(page.get_by_role("heading", name="Storage pooling")).to_be_visible()
     expect(page.locator("[data-extension-id='mattermost']")).to_contain_text("Mattermost")
     expect(page.locator("[data-extension-id='mergerfs']")).to_contain_text("2.40.2")
+    expect(page.locator("[data-extension-id='mergerfs']")).to_contain_text("capabilities available")
+    expect(page.get_by_text("providers ready")).to_have_count(0)
     expect(page.get_by_role("heading", name="Extension diagnostics")).to_be_visible()
     assert_no_horizontal_overflow(page, f"v2 extensions ({viewport_profile_name})")
 

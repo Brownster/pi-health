@@ -8,6 +8,7 @@ import { PoolCapabilityCard } from "@/components/storage/pool-capability-card";
 import { Button } from "@/components/ui/button";
 import type { CapabilityStatus } from "@/lib/capabilities";
 import type { PoolView } from "@/lib/pool-capabilities";
+import { handleTabKeyDown } from "@/lib/tab-keyboard";
 import {
   fetchPluginLatestLog,
   type PluginDetail,
@@ -88,7 +89,9 @@ export function MergerfsProviderRenderer({
             id={`mergerfs-tab-${item.id}`}
             key={item.id}
             onClick={() => setTab(item.id)}
+            onKeyDown={handleTabKeyDown}
             role="tab"
+            tabIndex={tab === item.id ? 0 : -1}
             type="button"
           >
             {item.label}
@@ -169,7 +172,7 @@ export function MergerfsProviderRenderer({
             </div>
             {logPhase === "error" ? <p className="flex items-center gap-2 p-3 text-xs text-danger"><TriangleAlert aria-hidden="true" className="h-4 w-4" />{logError}</p> : null}
             {logPhase === "ready" ? <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words p-3 text-xs text-muted-foreground" data-mergerfs-log>{latestLog || "No provider log is available."}</pre> : null}
-            {logPhase === "loading" ? <p className="p-3 text-xs text-muted-foreground">Loading provider log...</p> : null}
+            {logPhase === "loading" ? <p className="p-3 text-xs text-muted-foreground">Loading provider log…</p> : null}
           </section>
         </div>
       ) : null}

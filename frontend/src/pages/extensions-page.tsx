@@ -106,7 +106,7 @@ function ExtensionRow({ extension }: { extension: ExtensionDescriptor }) {
       </div>
       <div className="hidden sm:block">
         <StatusBadge label={stateLabel(extension.health.state)} tone={healthTone(extension.health.state)} />
-        <p className="mt-1 text-xs text-dim">{operational}/{extension.capabilities.length} providers ready</p>
+        <p className="mt-1 text-xs text-dim">{operational}/{extension.capabilities.length} capabilities available</p>
       </div>
       <div className="flex items-center justify-between gap-3 sm:justify-end">
         <Badge tone={extension.compatibility === "compatible" ? "success" : extension.compatibility === "incompatible" ? "danger" : "neutral"}>
@@ -197,7 +197,7 @@ function ExtensionListPage() {
       {phase === "loading" ? (
         <div aria-live="polite" className="flex min-h-56 items-center justify-center gap-2 rounded-md border border-border text-sm text-muted-foreground" role="status">
           <RefreshCw aria-hidden="true" className="h-4 w-4 animate-spin text-primary" />
-          Loading extensions...
+          Loading extensions…
         </div>
       ) : null}
 
@@ -309,7 +309,7 @@ function ExtensionDetailPage({ extensionId }: { extensionId: string }) {
   };
 
   if (phase === "loading") {
-    return <div aria-live="polite" className="flex min-h-56 items-center justify-center gap-2 text-sm text-muted-foreground" role="status"><RefreshCw aria-hidden="true" className="h-4 w-4 animate-spin text-primary" />Loading extension...</div>;
+    return <div aria-live="polite" className="flex min-h-56 items-center justify-center gap-2 text-sm text-muted-foreground" role="status"><RefreshCw aria-hidden="true" className="h-4 w-4 animate-spin text-primary" />Loading extension…</div>;
   }
 
   if (phase === "error" || !extension) {

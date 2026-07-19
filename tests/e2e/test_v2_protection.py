@@ -90,6 +90,15 @@ def test_v2_snapraid_tailored_operations_recovery_and_diagnostics(
     expect(page.locator("button[data-snapraid-tab='overview'][aria-selected='true']")).to_be_visible()
     expect(page.locator("[data-protection-set='SnapRAID parity']")).to_contain_text("healthy")
 
+    overview_tab = page.locator("button[data-snapraid-tab='overview']")
+    overview_tab.focus()
+    overview_tab.press("ArrowRight")
+    configuration_tab = page.locator("button[data-snapraid-tab='configuration']")
+    expect(configuration_tab).to_have_attribute("aria-selected", "true")
+    expect(configuration_tab).to_be_focused()
+    configuration_tab.press("Home")
+    expect(overview_tab).to_have_attribute("aria-selected", "true")
+
     # Sync is always explicitly confirmed because it writes parity. Scrub keeps
     # its bounded percentage and age controls visible before execution.
     page.click("button[data-snapraid-tab='operations']")

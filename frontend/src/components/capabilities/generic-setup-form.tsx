@@ -67,13 +67,26 @@ export function GenericSetupForm({
     setLocalErrors(validation.errors);
     setRemoteErrors([]);
     setNotice(null);
-    if (validation.errors.length) return;
+    if (validation.errors.length) {
+      requestAnimationFrame(() => {
+        const first = validation.errors[0];
+        const id = `${schema.schema_id}-field-${first.field.split(".").join("-")}`;
+        document.getElementById(id)?.focus();
+      });
+      return;
+    }
 
     setBusy(true);
     try {
       const result = await onSubmit(validation.values);
       if (result && !result.valid) {
         setRemoteErrors(result.errors);
+        requestAnimationFrame(() => {
+          const first = result.errors.find((item) => item.field !== "_form");
+          if (!first) return;
+          const id = `${schema.schema_id}-field-${first.field.split(".").join("-")}`;
+          document.getElementById(id)?.focus();
+        });
       } else {
         setNotice("Configuration saved.");
       }

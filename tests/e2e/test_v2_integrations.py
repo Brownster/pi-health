@@ -108,7 +108,13 @@ def test_agent_integration_views_are_separate_and_operational(
     agent = page.locator("[data-agent-integration]")
     expect(agent.get_by_role("heading", name="AI Agents")).to_be_visible()
     expect(agent.get_by_text("@limeos", exact=True)).to_be_visible()
-    agent.get_by_role("tab", name="Providers").click()
+    overview_tab = agent.get_by_role("tab", name="Overview")
+    overview_tab.focus()
+    overview_tab.press("ArrowRight")
+    expect(agent.get_by_role("tab", name="Providers")).to_be_focused()
+    expect(agent.get_by_role("tabpanel")).to_have_attribute(
+        "aria-labelledby", "agent-tab-providers"
+    )
     expect(agent.get_by_text("Claude Code", exact=True)).to_be_visible()
     expect(agent.get_by_text("Authenticated", exact=True)).to_be_visible()
     agent.get_by_role("tab", name="Permissions").click()

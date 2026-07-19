@@ -165,6 +165,17 @@ def test_v2_mergerfs_provider_operations_and_diagnostics(
     expect(page.locator("[data-pool-card='media']")).to_contain_text("mounted")
     expect(page.locator("[data-pool-card='backup']")).to_contain_text("unmounted")
 
+    overview_tab = page.locator("button[data-mergerfs-tab='overview']")
+    overview_tab.focus()
+    overview_tab.press("End")
+    expect(page.locator("button[data-mergerfs-tab='diagnostics']")).to_have_attribute(
+        "aria-selected", "true"
+    )
+    expect(page.locator("button[data-mergerfs-tab='diagnostics']")).to_be_focused()
+    page.locator("button[data-mergerfs-tab='diagnostics']").press("Home")
+    expect(overview_tab).to_have_attribute("aria-selected", "true")
+    expect(overview_tab).to_be_focused()
+
     # Pool operations use the provider's declared pool selector. Unmount adds a
     # resource-specific interruption warning before the command can run.
     page.click("button[data-plugin-command='mount']")

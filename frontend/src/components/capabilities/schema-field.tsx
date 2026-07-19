@@ -32,6 +32,7 @@ export function SchemaField({
           checked={value === true}
           className="mt-0.5 h-4 w-4 shrink-0 accent-primary"
           disabled={field.read_only}
+          name={field.key}
           onChange={(event) => onChange(event.target.checked)}
           type="checkbox"
         />
@@ -67,6 +68,7 @@ export function SchemaField({
           className={cn(inputClass, error && "border-danger/60")}
           disabled={field.read_only}
           id={inputId}
+          name={field.key}
           onChange={(event) =>
             onChange(deserializeChoice(event.target.value, field.choices ?? []))
           }
@@ -94,6 +96,7 @@ export function SchemaField({
           maxLength={field.max_length}
           min={field.minimum}
           minLength={field.min_length}
+          name={field.key}
           onChange={(event) => onChange(event.target.value)}
           placeholder={field.placeholder}
           spellCheck={field.type === "text" ? undefined : false}
