@@ -18,6 +18,7 @@ from agent_transport.gateway_contract import (
     TurnResult,
 )
 from agent_transport.listener import (
+    OUT_OF_SCOPE_REPLY,
     ListenerConfig,
     MentionListener,
     chunk_reply,
@@ -338,6 +339,31 @@ def test_listener_same_thread_maps_to_same_conversation(tmp_path):
     listener.handle_frame(_frame("@limeos one", post_id="p1", root_id="root-1"))
     listener.handle_frame(_frame("@limeos two", post_id="p2", root_id="root-1"))
     assert gateway.requests[0].conversation_id == gateway.requests[1].conversation_id
+
+
+def test_listener_acknowledges_mention_outside_allowlist(tmp_path):
+    gateway, posts = FakeGateway(), []
+    listener = _listener(tmp_path, gateway, posts, allowed_channels=("chan-1",))
+    # Explicit mention in a non-allowed channel: acknowledged, agent never invoked.
+    assert listener.handle_frame(_frame("@limeos help", channel="other", root_id="root-9")) is False
+    assert gateway.requests == []
+    assert posts == [("other", "root-9", OUT_OF_SCOPE_REPLY)]
+
+
+def test_listener_runs_turn_inside_allowlist(tmp_path):
+    gateway, posts = FakeGateway(), []
+    listener = _listener(tmp_path, gateway, posts, allowed_channels=("chan-1",))
+    assert listener.handle_frame(_frame("@limeos status", channel="chan-1")) is True
+    assert len(gateway.requests) == 1  # allowed channel still runs the turn
+
+
+def test_listener_out_of_scope_reply_is_deduped(tmp_path):
+    gateway, posts = FakeGateway(), []
+    listener = _listener(tmp_path, gateway, posts, allowed_channels=("chan-1",))
+    frame = _frame("@limeos help", channel="other")
+    assert listener.handle_frame(frame) is False
+    assert listener.handle_frame(frame) is False  # replayed frame not re-acknowledged
+    assert len(posts) == 1
 
 
 def test_listener_posts_typed_public_message_on_turn_error(tmp_path):

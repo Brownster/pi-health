@@ -33,6 +33,14 @@ logger = logging.getLogger("limeos.agent.listener")
 #: Safe under Mattermost's smallest common per-post limit (4000 chars).
 REPLY_CHUNK_CHARS = 3500
 
+#: Posted when the bot is explicitly @mentioned in a channel outside its allowlist.
+#: An explicit mention is always acknowledged rather than silently dropped, so the
+#: user is never left hanging waiting for a reply that will not come.
+OUT_OF_SCOPE_REPLY = (
+    "I'm not enabled to respond in this channel. An admin can enable it under "
+    "LimeOS → Integrations → Agents."
+)
+
 ReplyPoster = Callable[..., str]  # post_message(channel_id=, message=, root_id=) -> post id
 
 
@@ -84,11 +92,13 @@ class MentionListener:
     # -- per-frame handling (pure of I/O except posting) -----------------------
     def handle_frame(self, frame_text: str) -> bool:
         """Process one frame. Returns True when a turn was executed."""
+        # The channel allowlist is enforced here rather than inside parse_frame so
+        # that an explicit mention in a non-allowed channel is acknowledged (see
+        # _post_out_of_scope) instead of silently dropped.
         event = parse_frame(
             frame_text,
             bot_username=self._config.bot_username,
             bot_user_id=self._config.bot_user_id,
-            allowed_channels=self._config.allowed_channels,
         )
         if event is None:
             return False
@@ -97,8 +107,25 @@ class MentionListener:
         # Mark before executing so a crash mid-turn cannot double-run the same
         # mention after restart (losing one reply is safer than acting twice).
         self._dedup.mark(event.post_id)
+        if (
+            self._config.allowed_channels
+            and event.channel_id not in self._config.allowed_channels
+        ):
+            self._post_out_of_scope(event)
+            return False
         self._run_turn(event)
         return True
+
+    def _post_out_of_scope(self, event: MentionEvent) -> None:
+        """Acknowledge a mention in a non-allowed channel so the user isn't left hanging."""
+        try:
+            self._post_reply(
+                channel_id=event.channel_id,
+                message=OUT_OF_SCOPE_REPLY,
+                root_id=event.root_post_id,
+            )
+        except Exception:  # noqa: BLE001 - delivery failure must not kill the loop
+            logger.error("failed to post out-of-scope reply in %s", event.root_post_id)
 
     def _run_turn(self, event: MentionEvent) -> None:
         # On the first mention in a thread rooted elsewhere (e.g. an alert incident),
