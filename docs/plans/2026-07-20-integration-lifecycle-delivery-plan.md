@@ -192,7 +192,7 @@ boundaries.
 | ID | Work package | Depends on | Status | Deliverable |
 | --- | --- | --- | --- | --- |
 | IL-002 | Mattermost lifecycle service | IL-001 | Complete | Dependency-gated disable/enable; retained-data uninstall/reinstall; fixed local-image and orphan cleanup; ownership-verified purge behind a default-off server release policy; alert/package-hook cleanup; recovery-secret rotation; tombstone recovery; and status derivation |
-| IL-003 | AI Agents helper and feature-scoped Claude package ownership | IL-001 | Planned | Boolean-only Claude removal; fixed unit/path/package/source/key allowlists; coordinated `config/limeos-packages.json`, `limeos_packages.py`, and `pihealth_helper.py` reconciliation behavior; audit and identity preservation; and idempotent step results |
+| IL-003 | AI Agents helper and feature-scoped Claude package ownership | IL-001 | Complete (`2206cb5`) | Boolean-only Claude removal; fixed unit/path/package/source/key allowlists; coordinated `config/limeos-packages.json`, `limeos_packages.py`, and `pihealth_helper.py` reconciliation behavior; audit and identity preservation; and idempotent step results |
 | IL-004 | AI Agents lifecycle orchestration | IL-001, IL-003 | Planned | Mattermost-independent dependency state, remote bot cleanup, required local cleanup, bounded warning completion, usage/runtime removal, and cleanup retry |
 
 Exit gate:
