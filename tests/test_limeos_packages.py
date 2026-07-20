@@ -3,6 +3,7 @@
 import pytest
 
 from limeos_packages import (
+    FEATURES,
     MANAGERS,
     POLICIES,
     PackageManifestError,
@@ -16,6 +17,7 @@ from limeos_packages import (
     apply_approvals,
     is_approvable,
     load_manifest,
+    managed_packages,
     parse_manifest,
     pending_updates,
     plan_actions,
@@ -139,6 +141,7 @@ def test_shipped_manifest_pins_and_self_disables_the_claude_cli():
     by_name = {spec.name: spec for spec in load_manifest()}
     claude = by_name["claude-code"]
     assert claude.policy == "pinned" and claude.critical and claude.disable_self_update
+    assert claude.feature == "ai_agents"
     assert claude.version  # a pinned package must state its version
     # The broker's psutil dependency is tracked as a critical package.
     assert by_name["python3-psutil"].critical
@@ -157,6 +160,22 @@ def test_parse_pinned_and_present_and_present_min():
     assert [s.name for s in specs] == ["claude-code", "python3-psutil", "docker-ce"]
     assert specs[0].version == "2.1.207" and specs[0].disable_self_update
     assert [s.name for s in critical_packages(specs)] == ["claude-code", "python3-psutil"]
+
+
+def test_feature_packages_fail_closed_while_host_baseline_remains_managed():
+    specs = _specs(
+        {"name": "claude-code", "manager": "apt", "policy": "present", "feature": "ai_agents"},
+        {"name": "python3-psutil", "manager": "apt", "policy": "present"},
+    )
+
+    assert [spec.name for spec in managed_packages(specs, {})] == ["python3-psutil"]
+    assert [spec.name for spec in managed_packages(specs, {"ai_agents": False})] == [
+        "python3-psutil"
+    ]
+    assert [spec.name for spec in managed_packages(specs, {"ai_agents": True})] == [
+        "claude-code",
+        "python3-psutil",
+    ]
 
 
 # -- rejection cases --------------------------------------------------------------
@@ -186,6 +205,7 @@ def test_rejects_bad_manifest_structure(raw):
         _pkg(policy="pinned", version="2.1.207", critical="yes"),  # non-bool critical
         _pkg(policy="present", version="1.0"),  # version set on an unversioned policy
         _pkg(policy="pinned", version="not a version"),  # bad version chars
+        _pkg(feature="unknown"),  # unknown feature owner
         {"name": "x", "manager": "apt", "policy": "present", "surprise": True},  # unknown field
     ],
 )
@@ -213,6 +233,7 @@ def test_published_schema_enums_match_the_validator():
     props = schema["properties"]["packages"]["items"]["properties"]
     assert set(props["manager"]["enum"]) == MANAGERS
     assert set(props["policy"]["enum"]) == POLICIES
+    assert set(props["feature"]["enum"]) == FEATURES
 
 
 # -- PB-002 reconcile logic -------------------------------------------------------

@@ -149,6 +149,23 @@ MATTERMOST_RECOVERY_CREDENTIAL = os.path.join(
 )
 MATTERMOST_CREDENTIAL_LIMIT = 64 * 1024
 AGENT_LIFECYCLE_TOMBSTONE = '/var/lib/limeos/integrations/agents-lifecycle.json'
+AGENT_CLEANUP_UNITS = (
+    ('limeos-agent.service', AGENT_UNIT_PATH),
+    ('limeopsd.service', LIMEOPS_UNIT_PATH),
+)
+AGENT_CLEANUP_FILES = (AGENT_CONFIG_PATH, AGENT_ENV_PATH, AGENT_POLICY_PATH)
+AGENT_CLEANUP_DIRECTORIES = (
+    AGENT_LIB_DIR,
+    AGENT_STATE_DIR,
+    CLAUDE_CONFIG_DIR,
+    AGENT_VENV_DIR,
+    LIMEOPS_STATE_DIR,
+)
+AGENT_LIFECYCLE_FIELDS = frozenset({
+    'schema_version', 'integration', 'operation_id', 'action', 'phase',
+    'target_state', 'started_at', 'updated_at', 'completed_steps',
+    'retained_data', 'remove_claude_code', 'failure', 'warning_codes',
+})
 
 _agent_auth_manager = GuidedAuthManager(
     [
@@ -2891,6 +2908,13 @@ def _pihealth_update_agent(ctx):
     """
     if not os.path.exists(AGENT_UNIT_PATH):
         return {'success': True, 'skipped': True, 'reason': 'agent not installed'}
+    feature = _read_agent_lifecycle_feature_state()
+    if not feature['reconcile_allowed']:
+        return {
+            'success': True,
+            'skipped': True,
+            'reason': 'agent lifecycle state blocks update convergence',
+        }
     policy = _migrate_agent_policy()
     if not policy.get('success'):
         return {'success': False, 'error': policy.get('error', 'broker policy migration failed')}
@@ -3520,6 +3544,140 @@ def cmd_agent_runtime_disable(params):
     return {'success': True, 'disabled': True}
 
 
+def _remove_agent_owned_path(path):
+    """Remove one fixed owned path without following a substituted symlink."""
+    if not os.path.lexists(path):
+        return False
+    metadata = os.lstat(path)
+    if stat.S_ISLNK(metadata.st_mode):
+        raise OSError('unsafe agent cleanup path')
+    if stat.S_ISDIR(metadata.st_mode):
+        shutil.rmtree(path)
+    elif stat.S_ISREG(metadata.st_mode):
+        os.unlink(path)
+    else:
+        raise OSError('unsupported agent cleanup path')
+    return True
+
+
+def _stop_agent_cleanup_units():
+    changed = False
+    for unit, _path in AGENT_CLEANUP_UNITS:
+        active = run_command(['systemctl', 'is-active', '--quiet', unit], timeout=10)
+        active_state = (active.get('stdout') or '').strip()
+        if active.get('returncode') == 0 or active_state in {
+            'active', 'activating', 'reloading', 'deactivating'
+        }:
+            stopped = run_command(['systemctl', 'stop', unit], timeout=60)
+            if stopped.get('returncode') != 0:
+                raise OSError('failed to stop agent unit')
+            changed = True
+        enabled = run_command(['systemctl', 'is-enabled', '--quiet', unit], timeout=10)
+        if enabled.get('returncode') == 0:
+            disabled = run_command(['systemctl', 'disable', unit], timeout=60)
+            if disabled.get('returncode') != 0:
+                raise OSError('failed to disable agent unit')
+            changed = True
+    return changed
+
+
+def _remove_agent_cleanup_units():
+    changed = False
+    for _unit, path in AGENT_CLEANUP_UNITS:
+        changed = _remove_agent_owned_path(path) or changed
+    reloaded = run_command(['systemctl', 'daemon-reload'], timeout=60)
+    if reloaded.get('returncode') != 0:
+        raise OSError('failed to reload systemd')
+    return changed
+
+
+def _remove_agent_runtime_paths():
+    changed = False
+    for path in (*AGENT_CLEANUP_FILES, *AGENT_CLEANUP_DIRECTORIES):
+        changed = _remove_agent_owned_path(path) or changed
+    return changed
+
+
+def _remove_claude_hold():
+    result = run_command(['apt-mark', 'showhold', 'claude-code'], timeout=30)
+    held = 'claude-code' in (result.get('stdout') or '').splitlines()
+    if not held:
+        return False
+    if run_command(['apt-mark', 'unhold', 'claude-code'], timeout=30).get('returncode') != 0:
+        raise OSError('failed to remove Claude Code hold')
+    return True
+
+
+def _remove_claude_package():
+    installed = run_command(
+        ['dpkg-query', '-W', '-f', '${Status}', 'claude-code'], timeout=10
+    )
+    if installed.get('returncode') != 0:
+        return False
+    if run_command(
+        ['apt-get', 'remove', '-y', 'claude-code'], timeout=600
+    ).get('returncode') != 0:
+        raise OSError('failed to remove Claude Code')
+    return True
+
+
+def cmd_agent_runtime_uninstall(params):
+    """Remove only the fixed local AI Agents footprint and optional Claude package."""
+    if (
+        not isinstance(params, dict)
+        or set(params) != {'remove_claude_code'}
+        or not isinstance(params.get('remove_claude_code'), bool)
+    ):
+        return {
+            'success': False,
+            'error': 'Agent uninstall accepts only remove_claude_code as a boolean',
+        }
+
+    steps = []
+
+    def run_step(name, operation):
+        try:
+            changed = bool(operation())
+        except (OSError, shutil.Error):
+            steps.append({'name': name, 'success': False, 'changed': False, 'skipped': False})
+            return False
+        steps.append({'name': name, 'success': True, 'changed': changed, 'skipped': False})
+        return True
+
+    operations = [
+        ('stop_services', _stop_agent_cleanup_units),
+        ('remove_units', _remove_agent_cleanup_units),
+        ('remove_runtime', _remove_agent_runtime_paths),
+    ]
+    if params['remove_claude_code']:
+        operations.extend([
+            ('remove_claude_hold', _remove_claude_hold),
+            ('remove_claude_package', _remove_claude_package),
+            ('remove_claude_source', lambda: _remove_agent_owned_path(CLAUDE_APT_SOURCE_PATH)),
+            ('remove_claude_key', lambda: _remove_agent_owned_path(CLAUDE_APT_KEY_PATH)),
+        ])
+    for name, operation in operations:
+        if not run_step(name, operation):
+            return {
+                'success': False,
+                'remove_claude_code': params['remove_claude_code'],
+                'failed_step': name,
+                'steps': steps,
+            }
+    if not params['remove_claude_code']:
+        steps.append({
+            'name': 'retain_claude_code',
+            'success': True,
+            'changed': False,
+            'skipped': True,
+        })
+    return {
+        'success': True,
+        'remove_claude_code': params['remove_claude_code'],
+        'steps': steps,
+    }
+
+
 def _install_claude_apt_repository():
     """Install Anthropic's fixed apt key after checking its published fingerprint."""
     try:
@@ -3904,6 +4062,108 @@ def _packages_apt_command(action):
     return None
 
 
+def _read_agent_lifecycle_feature_state():
+    """Derive package ownership from fixed lifecycle and runtime facts.
+
+    The lifecycle file is application-owned, so ownership is intentionally not assumed;
+    the helper still rejects links, non-regular files, oversized input, and malformed
+    records. Any ambiguous state excludes feature packages.
+    """
+    try:
+        descriptor = os.open(
+            AGENT_LIFECYCLE_TOMBSTONE,
+            os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW,
+        )
+    except FileNotFoundError:
+        descriptor = None
+    except OSError:
+        return {'feature': 'ai_agents', 'state': 'cleanup_required', 'reconcile_allowed': False}
+
+    if descriptor is not None:
+        try:
+            metadata = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or stat.S_IMODE(metadata.st_mode) & 0o022
+                or metadata.st_size < 1
+                or metadata.st_size > 64 * 1024
+            ):
+                raise OSError('invalid lifecycle state')
+            raw = os.read(descriptor, 64 * 1024 + 1)
+            record = json.loads(raw.decode('utf-8'))
+        except (OSError, UnicodeDecodeError, ValueError):
+            return {
+                'feature': 'ai_agents',
+                'state': 'cleanup_required',
+                'reconcile_allowed': False,
+            }
+        finally:
+            os.close(descriptor)
+        if (
+            not isinstance(record, dict)
+            or set(record) != AGENT_LIFECYCLE_FIELDS
+            or record.get('schema_version') != '1'
+            or record.get('integration') != 'agents'
+            or record.get('action') not in {'enable', 'disable', 'uninstall'}
+            or record.get('phase') not in {'running', 'cleanup_required', 'complete'}
+            or record.get('target_state') not in {'connected', 'disabled', 'not_installed'}
+            or not isinstance(record.get('completed_steps'), list)
+            or not isinstance(record.get('retained_data'), bool)
+            or not isinstance(record.get('warning_codes'), list)
+        ):
+            return {'feature': 'ai_agents', 'state': 'cleanup_required', 'reconcile_allowed': False}
+        if record.get('phase') != 'complete':
+            return {'feature': 'ai_agents', 'state': 'cleanup_required', 'reconcile_allowed': False}
+        target = record.get('target_state')
+        if target == 'disabled':
+            return {'feature': 'ai_agents', 'state': 'disabled', 'reconcile_allowed': True}
+        if target == 'not_installed':
+            return {
+                'feature': 'ai_agents',
+                'state': 'not_installed',
+                'reconcile_allowed': False,
+            }
+        if target != 'connected':
+            return {'feature': 'ai_agents', 'state': 'cleanup_required', 'reconcile_allowed': False}
+
+    fixed_runtime = (AGENT_UNIT_PATH, LIMEOPS_UNIT_PATH, AGENT_CONFIG_PATH)
+    try:
+        if not all(stat.S_ISREG(os.lstat(path).st_mode) for path in fixed_runtime):
+            raise OSError('incomplete agent runtime')
+        descriptor = os.open(
+            AGENT_CONFIG_PATH,
+            os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW,
+        )
+        try:
+            metadata = os.fstat(descriptor)
+            if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > 64 * 1024:
+                raise OSError('invalid agent settings')
+            settings = json.loads(os.read(descriptor, 64 * 1024 + 1).decode('utf-8'))
+        finally:
+            os.close(descriptor)
+        if not isinstance(settings, dict):
+            raise ValueError('invalid agent settings')
+    except FileNotFoundError:
+        if not any(os.path.lexists(path) for path in fixed_runtime):
+            return {
+                'feature': 'ai_agents',
+                'state': 'not_installed',
+                'reconcile_allowed': False,
+            }
+        return {'feature': 'ai_agents', 'state': 'cleanup_required', 'reconcile_allowed': False}
+    except (OSError, UnicodeDecodeError, ValueError):
+        return {'feature': 'ai_agents', 'state': 'cleanup_required', 'reconcile_allowed': False}
+    state = 'enabled' if settings.get('enabled') else 'disabled'
+    return {'feature': 'ai_agents', 'state': state, 'reconcile_allowed': True}
+
+
+def _managed_package_specs(specs):
+    from limeos_packages import managed_packages
+
+    feature = _read_agent_lifecycle_feature_state()
+    return managed_packages(specs, {'ai_agents': feature['reconcile_allowed']})
+
+
 PACKAGE_APPROVALS_STORE = os.path.join(
     os.getenv("LIMEOS_STATE_DIR", "/var/lib/limeos"), "package-approvals.json"
 )
@@ -3946,7 +4206,9 @@ def _compute_pending_updates():
     """Current held/critical pending updates (post-approval overlay), or None on error."""
     try:
         from limeos_packages import apply_approvals, load_manifest, pending_updates
-        specs = apply_approvals(load_manifest(), _load_package_approvals())
+        specs = _managed_package_specs(
+            apply_approvals(load_manifest(), _load_package_approvals())
+        )
     except Exception:
         return None
     return pending_updates(
@@ -4028,7 +4290,9 @@ def cmd_packages_reconcile(params):
         )
         # Overlay admin-approved per-host pin bumps so reconcile enforces the approved
         # version (the committed manifest stays the fleet default).
-        specs = apply_approvals(load_manifest(), _load_package_approvals())
+        specs = _managed_package_specs(
+            apply_approvals(load_manifest(), _load_package_approvals())
+        )
     except Exception:
         return {'success': False, 'error': 'Unable to read the package manifest'}
 
@@ -4173,7 +4437,7 @@ def cmd_packages_nightly_reconcile(params):
         return {'success': False, 'error': 'packages.nightly_reconcile accepts no parameters'}
     try:
         from limeos_packages import load_manifest
-        specs = load_manifest()
+        specs = _managed_package_specs(load_manifest())
     except Exception:
         return {'success': False, 'error': 'Unable to read the package manifest'}
 
@@ -4305,6 +4569,7 @@ COMMANDS = {
     'agent_runtime_install': cmd_agent_runtime_install,
     'agent_runtime_status': cmd_agent_runtime_status,
     'agent_runtime_disable': cmd_agent_runtime_disable,
+    'agent_runtime_uninstall': cmd_agent_runtime_uninstall,
     'agent_provider_install': cmd_agent_provider_install,
     'agent_provider_auth_start': cmd_agent_provider_auth_start,
     'agent_provider_auth_status': cmd_agent_provider_auth_status,
@@ -4344,7 +4609,8 @@ _MUTATING_COMMANDS = frozenset({
     'rclone_configure', 'rclone_remove', 'rclone_mount', 'rclone_unmount',
     'copyparty_configure',
     'plugin_install', 'plugin_remove', 'plugin_update', 'plugin_repair',
-    'agent_runtime_install', 'agent_runtime_disable', 'agent_provider_install',
+    'agent_runtime_install', 'agent_runtime_disable', 'agent_runtime_uninstall',
+    'agent_provider_install',
     'agent_provider_auth_start', 'agent_provider_auth_submit', 'agent_provider_auth_cancel',
     'agent_bot_secret_write', 'agent_configure', 'agent_runtime_start',
     'packages_reconcile', 'packages_approve', 'packages_nightly_reconcile',

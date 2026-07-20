@@ -73,12 +73,11 @@ def test_helper_agent_commands_reject_all_caller_controlled_parameters():
         helper.cmd_agent_runtime_install,
         helper.cmd_agent_runtime_status,
         helper.cmd_agent_runtime_disable,
+        helper.cmd_agent_runtime_uninstall,
         helper.cmd_agent_provider_install,
     ):
-        assert command({"path": "/tmp/evil"}) == {
-            "success": False,
-            "error": "Agent operation does not accept parameters",
-        }
+        result = command({"path": "/tmp/evil"})
+        assert result["success"] is False
 
 
 def test_helper_exposes_only_fixed_agent_operations():
@@ -86,6 +85,7 @@ def test_helper_exposes_only_fixed_agent_operations():
         "agent_runtime_install",
         "agent_runtime_status",
         "agent_runtime_disable",
+        "agent_runtime_uninstall",
         "agent_provider_install",
         "agent_provider_auth_start",
         "agent_provider_auth_status",
@@ -516,6 +516,11 @@ def test_policy_migration_skips_when_not_installed(tmp_path):
 def test_update_agent_step_reports_reconcile_failure():
     with (
         patch.object(helper.os.path, "exists", return_value=True),
+        patch.object(
+            helper,
+            "_read_agent_lifecycle_feature_state",
+            return_value={"state": "enabled", "reconcile_allowed": True},
+        ),
         patch.object(helper, "_migrate_agent_policy", return_value={"success": True}),
         patch.object(helper, "cmd_agent_runtime_install", return_value={"success": True}),
         patch.object(helper, "cmd_packages_reconcile",
@@ -529,6 +534,11 @@ def test_update_agent_step_reports_reconcile_failure():
 def test_update_agent_step_reports_restart_failure():
     with (
         patch.object(helper.os.path, "exists", return_value=True),
+        patch.object(
+            helper,
+            "_read_agent_lifecycle_feature_state",
+            return_value={"state": "enabled", "reconcile_allowed": True},
+        ),
         patch.object(helper, "_migrate_agent_policy", return_value={"success": True}),
         patch.object(helper, "cmd_agent_runtime_install", return_value={"success": True}),
         patch.object(helper, "cmd_packages_reconcile", return_value={"success": True}),

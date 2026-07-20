@@ -7,7 +7,8 @@
       "policy": "pinned",
       "version": "2.1.207",
       "critical": true,
-      "disable_self_update": true
+      "disable_self_update": true,
+      "feature": "ai_agents"
     },
     {
       "name": "python3-psutil",

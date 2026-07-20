@@ -19,7 +19,8 @@
           "policy": {"enum": ["pinned", "present-min", "present", "absent"]},
           "version": {"type": "string", "pattern": "^[0-9][0-9A-Za-z.:+~-]{0,63}$"},
           "critical": {"type": "boolean"},
-          "disable_self_update": {"type": "boolean"}
+          "disable_self_update": {"type": "boolean"},
+          "feature": {"enum": ["ai_agents"]}
         },
         "allOf": [
           {
