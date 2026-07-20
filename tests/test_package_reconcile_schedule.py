@@ -175,6 +175,26 @@ def test_configure_schedule_writes_units_and_enables_timer():
     assert any(p.endswith(".timer") for p in written)
 
 
+def test_startup_ensure_invokes_timer_install_with_app_dir_and_user():
+    import app as app_module
+
+    class SyncThread:
+        def __init__(self, target, **_kwargs):
+            self._target = target
+
+        def start(self):
+            self._target()
+
+    with patch("threading.Thread", SyncThread):
+        with patch("getpass.getuser", return_value="pihealth"):
+            with patch("helper_client.helper_call") as helper_call:
+                app_module._ensure_package_reconcile_timer()
+    helper_call.assert_called_once()
+    assert helper_call.call_args.args[0] == "configure_package_reconcile_schedule"
+    params = helper_call.call_args.args[1]
+    assert params["user"] == "pihealth" and params["app_dir"].startswith("/")
+
+
 def test_configure_schedule_rejects_relative_app_dir_and_bad_user():
     assert helper.cmd_configure_package_reconcile_schedule(
         {"app_dir": "relative", "user": "pihealth"})["success"] is False

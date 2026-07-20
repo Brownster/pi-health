@@ -1553,6 +1553,7 @@ def create_app(config=None, dependencies=None):
         init_scheduler(application)
         init_backup_scheduler(application)
         _start_agent_convergence()
+        _ensure_package_reconcile_timer()
 
     print(f"Loaded {len(resolved.users)} user(s) for authentication")
     return application
@@ -1577,6 +1578,35 @@ def _start_agent_convergence():
             pass
 
     threading.Thread(target=_run, name="agent-convergence", daemon=True).start()
+
+
+def _ensure_package_reconcile_timer():
+    """Install the nightly package-reconcile timer after a self-update restart, best-effort.
+
+    Same bootstrap gap as the agent convergence: the update's migrate step runs on the
+    pre-restart helper, so the release that first ships the timer can't install it in that
+    same flow. Ensuring it here — after the web service restarts on the new code, alongside
+    the now-restarted helper — closes the gap without needing a second update. Idempotent and
+    best-effort: it never blocks or fails web startup.
+    """
+    import getpass
+    import threading
+
+    def _run():
+        try:
+            from helper_client import helper_call
+            helper_call(
+                "configure_package_reconcile_schedule",
+                {
+                    "app_dir": os.path.dirname(os.path.abspath(__file__)),
+                    "user": getpass.getuser(),
+                },
+            )
+        except Exception:
+            pass
+
+    threading.Thread(target=_run, name="package-timer-ensure", daemon=True).start()
+
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8002))
