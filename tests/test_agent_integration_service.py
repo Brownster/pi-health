@@ -7,6 +7,10 @@ import json
 import pytest
 
 from agent_integration_service import AgentIntegrationError, AgentIntegrationService
+from integration_lifecycle_service import (
+    IntegrationLifecycleResolver,
+    LifecycleStateRepository,
+)
 
 
 class FakeHelper:
@@ -93,7 +97,7 @@ def _mattermost(state="connected"):
     }
 
 
-def _service(helper=None, mattermost=None):
+def _service(helper=None, mattermost=None, lifecycle_resolver=None):
     return AgentIntegrationService(
         helper_call=helper or FakeHelper(),
         mattermost_status=lambda: mattermost or _mattermost(),
@@ -103,7 +107,44 @@ def _service(helper=None, mattermost=None):
             "stacks": ["media", "mattermost"],
         },
         sleep=lambda _seconds: None,
+        lifecycle_resolver=lifecycle_resolver,
     )
+
+
+def test_uninstalled_lifecycle_record_avoids_removed_runtime_calls(tmp_path):
+    lifecycle = LifecycleStateRepository(
+        tmp_path / "agents-lifecycle.json",
+        "agents",
+    )
+    lifecycle.write(
+        {
+            "schema_version": "1",
+            "integration": "agents",
+            "operation_id": "operation-1",
+            "action": "uninstall",
+            "phase": "complete",
+            "target_state": "not_installed",
+            "started_at": "2026-07-20T20:00:00+00:00",
+            "updated_at": "2026-07-20T20:01:00+00:00",
+            "completed_steps": [],
+            "retained_data": False,
+            "remove_claude_code": True,
+            "failure": None,
+            "warning_codes": [],
+        }
+    )
+
+    def removed_helper(*_args, **_kwargs):
+        raise AssertionError("removed runtime must not be queried")
+
+    status = _service(
+        removed_helper,
+        lifecycle_resolver=IntegrationLifecycleResolver(lifecycle),
+    ).status()
+
+    assert status["state"] == "not_installed"
+    assert status["installed"] is False
+    assert status["allowed_actions"] == ["setup"]
 
 
 def test_status_requires_mattermost_then_maps_runtime_states():

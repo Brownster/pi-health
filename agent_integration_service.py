@@ -54,6 +54,7 @@ class AgentIntegrationService:
         resource_provider: Callable[[], dict] = lambda: {"containers": [], "stacks": []},
         sleep: Callable[[float], None] = time.sleep,
         policy_path: Path | str = STATIC_CONFIG_DIR / "agent-policy.default.json",
+        lifecycle_resolver=None,
     ) -> None:
         self._helper_call = helper_call
         self._mattermost_status = mattermost_status
@@ -61,11 +62,20 @@ class AgentIntegrationService:
         self._resource_provider = resource_provider
         self._sleep = sleep
         self._policy_path = Path(policy_path)
+        self._lifecycle_resolver = lifecycle_resolver
 
     def status(self) -> dict:
         mattermost = self._mattermost()
+        if self._lifecycle_resolver is not None:
+            authoritative = self._lifecycle_resolver.authoritative_status(
+                self._public_status("not_installed", mattermost, {})
+            )
+            if authoritative is not None:
+                return authoritative
         if not mattermost.get("installed"):
-            return self._public_status("setup_required", mattermost, {})
+            return self._lifecycle_status(
+                self._public_status("setup_required", mattermost, {})
+            )
         runtime = self._call("agent_runtime_status", public_error="Agent runtime is unavailable")
         if not runtime.get("runtime_installed"):
             state = "not_installed"
@@ -102,7 +112,12 @@ class AgentIntegrationService:
             public["last_successful_turn"] = successful[-1] if successful else None
         except AgentIntegrationError:
             public["last_successful_turn"] = None
-        return public
+        return self._lifecycle_status(public)
+
+    def _lifecycle_status(self, status: dict) -> dict:
+        if self._lifecycle_resolver is None:
+            return status
+        return self._lifecycle_resolver.status(status)
 
     def providers(self) -> dict:
         status = self.status()

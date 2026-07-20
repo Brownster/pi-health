@@ -8,6 +8,10 @@ from werkzeug.security import generate_password_hash
 from app import AppDependencies, create_app
 from auth_utils import LoginRateLimiter
 from mattermost_integration_service import MattermostIntegrationService
+from integration_lifecycle_service import (
+    IntegrationLifecycleResolver,
+    LifecycleStateRepository,
+)
 from operation_manager import OperationRegistry
 from ports import JsonFileRepository
 from stack_manager import atomic_write_text
@@ -53,7 +57,7 @@ class RecordingNotifier:
         self.sent.append((self.url, notification))
 
 
-def make_service(tmp_path):
+def make_service(tmp_path, *, lifecycle_resolver=None, agent_snapshot=None):
     api = FakeMattermostApi()
     sent = []
     compose_calls = []
@@ -76,8 +80,72 @@ def make_service(tmp_path):
         clock=lambda: 1_784_275_200,
         stack_notifications_config_path=tmp_path / "config" / "stack-notifications.json",
         package_updates_config_path=tmp_path / "config" / "package-updates.json",
+        lifecycle_resolver=lifecycle_resolver,
+        agent_lifecycle_snapshot=agent_snapshot,
     )
     return service, api, sent, compose_calls
+
+
+def _lifecycle_record(*, target_state="disabled"):
+    return {
+        "schema_version": "1",
+        "integration": "mattermost",
+        "operation_id": "operation-1",
+        "action": "disable" if target_state == "disabled" else "uninstall",
+        "phase": "complete",
+        "target_state": target_state,
+        "started_at": "2026-07-20T20:00:00+00:00",
+        "updated_at": "2026-07-20T20:01:00+00:00",
+        "completed_steps": [],
+        "retained_data": target_state == "retained_data",
+        "remove_claude_code": None,
+        "failure": None,
+        "warning_codes": [],
+    }
+
+
+def test_status_applies_lifecycle_precedence_and_agent_dependency_blocks(tmp_path):
+    lifecycle = LifecycleStateRepository(
+        tmp_path / "state" / "mattermost-lifecycle.json",
+        "mattermost",
+    )
+    lifecycle.write(_lifecycle_record())
+    service, _api, _sent, _compose = make_service(
+        tmp_path,
+        lifecycle_resolver=IntegrationLifecycleResolver(lifecycle),
+        agent_snapshot=lambda: {
+            "state": "disabled",
+            "installed": True,
+            "enabled": False,
+        },
+    )
+
+    status = service.status()
+
+    assert status["state"] == "disabled"
+    assert status["installed"] is True
+    assert status["allowed_actions"] == ["enable"]
+    assert status["blocked_actions"][0]["dependency_code"] == (
+        "agents_must_be_uninstalled"
+    )
+
+
+def test_status_fails_closed_when_agent_dependency_snapshot_is_unavailable(tmp_path):
+    lifecycle = LifecycleStateRepository(
+        tmp_path / "state" / "mattermost-lifecycle.json",
+        "mattermost",
+    )
+    service, _api, _sent, _compose = make_service(
+        tmp_path,
+        lifecycle_resolver=IntegrationLifecycleResolver(lifecycle),
+        agent_snapshot=lambda: (_ for _ in ()).throw(RuntimeError("private path")),
+    )
+
+    status = service.status()
+
+    assert status["allowed_actions"] == ["setup"]
+    assert status["blocked_actions"] == []
+    assert "private path" not in json.dumps(status)
 
 
 SETUP = {

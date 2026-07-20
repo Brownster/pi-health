@@ -224,6 +224,11 @@ find "${LIMEOS_CONFIG_DIR}" "${LIMEOS_STATE_DIR}" "${LIMEOS_LOG_DIR}" \
   -type d -exec chmod 0750 {} +
 find "${LIMEOS_CONFIG_DIR}" "${LIMEOS_STATE_DIR}" "${LIMEOS_LOG_DIR}" \
   -type f -exec chmod 0640 {} +
+install -d -o root -g root -m 0700 "${LIMEOS_STATE_DIR}/integration-recovery"
+if [[ -f "${LIMEOS_STATE_DIR}/integration-recovery/mattermost.env" ]]; then
+  chown root:root "${LIMEOS_STATE_DIR}/integration-recovery/mattermost.env"
+  chmod 0600 "${LIMEOS_STATE_DIR}/integration-recovery/mattermost.env"
+fi
 if [[ -f "${CREDENTIALS_FILE}" ]]; then
   chown "${RUN_USER}:pihealth" "${CREDENTIALS_FILE}"
   chmod 0640 "${CREDENTIALS_FILE}"
@@ -256,6 +261,8 @@ ReadWritePaths=/backups
 ReadWritePaths=/etc/apt
 ReadWritePaths=/usr /var/lib/apt /var/lib/dpkg /var/cache/apt
 ReadWritePaths=-/var/lib/lime-agent -/var/lib/limeops -/run/limeos
+ReadWritePaths=-/etc/limeos/integrations/mattermost.env
+ReadWritePaths=-/var/lib/limeos/integration-recovery
 # Self-update writes to the checkout (git pull, venv pip, npm build) and the
 # LimeOS runtime dirs (migration); ProtectHome/ProtectSystem block these
 # without explicit write paths.

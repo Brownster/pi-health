@@ -80,6 +80,7 @@ class IntegrationCapabilityAdapter:
             status_reader=read_status,
             source="builtin",
             provider_id_hint=provider_id,
+            status_lifecycle_authoritative=True,
         )
 
     def _read_manifest(self, provider_id: str) -> dict[str, Any]:
@@ -95,6 +96,8 @@ class IntegrationCapabilityAdapter:
         installed = bool(raw.get("installed"))
         webhook_configured = bool(raw.get("webhook_configured"))
         configured = installed and webhook_configured
+        if state in {"disabled", "retained_data", "cleanup_required"}:
+            configured = False
         health_state, message, issues = self._mattermost_health(
             state, installed, webhook_configured
         )
@@ -122,6 +125,9 @@ class IntegrationCapabilityAdapter:
         return self._status(
             provider_id="mattermost",
             capability_id="integration.chat",
+            installed=installed,
+            enabled=installed and state != "disabled",
+            available=state not in {"not_installed", "retained_data", "cleanup_required"},
             configured=configured,
             health_state=health_state,
             message=message,
@@ -168,6 +174,21 @@ class IntegrationCapabilityAdapter:
         installed: bool,
         webhook_configured: bool,
     ) -> tuple[str, str, list[dict[str, str]]]:
+        if state == "cleanup_required":
+            return (
+                "error",
+                "Mattermost cleanup must be completed.",
+                [{
+                    "code": "mattermost_cleanup_required",
+                    "severity": "error",
+                    "message": "A Mattermost lifecycle operation did not complete.",
+                    "recovery": "Open Integrations and retry cleanup.",
+                }],
+            )
+        if state == "retained_data":
+            return "unconfigured", "Mattermost data is retained for reinstall.", []
+        if state == "disabled":
+            return "disabled", "Mattermost is disabled.", []
         if not installed:
             return "unconfigured", "Mattermost setup is required.", []
         if not webhook_configured:
@@ -217,6 +238,8 @@ class IntegrationCapabilityAdapter:
             and provider.get("compatible")
             and provider.get("authenticated")
         )
+        if state in {"disabled", "not_installed", "cleanup_required"}:
+            configured = False
         health_state, message, issues = self._agent_health(state)
         provider_name = "Claude Code" if provider.get("id") == "claude" else (
             provider.get("id") or "Not configured"
@@ -244,6 +267,9 @@ class IntegrationCapabilityAdapter:
         return self._status(
             provider_id="ai-agents",
             capability_id="agent.provider",
+            installed=bool(raw.get("installed")),
+            enabled=bool(raw.get("enabled")) and state != "disabled",
+            available=state not in {"not_installed", "cleanup_required"},
             configured=configured,
             health_state=health_state,
             message=message,
@@ -276,6 +302,17 @@ class IntegrationCapabilityAdapter:
     def _agent_health(state: str) -> tuple[str, str, list[dict[str, str]]]:
         if state == "connected":
             return "healthy", "The LimeOS assistant is connected.", []
+        if state == "cleanup_required":
+            return (
+                "error",
+                "AI Agents cleanup must be completed.",
+                [{
+                    "code": "agent_cleanup_required",
+                    "severity": "error",
+                    "message": "An AI Agents lifecycle operation did not complete.",
+                    "recovery": "Open Integrations and retry cleanup.",
+                }],
+            )
         if state == "disabled":
             return "disabled", "The LimeOS assistant is disabled.", []
         if state in {"not_installed", "setup_required"}:
@@ -309,6 +346,9 @@ class IntegrationCapabilityAdapter:
         *,
         provider_id: str,
         capability_id: str,
+        installed: bool,
+        enabled: bool,
+        available: bool,
         configured: bool,
         health_state: str,
         message: str,
@@ -323,11 +363,11 @@ class IntegrationCapabilityAdapter:
             "capability_id": capability_id,
             "observed_at": self._observed_at(),
             "lifecycle": {
-                "installed": True,
-                "enabled": True,
+                "installed": installed,
+                "enabled": enabled,
                 "configured": configured,
                 "compatibility": "compatible",
-                "availability": "available",
+                "availability": "available" if available else "unavailable",
             },
             "health": {"state": health_state, "message": message, "issues": issues},
             "summary": summary,

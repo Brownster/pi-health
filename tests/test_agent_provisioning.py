@@ -570,6 +570,18 @@ def test_converge_if_stale_skips_when_agent_not_installed():
         assert helper.cmd_agent_converge_if_stale({})["skipped"] is True
 
 
+def test_converge_if_stale_skips_when_any_lifecycle_tombstone_exists(tmp_path):
+    lifecycle = tmp_path / "agents-lifecycle.json"
+    lifecycle.write_text("{corrupt", encoding="utf-8")
+    with patch.object(helper, "AGENT_LIFECYCLE_TOMBSTONE", str(lifecycle)):
+        result = helper.cmd_agent_converge_if_stale({})
+    assert result == {
+        "success": True,
+        "skipped": True,
+        "reason": "agent lifecycle state blocks convergence",
+    }
+
+
 def test_converge_if_stale_rejects_parameters():
     assert helper.cmd_agent_converge_if_stale({"force": True})["success"] is False
 

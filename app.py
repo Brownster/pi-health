@@ -328,6 +328,11 @@ def _default_media_quickstart_service(
 
 def _default_mattermost_integration_service(repository, docker_port):
     from stack_manager import atomic_write_text, get_stack_path
+    from integration_lifecycle_service import (
+        IntegrationLifecycleResolver,
+        LifecycleStateRepository,
+        default_agent_lifecycle_snapshot,
+    )
 
     def container_status(name):
         if not docker_port.available:
@@ -351,6 +356,13 @@ def _default_mattermost_integration_service(repository, docker_port):
         / "stack-notifications.json",
         package_updates_config_path=RUNTIME_INTEGRATIONS_CONFIG_DIR
         / "package-updates.json",
+        lifecycle_resolver=IntegrationLifecycleResolver(
+            LifecycleStateRepository(
+                RUNTIME_INTEGRATIONS_STATE_DIR / "mattermost-lifecycle.json",
+                "mattermost",
+            )
+        ),
+        agent_lifecycle_snapshot=default_agent_lifecycle_snapshot().status,
     )
 
 
@@ -375,6 +387,10 @@ def _default_stack_notifications_service(repository):
 
 def _default_agent_integration_service(mattermost_service, docker_port, stack_read_service):
     from helper_client import helper_call
+    from integration_lifecycle_service import (
+        IntegrationLifecycleResolver,
+        LifecycleStateRepository,
+    )
 
     def resources():
         containers = []
@@ -398,6 +414,12 @@ def _default_agent_integration_service(mattermost_service, docker_port, stack_re
         helper_call=helper_call,
         mattermost_status=mattermost_service.status,
         resource_provider=resources,
+        lifecycle_resolver=IntegrationLifecycleResolver(
+            LifecycleStateRepository(
+                RUNTIME_INTEGRATIONS_STATE_DIR / "agents-lifecycle.json",
+                "agents",
+            )
+        ),
     )
 
 
@@ -1559,7 +1581,7 @@ def create_app(config=None, dependencies=None):
     return application
 
 
-def _start_agent_convergence():
+def _start_agent_convergence(snapshot_reader=None, helper=None):
     """Converge a stale agent runtime after a self-update restart, in the background.
 
     A self-update runs the pre-pull orchestrator/helper, so the release that first ships
@@ -1573,11 +1595,18 @@ def _start_agent_convergence():
     def _run():
         try:
             from helper_client import helper_call
-            helper_call("agent_converge_if_stale", {})
+            from integration_lifecycle_service import default_agent_lifecycle_snapshot
+
+            read_snapshot = snapshot_reader or default_agent_lifecycle_snapshot().status
+            if read_snapshot().get("state") != "enabled":
+                return
+            (helper or helper_call)("agent_converge_if_stale", {})
         except Exception:
             pass
 
-    threading.Thread(target=_run, name="agent-convergence", daemon=True).start()
+    thread = threading.Thread(target=_run, name="agent-convergence", daemon=True)
+    thread.start()
+    return thread
 
 
 def _ensure_package_reconcile_timer():

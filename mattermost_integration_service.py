@@ -230,6 +230,8 @@ class MattermostIntegrationService:
         container_status_provider: Callable[[str], Mapping[str, Any] | None] | None = None,
         stack_notifications_config_path: Path | None = None,
         package_updates_config_path: Path | None = None,
+        lifecycle_resolver: Any | None = None,
+        agent_lifecycle_snapshot: Callable[[], Mapping[str, Any]] | None = None,
     ) -> None:
         self._config_path = Path(config_path)
         self._stack_notifications_config_path = (
@@ -253,6 +255,8 @@ class MattermostIntegrationService:
         self._sleep = sleep
         self._clock = clock
         self._container_status_provider = container_status_provider
+        self._lifecycle_resolver = lifecycle_resolver
+        self._agent_lifecycle_snapshot = agent_lifecycle_snapshot
 
     def status(self) -> dict[str, Any]:
         config = self._load_config()
@@ -267,7 +271,7 @@ class MattermostIntegrationService:
             state = "degraded"
         if state == "connected" and delivery.get("ok") is False:
             state = "degraded"
-        return {
+        public = {
             "state": state,
             "installed": installed,
             "site_url": config.get("site_url"),
@@ -283,6 +287,21 @@ class MattermostIntegrationService:
             "updated_at": daemon.get("updated_at"),
             "services": services,
         }
+        if self._lifecycle_resolver is not None:
+            public = self._lifecycle_resolver.status(public)
+            if self._agent_lifecycle_snapshot is not None:
+                try:
+                    snapshot = self._agent_lifecycle_snapshot()
+                except Exception:
+                    snapshot = {
+                        "state": "cleanup_required",
+                        "installed": True,
+                        "enabled": True,
+                    }
+                public = self._lifecycle_resolver.apply_mattermost_dependencies(
+                    public, snapshot
+                )
+        return public
 
     def _updates_channel_configured(self) -> bool:
         if self._package_updates_config_path is None:

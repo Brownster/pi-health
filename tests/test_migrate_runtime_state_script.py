@@ -5,7 +5,9 @@ import scripts.migrate_runtime_state as migration_script
 from scripts.migrate_runtime_state import (
     ensure_agent_runtime_roots,
     ensure_helper_agent_permissions,
+    ensure_helper_integration_lifecycle_permissions,
     ensure_helper_restart_coupling,
+    ensure_integration_lifecycle_roots,
     ensure_metrics_timer,
     resolve_dashboard_user,
 )
@@ -37,6 +39,37 @@ def test_agent_runtime_roots_are_seeded_outside_helper_mount_sandbox(monkeypatch
         "--service-type=exec",
     ]
     assert argv[-3:] == ["-p", "/var/lib/lime-agent", "/var/lib/limeops"]
+    assert kwargs == {"check": True}
+
+
+def test_integration_recovery_root_is_seeded_with_root_only_permissions(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "scripts.migrate_runtime_state.subprocess.run",
+        lambda argv, **kwargs: calls.append((argv, kwargs)),
+    )
+
+    ensure_integration_lifecycle_roots()
+
+    argv, kwargs = calls[0]
+    assert argv[:6] == [
+        "systemd-run",
+        "--quiet",
+        "--wait",
+        "--pipe",
+        "--collect",
+        "--service-type=exec",
+    ]
+    assert argv[-8:] == [
+        "-d",
+        "-o",
+        "root",
+        "-g",
+        "root",
+        "-m",
+        "0700",
+        "/var/lib/limeos/integration-recovery",
+    ]
     assert kwargs == {"check": True}
 
 
@@ -83,6 +116,29 @@ def test_helper_agent_permissions_are_created_and_idempotent(tmp_path: Path):
     assert dropin.stat().st_mode & 0o777 == 0o644
 
     same_dropin, changed = ensure_helper_agent_permissions(tmp_path, repo)
+    assert same_dropin == dropin
+    assert changed is False
+
+
+def test_helper_lifecycle_permissions_are_fixed_and_idempotent(tmp_path: Path):
+    (tmp_path / "pihealth-helper.service").write_text("[Unit]\n", encoding="utf-8")
+
+    dropin, changed = ensure_helper_integration_lifecycle_permissions(tmp_path)
+
+    assert changed is True
+    assert dropin == (
+        tmp_path
+        / "pihealth-helper.service.d"
+        / "integration-lifecycle.conf"
+    )
+    assert dropin.read_text(encoding="utf-8") == (
+        "[Service]\n"
+        "ReadWritePaths=-/etc/limeos/integrations/mattermost.env\n"
+        "ReadWritePaths=-/var/lib/limeos/integration-recovery\n"
+    )
+    assert dropin.stat().st_mode & 0o777 == 0o644
+
+    same_dropin, changed = ensure_helper_integration_lifecycle_permissions(tmp_path)
     assert same_dropin == dropin
     assert changed is False
 
@@ -160,6 +216,11 @@ def test_migration_enables_metrics_timer_for_existing_install(monkeypatch, tmp_p
     repo.mkdir()
     calls = []
     monkeypatch.setattr(migration_script, "ensure_agent_runtime_roots", lambda: None)
+    monkeypatch.setattr(
+        migration_script,
+        "ensure_integration_lifecycle_roots",
+        lambda: None,
+    )
     monkeypatch.setattr(migration_script, "migrate_legacy_runtime_data", lambda **_kwargs: [])
     monkeypatch.setattr(
         migration_script,

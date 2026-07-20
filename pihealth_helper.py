@@ -142,6 +142,13 @@ CLAUDE_APT_SOURCE = (
     'https://downloads.claude.ai/claude-code/apt/latest latest main\n'
 )
 CLAUDE_SIGNING_FINGERPRINT = '31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE'
+MATTERMOST_ACTIVE_CREDENTIAL = '/etc/limeos/integrations/mattermost.env'
+MATTERMOST_RECOVERY_DIR = '/var/lib/limeos/integration-recovery'
+MATTERMOST_RECOVERY_CREDENTIAL = os.path.join(
+    MATTERMOST_RECOVERY_DIR, 'mattermost.env'
+)
+MATTERMOST_CREDENTIAL_LIMIT = 64 * 1024
+AGENT_LIFECYCLE_TOMBSTONE = '/var/lib/limeos/integrations/agents-lifecycle.json'
 
 _agent_auth_manager = GuidedAuthManager(
     [
@@ -207,6 +214,174 @@ def _write_managed_file(path, content, mode=0o644):
         except OSError:
             pass
         return {'success': False, 'error': str(exc)}
+
+
+def _sync_directory(path):
+    directory_fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+
+
+def _read_fixed_credential(path, *, root_owned=False):
+    """Read a fixed credential after rejecting links, unsafe modes, and large files."""
+    descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode) or stat.S_IMODE(metadata.st_mode) != 0o600:
+            raise OSError('unsafe credential file')
+        if root_owned and (metadata.st_uid != 0 or metadata.st_gid != 0):
+            raise OSError('invalid credential ownership')
+        if metadata.st_size < 1 or metadata.st_size > MATTERMOST_CREDENTIAL_LIMIT:
+            raise OSError('invalid credential size')
+        value = os.read(descriptor, MATTERMOST_CREDENTIAL_LIMIT + 1)
+    finally:
+        os.close(descriptor)
+    if not value or len(value) > MATTERMOST_CREDENTIAL_LIMIT:
+        raise OSError('invalid credential size')
+    return value
+
+
+def _write_fixed_credential(path, value, *, uid, gid):
+    directory = os.path.dirname(path)
+    fd, temporary = tempfile.mkstemp(
+        dir=directory,
+        prefix=f'.{os.path.basename(path)}.',
+        suffix='.tmp',
+    )
+    try:
+        os.fchmod(fd, 0o600)
+        os.fchown(fd, uid, gid)
+        with os.fdopen(fd, 'wb') as handle:
+            handle.write(value)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        _sync_directory(directory)
+    except BaseException:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+        raise
+
+
+def _transfer_mattermost_credential(
+    source, destination, *, destination_uid, destination_gid
+):
+    source_root_owned = source == MATTERMOST_RECOVERY_CREDENTIAL
+    destination_root_owned = destination == MATTERMOST_RECOVERY_CREDENTIAL
+    source_exists = os.path.lexists(source)
+    destination_exists = os.path.lexists(destination)
+    if not source_exists:
+        if not destination_exists:
+            raise OSError('credential is unavailable')
+        _read_fixed_credential(destination, root_owned=destination_root_owned)
+        return
+
+    source_value = _read_fixed_credential(source, root_owned=source_root_owned)
+    if destination_exists:
+        destination_value = _read_fixed_credential(
+            destination, root_owned=destination_root_owned
+        )
+        if source_value != destination_value:
+            raise OSError('credential copies do not match')
+    else:
+        _write_fixed_credential(
+            destination,
+            source_value,
+            uid=destination_uid,
+            gid=destination_gid,
+        )
+    os.unlink(source)
+    _sync_directory(os.path.dirname(source))
+
+
+def _credential_directory_owner(path, *, root_owned=False):
+    metadata = os.lstat(path)
+    if not stat.S_ISDIR(metadata.st_mode) or stat.S_IMODE(metadata.st_mode) & 0o022:
+        raise OSError('unsafe credential directory')
+    if root_owned and (metadata.st_uid != 0 or metadata.st_gid != 0):
+        raise OSError('invalid credential directory ownership')
+    return metadata
+
+
+def _ensure_mattermost_recovery_directory():
+    if not os.path.lexists(MATTERMOST_RECOVERY_DIR):
+        os.mkdir(MATTERMOST_RECOVERY_DIR, mode=0o700)
+    metadata = _credential_directory_owner(
+        MATTERMOST_RECOVERY_DIR,
+        root_owned=True,
+    )
+    if stat.S_IMODE(metadata.st_mode) != 0o700:
+        os.chmod(MATTERMOST_RECOVERY_DIR, 0o700)
+
+
+def cmd_mattermost_recovery_credential_retain(params):
+    """Move the active Mattermost credential into fixed root-only custody."""
+    if params != {}:
+        return {'success': False, 'error': 'Invalid recovery credential parameters'}
+    try:
+        _ensure_mattermost_recovery_directory()
+        _transfer_mattermost_credential(
+            MATTERMOST_ACTIVE_CREDENTIAL,
+            MATTERMOST_RECOVERY_CREDENTIAL,
+            destination_uid=0,
+            destination_gid=0,
+        )
+        return {'success': True, 'credential_retained': True}
+    except OSError:
+        return {
+            'success': False,
+            'error': 'Mattermost recovery credential could not be retained',
+        }
+
+
+def cmd_mattermost_recovery_credential_restore(params):
+    """Restore the retained credential to the fixed active integration path."""
+    if params != {}:
+        return {'success': False, 'error': 'Invalid recovery credential parameters'}
+    try:
+        active_directory = os.path.dirname(MATTERMOST_ACTIVE_CREDENTIAL)
+        owner = _credential_directory_owner(active_directory)
+        _credential_directory_owner(MATTERMOST_RECOVERY_DIR, root_owned=True)
+        _transfer_mattermost_credential(
+            MATTERMOST_RECOVERY_CREDENTIAL,
+            MATTERMOST_ACTIVE_CREDENTIAL,
+            destination_uid=owner.st_uid,
+            destination_gid=owner.st_gid,
+        )
+        return {'success': True, 'credential_restored': True}
+    except OSError:
+        return {
+            'success': False,
+            'error': 'Mattermost recovery credential could not be restored',
+        }
+
+
+def cmd_mattermost_recovery_credential_discard(params):
+    """Remove only the fixed root-owned retained Mattermost credential."""
+    if params != {}:
+        return {'success': False, 'error': 'Invalid recovery credential parameters'}
+    try:
+        if not os.path.lexists(MATTERMOST_RECOVERY_DIR):
+            return {'success': True, 'credential_discarded': True}
+        _credential_directory_owner(MATTERMOST_RECOVERY_DIR, root_owned=True)
+        if os.path.lexists(MATTERMOST_RECOVERY_CREDENTIAL):
+            _read_fixed_credential(MATTERMOST_RECOVERY_CREDENTIAL, root_owned=True)
+            os.unlink(MATTERMOST_RECOVERY_CREDENTIAL)
+            _sync_directory(MATTERMOST_RECOVERY_DIR)
+        return {'success': True, 'credential_discarded': True}
+    except OSError:
+        return {
+            'success': False,
+            'error': 'Mattermost recovery credential could not be discarded',
+        }
 
 
 def _validate_compose_path(value):
@@ -2546,6 +2721,11 @@ def _pihealth_update_migrate(ctx):
     # Restore service ownership regardless of whether new files were copied.
     run_command(["chown", "-R", f"{user}:pihealth", config_dir, state_dir, log_dir])
     _restore_agent_runtime_ownership()
+    if not _restore_mattermost_recovery_ownership():
+        return {
+            'success': False,
+            'error': 'Mattermost recovery credential ownership repair failed',
+        }
 
     if result.get("returncode") != 0:
         return {
@@ -2991,6 +3171,32 @@ def _agent_install_directory(path, mode, owner, group):
     return result.get('returncode') == 0
 
 
+def _restore_mattermost_recovery_ownership():
+    """Restore the fixed root-only recovery path after broad legacy migration."""
+    try:
+        if not os.path.lexists(MATTERMOST_RECOVERY_DIR):
+            os.mkdir(MATTERMOST_RECOVERY_DIR, mode=0o700)
+        directory = os.lstat(MATTERMOST_RECOVERY_DIR)
+        if not stat.S_ISDIR(directory.st_mode):
+            return False
+        os.chown(MATTERMOST_RECOVERY_DIR, 0, 0, follow_symlinks=False)
+        os.chmod(MATTERMOST_RECOVERY_DIR, 0o700)
+        if os.path.lexists(MATTERMOST_RECOVERY_CREDENTIAL):
+            credential = os.lstat(MATTERMOST_RECOVERY_CREDENTIAL)
+            if not stat.S_ISREG(credential.st_mode):
+                return False
+            os.chown(
+                MATTERMOST_RECOVERY_CREDENTIAL,
+                0,
+                0,
+                follow_symlinks=False,
+            )
+            os.chmod(MATTERMOST_RECOVERY_CREDENTIAL, 0o600)
+        return True
+    except OSError:
+        return False
+
+
 def _restore_agent_runtime_ownership():
     """Restore fixed agent paths after legacy state migration or helper restart."""
     if run_command(['getent', 'passwd', 'lime-agent']).get('returncode') != 0:
@@ -3189,6 +3395,12 @@ def cmd_agent_converge_if_stale(params):
     rejected = _agent_reject_params(params)
     if rejected:
         return rejected
+    if os.path.lexists(AGENT_LIFECYCLE_TOMBSTONE):
+        return {
+            'success': True,
+            'skipped': True,
+            'reason': 'agent lifecycle state blocks convergence',
+        }
     if not os.path.exists(AGENT_UNIT_PATH):
         return {'success': True, 'skipped': True, 'reason': 'agent not installed'}
     repo_dir = _agent_repo_dir()
@@ -4110,6 +4322,9 @@ COMMANDS = {
     'packages_nightly_reconcile': cmd_packages_nightly_reconcile,
     'configure_package_reconcile_schedule': cmd_configure_package_reconcile_schedule,
     'agent_converge_if_stale': cmd_agent_converge_if_stale,
+    'mattermost_recovery_credential_retain': cmd_mattermost_recovery_credential_retain,
+    'mattermost_recovery_credential_restore': cmd_mattermost_recovery_credential_restore,
+    'mattermost_recovery_credential_discard': cmd_mattermost_recovery_credential_discard,
     'ping': lambda p: {'success': True, 'message': 'pong'}
 }
 
@@ -4134,6 +4349,9 @@ _MUTATING_COMMANDS = frozenset({
     'agent_bot_secret_write', 'agent_configure', 'agent_runtime_start',
     'packages_reconcile', 'packages_approve', 'packages_nightly_reconcile',
     'configure_package_reconcile_schedule', 'agent_converge_if_stale',
+    'mattermost_recovery_credential_retain',
+    'mattermost_recovery_credential_restore',
+    'mattermost_recovery_credential_discard',
 })
 
 _mutation_lock = threading.Lock()
