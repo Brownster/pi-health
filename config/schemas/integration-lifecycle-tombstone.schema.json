@@ -1,0 +1,94 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://limeos.local/schemas/integration-lifecycle-tombstone-v1.json",
+  "title": "LimeOS integration lifecycle tombstone",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "integration",
+    "operation_id",
+    "action",
+    "phase",
+    "target_state",
+    "started_at",
+    "updated_at",
+    "completed_steps",
+    "retained_data",
+    "remove_claude_code",
+    "failure",
+    "warning_codes"
+  ],
+  "properties": {
+    "schema_version": {"const": "1"},
+    "integration": {"enum": ["mattermost", "agents"]},
+    "operation_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{1,128}$"
+    },
+    "action": {
+      "enum": ["enable", "disable", "uninstall", "purge"]
+    },
+    "phase": {"enum": ["running", "cleanup_required", "complete"]},
+    "target_state": {
+      "enum": ["connected", "disabled", "retained_data", "not_installed"]
+    },
+    "started_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"},
+    "completed_steps": {
+      "type": "array",
+      "maxItems": 32,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$",
+        "maxLength": 64
+      }
+    },
+    "retained_data": {"type": "boolean"},
+    "remove_claude_code": {"type": ["boolean", "null"]},
+    "failure": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["code", "message"],
+          "properties": {
+            "code": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$",
+              "maxLength": 64
+            },
+            "message": {"type": "string", "minLength": 1, "maxLength": 240}
+          }
+        }
+      ]
+    },
+    "warning_codes": {
+      "type": "array",
+      "maxItems": 8,
+      "uniqueItems": true,
+      "items": {"enum": ["agent_bot_cleanup_failed"]}
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"phase": {"const": "cleanup_required"}}},
+      "then": {"not": {"properties": {"failure": {"type": "null"}}}}
+    },
+    {
+      "if": {"properties": {"integration": {"const": "mattermost"}}},
+      "then": {"properties": {"remove_claude_code": {"type": "null"}}}
+    },
+    {
+      "if": {
+        "properties": {
+          "integration": {"const": "agents"},
+          "action": {"const": "uninstall"}
+        }
+      },
+      "then": {"properties": {"remove_claude_code": {"type": "boolean"}}}
+    }
+  ]
+}

@@ -1,0 +1,153 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://limeos.local/schemas/integration-lifecycle-status-v1.json",
+  "title": "LimeOS integration lifecycle status projection",
+  "type": "object",
+  "required": [
+    "state",
+    "installed",
+    "retained_data",
+    "cleanup_required",
+    "allowed_actions",
+    "blocked_actions",
+    "cleanup_operation",
+    "warnings"
+  ],
+  "properties": {
+    "state": {
+      "enum": [
+        "cleanup_required",
+        "retained_data",
+        "not_installed",
+        "disabled",
+        "authenticating",
+        "setup_required",
+        "disconnected",
+        "degraded",
+        "connected"
+      ]
+    },
+    "installed": {"type": "boolean"},
+    "retained_data": {"type": "boolean"},
+    "cleanup_required": {"type": "boolean"},
+    "allowed_actions": {
+      "type": "array",
+      "maxItems": 8,
+      "uniqueItems": true,
+      "items": {"$ref": "#/definitions/action"}
+    },
+    "blocked_actions": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {"$ref": "#/definitions/blockedAction"}
+    },
+    "cleanup_operation": {
+      "oneOf": [
+        {"type": "null"},
+        {"$ref": "#/definitions/cleanupOperation"}
+      ]
+    },
+    "warnings": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {"$ref": "#/definitions/warning"}
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"state": {"const": "retained_data"}}},
+      "then": {
+        "properties": {
+          "installed": {"const": false},
+          "retained_data": {"const": true}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"state": {"const": "not_installed"}}},
+      "then": {"properties": {"installed": {"const": false}}}
+    },
+    {
+      "if": {"properties": {"cleanup_required": {"const": true}}},
+      "then": {
+        "properties": {
+          "state": {"const": "cleanup_required"},
+          "cleanup_operation": {"$ref": "#/definitions/cleanupOperation"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"state": {"const": "cleanup_required"}}},
+      "then": {"properties": {"cleanup_required": {"const": true}}}
+    }
+  ],
+  "definitions": {
+    "action": {
+      "enum": [
+        "setup",
+        "enable",
+        "repair",
+        "authenticate",
+        "disable",
+        "uninstall",
+        "retry_cleanup",
+        "purge"
+      ]
+    },
+    "blockedAction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action",
+        "dependency_code",
+        "message",
+        "required_action",
+        "route"
+      ],
+      "properties": {
+        "action": {"$ref": "#/definitions/action"},
+        "dependency_code": {
+          "enum": [
+            "agents_must_be_disabled",
+            "agents_must_be_uninstalled"
+          ]
+        },
+        "message": {"type": "string", "minLength": 1, "maxLength": 240},
+        "required_action": {"enum": ["disable", "uninstall"]},
+        "route": {"const": "/integrations#ai-agents"}
+      }
+    },
+    "cleanupOperation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "action",
+        "state",
+        "started_at",
+        "updated_at",
+        "retryable"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,128}$"
+        },
+        "action": {"$ref": "#/definitions/action"},
+        "state": {"enum": ["running", "failed", "interrupted"]},
+        "started_at": {"type": "string", "format": "date-time"},
+        "updated_at": {"type": "string", "format": "date-time"},
+        "retryable": {"type": "boolean"}
+      }
+    },
+    "warning": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": {"enum": ["agent_bot_cleanup_failed"]},
+        "message": {"type": "string", "minLength": 1, "maxLength": 240}
+      }
+    }
+  }
+}
