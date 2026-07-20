@@ -253,6 +253,43 @@ def _package_status() -> dict:  # pragma: no cover - target integration
     return compliance_report(check_packages(specs, version_of, version_ge=_dpkg_ge))
 
 
+def _apt_candidate(name: str) -> str | None:  # pragma: no cover - target integration
+    result = subprocess.run(
+        ["apt-cache", "policy", name], capture_output=True, text=True, timeout=30
+    )
+    if result.returncode != 0:
+        return None
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if line.startswith("Candidate:"):
+            value = line.split(":", 1)[1].strip()
+            return None if value in ("", "(none)") else value
+    return None
+
+
+def _package_pending() -> dict:  # pragma: no cover - target integration
+    """Held/critical updates awaiting review — read-only, so `@limeos` can report them.
+
+    No root and no approval overlay (the approvals store is root-only); this reports the raw
+    pending list. Approving remains an authenticated app action, not an agent capability.
+    """
+    from limeos_packages import load_manifest, pending_updates
+
+    specs = load_manifest()
+    updates = pending_updates(
+        specs,
+        lambda spec: _dpkg_version(spec.name) if spec.manager == "apt" else None,
+        lambda spec: _apt_candidate(spec.name) if spec.manager == "apt" else None,
+    )
+    return {
+        "pending": [
+            {"name": u.name, "installed": u.installed, "candidate": u.candidate,
+             "critical": u.critical}
+            for u in updates
+        ]
+    }
+
+
 def default_dependencies() -> DiagnosticDependencies:  # pragma: no cover - target integration
     return DiagnosticDependencies(
         system_status=_system_status,
@@ -270,6 +307,7 @@ def default_dependencies() -> DiagnosticDependencies:  # pragma: no cover - targ
         network_check=_network_check,
         installation_inventory=_installation_inventory,
         package_status=_package_status,
+        package_pending=_package_pending,
     )
 
 

@@ -208,6 +208,18 @@ def test_packages_status_read_op_returns_compliance_report():
     assert response["data"]["drift"] == ["claude-code"]
 
 
+def test_packages_pending_read_op_returns_held_updates():
+    deps = make_deps(
+        package_pending=lambda: {"pending": [
+            {"name": "claude-code", "installed": "2.1.207-1", "candidate": "2.1.212-1", "critical": True}
+        ]}
+    )
+    broker = make_broker(build_operations(deps))
+    response = call(broker, "packages.pending")
+    assert response["ok"] is True
+    assert response["data"]["pending"][0]["candidate"] == "2.1.212-1"
+
+
 def test_container_logs_flow_redacts_and_defaults_lines():
     deps = make_deps(
         container_logs=lambda name, lines: f"{name} lines={lines} password=hunter2"

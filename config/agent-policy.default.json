@@ -81,6 +81,9 @@
     },
     "packages.status": {
       "enabled": true
+    },
+    "packages.pending": {
+      "enabled": true
     }
   }
 }

@@ -160,6 +160,7 @@ class DiagnosticDependencies:
     network_check: Callable[[str], dict]
     installation_inventory: Callable[[], dict]
     package_status: Callable[[], dict]
+    package_pending: Callable[[], dict] = lambda: {"pending": []}
 
 
 def build_operations(deps: DiagnosticDependencies) -> dict[str, OperationDefinition]:
@@ -236,4 +237,5 @@ def build_operations(deps: DiagnosticDependencies) -> dict[str, OperationDefinit
         _no_params,
     )
     add("packages.status", lambda p, c: deps.package_status(), _no_params)
+    add("packages.pending", lambda p, c: deps.package_pending(), _no_params)
     return operations

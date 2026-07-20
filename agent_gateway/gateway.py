@@ -79,6 +79,7 @@ class GatewayConfig:
         "network.check",
         "installation.inventory",
         "packages.status",
+        "packages.pending",
     )
 
 
