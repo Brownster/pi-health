@@ -102,6 +102,34 @@ export function sendMattermostTest(): Promise<{ status: string; at: string }> {
   });
 }
 
+export interface PendingPackageUpdate {
+  name: string;
+  installed: string | null;
+  candidate: string;
+  critical: boolean;
+  approved: boolean;
+}
+
+export function getPendingPackageUpdates(
+  signal?: AbortSignal,
+): Promise<{ pending: PendingPackageUpdate[]; approvals: unknown[] }> {
+  return requestApi<{ pending: PendingPackageUpdate[]; approvals: unknown[] }>(
+    "/api/integrations/packages/pending",
+    { method: "GET", signal },
+  );
+}
+
+export function approvePackageUpdate(
+  name: string,
+  version: string,
+): Promise<{ approval: { name: string; version: string; approved_by: string; approved_at: string } }> {
+  return requestApi("/api/integrations/packages/approve", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, version }),
+  });
+}
+
 export interface StackNotificationsStatus {
   enabled: boolean;
   configured: boolean;

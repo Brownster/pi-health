@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 
 import { AgentsIntegrationCard } from "@/components/integrations/agents-integration-card";
+import { PackageUpdatesCard } from "@/components/integrations/package-updates-card";
 import { StackNotificationsCard } from "@/components/integrations/stack-notifications-card";
 import { Badge, StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -350,6 +351,8 @@ export function IntegrationsPage() {
       <AgentsIntegrationCard refreshKey={agentRefreshKey} />
 
       <StackNotificationsCard refreshKey={agentRefreshKey} />
+
+      <PackageUpdatesCard refreshKey={agentRefreshKey} />
 
       {setupOpen ? <ModalOverlay onClose={installing ? () => undefined : () => setSetupOpen(false)}><Card aria-labelledby="mattermost-setup-title" aria-modal="true" className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden" role="dialog"><CardHeader className="flex flex-row items-start justify-between border-b border-border"><div><CardTitle id="mattermost-setup-title">Set up Mattermost</CardTitle><CardDescription>Install chat and connect LimeOS alerts in one workflow.</CardDescription></div><Button aria-label="Close setup" className="w-11 px-0" disabled={installing} onClick={() => setSetupOpen(false)} variant="ghost"><X className="h-4 w-4" /></Button></CardHeader><CardContent className="space-y-4 overflow-auto p-4 sm:p-6">
         {installing || installLines.length ? <div className="space-y-3"><div className={cn("flex items-center gap-2 text-sm", error ? "text-danger" : "text-info")}>{installing ? <Loader2 className="h-4 w-4 animate-spin" /> : error ? <TriangleAlert className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}{installing ? "Installing Mattermost" : error ? "Setup failed" : "Setup finished"}</div><pre className="max-h-72 overflow-auto rounded-md border border-border bg-black/30 p-3 font-mono text-xs leading-5 text-muted-foreground" data-mattermost-install-log>{installLines.join("\n")}</pre>{!installing ? <Button onClick={() => setSetupOpen(false)}>Close</Button> : null}</div> : <>
