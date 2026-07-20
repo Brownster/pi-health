@@ -1,8 +1,8 @@
 # Integration Lifecycle Delivery Plan
 
 Date: 2026-07-20
-Status: In progress; IL-000 complete, but CP-021 must complete before any IL code is
-deployed to Holly
+Status: In progress; IL-000 and IL-001 complete, but CP-021 must complete before any IL
+code is deployed to Holly
 Tracking prefix: `IL`
 Approved design:
 `docs/plans/2026-07-20-integration-lifecycle-design.md`
@@ -167,7 +167,7 @@ added.
 | ID | Work package | Depends on | Status | Deliverable |
 | --- | --- | --- | --- | --- |
 | IL-000 | Baseline, ownership, lifecycle and API contract | Approved design | Complete (`94d6ae7`) | Recorded current Mattermost/agent/package behavior; frozen public state, blocked-action, tombstone, warning, cleanup-operation, ownership, recovery-credential custody, and rollback contracts |
-| IL-001 | Lifecycle state and recovery repositories | IL-000 | Planned | Atomic tombstone and retained-data repositories; Mattermost-independent agent snapshot; status precedence; capability-adapter mapping; startup convergence guard; helper sandbox/drop-in migration in `scripts/migrate_runtime_state.py`; and feature-state input for package reconciliation |
+| IL-001 | Lifecycle state and recovery repositories | IL-000 | Complete (`4163c30`) | Atomic tombstone and retained-data repositories; Mattermost-independent agent snapshot; status precedence; capability-adapter mapping; startup convergence guard; helper sandbox/drop-in migration in `scripts/migrate_runtime_state.py`; and feature-state input for package reconciliation |
 
 Exit gate:
 
