@@ -331,7 +331,9 @@ def _default_mattermost_integration_service(repository, docker_port):
     from integration_lifecycle_service import (
         IntegrationLifecycleResolver,
         LifecycleStateRepository,
+        RecoveryCredentialCustody,
         default_agent_lifecycle_snapshot,
+        load_lifecycle_policy,
     )
 
     def container_status(name):
@@ -344,6 +346,11 @@ def _default_mattermost_integration_service(repository, docker_port):
         health = ((attrs.get("State") or {}).get("Health") or {}).get("Status")
         return {"state": getattr(container, "status", "unknown"), "health": health}
 
+    lifecycle_policy = load_lifecycle_policy()
+    lifecycle_repository = LifecycleStateRepository(
+        RUNTIME_INTEGRATIONS_STATE_DIR / "mattermost-lifecycle.json",
+        "mattermost",
+    )
     return MattermostIntegrationService(
         config_path=RUNTIME_INTEGRATIONS_CONFIG_DIR / "mattermost.json",
         secrets_path=RUNTIME_INTEGRATIONS_CONFIG_DIR / "mattermost.env",
@@ -357,11 +364,12 @@ def _default_mattermost_integration_service(repository, docker_port):
         package_updates_config_path=RUNTIME_INTEGRATIONS_CONFIG_DIR
         / "package-updates.json",
         lifecycle_resolver=IntegrationLifecycleResolver(
-            LifecycleStateRepository(
-                RUNTIME_INTEGRATIONS_STATE_DIR / "mattermost-lifecycle.json",
-                "mattermost",
-            )
+            lifecycle_repository,
+            policy=lifecycle_policy,
         ),
+        lifecycle_repository=lifecycle_repository,
+        lifecycle_policy=lifecycle_policy,
+        recovery_custody=RecoveryCredentialCustody(helper_call),
         agent_lifecycle_snapshot=default_agent_lifecycle_snapshot().status,
     )
 
