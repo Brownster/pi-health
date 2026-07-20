@@ -3751,6 +3751,38 @@ def cmd_packages_reconcile(params):
 
 PACKAGE_RECONCILE_UNIT = 'limeos-package-reconcile'
 PACKAGE_UPDATES_CONFIG = '/etc/limeos/integrations/package-updates.json'
+MATTERMOST_SECRETS = '/etc/limeos/integrations/mattermost.env'
+
+
+def _read_env_value(path, key):
+    """Read a single KEY=value from a dotenv-style file, or None."""
+    try:
+        with open(path) as handle:
+            for line in handle:
+                stripped = line.strip()
+                if stripped.startswith(key + '='):
+                    return stripped.split('=', 1)[1].strip() or None
+    except OSError:
+        return None
+    return None
+
+
+def _updates_webhook():
+    """Where to post held package updates.
+
+    Prefer the dedicated #limeos-updates channel when it has been provisioned; otherwise fall
+    back to the always-present alerts webhook so updates still land somewhere the operator
+    already watches, with no extra setup. Returns (url, target) or (None, None).
+    """
+    try:
+        with open(PACKAGE_UPDATES_CONFIG) as handle:
+            config = json.load(handle)
+        if config.get('enabled') and config.get('webhook_url'):
+            return config['webhook_url'], 'updates'
+    except (OSError, ValueError):
+        pass
+    alerts = _read_env_value(MATTERMOST_SECRETS, 'LIMEOS_ALERT_MATTERMOST_WEBHOOK')
+    return (alerts, 'alerts') if alerts else (None, None)
 
 
 def _dpkg_installed_version(name):
@@ -3803,14 +3835,10 @@ def _post_package_updates(specs):
     names = [update.name for update in pending]
     if payload is None:
         return {'pending': names, 'skipped': True, 'reason': 'no held updates'}
-    try:
-        with open(PACKAGE_UPDATES_CONFIG) as handle:
-            config = json.load(handle)
-    except (OSError, ValueError):
-        return {'pending': names, 'skipped': True, 'reason': 'updates channel not configured'}
-    if not config.get('enabled') or not config.get('webhook_url'):
-        return {'pending': names, 'skipped': True, 'reason': 'updates channel not configured'}
-    return {'pending': names, **_post_webhook(config['webhook_url'], payload)}
+    webhook, target = _updates_webhook()
+    if not webhook:
+        return {'pending': names, 'skipped': True, 'reason': 'no updates or alerts channel configured'}
+    return {'pending': names, 'target': target, **_post_webhook(webhook, payload)}
 
 
 def cmd_packages_nightly_reconcile(params):
@@ -3850,9 +3878,12 @@ def cmd_packages_nightly_reconcile(params):
     except Exception:
         updates = {'skipped': True, 'reason': 'update report failed'}
 
-    security_ok = security.get('skipped', False) or security.get('ok', False)
+    # Security auto-apply is best-effort: `unattended-upgrade` can return non-zero for benign
+    # reasons (e.g. apt-lock contention with the OS apt-daily timer) even when nothing is
+    # pending, so it must not fail the whole run or the timer flaps. Success is gated on what
+    # we own — holds + the manifest reconcile; the security status is reported for visibility.
     return {
-        'success': (not hold_failed) and security_ok and reconcile.get('success', False),
+        'success': (not hold_failed) and reconcile.get('success', False),
         'held': held,
         'hold_failed': hold_failed,
         'security': security,

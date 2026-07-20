@@ -83,6 +83,21 @@ def test_nightly_fails_when_a_critical_hold_fails():
     assert result["hold_failed"] == ["claude-code"]
 
 
+def test_nightly_security_failure_does_not_fail_the_run():
+    # unattended-upgrade returns non-zero (benign, e.g. apt-lock) but holds + reconcile are OK.
+    def run(argv, **_kwargs):
+        return {"returncode": 1 if argv[0] == "unattended-upgrade" else 0}
+
+    with patch("limeos_packages.load_manifest", return_value=_specs()):
+        with patch("pihealth_helper.shutil.which", return_value="/usr/bin/unattended-upgrade"):
+            with patch("pihealth_helper.run_command", side_effect=run):
+                with patch("pihealth_helper.cmd_packages_reconcile", return_value={"success": True}):
+                    with patch("pihealth_helper._post_package_updates", return_value={"skipped": True}):
+                        result = helper.cmd_packages_nightly_reconcile({})
+    assert result["success"] is True  # best-effort security does not fail the run
+    assert result["security"] == {"skipped": False, "ok": False}
+
+
 def test_nightly_fails_when_reconcile_fails():
     with patch("limeos_packages.load_manifest", return_value=_specs()):
         with patch("pihealth_helper.shutil.which", return_value=None):
@@ -118,11 +133,25 @@ def test_post_updates_skips_when_no_held_update():
     assert result["skipped"] is True and result["pending"] == []
 
 
-def test_post_updates_skips_when_channel_not_configured(tmp_path):
+def test_post_updates_falls_back_to_alerts_webhook_when_no_dedicated_channel(tmp_path):
+    secrets = tmp_path / "mattermost.env"
+    secrets.write_text("LIMEOS_ALERT_MATTERMOST_WEBHOOK=https://mm/hooks/alerts\n")
     with patch("pihealth_helper.PACKAGE_UPDATES_CONFIG", str(tmp_path / "missing.json")):
-        with patch("pihealth_helper._dpkg_installed_version", return_value="2.1.207-1"):
-            with patch("pihealth_helper._apt_candidate_version", return_value="2.1.210-1"):
-                result = helper._post_package_updates(_held_specs())
+        with patch("pihealth_helper.MATTERMOST_SECRETS", str(secrets)):
+            with patch("pihealth_helper._dpkg_installed_version", return_value="2.1.207-1"):
+                with patch("pihealth_helper._apt_candidate_version", return_value="2.1.210-1"):
+                    with patch("pihealth_helper._post_webhook", return_value={"posted": True}) as post:
+                        result = helper._post_package_updates(_held_specs())
+    assert result["posted"] is True and result["target"] == "alerts"
+    assert post.call_args.args[0] == "https://mm/hooks/alerts"
+
+
+def test_post_updates_skips_when_neither_channel_configured(tmp_path):
+    with patch("pihealth_helper.PACKAGE_UPDATES_CONFIG", str(tmp_path / "missing.json")):
+        with patch("pihealth_helper.MATTERMOST_SECRETS", str(tmp_path / "missing.env")):
+            with patch("pihealth_helper._dpkg_installed_version", return_value="2.1.207-1"):
+                with patch("pihealth_helper._apt_candidate_version", return_value="2.1.210-1"):
+                    result = helper._post_package_updates(_held_specs())
     assert result["skipped"] is True and result["pending"] == ["claude-code"]
 
 
