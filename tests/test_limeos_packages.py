@@ -12,6 +12,9 @@ from limeos_packages import (
     compliance_report,
     critical_packages,
     default_version_ge,
+    PackageApproval,
+    apply_approvals,
+    is_approvable,
     load_manifest,
     parse_manifest,
     pending_updates,
@@ -74,6 +77,54 @@ def test_render_updates_message_lists_versions_and_flags_critical():
     assert "claude-code" in attachment["text"] and "2.1.210-1" in attachment["text"]
     assert "critical" in attachment["text"]
     assert "1 held package update" in attachment["title"]
+
+
+# -- approvals ------------------------------------------------------------------
+def test_is_approvable_only_for_a_currently_pending_version():
+    specs = _specs({"name": "claude-code", "manager": "apt", "policy": "pinned", "version": "2.1.207", "critical": True})
+    updates = pending_updates(specs, lambda s: "2.1.207-1", lambda s: "2.1.212-1")
+    assert is_approvable(updates, "claude-code", "2.1.212-1") is True
+    # an arbitrary version, or the wrong package, is never approvable
+    assert is_approvable(updates, "claude-code", "9.9.9") is False
+    assert is_approvable(updates, "coreutils", "2.1.212-1") is False
+
+
+def _approval(name="claude-code", version="2.1.212-1"):
+    return PackageApproval(name=name, version=version, approved_by="admin", approved_at="2026-07-20T00:00:00Z")
+
+
+def test_apply_approvals_overrides_a_pinned_version():
+    specs = _specs({"name": "claude-code", "manager": "apt", "policy": "pinned", "version": "2.1.207", "critical": True})
+    overlaid = apply_approvals(specs, [_approval()])
+    assert overlaid[0].version == "2.1.212-1" and overlaid[0].policy == "pinned"
+    # the overlaid spec drives reconcile: it now plans install_version to the approved version
+    actions = plan_actions(overlaid, lambda s: "2.1.207-1")
+    assert any(a.action == "install_version" and a.version == "2.1.212-1" for a in actions)
+
+
+def test_apply_approvals_ignores_unknown_names_and_non_pinned_policies():
+    specs = _specs(
+        {"name": "unattended-upgrades", "manager": "apt", "policy": "present", "critical": False},
+    )
+    # approval for a non-pinned / unmanaged package is a no-op
+    assert apply_approvals(specs, [_approval(name="unattended-upgrades", version="3.0")]) == specs
+    assert apply_approvals(specs, [_approval(name="ghost", version="1.0")]) == specs
+
+
+def test_apply_approvals_never_downgrades_below_a_newer_manifest_pin():
+    # central release later pins something newer than the old approval -> manifest wins
+    specs = _specs({"name": "claude-code", "manager": "apt", "policy": "pinned", "version": "2.1.220", "critical": True})
+    overlaid = apply_approvals(specs, [_approval(version="2.1.212-1")])
+    assert overlaid[0].version == "2.1.220"
+
+
+def test_apply_approvals_is_idempotent_once_installed():
+    specs = _specs({"name": "claude-code", "manager": "apt", "policy": "pinned", "version": "2.1.207", "critical": True})
+    overlaid = apply_approvals(specs, [_approval()])
+    # once installed matches the approved version, no install_version is planned (only hold)
+    actions = plan_actions(overlaid, lambda s: "2.1.212-1")
+    assert not any(a.action == "install_version" for a in actions)
+    assert any(a.action == "hold" for a in actions)
 
 
 # -- the shipped manifest ---------------------------------------------------------

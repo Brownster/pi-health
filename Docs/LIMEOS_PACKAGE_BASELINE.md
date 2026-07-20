@@ -104,7 +104,7 @@ host's units can't silently diverge from the release.
 |---|---|---|---|
 | PB-001 | Manifest schema + `config/limeos-packages.json` + validator/tests | The versioned baseline | ✅ `bb5e21e` |
 | PB-002 | `cmd_packages_reconcile` (helper) + `packages.status` limeops op | Read-only status + gated apply | ✅ done |
-| PB-003 | Nightly timer + drift→Mattermost incident + unattended-upgrades scoping | Controlled updates | 🚧 slices 1–2 done (timer + nightly run + updates-channel report); approval next |
+| PB-003 | Nightly timer + drift→Mattermost incident + unattended-upgrades scoping | Controlled updates | 🚧 slices 1–3 (backend) done: timer + nightly run + updates report + approval flow; UI + agent-read next |
 | PB-004 | Deploy the agent runtime via self-update-from-repo; fix the module deploy gap | Reproducible installs | ✅ done |
 | PB-005 | Target signoff on Holly (pin holds across an apt upgrade; drift detected + reported) | Evidence | Planned |
 
@@ -142,7 +142,22 @@ and posts them to a dedicated **#limeos-updates** channel via an incoming webhoo
 `/etc/limeos/integrations/package-updates.json` (best-effort, non-fatal). That channel + webhook are
 provisioned by `MattermostIntegrationService` on install and by the existing "Set up" enable flow for
 existing users (which now creates both the stack-notifications and updates channels); the post-update
-setup modal fires whenever either channel is missing. Remaining: the single-use approval flow (slice 3).
+setup modal fires whenever either channel is missing.
+
+PB-003 slice 3 (backend) landed: the approval flow. `PackageApproval` + `is_approvable` + `apply_approvals`
+(pure) model an admin-approved, forward-only per-host pin override. The helper stores approvals at
+`/var/lib/limeos/package-approvals.json` (root, `0o600`, atomic upsert) and exposes read-only
+`packages_pending` and mutating `packages_approve` — the latter is **payload-bound** (name+version must
+match a currently-pending held update, re-validated server-side) and **actor-bound** (records the
+authenticated admin), audited via the helper mutation path. `cmd_packages_reconcile` overlays approvals
+onto the manifest so the nightly run enforces the approved version and holds it; a later central release
+that pins something newer wins (no downgrade). Authenticated routes: `GET /api/integrations/packages/pending`
+and `POST /api/integrations/packages/approve`. Remaining: an approvals UI card and exposing pending
+updates read-only through the limeops broker so `@limeos` can report them.
+
+**Security note on the model:** the approval is a durable, forward-only override rather than a
+consume-once token — it reflects desired state (the approved pin), so it can't be replayed to an
+arbitrary version (only a currently-offered candidate is approvable) and is idempotent once applied.
 
 ## Review findings addressed (2026-07-15)
 A review of `2366e41..d4789e0` surfaced four convergence/reporting gaps; the high ones are

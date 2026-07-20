@@ -7,6 +7,7 @@ from flask import Blueprint, current_app, jsonify, request, session
 from alert_policy import AlertPolicyError
 from agent_integration_service import AgentIntegrationError
 from auth_utils import csrf_protect, login_required
+from helper_client import helper_call
 from mattermost_integration_service import MattermostIntegrationError
 from operation_manager import OperationCapacityError
 
@@ -312,6 +313,37 @@ def pending_setup_actions(*, mattermost_status, stack_notifications_status):
             }
         )
     return actions
+
+
+@integrations_manager.route("/api/integrations/packages/pending", methods=["GET"])
+@login_required
+def packages_pending():
+    """Held/critical package updates awaiting review, plus recorded approvals."""
+    result = helper_call("packages_pending", {}) or {}
+    if not result.get("success"):
+        return jsonify({"error": result.get("error", "Unable to read pending updates")}), 502
+    return jsonify({"pending": result.get("pending", []), "approvals": result.get("approvals", [])})
+
+
+@integrations_manager.route("/api/integrations/packages/approve", methods=["POST"])
+@login_required
+@csrf_protect
+def packages_approve():
+    """Approve a specific held update. Payload-bound (name+version must match a pending
+    update, enforced in the helper) and actor-bound (the authenticated admin is recorded)."""
+    values = request.get_json(silent=True)
+    if not isinstance(values, dict):
+        return jsonify({"error": "Request body must be an object"}), 400
+    name, version = values.get("name"), values.get("version")
+    if not isinstance(name, str) or not isinstance(version, str) or not name or not version:
+        return jsonify({"error": "name and version are required"}), 400
+    result = helper_call(
+        "packages_approve",
+        {"name": name, "version": version, "approved_by": session.get("username", "unknown")},
+    ) or {}
+    if not result.get("success"):
+        return jsonify({"error": result.get("error", "Approval failed")}), 400
+    return jsonify({"approval": result.get("approval")}), 201
 
 
 @integrations_manager.route("/api/setup/pending", methods=["GET"])

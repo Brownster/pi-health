@@ -3692,6 +3692,111 @@ def _packages_apt_command(action):
     return None
 
 
+PACKAGE_APPROVALS_STORE = os.path.join(
+    os.getenv("LIMEOS_STATE_DIR", "/var/lib/limeos"), "package-approvals.json"
+)
+
+
+def _load_package_approvals():
+    """Approved per-host pin overrides. Malformed entries are skipped, never raised."""
+    from limeos_packages import PackageApproval
+    try:
+        with open(PACKAGE_APPROVALS_STORE) as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return []
+    entries = data.get('approvals') if isinstance(data, dict) else None
+    approvals = []
+    for entry in entries or []:
+        try:
+            approvals.append(PackageApproval(
+                name=entry['name'], version=entry['version'],
+                approved_by=str(entry.get('approved_by') or '?'),
+                approved_at=str(entry.get('approved_at') or ''),
+            ))
+        except (KeyError, TypeError):
+            continue
+    return approvals
+
+
+def _write_package_approvals(approvals):
+    from dataclasses import asdict
+    payload = json.dumps({'approvals': [asdict(a) for a in approvals]}, indent=2)
+    os.makedirs(os.path.dirname(PACKAGE_APPROVALS_STORE), exist_ok=True)
+    tmp = PACKAGE_APPROVALS_STORE + '.tmp'
+    with open(tmp, 'w') as handle:
+        handle.write(payload + '\n')
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, PACKAGE_APPROVALS_STORE)
+
+
+def _compute_pending_updates():
+    """Current held/critical pending updates (post-approval overlay), or None on error."""
+    try:
+        from limeos_packages import apply_approvals, load_manifest, pending_updates
+        specs = apply_approvals(load_manifest(), _load_package_approvals())
+    except Exception:
+        return None
+    return pending_updates(
+        specs,
+        lambda spec: _dpkg_installed_version(spec.name),
+        lambda spec: _apt_candidate_version(spec.name),
+    )
+
+
+def cmd_packages_pending(params):
+    """Read-only: current held/critical pending updates plus recorded approvals."""
+    if not isinstance(params, dict) or set(params):
+        return {'success': False, 'error': 'packages.pending accepts no parameters'}
+    pending = _compute_pending_updates()
+    if pending is None:
+        return {'success': False, 'error': 'Unable to read the package manifest'}
+    from dataclasses import asdict
+    approved = {a.name for a in _load_package_approvals()}
+    return {
+        'success': True,
+        'pending': [
+            {'name': u.name, 'installed': u.installed, 'candidate': u.candidate,
+             'critical': u.critical, 'approved': u.name in approved}
+            for u in pending
+        ],
+        'approvals': [asdict(a) for a in _load_package_approvals()],
+    }
+
+
+def cmd_packages_approve(params):
+    """Approve a specific held package update. Params: {name, version, approved_by}.
+
+    Payload-bound: (name, version) must match a *currently-pending* held update, so only a
+    version apt offers right now can be approved. Actor-bound: `approved_by` (the app's
+    authenticated admin) is recorded. The approval overrides the local pin; the next reconcile
+    applies it. Upserts by name (a fresh approval replaces a prior one for the same package).
+    """
+    if not isinstance(params, dict) or set(params) - {'name', 'version', 'approved_by'}:
+        return {'success': False, 'error': 'packages.approve accepts name, version, approved_by'}
+    name = params.get('name')
+    version = params.get('version')
+    approved_by = str(params.get('approved_by') or '').strip() or 'unknown'
+    if not isinstance(name, str) or not isinstance(version, str) or not name or not version:
+        return {'success': False, 'error': 'name and version are required'}
+
+    from limeos_packages import PackageApproval, is_approvable
+    pending = _compute_pending_updates()
+    if pending is None:
+        return {'success': False, 'error': 'Unable to read the package manifest'}
+    if not is_approvable(pending, name, version):
+        return {'success': False, 'error': 'No pending update matches that package and version'}
+
+    approval = PackageApproval(
+        name=name, version=version, approved_by=approved_by,
+        approved_at=datetime.now(timezone.utc).isoformat(),
+    )
+    approvals = [a for a in _load_package_approvals() if a.name != name] + [approval]
+    _write_package_approvals(approvals)
+    from dataclasses import asdict
+    return {'success': True, 'approval': asdict(approval)}
+
+
 def cmd_packages_reconcile(params):
     """Reconcile installed packages to the shipped manifest. Accepts only {mode}, where
     mode is 'check' (read-only report) or 'apply' (enforce the manifest). Package names
@@ -3703,12 +3808,15 @@ def cmd_packages_reconcile(params):
         return {'success': False, 'error': 'mode must be check or apply'}
     try:
         from limeos_packages import (
+            apply_approvals,
             check_packages,
             compliance_report,
             load_manifest,
             plan_actions,
         )
-        specs = load_manifest()
+        # Overlay admin-approved per-host pin bumps so reconcile enforces the approved
+        # version (the committed manifest stays the fleet default).
+        specs = apply_approvals(load_manifest(), _load_package_approvals())
     except Exception:
         return {'success': False, 'error': 'Unable to read the package manifest'}
 
@@ -3997,6 +4105,8 @@ COMMANDS = {
     'agent_audit_read': cmd_agent_audit_read,
     'agent_delivery_test': cmd_agent_delivery_test,
     'packages_reconcile': cmd_packages_reconcile,
+    'packages_pending': cmd_packages_pending,
+    'packages_approve': cmd_packages_approve,
     'packages_nightly_reconcile': cmd_packages_nightly_reconcile,
     'configure_package_reconcile_schedule': cmd_configure_package_reconcile_schedule,
     'agent_converge_if_stale': cmd_agent_converge_if_stale,
@@ -4022,7 +4132,7 @@ _MUTATING_COMMANDS = frozenset({
     'agent_runtime_install', 'agent_runtime_disable', 'agent_provider_install',
     'agent_provider_auth_start', 'agent_provider_auth_submit', 'agent_provider_auth_cancel',
     'agent_bot_secret_write', 'agent_configure', 'agent_runtime_start',
-    'packages_reconcile', 'packages_nightly_reconcile',
+    'packages_reconcile', 'packages_approve', 'packages_nightly_reconcile',
     'configure_package_reconcile_schedule', 'agent_converge_if_stale',
 })
 

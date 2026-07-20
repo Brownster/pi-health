@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 MANAGERS = frozenset({"apt", "pip", "npm", "claude"})
@@ -322,3 +322,55 @@ def render_updates_message(updates: list[PendingUpdate]) -> dict | None:
             }
         ]
     }
+
+
+# -- approvals: durable per-host pin overrides for held updates -------------------
+@dataclass(frozen=True)
+class PackageApproval:
+    """An admin-approved version bump for a held package (a per-host override of the
+    fleet manifest). Bound to the exact package+version and the approving actor."""
+
+    name: str
+    version: str
+    approved_by: str
+    approved_at: str
+
+
+def is_approvable(updates: list[PendingUpdate], name: str, version: str) -> bool:
+    """True only when (name, version) matches a currently-pending held update.
+
+    This is the payload binding: an approval can name only a version apt actually offers
+    right now for a held package — never an arbitrary version.
+    """
+    return any(u.name == name and u.candidate == version for u in updates)
+
+
+def apply_approvals(
+    specs: list[PackageSpec],
+    approvals: list[PackageApproval],
+    *,
+    version_ge: VersionGe = default_version_ge,
+) -> list[PackageSpec]:
+    """Overlay approved version bumps onto pinned specs.
+
+    An approval only moves a `pinned` entry (the held/critical ones the nightly job never
+    auto-applies) and only *forward* — it is applied when the approved version is strictly
+    newer than the committed pin, so a later central release that pins something newer wins
+    and an override never forces a downgrade. Ignored for other names/policies. The result is
+    what reconcile plans against, so an approved bump becomes the effective local pin.
+    """
+    by_name = {approval.name: approval for approval in approvals}
+    overlaid = []
+    for spec in specs:
+        approval = by_name.get(spec.name)
+        if (
+            approval is not None
+            and spec.policy == "pinned"
+            and spec.version is not None
+            and approval.version != spec.version
+            and version_ge(approval.version, spec.version)
+        ):
+            overlaid.append(replace(spec, version=approval.version))
+        else:
+            overlaid.append(spec)
+    return overlaid
