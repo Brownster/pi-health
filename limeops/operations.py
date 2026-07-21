@@ -1,10 +1,10 @@
-"""AA-002 read-only diagnostic operations behind the AA-001 broker.
+"""Bounded diagnostic and local action-proposal operations behind the broker.
 
 Every handler is a thin, bounded adapter over an injected domain reader — nothing here
 constructs Docker, helper, or filesystem access itself, and nothing mutates. The broker
 remains the authorization boundary (policy, resource allowlists, timeouts, output
-limits, audit); this module adds the diagnostic behavior and the redaction/sanitization
-guarantees:
+limits, audit); this module adds the diagnostic behavior, a proposal-only bridge, and
+the redaction/sanitization guarantees:
 
 - Log text is redacted (passwords, tokens, bearer headers, webhook URLs, URL
   credentials) and byte-bounded below the policy output limit, with an explicit
@@ -140,10 +140,56 @@ def _log_params(field: str) -> Callable[[Mapping[str, Any]], Mapping[str, Any]]:
     return validate
 
 
+def _action_proposal_params(params: Mapping[str, Any]) -> Mapping[str, Any]:
+    _require_fields(
+        params,
+        {"operation", "params", "reason", "evidence_ids", "idempotency_key"},
+    )
+    operation = _name(params, "operation")
+    action_params = params.get("params")
+    reason = params.get("reason")
+    idempotency_key = params.get("idempotency_key")
+    evidence_ids = params.get("evidence_ids", [])
+    if not isinstance(action_params, Mapping):
+        raise ValueError("Parameter 'params' must be an object")
+    if not isinstance(reason, str) or not reason.strip() or len(reason) > 1000:
+        raise ValueError("Parameter 'reason' must be a non-empty string")
+    if not isinstance(idempotency_key, str) or not 8 <= len(idempotency_key) <= 128:
+        raise ValueError("Parameter 'idempotency_key' must be a short string")
+    if (
+        not isinstance(evidence_ids, list)
+        or len(evidence_ids) > 15
+        or any(not isinstance(item, str) for item in evidence_ids)
+    ):
+        raise ValueError("Parameter 'evidence_ids' must be a short string list")
+    return {
+        "operation": operation,
+        "params": dict(action_params),
+        "reason": reason.strip(),
+        "evidence_ids": list(evidence_ids),
+        "idempotency_key": idempotency_key,
+    }
+
+
+def _finding_proposal_params(params: Mapping[str, Any]) -> Mapping[str, Any]:
+    _require_fields(params, {"finding", "evidence_ids"})
+    finding = params.get("finding")
+    evidence_ids = params.get("evidence_ids", [])
+    if not isinstance(finding, Mapping):
+        raise ValueError("Parameter 'finding' must be an object")
+    if (
+        not isinstance(evidence_ids, list)
+        or len(evidence_ids) > 15
+        or any(not isinstance(item, str) for item in evidence_ids)
+    ):
+        raise ValueError("Parameter 'evidence_ids' must be a short string list")
+    return {"finding": dict(finding), "evidence_ids": list(evidence_ids)}
+
+
 # -- dependencies ----------------------------------------------------------------
 @dataclass(frozen=True)
 class DiagnosticDependencies:
-    """Injected read-only domain readers. Each returns JSON-serializable data."""
+    """Injected bounded domain adapters. Each returns JSON-serializable data."""
 
     system_status: Callable[[], dict]
     list_containers: Callable[[], list]
@@ -161,6 +207,18 @@ class DiagnosticDependencies:
     installation_inventory: Callable[[], dict]
     package_status: Callable[[], dict]
     package_pending: Callable[[], dict] = lambda: {"pending": []}
+    action_propose: Callable[[Mapping[str, Any], Mapping[str, str], str], dict] = (
+        lambda params, actor, audit_id: {
+            "available": False,
+            "message": "Action proposal service is unavailable",
+        }
+    )
+    finding_propose: Callable[[Mapping[str, Any], Mapping[str, str], str], dict] = (
+        lambda params, actor, audit_id: {
+            "available": False,
+            "message": "Finding proposal service is unavailable",
+        }
+    )
 
 
 def build_operations(deps: DiagnosticDependencies) -> dict[str, OperationDefinition]:
@@ -178,7 +236,7 @@ def build_operations(deps: DiagnosticDependencies) -> dict[str, OperationDefinit
 
     def context_handler(_params: Mapping[str, Any], _context: Any) -> dict:
         return {
-            "capabilities": "read-only",
+            "capabilities": "read-and-propose",
             "operations": sorted(operations),
         }
 
@@ -238,4 +296,14 @@ def build_operations(deps: DiagnosticDependencies) -> dict[str, OperationDefinit
     )
     add("packages.status", lambda p, c: deps.package_status(), _no_params)
     add("packages.pending", lambda p, c: deps.package_pending(), _no_params)
+    add(
+        "action.propose",
+        lambda p, c: deps.action_propose(p, c.actor, c.audit_id),
+        _action_proposal_params,
+    )
+    add(
+        "finding.propose",
+        lambda p, c: deps.finding_propose(p, c.actor, c.audit_id),
+        _finding_proposal_params,
+    )
     return operations

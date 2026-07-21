@@ -341,6 +341,8 @@ def test_listener_runs_turn_and_replies_in_thread(tmp_path):
     assert listener.handle_frame(_frame("@limeos status please", root_id="root-1")) is True
     assert gateway.requests[0].text == "status please"
     assert gateway.requests[0].root_post_id == "root-1"
+    assert gateway.requests[0].actor_id == "user-1"
+    assert gateway.requests[0].actor_username == "marc"
     assert gateway.requests[0].conversation_id.startswith("conv-")
     assert posts == [("chan-1", "root-1", "All healthy.")]
 

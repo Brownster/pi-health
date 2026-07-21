@@ -19,7 +19,10 @@ import subprocess
 import time
 from pathlib import Path
 
+from agent_actions.defaults import LazyAgentActionService, build_action_service
+from agent_findings.service import LazyFindingsService
 from limeops.operations import DiagnosticDependencies, build_operations
+from runtime_paths import STATE_DIR
 
 _SERVICE_UNITS = {
     "docker": "docker.service",
@@ -34,6 +37,11 @@ _NETWORK_TARGETS = {
     "internet": ("8.8.8.8", 53),
     "mattermost": ("127.0.0.1", 8065),
 }
+
+_ACTION_SERVICE = LazyAgentActionService(
+    lambda: build_action_service(container_status=_container_action_status)
+)
+_FINDINGS_SERVICE = LazyFindingsService(STATE_DIR / "agent-actions" / "findings.sqlite3")
 
 
 def _docker_command(*args: str, timeout: int = 15) -> str:
@@ -92,10 +100,28 @@ def _list_containers() -> list:  # pragma: no cover - target integration
 
 
 def _container_status(name: str) -> dict:  # pragma: no cover - target integration
+    return _container_summary(_inspect_container(name))
+
+
+def _container_action_status(name: str) -> dict:  # pragma: no cover - target integration
+    attrs = _inspect_container(name)
+    summary = _container_summary(attrs)
+    state = attrs.get("State") or {}
+    return {
+        **summary,
+        "id": str(attrs.get("Id") or ""),
+        "image_id": str(attrs.get("Image") or ""),
+        "started_at": state.get("StartedAt") or None,
+    }
+
+
+def _inspect_container(name: str) -> dict:  # pragma: no cover - target integration
     containers = json.loads(_docker_command("container", "inspect", "--", name))
     if not isinstance(containers, list) or len(containers) != 1:
         raise ValueError("Invalid Docker response")
-    return _container_summary(containers[0])
+    if not isinstance(containers[0], dict):
+        raise ValueError("Invalid Docker response")
+    return containers[0]
 
 
 def _container_logs(name: str, lines: int) -> str:  # pragma: no cover - target integration
@@ -290,6 +316,32 @@ def _package_pending() -> dict:  # pragma: no cover - target integration
     }
 
 
+def _action_propose(params, actor, audit_id) -> dict:  # pragma: no cover - target integration
+    evidence_ids = list(params["evidence_ids"])
+    if audit_id not in evidence_ids:
+        evidence_ids.append(audit_id)
+    action, created = _ACTION_SERVICE.propose(
+        operation=params["operation"],
+        params=params["params"],
+        actor=actor,
+        trigger="interactive",
+        reason=params["reason"],
+        evidence_ids=evidence_ids,
+        idempotency_key=params["idempotency_key"],
+    )
+    return {"action": action, "created": created}
+
+
+def _finding_propose(params, actor, audit_id) -> dict:  # pragma: no cover - target integration
+    evidence_ids = list(params["evidence_ids"])
+    if audit_id not in evidence_ids:
+        evidence_ids.append(audit_id)
+    finding, created = _FINDINGS_SERVICE.propose(
+        finding=params["finding"], actor=actor, evidence_ids=evidence_ids
+    )
+    return {"finding": finding, "created": created}
+
+
 def default_dependencies() -> DiagnosticDependencies:  # pragma: no cover - target integration
     return DiagnosticDependencies(
         system_status=_system_status,
@@ -308,6 +360,8 @@ def default_dependencies() -> DiagnosticDependencies:  # pragma: no cover - targ
         installation_inventory=_installation_inventory,
         package_status=_package_status,
         package_pending=_package_pending,
+        action_propose=_action_propose,
+        finding_propose=_finding_propose,
     )
 
 

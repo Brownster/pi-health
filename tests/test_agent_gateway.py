@@ -31,6 +31,7 @@ def _request(text="why is jellyfin down?", conversation="conv-1"):
         channel_id="chan-1",
         root_post_id="root-1",
         post_id="p1",
+        actor_id="user-1",
         actor_username="marc",
         text=text,
     )
@@ -155,7 +156,7 @@ def test_tool_loop_executes_limeops_and_feeds_result_back(tmp_path):
     operation, params, actor = executor.calls[0]
     assert operation == "container.status" and params == {"name": "jellyfin"}
     # The broker's frozen actor contract: {type, id, username?}.
-    assert actor == {"type": "mattermost", "id": "marc", "username": "marc"}
+    assert actor == {"type": "mattermost", "id": "user-1", "username": "marc"}
     # The broker audit id is captured for the usage/audit views.
     records = [
         json.loads(line)

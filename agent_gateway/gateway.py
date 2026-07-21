@@ -80,6 +80,8 @@ class GatewayConfig:
         "installation.inventory",
         "packages.status",
         "packages.pending",
+        "action.propose",
+        "finding.propose",
     )
 
 
@@ -189,7 +191,7 @@ class AgentGateway:
         # audit ids captured per tool call.
         actor = {
             "type": "mattermost",
-            "id": request.actor_username,
+            "id": request.actor_id,
             "username": request.actor_username,
         }
 

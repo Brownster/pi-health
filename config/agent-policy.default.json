@@ -84,6 +84,12 @@
     },
     "packages.pending": {
       "enabled": true
+    },
+    "action.propose": {
+      "enabled": true
+    },
+    "finding.propose": {
+      "enabled": true
     }
   }
 }

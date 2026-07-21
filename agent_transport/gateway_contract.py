@@ -24,6 +24,7 @@ class TurnRequest:
     channel_id: str
     root_post_id: str
     post_id: str
+    actor_id: str
     actor_username: str
     text: str  # mention-stripped, truncated to MAX_TURN_INPUT_BYTES
 

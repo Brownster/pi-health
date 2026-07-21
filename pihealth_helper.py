@@ -40,6 +40,14 @@ from helper_templates import (
 )
 from fstab_presets import get_fstab_preset, normalize_fstype
 from agent_provider.provisioning import (
+    ACTION_AUDIT_PATH,
+    ACTION_BROKER_POLICY_PATH,
+    ACTION_BROKER_UNIT_PATH,
+    ACTION_POLICY_PATH,
+    ACTION_SOCKET_DIR,
+    ACTION_SOCKET_PATH,
+    ACTION_STATE_DIR,
+    ACTION_WORKER_UNIT_PATH,
     AGENT_CONFIG_PATH,
     AGENT_ENV_PATH,
     AGENT_LIB_DIR,
@@ -54,6 +62,8 @@ from agent_provider.provisioning import (
     LIMEOPS_STATE_DIR,
     LIMEOPS_UNIT_PATH,
     render_agent_unit,
+    render_action_broker_unit,
+    render_action_worker_unit,
     render_limeops_unit,
 )
 from agent_provider.auth import (
@@ -152,8 +162,16 @@ AGENT_LIFECYCLE_TOMBSTONE = '/var/lib/limeos/integrations/agents-lifecycle.json'
 AGENT_CLEANUP_UNITS = (
     ('limeos-agent.service', AGENT_UNIT_PATH),
     ('limeopsd.service', LIMEOPS_UNIT_PATH),
+    ('limeops-action-worker.service', ACTION_WORKER_UNIT_PATH),
+    ('limeops-actuatord.service', ACTION_BROKER_UNIT_PATH),
 )
-AGENT_CLEANUP_FILES = (AGENT_CONFIG_PATH, AGENT_ENV_PATH, AGENT_POLICY_PATH)
+AGENT_CLEANUP_FILES = (
+    AGENT_CONFIG_PATH,
+    AGENT_ENV_PATH,
+    AGENT_POLICY_PATH,
+    ACTION_POLICY_PATH,
+    ACTION_BROKER_POLICY_PATH,
+)
 AGENT_CLEANUP_DIRECTORIES = (
     AGENT_LIB_DIR,
     AGENT_STATE_DIR,
@@ -3262,13 +3280,28 @@ def cmd_agent_runtime_install(params):
     if not repo_dir:
         return {'success': False, 'error': 'LimeOS repository is unavailable'}
 
-    for group in ('limeops', 'lime-agent', 'limeops-client'):
+    for group in (
+        'limeops',
+        'lime-agent',
+        'limeops-client',
+        'limeops-actuator',
+        'limeops-action-worker',
+        'limeops-action',
+    ):
         if not _ensure_system_group(group):
             return {'success': False, 'error': 'Failed to create agent identities'}
     if not _ensure_system_user('limeops', 'limeops', '/var/lib/limeops'):
         return {'success': False, 'error': 'Failed to create agent identities'}
     if not _ensure_system_user('lime-agent', 'lime-agent', '/var/lib/lime-agent'):
         return {'success': False, 'error': 'Failed to create agent identities'}
+    if not _ensure_system_user(
+        'limeops-actuator', 'limeops-actuator', ACTION_STATE_DIR
+    ):
+        return {'success': False, 'error': 'Failed to create action identities'}
+    if not _ensure_system_user(
+        'limeops-action-worker', 'limeops-action-worker', ACTION_STATE_DIR
+    ):
+        return {'success': False, 'error': 'Failed to create action identities'}
 
     if _run_account_command([
         '/usr/sbin/usermod', '-a', '-G', 'limeops-client', 'lime-agent'
@@ -3285,6 +3318,15 @@ def cmd_agent_runtime_install(params):
     ])
     if result.get('returncode') != 0:
         return {'success': False, 'error': 'Failed to authorize the LimeOps broker'}
+    for user, groups in (
+        ('limeops-actuator', 'docker,pihealth,limeops-action'),
+        ('limeops-action-worker', 'pihealth,limeops-action'),
+    ):
+        result = _run_account_command([
+            '/usr/sbin/usermod', '-a', '-G', groups, user
+        ])
+        if result.get('returncode') != 0:
+            return {'success': False, 'error': 'Failed to authorize action services'}
 
     integrations_config_dir = os.path.dirname(AGENT_CONFIG_PATH)
     if os.path.islink(integrations_config_dir) or not os.path.isdir(integrations_config_dir):
@@ -3296,6 +3338,8 @@ def cmd_agent_runtime_install(params):
         (CLAUDE_CONFIG_DIR, 0o700, 'lime-agent', 'lime-agent'),
         (LIMEOPS_STATE_DIR, 0o750, 'limeops', 'limeops'),
         (LIMEOPS_SOCKET_DIR, 0o750, 'limeops', 'limeops-client'),
+        (ACTION_STATE_DIR, 0o770, 'limeops-actuator', 'pihealth'),
+        (ACTION_SOCKET_DIR, 0o750, 'limeops-actuator', 'limeops-action'),
     )
     if not all(_agent_install_directory(*item) for item in directories):
         return {'success': False, 'error': 'Failed to create agent runtime directories'}
@@ -3305,7 +3349,15 @@ def cmd_agent_runtime_install(params):
         return {'success': False, 'error': 'LimeOS virtual environment is unavailable'}
     if not _agent_install_directory(AGENT_LIB_DIR, 0o755, 'root', 'root'):
         return {'success': False, 'error': 'Failed to create the agent runtime library'}
-    for package in ('agent_gateway', 'agent_provider', 'agent_runtime', 'agent_transport', 'limeops'):
+    for package in (
+        'agent_actions',
+        'agent_findings',
+        'agent_gateway',
+        'agent_provider',
+        'agent_runtime',
+        'agent_transport',
+        'limeops',
+    ):
         source = os.path.join(repo_dir, package)
         destination = os.path.join(AGENT_LIB_DIR, package)
         if not os.path.isdir(source):
@@ -3324,6 +3376,15 @@ def cmd_agent_runtime_install(params):
         manifest_source = os.path.join(repo_dir, 'config', 'limeos-packages.json')
         if os.path.isfile(manifest_source):
             shutil.copy2(manifest_source, os.path.join(manifest_dir, 'limeos-packages.json'))
+        for module_name in (
+            'container_operations_service.py',
+            'ports.py',
+            'runtime_paths.py',
+        ):
+            module_source = os.path.join(repo_dir, module_name)
+            if not os.path.isfile(module_source):
+                raise OSError('Action runtime module is unavailable')
+            shutil.copy2(module_source, os.path.join(AGENT_LIB_DIR, module_name))
     except OSError:
         return {'success': False, 'error': 'Failed to install the package manifest'}
     for argv, timeout in (
@@ -3331,7 +3392,7 @@ def cmd_agent_runtime_install(params):
         ([os.path.join(AGENT_VENV_DIR, 'bin', 'pip'), 'install', 'websocket-client>=1.8,<2'], 300),
         # The broker reads system status via psutil; guarantee it for the system
         # interpreter path so system.status cannot fail with upstream_failure.
-        (['apt-get', 'install', '-y', 'python3-psutil'], 300),
+        (['apt-get', 'install', '-y', 'python3-psutil', 'python3-docker'], 300),
         (['chmod', '-R', 'u=rwX,go=rX', AGENT_LIB_DIR], 60),
         (['chown', '-R', 'root:root', AGENT_LIB_DIR], 60),
         (['chown', '-R', 'lime-agent:lime-agent', AGENT_VENV_DIR], 60),
@@ -3339,10 +3400,20 @@ def cmd_agent_runtime_install(params):
         if run_command(argv, timeout=timeout).get('returncode') != 0:
             return {'success': False, 'error': 'Failed to prepare the isolated agent runtime'}
     policy_source = os.path.join(repo_dir, 'config', 'agent-policy.default.json')
+    action_policy_source = os.path.join(
+        repo_dir, 'config', 'agent-action-policy.default.json'
+    )
+    action_broker_policy_source = os.path.join(
+        repo_dir, 'config', 'agent-actuator-policy.default.json'
+    )
     settings_source = os.path.join(repo_dir, 'config', 'agents.default.json')
     try:
         with open(policy_source) as handle:
             policy = handle.read()
+        with open(action_policy_source) as handle:
+            action_policy = handle.read()
+        with open(action_broker_policy_source) as handle:
+            action_broker_policy = handle.read()
         with open(settings_source) as handle:
             settings = handle.read()
     except OSError:
@@ -3350,6 +3421,13 @@ def cmd_agent_runtime_install(params):
 
     preserved_files = (
         (AGENT_POLICY_PATH, policy, 0o640, 'root:limeops'),
+        (ACTION_POLICY_PATH, action_policy, 0o640, 'root:pihealth'),
+        (
+            ACTION_BROKER_POLICY_PATH,
+            action_broker_policy,
+            0o640,
+            'root:limeops-actuator',
+        ),
         (AGENT_CONFIG_PATH, settings, 0o640, 'root:limeops'),
         (AGENT_ENV_PATH, '', 0o640, 'root:lime-agent'),
     )
@@ -3358,6 +3436,18 @@ def cmd_agent_runtime_install(params):
 
     managed_files = (
         (LIMEOPS_UNIT_PATH, render_limeops_unit(repo_dir), 0o644, 'root:root'),
+        (
+            ACTION_BROKER_UNIT_PATH,
+            render_action_broker_unit(repo_dir),
+            0o644,
+            'root:root',
+        ),
+        (
+            ACTION_WORKER_UNIT_PATH,
+            render_action_worker_unit(repo_dir),
+            0o644,
+            'root:root',
+        ),
         (AGENT_UNIT_PATH, render_agent_unit(repo_dir, python_bin), 0o644, 'root:root'),
     )
     for path, content, mode, ownership in managed_files:
@@ -3367,21 +3457,29 @@ def cmd_agent_runtime_install(params):
         if run_command(['chown', ownership, path]).get('returncode') != 0:
             return {'success': False, 'error': 'Failed to secure agent runtime files'}
 
-    if not os.path.exists(LIMEOPS_AUDIT_PATH):
-        audit = _write_managed_file(LIMEOPS_AUDIT_PATH, '', 0o640)
-        if not audit.get('success'):
-            return {'success': False, 'error': 'Failed to create the agent audit log'}
-    for argv in (
-        ['chown', 'limeops:limeops', LIMEOPS_AUDIT_PATH],
-        ['chmod', '0640', LIMEOPS_AUDIT_PATH],
+    for audit_path, ownership in (
+        (LIMEOPS_AUDIT_PATH, 'limeops:limeops'),
+        (ACTION_AUDIT_PATH, 'limeops-actuator:pihealth'),
     ):
-        if run_command(argv).get('returncode') != 0:
-            return {'success': False, 'error': 'Failed to secure the agent audit log'}
+        if not os.path.exists(audit_path):
+            audit = _write_managed_file(audit_path, '', 0o640)
+            if not audit.get('success'):
+                return {'success': False, 'error': 'Failed to create an agent audit log'}
+        for argv in (
+            ['chown', ownership, audit_path],
+            ['chmod', '0640', audit_path],
+        ):
+            if run_command(argv).get('returncode') != 0:
+                return {'success': False, 'error': 'Failed to secure an agent audit log'}
 
     for argv in (
         ['systemctl', 'daemon-reload'],
         ['systemctl', 'enable', 'limeopsd.service'],
         ['systemctl', 'restart', 'limeopsd.service'],
+        ['systemctl', 'enable', 'limeops-actuatord.service'],
+        ['systemctl', 'restart', 'limeops-actuatord.service'],
+        ['systemctl', 'enable', 'limeops-action-worker.service'],
+        ['systemctl', 'restart', 'limeops-action-worker.service'],
         ['systemctl', 'enable', 'limeos-agent.service'],
     ):
         if run_command(argv, timeout=60).get('returncode') != 0:
@@ -3457,6 +3555,17 @@ def _agent_broker_state():
     return 'active' if stat.S_ISSOCK(socket_mode) else 'failed'
 
 
+def _agent_action_broker_state():
+    state = _unit_state('limeops-actuatord.service', 'is-active')
+    if state != 'active':
+        return state
+    try:
+        socket_mode = os.stat(ACTION_SOCKET_PATH, follow_symlinks=False).st_mode
+    except OSError:
+        return 'failed'
+    return 'active' if stat.S_ISSOCK(socket_mode) else 'failed'
+
+
 def cmd_agent_runtime_status(params):
     """Return a non-secret status snapshot for AA-006."""
     rejected = _agent_reject_params(params)
@@ -3496,9 +3605,15 @@ def cmd_agent_runtime_status(params):
         settings, parsed_settings, configured = {}, None, False
     return {
         'success': True,
-        'runtime_installed': os.path.isfile(AGENT_UNIT_PATH) and os.path.isfile(LIMEOPS_UNIT_PATH),
+        'runtime_installed': all(os.path.isfile(path) for path in (
+            AGENT_UNIT_PATH,
+            LIMEOPS_UNIT_PATH,
+            ACTION_BROKER_UNIT_PATH,
+            ACTION_WORKER_UNIT_PATH,
+        )),
         'agent_active': _unit_state('limeos-agent.service', 'is-active'),
         'broker_active': _agent_broker_state(),
+        'action_broker_active': _agent_action_broker_state(),
         'claude_installed': version_result.get('returncode') == 0,
         'claude_version': version_match.group(0) if version_match else None,
         'claude_compatible': bool(version_tuple and version_tuple >= (2, 1, 205)),
@@ -4127,7 +4242,25 @@ def _read_agent_lifecycle_feature_state():
         if target != 'connected':
             return {'feature': 'ai_agents', 'state': 'cleanup_required', 'reconcile_allowed': False}
 
-    fixed_runtime = (AGENT_UNIT_PATH, LIMEOPS_UNIT_PATH, AGENT_CONFIG_PATH)
+    legacy_runtime = (
+        AGENT_UNIT_PATH,
+        LIMEOPS_UNIT_PATH,
+        AGENT_CONFIG_PATH,
+    )
+    action_runtime = (
+        ACTION_BROKER_UNIT_PATH,
+        ACTION_WORKER_UNIT_PATH,
+        ACTION_POLICY_PATH,
+        ACTION_BROKER_POLICY_PATH,
+    )
+    # Hosts installed before the action foundation remain valid until convergence.
+    # Once any action artifact exists, require the complete action boundary so a
+    # partial upgrade fails closed as cleanup_required.
+    fixed_runtime = (
+        legacy_runtime + action_runtime
+        if any(os.path.lexists(path) for path in action_runtime)
+        else legacy_runtime
+    )
     try:
         if not all(stat.S_ISREG(os.lstat(path).st_mode) for path in fixed_runtime):
             raise OSError('incomplete agent runtime')

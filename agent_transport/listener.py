@@ -147,6 +147,7 @@ class MentionListener:
             channel_id=event.channel_id,
             root_post_id=event.root_post_id,
             post_id=event.post_id,
+            actor_id=event.user_id,
             actor_username=event.username,
             text=truncate_input(text),
         )
