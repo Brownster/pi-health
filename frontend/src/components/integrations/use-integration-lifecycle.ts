@@ -39,6 +39,11 @@ export function useIntegrationLifecycle(onInvalidated: () => void) {
     setState((current) => current.phase === "running" ? current : CLOSED_STATE);
   }, []);
 
+  const reconfirm = useCallback(() => {
+    executorRef.current = null;
+    setState({ ...CLOSED_STATE, open: true });
+  }, []);
+
   const run = useCallback(async (executor: LifecycleExecutor): Promise<boolean> => {
     executorRef.current = executor;
     let terminalWarnings: IntegrationLifecycleWarning[] = [];
@@ -84,5 +89,5 @@ export function useIntegrationLifecycle(onInvalidated: () => void) {
     return executorRef.current ? run(executorRef.current) : false;
   }, [run]);
 
-  return { state, open, close, run, retry };
+  return { state, open, close, reconfirm, run, retry };
 }

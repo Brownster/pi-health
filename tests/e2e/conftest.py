@@ -1741,6 +1741,9 @@ def install_v2_integrations_api_mocks():
         agent_authenticated: bool = True,
         agent_configured: bool = True,
         agent_disable_fails_once: bool = False,
+        agent_cleanup_action: str | None = None,
+        agent_uninstall_fails_once: bool = False,
+        agent_uninstall_warning: bool = False,
     ) -> None:
         state = {
             "installed": installed,
@@ -1748,7 +1751,10 @@ def install_v2_integrations_api_mocks():
             "agent_authenticated": agent_authenticated and agent_installed and installed,
             "agent_configured": agent_configured and agent_installed and installed,
             "agent_enabled": agent_installed and installed,
+            "agent_cleanup_action": agent_cleanup_action,
             "agent_disable_attempts": 0,
+            "agent_uninstall_attempts": 0,
+            "agent_warnings": [],
             "policy": {
                 "version": 1,
                 "categories": {
@@ -1828,7 +1834,9 @@ def install_v2_integrations_api_mocks():
             path = urlparse(route.request.url).path
             method = route.request.method
             if path == "/api/integrations/agents" and method == "GET":
-                if not state["installed"]:
+                if state["agent_cleanup_action"]:
+                    agent_state = "cleanup_required"
+                elif not state["installed"]:
                     agent_state = "setup_required"
                 elif not state["agent_installed"]:
                     agent_state = "not_installed"
@@ -1838,7 +1846,9 @@ def install_v2_integrations_api_mocks():
                     agent_state = "setup_required"
                 else:
                     agent_state = "connected"
-                if agent_state == "not_installed":
+                if agent_state == "cleanup_required":
+                    agent_actions = ["retry_cleanup"]
+                elif agent_state == "not_installed":
                     agent_actions = ["setup"]
                 elif agent_state == "disabled":
                     agent_actions = ["enable", "uninstall"]
@@ -1856,11 +1866,22 @@ def install_v2_integrations_api_mocks():
                             "enabled": state["agent_enabled"],
                             "configured": state["agent_configured"],
                             "retained_data": False,
-                            "cleanup_required": False,
+                            "cleanup_required": agent_state == "cleanup_required",
                             "allowed_actions": agent_actions,
                             "blocked_actions": [],
-                            "cleanup_operation": None,
-                            "warnings": [],
+                            "cleanup_operation": (
+                                {
+                                    "id": "mock-agent-cleanup",
+                                    "action": state["agent_cleanup_action"],
+                                    "state": "failed",
+                                    "started_at": "2026-07-21T10:00:00Z",
+                                    "updated_at": "2026-07-21T10:01:00Z",
+                                    "retryable": True,
+                                }
+                                if agent_state == "cleanup_required"
+                                else None
+                            ),
+                            "warnings": state["agent_warnings"],
                             "mattermost": {
                                 "state": "connected" if state["installed"] else "not_installed",
                                 "site_url": (
@@ -2095,6 +2116,7 @@ def install_v2_integrations_api_mocks():
                 return
             if path.endswith("/mock-agent-disable/stream") and method == "GET":
                 if agent_disable_fails_once and state["agent_disable_attempts"] == 1:
+                    state["agent_cleanup_action"] = "disable"
                     route.fulfill(
                         status=200,
                         content_type="text/event-stream",
@@ -2104,11 +2126,60 @@ def install_v2_integrations_api_mocks():
                         ),
                     )
                     return
+                state["agent_cleanup_action"] = None
                 state["agent_enabled"] = False
                 route.fulfill(
                     status=200,
                     content_type="text/event-stream",
                     body='id: 0\ndata: {"step":"complete","line":"AI Agents disabled","done":true}\n\n',
+                )
+                return
+            if path == "/api/integrations/agents/uninstall" and method == "POST":
+                state["agent_uninstall_attempts"] += 1
+                route.fulfill(
+                    status=202,
+                    content_type="application/json",
+                    body=json.dumps(
+                        {
+                            "operation_id": "mock-agent-uninstall",
+                            "stream_url": "/api/integrations/agents/operations/mock-agent-uninstall/stream",
+                        }
+                    ),
+                )
+                return
+            if path.endswith("/mock-agent-uninstall/stream") and method == "GET":
+                if agent_uninstall_fails_once and state["agent_uninstall_attempts"] == 1:
+                    state["agent_cleanup_action"] = "uninstall"
+                    route.fulfill(
+                        status=200,
+                        content_type="text/event-stream",
+                        body=(
+                            'id: 0\ndata: {"step":"stop","line":"Stopping AI Agents"}\n\n'
+                            'id: 1\ndata: {"step":"error","error":"AI Agents lifecycle operation failed"}\n\n'
+                        ),
+                    )
+                    return
+                state["agent_cleanup_action"] = None
+                state["agent_installed"] = False
+                state["agent_enabled"] = False
+                state["agent_authenticated"] = False
+                state["agent_configured"] = False
+                warning = {
+                    "code": "agent_bot_cleanup_failed",
+                    "message": "AI Agents was removed locally, but the Mattermost bot could not be removed.",
+                }
+                state["agent_warnings"] = [warning] if agent_uninstall_warning else []
+                event = {
+                    "step": "complete",
+                    "line": "AI Agents was uninstalled",
+                    "done": True,
+                }
+                if agent_uninstall_warning:
+                    event["warnings"] = [warning]
+                route.fulfill(
+                    status=200,
+                    content_type="text/event-stream",
+                    body=f"id: 0\ndata: {json.dumps(event)}\n\n",
                 )
                 return
             if path == "/api/integrations/agents/test" and method == "POST":

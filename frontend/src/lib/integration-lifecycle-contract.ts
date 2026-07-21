@@ -152,17 +152,48 @@ export function lifecycleWarnings(value: unknown): IntegrationLifecycleWarning[]
   }).slice(0, 8);
 }
 
+export function lifecycleCleanupOperation(
+  integration: IntegrationLifecycleId,
+  value: unknown,
+): IntegrationCleanupOperation | null {
+  const item = record(value);
+  if (!item) return null;
+  const action = lifecycleActions(integration, [item.action])[0];
+  if (
+    !action
+    || !lifecycleMutationRoute(integration, "retry_cleanup", action)
+    || !boundedText(item.id)
+    || !boundedText(item.started_at)
+    || !boundedText(item.updated_at)
+    || !["running", "failed", "interrupted"].includes(String(item.state))
+    || typeof item.retryable !== "boolean"
+  ) return null;
+  return {
+    id: item.id,
+    action,
+    state: item.state as IntegrationCleanupOperation["state"],
+    started_at: item.started_at,
+    updated_at: item.updated_at,
+    retryable: item.retryable,
+  };
+}
+
 export function lifecycleContractFields(
   integration: IntegrationLifecycleId,
   value: {
     allowed_actions?: unknown;
     blocked_actions?: unknown;
+    cleanup_operation?: unknown;
     warnings?: unknown;
   },
-): Pick<IntegrationLifecycleStatus, "allowed_actions" | "blocked_actions" | "warnings"> {
+): Pick<
+  IntegrationLifecycleStatus,
+  "allowed_actions" | "blocked_actions" | "cleanup_operation" | "warnings"
+> {
   return {
     allowed_actions: lifecycleActions(integration, value.allowed_actions),
     blocked_actions: lifecycleBlockedActions(value.blocked_actions),
+    cleanup_operation: lifecycleCleanupOperation(integration, value.cleanup_operation),
     warnings: lifecycleWarnings(value.warnings),
   };
 }

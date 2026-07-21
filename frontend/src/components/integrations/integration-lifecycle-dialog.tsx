@@ -1,4 +1,4 @@
-import { useId, useState, type ReactNode } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -52,6 +52,11 @@ export function IntegrationLifecycleDialog({
   const canConfirm = ready
     && (!confirmation || confirmationValue === confirmation.expected)
     && (!acknowledgement || acknowledged);
+  useEffect(() => {
+    if (state.phase !== "confirm") return;
+    setConfirmationValue("");
+    setAcknowledged(false);
+  }, [state.phase]);
   const close = () => {
     if (running) return;
     setConfirmationValue("");

@@ -217,6 +217,42 @@ export function disableAgents(
   return runIntegrationLifecycleOperation("agents", "disable", {}, onEvent, { signal });
 }
 
+export interface AgentUninstallValues {
+  confirmation: "AI Agents";
+  admin_username: string;
+  admin_password: string;
+  remove_claude_code: boolean;
+}
+
+export function uninstallAgents(
+  values: AgentUninstallValues,
+  onEvent: (event: OperationEvent) => void,
+  options: { onCreated?: () => void; signal?: AbortSignal } = {},
+): Promise<void> {
+  return runIntegrationLifecycleOperation(
+    "agents",
+    "uninstall",
+    values as unknown as Record<string, unknown>,
+    onEvent,
+    options,
+  );
+}
+
+export function retryAgentCleanup(
+  action: "disable" | "uninstall",
+  values: Record<string, unknown>,
+  onEvent: (event: OperationEvent) => void,
+  options: { onCreated?: () => void; signal?: AbortSignal } = {},
+): Promise<void> {
+  return runIntegrationLifecycleOperation(
+    "agents",
+    "retry_cleanup",
+    values,
+    onEvent,
+    { ...options, cleanupAction: action },
+  );
+}
+
 export function sendAgentTest(): Promise<{ status: "sent" }> {
   return requestApi<{ status: "sent" }>("/api/integrations/agents/test", {
     method: "POST",

@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   lifecycleActions,
   lifecycleBlockedActions,
+  lifecycleCleanupOperation,
   lifecycleContractFields,
   lifecycleMutationRoute,
   lifecycleNavigationTarget,
@@ -82,11 +83,40 @@ test("status contract fields are normalized together at the API boundary", () =>
       },
     ],
     warnings: [{ code: "agent_bot_cleanup_failed", message: "Remote cleanup failed." }],
+    cleanup_operation: {
+      id: "agent-cleanup-1",
+      action: "uninstall",
+      state: "failed",
+      started_at: "2026-07-21T10:00:00Z",
+      updated_at: "2026-07-21T10:01:00Z",
+      retryable: true,
+    },
   });
 
   assert.deepEqual(fields, {
     allowed_actions: ["disable", "uninstall"],
     blocked_actions: [],
+    cleanup_operation: {
+      id: "agent-cleanup-1",
+      action: "uninstall",
+      state: "failed",
+      started_at: "2026-07-21T10:00:00Z",
+      updated_at: "2026-07-21T10:01:00Z",
+      retryable: true,
+    },
     warnings: [{ code: "agent_bot_cleanup_failed", message: "Remote cleanup failed." }],
   });
+});
+
+test("cleanup operations reject actions without a fixed retry route", () => {
+  const operation = {
+    id: "cleanup-1",
+    action: "setup",
+    state: "failed",
+    started_at: "2026-07-21T10:00:00Z",
+    updated_at: "2026-07-21T10:01:00Z",
+    retryable: true,
+  };
+  assert.equal(lifecycleCleanupOperation("agents", operation), null);
+  assert.equal(lifecycleCleanupOperation("agents", { ...operation, action: "disable" })?.action, "disable");
 });

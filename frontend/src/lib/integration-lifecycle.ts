@@ -12,12 +12,14 @@ export async function runIntegrationLifecycleOperation(
   onEvent: (event: OperationEvent) => void,
   options: {
     cleanupAction?: IntegrationLifecycleAction | null;
+    onCreated?: () => void;
     signal?: AbortSignal;
   } = {},
 ): Promise<void> {
   const route = lifecycleMutationRoute(integration, action, options.cleanupAction);
   if (!route) throw new Error("Lifecycle action is unavailable");
   const operation = await createOperation(route, values, options.signal);
+  options.onCreated?.();
   await streamOperation(
     operation.stream_url,
     (event) => {

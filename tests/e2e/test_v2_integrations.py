@@ -15,6 +15,7 @@ def _open(
     agent_installed=True,
     agent_authenticated=True,
     agent_configured=True,
+    **mock_options,
 ):
     v2_login(page, base_url)
     install_v2_integrations_api_mocks(
@@ -23,9 +24,18 @@ def _open(
         agent_installed=agent_installed,
         agent_authenticated=agent_authenticated,
         agent_configured=agent_configured,
+        **mock_options,
     )
     page.goto(f"{base_url}/v2/integrations")
     expect(page.get_by_role("heading", name="integrations")).to_be_visible()
+
+
+def _open_agent_manage_menu(page: Page):
+    trigger = page.locator("[data-agent-lifecycle-menu-trigger='agents']")
+    trigger.click()
+    menu = page.locator("[data-agent-lifecycle-menu='agents']")
+    expect(menu).to_be_visible()
+    return trigger, menu
 
 
 def test_integrations_policy_and_silence(
@@ -164,7 +174,8 @@ def test_disabling_agent_leaves_mattermost_connected(
 ):
     _open(page, v2_server["base_url"], v2_login, install_v2_integrations_api_mocks)
 
-    page.get_by_role("button", name="Disable", exact=True).click()
+    trigger, menu = _open_agent_manage_menu(page)
+    menu.get_by_role("menuitem", name="Disable", exact=True).click()
     page.get_by_role("button", name="Disable assistant").click()
     expect(page.get_by_role("dialog", name="Disable AI Agents?")).to_contain_text(
         "Operation completed"
@@ -174,7 +185,7 @@ def test_disabling_agent_leaves_mattermost_connected(
     ).click()
     expect(page.get_by_text("AI Agents is disabled. Mattermost and alert delivery remain active.")).to_be_visible()
     expect(page.locator("[data-agent-integration]").get_by_text("disabled", exact=True)).to_be_visible()
-    expect(page.locator("#ai-agents")).to_be_focused()
+    expect(trigger).to_be_focused()
     expect(page.get_by_text("connected", exact=True).first).to_be_visible()
 
 
@@ -205,7 +216,8 @@ def test_agent_lifecycle_failure_retains_progress_retries_and_refreshes_both_car
         if request.method == "GET" and request.url.endswith("/api/integrations/mattermost")
     ])
 
-    page.get_by_role("button", name="Disable", exact=True).click()
+    _, menu = _open_agent_manage_menu(page)
+    menu.get_by_role("menuitem", name="Disable", exact=True).click()
     dialog = page.get_by_role("dialog", name="Disable AI Agents?")
     dialog.get_by_role("button", name="Disable assistant").click()
     expect(dialog.get_by_role("alert")).to_contain_text(
@@ -215,7 +227,7 @@ def test_agent_lifecycle_failure_retains_progress_retries_and_refreshes_both_car
         "Stopping AI Agents"
     )
     expect(dialog.get_by_role("button", name="Retry")).to_be_visible()
-    expect(page.locator("[data-agent-integration]").get_by_text("connected", exact=True)).to_be_visible()
+    expect(page.get_by_text("Cleanup needs attention", exact=True)).to_be_visible()
 
     dialog.get_by_role("button", name="Retry").click()
     expect(dialog.get_by_role("status")).to_contain_text("Operation completed")
@@ -231,6 +243,200 @@ def test_agent_lifecycle_failure_retains_progress_retries_and_refreshes_both_car
     page.reload()
     expect(page.locator("[data-agent-integration]").get_by_text("disabled", exact=True)).to_be_visible()
     expect(page.get_by_text("connected", exact=True).first).to_be_visible()
+
+
+def test_agent_enable_and_repair_uses_server_authorized_action(
+    page: Page,
+    v2_server,
+    v2_login,
+    install_v2_integrations_api_mocks,
+):
+    _open(page, v2_server["base_url"], v2_login, install_v2_integrations_api_mocks)
+    _, menu = _open_agent_manage_menu(page)
+    menu.get_by_role("menuitem", name="Disable", exact=True).click()
+    page.get_by_role("button", name="Disable assistant").click()
+    dialog = page.get_by_role("dialog", name="Disable AI Agents?")
+    expect(dialog.get_by_role("status")).to_contain_text("Operation completed")
+    dialog.get_by_role("button", name="Close", exact=True).click()
+
+    _, menu = _open_agent_manage_menu(page)
+    expect(menu.get_by_role("menuitem", name="Enable and repair")).to_be_visible()
+    menu.get_by_role("menuitem", name="Enable and repair").click()
+    repair = page.get_by_role("dialog", name="Repair AI Agents")
+    repair.locator("[data-agent-repair]").click()
+    expect(repair).to_contain_text("Operation finished")
+    expect(page.locator("[data-agent-integration]").get_by_text("connected", exact=True)).to_be_visible()
+
+
+def test_agent_uninstall_requires_confirmation_and_clears_password(
+    profiled_page: Page,
+    viewport_profile_name,
+    assert_no_horizontal_overflow,
+    v2_server,
+    v2_login,
+    install_v2_integrations_api_mocks,
+):
+    page = profiled_page
+    requests = []
+    page.on("request", lambda request: requests.append(request))
+    _open(page, v2_server["base_url"], v2_login, install_v2_integrations_api_mocks)
+
+    _, menu = _open_agent_manage_menu(page)
+    menu.get_by_role("menuitem", name="Uninstall", exact=True).click()
+    dialog = page.get_by_role("dialog", name="Uninstall AI Agents?")
+    expect(dialog).to_contain_text("Mattermost, alert delivery, channels, messages")
+    expect(dialog.locator("[data-agent-remove-claude]")).to_be_checked()
+    confirm = dialog.locator("[data-lifecycle-confirm]")
+    expect(confirm).to_be_disabled()
+    dialog.locator("[data-agent-uninstall-password]").fill("first-test-password")
+    dialog.get_by_role("button", name="Cancel", exact=True).click()
+    _, menu = _open_agent_manage_menu(page)
+    menu.get_by_role("menuitem", name="Uninstall", exact=True).click()
+    dialog = page.get_by_role("dialog", name="Uninstall AI Agents?")
+    expect(dialog.locator("[data-agent-uninstall-password]")).to_have_value("")
+    assert_no_horizontal_overflow(page, f"AI Agents uninstall ({viewport_profile_name})")
+    confirm = dialog.locator("[data-lifecycle-confirm]")
+    dialog.locator("[data-agent-uninstall-password]").fill("first-test-password")
+    dialog.locator("[data-lifecycle-confirmation]").fill("AI Agents")
+    confirm.click()
+
+    expect(dialog.get_by_role("status")).to_contain_text("Operation completed")
+    uninstall_request = next(
+        request for request in requests
+        if request.method == "POST" and request.url.endswith("/api/integrations/agents/uninstall")
+    )
+    assert uninstall_request.post_data_json == {
+        "confirmation": "AI Agents",
+        "admin_username": "limeadmin",
+        "admin_password": "first-test-password",
+        "remove_claude_code": True,
+    }
+    stored = page.evaluate(
+        """() => JSON.stringify({local: {...localStorage}, session: {...sessionStorage}})"""
+    )
+    assert "first-test-password" not in stored
+    dialog.get_by_role("button", name="Close", exact=True).click()
+    expect(page.locator("[data-agent-integration]").get_by_text("not installed", exact=True)).to_be_visible()
+    expect(page.locator("[data-agent-setup]")).to_be_visible()
+    expect(page.locator("#ai-agents")).to_be_focused()
+
+
+def test_agent_uninstall_failure_requires_fresh_credentials_for_retry(
+    page: Page,
+    v2_server,
+    v2_login,
+    install_v2_integrations_api_mocks,
+):
+    requests = []
+    page.on("request", lambda request: requests.append(request))
+    _open(
+        page,
+        v2_server["base_url"],
+        v2_login,
+        install_v2_integrations_api_mocks,
+        agent_uninstall_fails_once=True,
+    )
+    _, menu = _open_agent_manage_menu(page)
+    menu.get_by_role("menuitem", name="Uninstall", exact=True).click()
+    dialog = page.get_by_role("dialog", name="Uninstall AI Agents?")
+    dialog.locator("[data-agent-uninstall-password]").fill("first-test-password")
+    dialog.locator("[data-lifecycle-confirmation]").fill("AI Agents")
+    dialog.locator("[data-lifecycle-confirm]").click()
+    expect(dialog.get_by_role("alert")).to_contain_text("AI Agents lifecycle operation failed")
+    expect(page.get_by_text("Cleanup needs attention", exact=True)).to_be_visible()
+
+    dialog.get_by_role("button", name="Retry").click()
+    retry = page.get_by_role("dialog", name="Retry AI Agents uninstall")
+    expect(retry.locator("[data-agent-uninstall-password]")).to_have_value("")
+    expect(retry.locator("[data-lifecycle-confirmation]")).to_have_value("")
+    retry.locator("[data-agent-uninstall-password]").fill("second-test-password")
+    retry.locator("[data-lifecycle-confirmation]").fill("AI Agents")
+    retry.locator("[data-lifecycle-confirm]").click()
+    expect(retry.get_by_role("status")).to_contain_text("Operation completed")
+
+    payloads = [
+        request.post_data_json for request in requests
+        if request.method == "POST" and request.url.endswith("/api/integrations/agents/uninstall")
+    ]
+    assert [payload["admin_password"] for payload in payloads] == [
+        "first-test-password",
+        "second-test-password",
+    ]
+
+
+def test_agent_uninstall_remote_bot_warning_remains_distinct(
+    page: Page,
+    v2_server,
+    v2_login,
+    install_v2_integrations_api_mocks,
+):
+    _open(
+        page,
+        v2_server["base_url"],
+        v2_login,
+        install_v2_integrations_api_mocks,
+        agent_uninstall_warning=True,
+    )
+    _, menu = _open_agent_manage_menu(page)
+    menu.get_by_role("menuitem", name="Uninstall", exact=True).click()
+    dialog = page.get_by_role("dialog", name="Uninstall AI Agents?")
+    dialog.locator("[data-agent-uninstall-password]").fill("warning-test-password")
+    dialog.locator("[data-lifecycle-confirmation]").fill("AI Agents")
+    dialog.locator("[data-lifecycle-confirm]").click()
+
+    expect(dialog.get_by_role("status")).to_contain_text("attention needed")
+    expect(dialog.locator("[data-lifecycle-warnings]")).to_contain_text(
+        "Mattermost bot could not be removed"
+    )
+    dialog.get_by_role("button", name="Close", exact=True).click()
+    expect(page.locator("[data-agent-lifecycle-warnings]")).to_contain_text(
+        "Mattermost bot could not be removed"
+    )
+
+
+def test_agent_cleanup_required_can_resume_after_refresh(
+    page: Page,
+    v2_server,
+    v2_login,
+    install_v2_integrations_api_mocks,
+):
+    _open(
+        page,
+        v2_server["base_url"],
+        v2_login,
+        install_v2_integrations_api_mocks,
+        agent_cleanup_action="uninstall",
+    )
+    expect(page.get_by_text("Cleanup needs attention", exact=True)).to_be_visible()
+    page.locator("[data-agent-retry-cleanup]").click()
+    dialog = page.get_by_role("dialog", name="Retry AI Agents uninstall")
+    expect(dialog).to_contain_text("original Claude Code removal choice")
+    dialog.locator("[data-agent-uninstall-password]").fill("retry-test-password")
+    dialog.locator("[data-lifecycle-confirmation]").fill("AI Agents")
+    dialog.locator("[data-lifecycle-confirm]").click()
+    expect(dialog.get_by_role("status")).to_contain_text("Operation completed")
+    expect(page.locator("[data-agent-integration]").get_by_text("not installed", exact=True)).to_be_visible()
+
+
+def test_agent_lifecycle_controls_are_hidden_from_viewers(
+    page: Page,
+    v2_server,
+    v2_login,
+    install_v2_integrations_api_mocks,
+):
+    _open(page, v2_server["base_url"], v2_login, install_v2_integrations_api_mocks)
+    page.route(
+        "**/api/auth/check",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body='{"authenticated":true,"username":"viewer","role":"viewer","permissions":["capability.view"],"csrf_token":"viewer-token"}',
+        ),
+    )
+    page.reload()
+
+    expect(page.locator("[data-agent-lifecycle-menu-trigger='agents']")).to_have_count(0)
+    expect(page.locator("[data-agent-setup]")).to_have_count(0)
 
 
 def test_agent_authentication_recovers_after_browser_reload(
