@@ -53,7 +53,12 @@ from stack_notifications_service import StackNotificationsService
 from agent_integration_service import AgentIntegrationService
 from agent_actions.defaults import LazyAgentActionService, build_action_service
 from agent_actions.packages import package_job_status, package_repair_status
-from agent_actions.integrations import agent_integration_status, agent_repair_job_status
+from agent_actions.integrations import (
+    agent_integration_status,
+    agent_repair_job_status,
+    extension_repair_job_status,
+    mattermost_repair_job_status,
+)
 from agent_findings.service import LazyFindingsService
 from alert_history import AlertEventLedger
 from media_profile_service import MediaProfileService
@@ -476,6 +481,13 @@ def _default_agent_action_service(container_inventory_service, stack_read_servic
         compose = load_compose_yaml(details.get("compose_content") or "") or {}
         return sanitize_stack_details(details, compose)
 
+    def repair_status(command, params):
+        try:
+            result = helper_call(command, params, timeout=60)
+        except Exception:
+            return {}
+        return result if isinstance(result, dict) and result.get("success") else {}
+
     return LazyAgentActionService(
         lambda: build_action_service(
             container_status=lambda name: container_inventory_service.inspect(
@@ -486,6 +498,14 @@ def _default_agent_action_service(container_inventory_service, stack_read_servic
             package_job_status=package_job_status,
             integration_status=agent_integration_status,
             integration_job_status=agent_repair_job_status,
+            mattermost_status=lambda: repair_status(
+                "agent_mattermost_status", {}
+            ),
+            mattermost_job_status=mattermost_repair_job_status,
+            extension_status=lambda name: repair_status(
+                "agent_extension_status", {"name": name}
+            ),
+            extension_job_status=extension_repair_job_status,
         )
     )
 

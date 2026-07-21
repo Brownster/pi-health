@@ -17,16 +17,20 @@ from agent_provider.provisioning import (
     ACTION_STATE_DIR,
     ACTION_WORKER_UNIT_PATH,
     AGENT_REPAIR_UNIT_PATH,
+    EXTENSION_REPAIR_UNIT_PATH,
     AGENT_ENV_PATH,
     AGENT_LIB_DIR,
     AGENT_STATE_DIR,
     CLAUDE_CONFIG_DIR,
     LIMEOPS_STATE_DIR,
+    MATTERMOST_REPAIR_UNIT_PATH,
     render_agent_unit,
     render_action_broker_unit,
     render_action_worker_unit,
     render_agent_repair_unit,
+    render_extension_repair_unit,
     render_limeops_unit,
+    render_mattermost_repair_unit,
 )
 from agent_runtime.service import DEFAULT_STATE_DIR
 
@@ -110,6 +114,28 @@ def test_agent_repair_unit_is_fixed_unprivileged_and_helper_backed():
     assert "SupplementaryGroups=docker" not in unit
 
 
+def test_extension_repair_unit_runs_only_configured_target_as_dashboard_user():
+    unit = render_extension_repair_unit("/opt/pi-health", "holly")
+
+    assert "User=holly" in unit
+    assert "SupplementaryGroups=pihealth" in unit
+    assert "extension-repair --name %i" in unit
+    assert "ReadWritePaths=/opt/pi-health/plugins /etc/limeos" in unit
+    assert "RestrictAddressFamilies=AF_UNIX" in unit
+    assert "SupplementaryGroups=docker" not in unit
+    assert "/var/run/docker.sock" in unit
+
+
+def test_mattermost_repair_unit_runs_fixed_service_as_dashboard_user():
+    unit = render_mattermost_repair_unit("/opt/pi-health", "holly")
+
+    assert "User=holly" in unit
+    assert "SupplementaryGroups=docker pihealth" in unit
+    assert "agent_actions.repair_job mattermost-repair" in unit
+    assert "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6" in unit
+    assert "ReadOnlyPaths=/opt/pi-health /etc/limeos" in unit
+
+
 def test_helper_agent_commands_reject_all_caller_controlled_parameters():
     for command in (
         helper.cmd_agent_runtime_install,
@@ -120,6 +146,10 @@ def test_helper_agent_commands_reject_all_caller_controlled_parameters():
         helper.cmd_agent_action_policy_write,
         helper.cmd_agent_integration_repair,
         helper.cmd_agent_integration_repair_start,
+        helper.cmd_agent_mattermost_status,
+        helper.cmd_agent_mattermost_repair_start,
+        helper.cmd_agent_extension_status,
+        helper.cmd_agent_extension_repair_start,
     ):
         result = command({"path": "/tmp/evil"})
         assert result["success"] is False
@@ -142,6 +172,10 @@ def test_helper_exposes_only_fixed_agent_operations():
         "agent_runtime_start",
         "agent_integration_repair",
         "agent_integration_repair_start",
+        "agent_mattermost_status",
+        "agent_mattermost_repair_start",
+        "agent_extension_status",
+        "agent_extension_repair_start",
         "agent_usage_read",
         "agent_audit_read",
         "agent_delivery_test",
@@ -227,6 +261,86 @@ def test_helper_agent_repair_start_uses_only_the_fixed_nonblocking_unit():
         "--no-block",
         "limeos-agent-repair.service",
     ]
+
+
+def test_helper_extension_repair_derives_eligibility_then_starts_fixed_instance():
+    with (
+        patch.object(
+            helper,
+            "cmd_agent_extension_status",
+            return_value={"success": True, "repairable": True},
+        ),
+        patch.object(helper, "run_command", return_value={"returncode": 0}) as run,
+    ):
+        result = helper.cmd_agent_extension_repair_start({"name": "weather"})
+
+    assert result == {"success": True, "started": True}
+    assert [call.args[0] for call in run.call_args_list] == [
+        ["systemctl", "reset-failed", "limeos-extension-repair@weather.service"],
+        [
+            "systemctl", "start", "--no-block",
+            "limeos-extension-repair@weather.service",
+        ],
+    ]
+    assert helper.cmd_agent_extension_repair_start(
+        {"name": "weather", "source": "https://evil.test"}
+    )["success"] is False
+
+
+def test_helper_mattermost_repair_starts_only_the_fixed_unit():
+    with (
+        patch.object(
+            helper,
+            "cmd_agent_mattermost_status",
+            return_value={"success": True, "installed": True, "state": "degraded"},
+        ),
+        patch.object(helper, "run_command", return_value={"returncode": 0}) as run,
+    ):
+        result = helper.cmd_agent_mattermost_repair_start({})
+
+    assert result == {"success": True, "started": True}
+    assert [call.args[0] for call in run.call_args_list] == [
+        ["systemctl", "reset-failed", "limeos-mattermost-repair.service"],
+        [
+            "systemctl", "start", "--no-block",
+            "limeos-mattermost-repair.service",
+        ],
+    ]
+
+
+def test_helper_runs_repair_status_as_repository_owner_and_parses_only_json():
+    result_payload = {
+        "name": "weather",
+        "repairable": True,
+        "source": "not-returned-by-real-job",
+    }
+    with (
+        patch.object(helper, "_agent_repo_dir", return_value="/opt/pi-health"),
+        patch.object(helper, "_agent_dashboard_user", return_value="holly"),
+        patch.object(helper.os.path, "isfile", return_value=True),
+        patch.object(
+            helper,
+            "run_command",
+            return_value={"returncode": 0, "stdout": json.dumps(result_payload)},
+        ) as run,
+    ):
+        result = helper.cmd_agent_extension_status({"name": "weather"})
+
+    assert result["success"] is True
+    assert result["repairable"] is True
+    assert run.call_args.args[0] == [
+        "runuser",
+        "-u",
+        "holly",
+        "--",
+        "/opt/pi-health/.venv/bin/python",
+        "-m",
+        "agent_actions.repair_job",
+        "extension-status",
+        "--name",
+        "weather",
+    ]
+    assert run.call_args.kwargs == {"timeout": 60, "cwd": "/opt/pi-health"}
 
 
 def test_helper_auth_commands_validate_operation_fields():
@@ -327,6 +441,8 @@ def test_runtime_install_creates_fixed_identities_paths_and_units(tmp_path):
     assert ACTION_BROKER_UNIT_PATH in written
     assert ACTION_WORKER_UNIT_PATH in written
     assert AGENT_REPAIR_UNIT_PATH in written
+    assert EXTENSION_REPAIR_UNIT_PATH in written
+    assert MATTERMOST_REPAIR_UNIT_PATH in written
     preserved_paths = {call.args[0] for call in ensure_file.call_args_list}
     assert preserved_paths == {
         "/etc/limeos/agent-policy.json",

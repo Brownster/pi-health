@@ -373,6 +373,41 @@ class MattermostIntegrationService:
         self._notifier_factory(webhook).send(notification)
         return {"status": "sent", "at": notification.at}
 
+    def repair(self) -> dict[str, Any]:
+        """Reconcile the fixed installed stack and require connected health."""
+        current = self._lifecycle_record(optional=True)
+        if current is not None:
+            if (
+                current.get("phase") != "complete"
+                or current.get("target_state") != "connected"
+            ):
+                raise MattermostIntegrationError(
+                    "Mattermost lifecycle cleanup must finish before repair"
+                )
+        config = self._installed_config()
+        self._require_fixed_compose_project(config)
+        stack_dir = self._stack_dir(config)
+        self._validate_owned_stack_layout(stack_dir)
+        self._run_compose(stack_dir, "up", "-d")
+        self._wait_until_ready(self._api_factory(str(config["site_url"])))
+        status = self.status()
+        services = status.get("services")
+        healthy_services = (
+            isinstance(services, Mapping)
+            and len(services) == 3
+            and all(
+                isinstance(value, Mapping)
+                and value.get("state") == "running"
+                and value.get("health") != "unhealthy"
+                for value in services.values()
+            )
+        )
+        if status.get("state") != "connected" or not healthy_services:
+            raise MattermostIntegrationError(
+                "Mattermost repair did not restore connected health"
+            )
+        return {"status": "repaired", "state": "connected"}
+
     def _provision_stack_notifications(self, client: Any, team_id: str) -> str:
         """Create the shared #stack-notifications channel + webhook and persist config.
 

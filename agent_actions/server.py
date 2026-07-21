@@ -11,6 +11,7 @@ import sys
 from agent_actions.actuator import (
     ActionActuator,
     build_container_executors,
+    build_extension_executors,
     build_integration_executors,
     build_job_retry_executors,
     build_package_executors,
@@ -18,7 +19,12 @@ from agent_actions.actuator import (
 )
 from agent_actions.broker import build_actuator_operations
 from agent_actions.defaults import build_repair_registry
-from agent_actions.integrations import agent_integration_status, agent_repair_job_status
+from agent_actions.integrations import (
+    agent_integration_status,
+    agent_repair_job_status,
+    extension_repair_job_status,
+    mattermost_repair_job_status,
+)
 from agent_actions.ledger import ActionLedger
 from agent_actions.packages import package_job_status, package_repair_status
 from agent_actions.policy import ActionPolicy, ActionPolicyError
@@ -66,12 +72,23 @@ def _build_actuator(action_policy_path: str, ledger_path: str) -> ActionActuator
     stack_service = default_stack_operations_service()
 
     def reconcile_stack(name: str):
-        result, error = stack_service.run(
-            name, "up", detach=True, timeout_seconds=60
-        )
+        result, error = stack_service.run(name, "up", detach=True, timeout_seconds=60)
         if error or not result or result.get("success") is not True:
             return {"error": "stack_reconcile_failed"}
         return {"reconciled": True}
+
+    def helper_status(command: str, params: dict):
+        try:
+            result = helper_call(command, params, timeout=60)
+        except HelperError:
+            return {}
+        return result if isinstance(result, dict) and result.get("success") else {}
+
+    def extension_status(name: str):
+        return helper_status("agent_extension_status", {"name": name})
+
+    def mattermost_status():
+        return helper_status("agent_mattermost_status", {})
 
     registry = build_repair_registry(
         container_status=_container_action_status,
@@ -80,6 +97,10 @@ def _build_actuator(action_policy_path: str, ledger_path: str) -> ActionActuator
         package_job_status=package_job_status,
         integration_status=agent_integration_status,
         integration_job_status=agent_repair_job_status,
+        mattermost_status=mattermost_status,
+        mattermost_job_status=mattermost_repair_job_status,
+        extension_status=extension_status,
+        extension_job_status=extension_repair_job_status,
     )
     executors = build_container_executors(
         control=container_service.control,
@@ -125,20 +146,49 @@ def _build_actuator(action_policy_path: str, ledger_path: str) -> ActionActuator
             return {}
         return result if isinstance(result, dict) else {}
 
+    def start_mattermost_repair():
+        try:
+            result = helper_call("agent_mattermost_repair_start", {}, timeout=15)
+        except HelperError:
+            return {"error": "mattermost_repair_unavailable"}
+        if not isinstance(result, dict) or result.get("success") is not True:
+            return {"error": "mattermost_repair_start_failed"}
+        return {"started": True}
+
     executors.update(
         build_integration_executors(
             start=start_agent_repair,
             status_reader=agent_integration_status,
             job_status_reader=agent_repair_job_status,
             runtime_status_reader=agent_runtime_health,
+            mattermost_start=start_mattermost_repair,
+            mattermost_status_reader=mattermost_status,
+            mattermost_job_status_reader=mattermost_repair_job_status,
+        )
+    )
+
+    def start_extension_repair(name: str):
+        try:
+            result = helper_call(
+                "agent_extension_repair_start", {"name": name}, timeout=15
+            )
+        except HelperError:
+            return {"error": "extension_repair_unavailable"}
+        if not isinstance(result, dict) or result.get("success") is not True:
+            return {"error": "extension_repair_start_failed"}
+        return {"started": True}
+
+    executors.update(
+        build_extension_executors(
+            start=start_extension_repair,
+            status_reader=extension_status,
+            job_status_reader=extension_repair_job_status,
         )
     )
 
     def retry_job(name: str):
         try:
-            result = helper_call(
-                "agent_job_retry_start", {"name": name}, timeout=15
-            )
+            result = helper_call("agent_job_retry_start", {"name": name}, timeout=15)
         except HelperError:
             return {"error": "job_retry_unavailable"}
         if not isinstance(result, dict) or result.get("success") is not True:

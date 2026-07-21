@@ -9,8 +9,10 @@ from agent_actions.capability import AuthorityMode, CapabilityError, RiskClass
 from agent_actions.defaults import build_repair_registry, safe_integration_precondition
 from agent_actions.integrations import (
     AGENT_RUNTIME_UNITS,
+    MATTERMOST_REPAIR_UNIT,
     agent_integration_status,
     agent_repair_job_status,
+    mattermost_repair_job_status,
     safe_agent_runtime_health,
 )
 
@@ -60,6 +62,24 @@ def _runtime_health():
     }
 
 
+def _mattermost_status(*, state="connected"):
+    return {
+        "name": "mattermost",
+        "state": state,
+        "installed": True,
+        "stack_name": "mattermost",
+        "webhook_configured": True,
+        "services": [
+            {"name": name, "state": "running", "health": "healthy"}
+            for name in (
+                "limeos-alertd",
+                "limeos-mattermost",
+                "limeos-mattermost-db",
+            )
+        ],
+    }
+
+
 def _registry():
     return build_repair_registry(
         container_status=lambda name: {"name": name, "status": "running"},
@@ -68,10 +88,16 @@ def _registry():
             "services": [{"name": "web"}],
             "status": {"status": "running", "containers": []},
         },
-        package_status=lambda: {"ok": True, "drift": [], "packages": [{"name": "base"}]},
+        package_status=lambda: {
+            "ok": True,
+            "drift": [],
+            "packages": [{"name": "base"}],
+        },
         package_job_status=lambda: _job(),
         integration_status=_integration_status,
         integration_job_status=lambda: _job(),
+        mattermost_status=_mattermost_status,
+        mattermost_job_status=lambda: _job(),
     )
 
 
@@ -84,10 +110,11 @@ def test_integration_capability_is_fixed_approval_bound_r2():
         AuthorityMode.APPROVAL,
     )
     assert capability.normalize({"name": "agents"}) == {"name": "agents"}
+    assert capability.normalize({"name": "mattermost"}) == {"name": "mattermost"}
     assert capability.target({"name": "agents"}) == "agents"
-    with pytest.raises(CapabilityError, match="only the agents target"):
-        capability.normalize({"name": "mattermost"})
-    with pytest.raises(CapabilityError, match="only the agents target"):
+    with pytest.raises(CapabilityError, match="agents or mattermost"):
+        capability.normalize({"name": "other"})
+    with pytest.raises(CapabilityError, match="agents or mattermost"):
         capability.normalize({"name": "agents", "command": "shell"})
 
 
@@ -151,6 +178,36 @@ def test_integration_executor_fails_completed_unhealthy_repair():
     assert verified is False
 
 
+def test_mattermost_executor_requires_new_job_and_connected_service_health():
+    jobs = iter(
+        [
+            _job(active_state="activating", invocation_id="new"),
+            _job(invocation_id="new"),
+        ]
+    )
+    starts = []
+    executor = build_integration_executors(
+        start=lambda: {"started": True},
+        status_reader=_integration_status,
+        job_status_reader=lambda: _job(),
+        runtime_status_reader=_runtime_health,
+        mattermost_start=lambda: starts.append(True) or {"started": True},
+        mattermost_status_reader=_mattermost_status,
+        mattermost_job_status_reader=lambda: next(jobs),
+    )["integration.repair"]
+    params = {"name": "mattermost"}
+    before = {"job": _job(invocation_id="old")}
+
+    assert executor.execute(params) == {"started": True}
+    assert executor.verify(params, before)[0] is None
+    verified, after = executor.verify(params, before)
+
+    assert verified is True
+    assert after["state"] == "connected"
+    assert len(after["services"]) == 3
+    assert starts == [True]
+
+
 def test_integration_status_reads_only_fixed_systemd_units():
     calls = []
 
@@ -179,6 +236,20 @@ def test_integration_job_status_requires_the_fixed_loaded_unit():
         )
 
     assert agent_repair_job_status(runner) == _job(invocation_id="abc123")
+
+
+def test_mattermost_job_status_reads_only_the_fixed_unit():
+    def runner(command, **_kwargs):
+        assert command[2] == MATTERMOST_REPAIR_UNIT
+        return SimpleNamespace(
+            returncode=0,
+            stdout=(
+                "LoadState=loaded\nActiveState=inactive\nResult=success\n"
+                "InvocationID=mattermost-1\n"
+            ),
+        )
+
+    assert mattermost_repair_job_status(runner) == _job(invocation_id="mattermost-1")
 
 
 def test_runtime_health_sanitizer_drops_identifiers_and_credentials():

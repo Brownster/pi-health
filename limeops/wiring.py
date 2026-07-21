@@ -21,11 +21,17 @@ from pathlib import Path
 
 from agent_actions.defaults import LazyAgentActionService, build_action_service
 from agent_actions.packages import package_job_status, package_repair_status
-from agent_actions.integrations import agent_integration_status, agent_repair_job_status
+from agent_actions.integrations import (
+    agent_integration_status,
+    agent_repair_job_status,
+    extension_repair_job_status,
+    mattermost_repair_job_status,
+)
 from agent_actions.service import AgentActionError
 from agent_findings.service import LazyFindingsService
 from limeops.operations import DiagnosticDependencies, build_operations
 from runtime_paths import STATE_DIR
+from helper_client import HelperError, helper_call
 
 _SERVICE_UNITS = {
     "docker": "docker.service",
@@ -41,6 +47,14 @@ _NETWORK_TARGETS = {
     "mattermost": ("127.0.0.1", 8065),
 }
 
+def _repair_helper_status(command: str, params: dict) -> dict:
+    try:
+        result = helper_call(command, params, timeout=60)
+    except HelperError:
+        return {}
+    return result if isinstance(result, dict) and result.get("success") else {}
+
+
 _ACTION_SERVICE = LazyAgentActionService(
     lambda: build_action_service(
         container_status=_container_action_status,
@@ -49,6 +63,14 @@ _ACTION_SERVICE = LazyAgentActionService(
         package_job_status=package_job_status,
         integration_status=agent_integration_status,
         integration_job_status=agent_repair_job_status,
+        mattermost_status=lambda: _repair_helper_status(
+            "agent_mattermost_status", {}
+        ),
+        mattermost_job_status=mattermost_repair_job_status,
+        extension_status=lambda name: _repair_helper_status(
+            "agent_extension_status", {"name": name}
+        ),
+        extension_job_status=extension_repair_job_status,
     )
 )
 _FINDINGS_SERVICE = LazyFindingsService(STATE_DIR / "agent-actions" / "findings.sqlite3")

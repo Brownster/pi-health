@@ -15,6 +15,7 @@ Security:
 """
 
 import os
+import pwd
 import sys
 import json
 import socket
@@ -50,6 +51,7 @@ from agent_provider.provisioning import (
     ACTION_STATE_DIR,
     ACTION_WORKER_UNIT_PATH,
     AGENT_REPAIR_UNIT_PATH,
+    EXTENSION_REPAIR_UNIT_PATH,
     AGENT_CONFIG_PATH,
     AGENT_ENV_PATH,
     AGENT_LIB_DIR,
@@ -63,11 +65,14 @@ from agent_provider.provisioning import (
     LIMEOPS_SOCKET_PATH,
     LIMEOPS_STATE_DIR,
     LIMEOPS_UNIT_PATH,
+    MATTERMOST_REPAIR_UNIT_PATH,
     render_agent_unit,
     render_action_broker_unit,
     render_action_worker_unit,
     render_agent_repair_unit,
+    render_extension_repair_unit,
     render_limeops_unit,
+    render_mattermost_repair_unit,
 )
 from agent_provider.auth import (
     AuthBusyError,
@@ -164,6 +169,8 @@ MATTERMOST_CREDENTIAL_LIMIT = 64 * 1024
 AGENT_LIFECYCLE_TOMBSTONE = '/var/lib/limeos/integrations/agents-lifecycle.json'
 AGENT_CLEANUP_UNITS = (
     ('limeos-agent-repair.service', AGENT_REPAIR_UNIT_PATH),
+    ('limeos-extension-repair@*.service', EXTENSION_REPAIR_UNIT_PATH),
+    ('limeos-mattermost-repair.service', MATTERMOST_REPAIR_UNIT_PATH),
     ('limeos-agent.service', AGENT_UNIT_PATH),
     ('limeopsd.service', LIMEOPS_UNIT_PATH),
     ('limeops-action-worker.service', ACTION_WORKER_UNIT_PATH),
@@ -3224,6 +3231,42 @@ def _agent_repo_dir():
     return repo_dir
 
 
+def _agent_dashboard_user(repo_dir):
+    try:
+        user = pwd.getpwuid(os.stat(repo_dir).st_uid).pw_name
+    except (KeyError, OSError):
+        return None
+    if user == 'root' or not re.fullmatch(r'[a-z_][a-z0-9_-]*', user):
+        return None
+    return user
+
+
+def _agent_repair_job(command, *, name=None, timeout=60):
+    """Run a bounded repair-job command as the unprivileged dashboard owner."""
+    repo_dir = _agent_repo_dir()
+    user = _agent_dashboard_user(repo_dir) if repo_dir else None
+    python_bin = os.path.join(repo_dir, '.venv', 'bin', 'python') if repo_dir else ''
+    if not user or not os.path.isfile(python_bin):
+        return {'success': False, 'error': 'Repair job runtime is unavailable'}
+    argv = [
+        'runuser', '-u', user, '--', python_bin,
+        '-m', 'agent_actions.repair_job', command,
+    ]
+    if name is not None:
+        argv.extend(['--name', name])
+    result = run_command(argv, timeout=timeout, cwd=repo_dir)
+    if result.get('returncode') != 0:
+        return {'success': False, 'error': 'Repair job status is unavailable'}
+    lines = [line for line in str(result.get('stdout') or '').splitlines() if line]
+    try:
+        payload = json.loads(lines[-1])
+    except (IndexError, TypeError, ValueError):
+        return {'success': False, 'error': 'Repair job returned invalid status'}
+    if not isinstance(payload, dict):
+        return {'success': False, 'error': 'Repair job returned invalid status'}
+    return {'success': True, **payload}
+
+
 def _ensure_system_group(name):
     if run_command(['getent', 'group', name]).get('returncode') == 0:
         return True
@@ -3323,6 +3366,9 @@ def cmd_agent_runtime_install(params):
     repo_dir = _agent_repo_dir()
     if not repo_dir:
         return {'success': False, 'error': 'LimeOS repository is unavailable'}
+    dashboard_user = _agent_dashboard_user(repo_dir)
+    if not dashboard_user:
+        return {'success': False, 'error': 'LimeOS repository owner is invalid'}
 
     for group in (
         'limeops',
@@ -3491,6 +3537,18 @@ def cmd_agent_runtime_install(params):
         (
             AGENT_REPAIR_UNIT_PATH,
             render_agent_repair_unit(repo_dir),
+            0o644,
+            'root:root',
+        ),
+        (
+            EXTENSION_REPAIR_UNIT_PATH,
+            render_extension_repair_unit(repo_dir, dashboard_user),
+            0o644,
+            'root:root',
+        ),
+        (
+            MATTERMOST_REPAIR_UNIT_PATH,
+            render_mattermost_repair_unit(repo_dir, dashboard_user),
             0o644,
             'root:root',
         ),
@@ -4191,6 +4249,77 @@ def cmd_agent_integration_repair_start(params):
     )
     if result.get('returncode') != 0:
         return {'success': False, 'error': 'AI Agents repair could not be started'}
+    return {'success': True, 'started': True}
+
+
+def _agent_extension_name(params):
+    if not isinstance(params, dict) or set(params) != {'name'}:
+        return None
+    name = params.get('name')
+    if (
+        not isinstance(name, str)
+        or len(name) > 64
+        or not re.fullmatch(r'[a-z][a-z0-9]*(?:-[a-z0-9]+)*', name)
+    ):
+        return None
+    return name
+
+
+def cmd_agent_extension_status(params):
+    """Inspect one configured extension without importing it as root."""
+    name = _agent_extension_name(params)
+    if not name:
+        return {'success': False, 'error': 'Invalid extension repair target'}
+    return _agent_repair_job('extension-status', name=name)
+
+
+def cmd_agent_extension_repair_start(params):
+    """Start one configured extension repair as the dashboard user."""
+    name = _agent_extension_name(params)
+    if not name:
+        return {'success': False, 'error': 'Invalid extension repair target'}
+    status = cmd_agent_extension_status({'name': name})
+    if status.get('success') is not True or status.get('repairable') is not True:
+        return {'success': False, 'error': 'Extension is not eligible for repair'}
+    unit = f'limeos-extension-repair@{name}.service'
+    reset = run_command(['systemctl', 'reset-failed', unit], timeout=15)
+    if reset.get('returncode') != 0:
+        return {'success': False, 'error': 'Extension repair state could not be reset'}
+    started = run_command(
+        ['systemctl', 'start', '--no-block', unit], timeout=15
+    )
+    if started.get('returncode') != 0:
+        return {'success': False, 'error': 'Extension repair could not be started'}
+    return {'success': True, 'started': True}
+
+
+def cmd_agent_mattermost_status(params):
+    """Read bounded Mattermost health through its integration service."""
+    rejected = _agent_reject_params(params)
+    if rejected:
+        return rejected
+    return _agent_repair_job('mattermost-status')
+
+
+def cmd_agent_mattermost_repair_start(params):
+    """Start the fixed Mattermost integration repair job."""
+    rejected = _agent_reject_params(params)
+    if rejected:
+        return rejected
+    status = cmd_agent_mattermost_status({})
+    if status.get('success') is not True or status.get('installed') is not True:
+        return {'success': False, 'error': 'Mattermost is not eligible for repair'}
+    if status.get('state') in {'disabled', 'retained_data', 'cleanup_required'}:
+        return {'success': False, 'error': 'Mattermost lifecycle blocks repair'}
+    unit = 'limeos-mattermost-repair.service'
+    reset = run_command(['systemctl', 'reset-failed', unit], timeout=15)
+    if reset.get('returncode') != 0:
+        return {'success': False, 'error': 'Mattermost repair state could not be reset'}
+    started = run_command(
+        ['systemctl', 'start', '--no-block', unit], timeout=15
+    )
+    if started.get('returncode') != 0:
+        return {'success': False, 'error': 'Mattermost repair could not be started'}
     return {'success': True, 'started': True}
 
 
@@ -4931,6 +5060,10 @@ COMMANDS = {
     'agent_runtime_start': cmd_agent_runtime_start,
     'agent_integration_repair': cmd_agent_integration_repair,
     'agent_integration_repair_start': cmd_agent_integration_repair_start,
+    'agent_extension_status': cmd_agent_extension_status,
+    'agent_extension_repair_start': cmd_agent_extension_repair_start,
+    'agent_mattermost_status': cmd_agent_mattermost_status,
+    'agent_mattermost_repair_start': cmd_agent_mattermost_repair_start,
     'agent_usage_read': cmd_agent_usage_read,
     'agent_audit_read': cmd_agent_audit_read,
     'agent_delivery_test': cmd_agent_delivery_test,
@@ -4971,6 +5104,7 @@ _MUTATING_COMMANDS = frozenset({
     'agent_bot_secret_write', 'agent_configure', 'agent_action_policy_write',
     'agent_runtime_start',
     'agent_integration_repair', 'agent_integration_repair_start',
+    'agent_extension_repair_start', 'agent_mattermost_repair_start',
     'packages_reconcile', 'packages_agent_reconcile',
     'packages_agent_reconcile_start', 'packages_approve',
     'agent_job_retry_start',
