@@ -1,5 +1,6 @@
 import { requestApi } from "@/lib/api";
 import { createOperation, streamOperation, type OperationEvent } from "@/lib/operations";
+import { runIntegrationLifecycleOperation } from "@/lib/integration-lifecycle";
 import {
   lifecycleContractFields,
   type IntegrationLifecycleStatus,
@@ -89,6 +90,63 @@ export async function installMattermost(
       }
     },
     signal,
+  );
+}
+
+export function disableMattermost(
+  onEvent: (event: OperationEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  return runIntegrationLifecycleOperation("mattermost", "disable", {}, onEvent, { signal });
+}
+
+export function enableMattermost(
+  onEvent: (event: OperationEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  return runIntegrationLifecycleOperation("mattermost", "enable", {}, onEvent, { signal });
+}
+
+export function uninstallMattermost(
+  confirmation: "Mattermost",
+  onEvent: (event: OperationEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  return runIntegrationLifecycleOperation(
+    "mattermost",
+    "uninstall",
+    { confirmation },
+    onEvent,
+    { signal },
+  );
+}
+
+export function purgeMattermost(
+  confirmation: "Mattermost",
+  onEvent: (event: OperationEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  return runIntegrationLifecycleOperation(
+    "mattermost",
+    "purge",
+    { confirmation, acknowledge_data_loss: true },
+    onEvent,
+    { signal },
+  );
+}
+
+export function retryMattermostCleanup(
+  action: "disable" | "enable" | "uninstall" | "purge",
+  values: Record<string, unknown>,
+  onEvent: (event: OperationEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  return runIntegrationLifecycleOperation(
+    "mattermost",
+    "retry_cleanup",
+    values,
+    onEvent,
+    { cleanupAction: action, signal },
   );
 }
 

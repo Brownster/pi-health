@@ -38,6 +38,14 @@ def _open_agent_manage_menu(page: Page):
     return trigger, menu
 
 
+def _open_mattermost_manage_menu(page: Page):
+    trigger = page.locator("[data-mattermost-lifecycle-menu-trigger='mattermost']")
+    trigger.click()
+    menu = page.locator("[data-mattermost-lifecycle-menu='mattermost']")
+    expect(menu).to_be_visible()
+    return trigger, menu
+
+
 def test_integrations_policy_and_silence(
     profiled_page: Page,
     viewport_profile_name,
@@ -102,6 +110,165 @@ def test_integrations_setup_reports_stream_error_without_success(
     expect(page.get_by_text("Setup failed")).to_be_visible()
     expect(page.get_by_text("Mattermost and LimeOS alerts are connected.")).not_to_be_visible()
     expect(page.get_by_text("no matching ARM64 manifest").first).to_be_visible()
+
+
+def test_mattermost_dependency_blocker_moves_focus_to_ai_agents(
+    page: Page,
+    v2_server,
+    v2_login,
+    install_v2_integrations_api_mocks,
+):
+    _open(page, v2_server["base_url"], v2_login, install_v2_integrations_api_mocks)
+
+    _, menu = _open_mattermost_manage_menu(page)
+    expect(menu.get_by_role("menuitem", name="Disable (AI Agents first)")).to_be_visible()
+    expect(menu.get_by_role("menuitem", name="Uninstall (AI Agents first)")).to_be_visible()
+    menu.get_by_role("menuitem", name="Disable (AI Agents first)").click()
+    dialog = page.get_by_role("dialog", name="Disable AI Agents first")
+    expect(dialog).to_contain_text("Disable AI Agents before stopping Mattermost.")
+    dialog.locator("[data-mattermost-go-to-agents]").click()
+    expect(page.locator("#ai-agents")).to_be_focused()
+
+
+def test_mattermost_disable_and_enable_use_server_authorized_actions(
+    page: Page,
+    v2_server,
+    v2_login,
+    install_v2_integrations_api_mocks,
+):
+    _open(
+        page,
+        v2_server["base_url"],
+        v2_login,
+        install_v2_integrations_api_mocks,
+        agent_enabled=False,
+    )
+
+    _, menu = _open_mattermost_manage_menu(page)
+    menu.get_by_role("menuitem", name="Disable", exact=True).click()
+    dialog = page.get_by_role("dialog", name="Disable Mattermost?")
+    expect(dialog).to_contain_text("complete Mattermost stack and alert delivery")
+    dialog.get_by_role("button", name="Disable Mattermost").click()
+    expect(dialog.get_by_role("status")).to_contain_text("Operation completed")
+    dialog.get_by_role("button", name="Close", exact=True).click()
+    mattermost = page.locator("[data-mattermost-integration]")
+    expect(mattermost.get_by_text("disabled", exact=True).first).to_be_visible()
+    expect(mattermost.get_by_text("Chat, alert delivery, and the full managed stack are stopped.")).to_be_visible()
+
+    _, menu = _open_mattermost_manage_menu(page)
+    menu.get_by_role("menuitem", name="Enable", exact=True).click()
+    dialog = page.get_by_role("dialog", name="Enable Mattermost?")
+    dialog.get_by_role("button", name="Enable Mattermost").click()
+    expect(dialog.get_by_role("status")).to_contain_text("Operation completed")
+    dialog.get_by_role("button", name="Close", exact=True).click()
+    expect(mattermost.get_by_text("connected", exact=True).first).to_be_visible()
+
+
+def test_mattermost_uninstall_retains_data_without_inferring_purge(
+    profiled_page: Page,
+    viewport_profile_name,
+    assert_no_horizontal_overflow,
+    v2_server,
+    v2_login,
+    install_v2_integrations_api_mocks,
+):
+    page = profiled_page
+    requests = []
+    page.on("request", lambda request: requests.append(request))
+    _open(
+        page,
+        v2_server["base_url"],
+        v2_login,
+        install_v2_integrations_api_mocks,
+        agent_installed=False,
+    )
+
+    _, menu = _open_mattermost_manage_menu(page)
+    menu.get_by_role("menuitem", name="Uninstall", exact=True).click()
+    dialog = page.get_by_role("dialog", name="Uninstall Mattermost?")
+    expect(dialog).to_contain_text("Database records, messages, uploads, plugins")
+    expect(dialog.locator("[data-lifecycle-confirm]")).to_be_disabled()
+    dialog.locator("[data-lifecycle-confirmation]").fill("Mattermost")
+    dialog.locator("[data-lifecycle-confirm]").click()
+    expect(dialog.get_by_role("status")).to_contain_text("Operation completed")
+    assert_no_horizontal_overflow(page, f"Mattermost uninstall ({viewport_profile_name})")
+    request = next(
+        item for item in requests
+        if item.method == "POST" and item.url.endswith("/api/integrations/mattermost/uninstall")
+    )
+    assert request.post_data_json == {"confirmation": "Mattermost"}
+    dialog.get_by_role("button", name="Close", exact=True).click()
+
+    mattermost = page.locator("[data-mattermost-integration]")
+    expect(mattermost.get_by_text("retained data", exact=True)).to_be_visible()
+    expect(mattermost.locator("[data-mattermost-retained-setup]")).to_be_visible()
+    expect(mattermost.locator("[data-mattermost-purge]")).to_have_count(0)
+    expect(mattermost.get_by_text("Permanent data deletion is not available in this release.")).to_be_visible()
+    expect(mattermost).to_be_focused()
+
+
+def test_mattermost_purge_requires_release_action_confirmation_and_acknowledgement(
+    page: Page,
+    v2_server,
+    v2_login,
+    install_v2_integrations_api_mocks,
+):
+    requests = []
+    page.on("request", lambda request: requests.append(request))
+    _open(
+        page,
+        v2_server["base_url"],
+        v2_login,
+        install_v2_integrations_api_mocks,
+        mattermost_retained_data=True,
+        mattermost_purge_enabled=True,
+        agent_installed=False,
+    )
+
+    page.locator("[data-mattermost-purge]").click()
+    dialog = page.get_by_role("dialog", name="Delete retained Mattermost data?")
+    expect(dialog).to_contain_text("database records, messages, uploads, plugins, retained logs")
+    confirm = dialog.locator("[data-lifecycle-confirm]")
+    expect(confirm).to_be_disabled()
+    dialog.locator("[data-lifecycle-confirmation]").fill("Mattermost")
+    expect(confirm).to_be_disabled()
+    dialog.locator("[data-lifecycle-acknowledgement]").check()
+    confirm.click()
+    expect(dialog.get_by_role("status")).to_contain_text("Operation completed")
+    request = next(
+        item for item in requests
+        if item.method == "POST" and item.url.endswith("/api/integrations/mattermost/purge")
+    )
+    assert request.post_data_json == {
+        "confirmation": "Mattermost",
+        "acknowledge_data_loss": True,
+    }
+    dialog.get_by_role("button", name="Close", exact=True).click()
+    expect(page.locator("[data-mattermost-integration]").get_by_text("not installed", exact=True)).to_be_visible()
+
+
+def test_mattermost_cleanup_required_can_resume_after_refresh(
+    page: Page,
+    v2_server,
+    v2_login,
+    install_v2_integrations_api_mocks,
+):
+    _open(
+        page,
+        v2_server["base_url"],
+        v2_login,
+        install_v2_integrations_api_mocks,
+        mattermost_cleanup_action="disable",
+        agent_installed=False,
+    )
+    mattermost = page.locator("[data-mattermost-integration]")
+    expect(mattermost.get_by_text("Cleanup needs attention", exact=True)).to_be_visible()
+    mattermost.locator("[data-mattermost-retry-cleanup]").click()
+    dialog = page.get_by_role("dialog", name="Retry Mattermost disable")
+    dialog.get_by_role("button", name="Retry disable").click()
+    expect(dialog.get_by_role("status")).to_contain_text("Operation completed")
+    dialog.get_by_role("button", name="Close", exact=True).click()
+    expect(mattermost.get_by_text("disabled", exact=True).first).to_be_visible()
 
 
 def test_agent_integration_views_are_separate_and_operational(
@@ -437,6 +604,8 @@ def test_agent_lifecycle_controls_are_hidden_from_viewers(
 
     expect(page.locator("[data-agent-lifecycle-menu-trigger='agents']")).to_have_count(0)
     expect(page.locator("[data-agent-setup]")).to_have_count(0)
+    expect(page.locator("[data-mattermost-lifecycle-menu-trigger='mattermost']")).to_have_count(0)
+    expect(page.locator("[data-mattermost-setup]")).to_have_count(0)
 
 
 def test_agent_authentication_recovers_after_browser_reload(
