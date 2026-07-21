@@ -118,10 +118,154 @@ def safe_stack_precondition(
     }
 
 
+def _packages_params(params: Mapping[str, Any]) -> dict[str, Any]:
+    if set(params):
+        raise CapabilityError("Package reconciliation accepts no parameters")
+    return {}
+
+
+def _integration_params(params: Mapping[str, Any]) -> dict[str, Any]:
+    if set(params) != {"name"} or params.get("name") != "agents":
+        raise CapabilityError("Integration repair accepts only the agents target")
+    return {"name": "agents"}
+
+
+def _job_retry_params(params: Mapping[str, Any]) -> dict[str, Any]:
+    if set(params) != {"name"} or params.get("name") != "package-reconcile":
+        raise CapabilityError("Job retry accepts only the package-reconcile target")
+    return {"name": "package-reconcile"}
+
+
+def safe_integration_precondition(
+    status_reader: Callable[[], Mapping[str, Any]],
+    job_status_reader: Callable[[], Mapping[str, Any]],
+) -> dict[str, Any]:
+    status = status_reader()
+    job = job_status_reader()
+    if not isinstance(status, Mapping) or not isinstance(job, Mapping):
+        raise CapabilityError("AI Agents repair status is unavailable")
+    active_state = str(job.get("active_state") or "unknown").lower()
+    if active_state in {"activating", "active", "reloading", "deactivating"}:
+        raise CapabilityError("AI Agents repair is already running")
+    if active_state not in {"inactive", "failed"}:
+        raise CapabilityError("AI Agents repair job is unavailable")
+    raw_units = status.get("units")
+    if not isinstance(raw_units, list):
+        raise CapabilityError("AI Agents repair status is unavailable")
+    units = sorted(
+        (
+            {
+                "name": str(item.get("name") or ""),
+                "load_state": str(item.get("load_state") or "unknown").lower(),
+                "active_state": str(item.get("active_state") or "unknown").lower(),
+                "unit_file_state": str(
+                    item.get("unit_file_state") or "unknown"
+                ).lower(),
+            }
+            for item in raw_units
+            if isinstance(item, Mapping) and item.get("name")
+        ),
+        key=lambda item: item["name"],
+    )
+    agent = next(
+        (item for item in units if item["name"] == "limeos-agent.service"), None
+    )
+    if agent is None or agent["load_state"] != "loaded":
+        raise CapabilityError("AI Agents installation is unavailable")
+    if agent["unit_file_state"] not in {"enabled", "enabled-runtime"}:
+        raise CapabilityError("AI Agents must be enabled before repair")
+    return {
+        "name": "agents",
+        "units": units,
+        "job": {
+            "active_state": active_state,
+            "result": str(job.get("result") or "unknown").lower(),
+            "invocation_id": str(job.get("invocation_id") or ""),
+        },
+    }
+
+
+def safe_package_precondition(
+    status_reader: Callable[[], Mapping[str, Any]],
+    job_status_reader: Callable[[], Mapping[str, Any]],
+) -> dict[str, Any]:
+    status = status_reader()
+    job = job_status_reader()
+    if not isinstance(status, Mapping) or not isinstance(job, Mapping):
+        raise CapabilityError("Package reconciliation status is unavailable")
+    active_state = str(job.get("active_state") or "unknown").lower()
+    if active_state in {"activating", "active", "reloading", "deactivating"}:
+        raise CapabilityError("Package reconciliation is already running")
+    if active_state not in {"inactive", "failed"}:
+        raise CapabilityError("Package reconciliation job is unavailable")
+    raw_packages = status.get("packages")
+    raw_drift = status.get("drift")
+    if (
+        not isinstance(status.get("ok"), bool)
+        or not isinstance(raw_packages, list)
+        or not isinstance(raw_drift, list)
+    ):
+        raise CapabilityError("Package reconciliation status is unavailable")
+    packages = sorted(
+        (
+            {
+                "name": str(item.get("name") or ""),
+                "policy": str(item.get("policy") or ""),
+                "expected": str(item.get("expected") or ""),
+                "installed": str(item.get("installed") or ""),
+                "compliant": item.get("compliant") is True,
+            }
+            for item in raw_packages
+            if isinstance(item, Mapping) and item.get("name")
+        ),
+        key=lambda item: item["name"],
+    )
+    if not packages:
+        raise CapabilityError("Package repair manifest is empty")
+    package_names = {item["name"] for item in packages}
+    drift = sorted(str(item) for item in raw_drift)
+    if any(item not in package_names for item in drift):
+        raise CapabilityError("Package reconciliation status is unavailable")
+    return {
+        "target": "shipped-manifest",
+        "ok": status["ok"],
+        "drift": drift,
+        "packages": packages,
+        "job": {
+            "active_state": active_state,
+            "result": str(job.get("result") or "unknown").lower(),
+            "invocation_id": str(job.get("invocation_id") or ""),
+        },
+    }
+
+
+def safe_job_retry_precondition(
+    status_reader: Callable[[], Mapping[str, Any]],
+    job_status_reader: Callable[[], Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Require one failed fixed package job with work still outstanding."""
+    package = safe_package_precondition(status_reader, job_status_reader)
+    if package["job"]["active_state"] != "failed":
+        raise CapabilityError("Package reconciliation job has not failed")
+    if package["ok"] or not package["drift"]:
+        raise CapabilityError("Package reconciliation has no remaining drift")
+    return {
+        "name": "package-reconcile",
+        "ok": package["ok"],
+        "drift": package["drift"],
+        "packages": package["packages"],
+        "job": package["job"],
+    }
+
+
 def build_repair_registry(
     *,
     container_status: Callable[[str], Mapping[str, Any]],
     stack_status: Callable[[str], Mapping[str, Any]],
+    package_status: Callable[[], Mapping[str, Any]],
+    package_job_status: Callable[[], Mapping[str, Any]],
+    integration_status: Callable[[], Mapping[str, Any]],
+    integration_job_status: Callable[[], Mapping[str, Any]],
 ) -> CapabilityRegistry:
     modes = (
         AuthorityMode.PROPOSE,
@@ -165,11 +309,65 @@ def build_repair_registry(
         ),
     )
 
+    package_capability = CapabilitySpec(
+        operation="packages.reconcile",
+        version="1",
+        risk=RiskClass.MUTATING,
+        eligible_modes=(AuthorityMode.PROPOSE, AuthorityMode.APPROVAL),
+        normalize_params=_packages_params,
+        select_target=lambda _params: "shipped-manifest",
+        read_precondition=lambda _params: safe_package_precondition(
+            package_status, package_job_status
+        ),
+        render_impact=lambda _params: (
+            "Reconcile the fixed non-feature, non-pinned package subset from the "
+            "shipped LimeOS manifest. Apt metadata may be refreshed and missing "
+            "packages installed; package names and versions cannot be supplied."
+        ),
+    )
+
+    integration_capability = CapabilitySpec(
+        operation="integration.repair",
+        version="1",
+        risk=RiskClass.MUTATING,
+        eligible_modes=(AuthorityMode.PROPOSE, AuthorityMode.APPROVAL),
+        normalize_params=_integration_params,
+        select_target=lambda params: params["name"],
+        read_precondition=lambda _params: safe_integration_precondition(
+            integration_status, integration_job_status
+        ),
+        render_impact=lambda _params: (
+            "Repair the installed AI Agents integration using its fixed provider and "
+            "runtime definition. Agent services will restart and may be briefly "
+            "unavailable; configuration and credentials are preserved."
+        ),
+    )
+
+    job_retry_capability = CapabilitySpec(
+        operation="job.retry",
+        version="1",
+        risk=RiskClass.MUTATING,
+        eligible_modes=(AuthorityMode.PROPOSE, AuthorityMode.APPROVAL),
+        normalize_params=_job_retry_params,
+        select_target=lambda params: params["name"],
+        read_precondition=lambda _params: safe_job_retry_precondition(
+            package_status, package_job_status
+        ),
+        render_impact=lambda _params: (
+            "Reset and retry the failed fixed package reconciliation job. Apt metadata "
+            "may be refreshed and missing baseline packages installed; the unit, "
+            "package names, and versions cannot be supplied."
+        ),
+    )
+
     return CapabilityRegistry(
         [
             container_capability("container.start", "Start"),
             container_capability("container.restart", "Restart"),
             stack_capability,
+            package_capability,
+            integration_capability,
+            job_retry_capability,
         ]
     )
 
@@ -178,6 +376,10 @@ def build_action_service(
     *,
     container_status: Callable[[str], Mapping[str, Any]],
     stack_status: Callable[[str], Mapping[str, Any]],
+    package_status: Callable[[], Mapping[str, Any]],
+    package_job_status: Callable[[], Mapping[str, Any]],
+    integration_status: Callable[[], Mapping[str, Any]],
+    integration_job_status: Callable[[], Mapping[str, Any]],
     policy_path: str | Path = DEFAULT_ACTION_POLICY_PATH,
     ledger_path: str | Path = DEFAULT_ACTION_LEDGER_PATH,
 ) -> AgentActionService:
@@ -185,6 +387,10 @@ def build_action_service(
         registry=build_repair_registry(
             container_status=container_status,
             stack_status=stack_status,
+            package_status=package_status,
+            package_job_status=package_job_status,
+            integration_status=integration_status,
+            integration_job_status=integration_job_status,
         ),
         policy_provider=lambda: ActionPolicy.from_file(policy_path),
         ledger=ActionLedger(ledger_path),

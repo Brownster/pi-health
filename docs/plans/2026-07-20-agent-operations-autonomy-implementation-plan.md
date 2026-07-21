@@ -13,9 +13,11 @@ Supersedes the delivery detail in: `Docs/LIMEOS_ASSISTANT_CAPABILITY_ROADMAP.md`
 The first deployable slice now includes immutable Mattermost actor IDs, code-owned
 capability contracts, deny-by-default action policy, a transactional action ledger,
 expiring single-use approvals, a separate actuator socket and identities, verified
-`container.start`, `container.restart`, and approval-only `stack.reconcile`, authenticated
-action APIs, and private local finding drafts. Shipped defaults keep the kill switch on
-and every repair operation disabled.
+`container.start`, `container.restart`, approval-only `stack.reconcile`, approval-only
+`packages.reconcile`, approval-only AI Agents `integration.repair`, authenticated action
+APIs, approval-only `job.retry` for the fixed failed package reconciliation job, and
+private local finding drafts. Shipped defaults keep the kill switch on and every repair
+operation disabled.
 
 AO-005 now has capability, policy, cancellation, approval, rejection, detail, history,
 and listing APIs. The AI Agents browser card now provides action review and approval,
@@ -23,8 +25,10 @@ private finding review and editing, and an administrator policy editor for exact
 allowlists, approvers, proposal expiry, authority modes, and the kill switch. Mattermost
 now renders exact proposals and uses restart-safe approve/reject reactions bound to the
 immutable reacting user and originating channel. AO-006 now covers container start and
-restart plus existing-definition stack reconciliation. Extension/integration repair,
-package reconciliation, job retry, scheduling, installation, configuration,
+restart, existing-definition stack reconciliation, fixed-subset package reconciliation,
+AI Agents integration repair, and retry of a failed fixed package reconciliation job.
+The systemd-backed operations resume verification after the actuator and worker restart.
+Extension repair, Mattermost integration repair, scheduling, installation, configuration,
 optimisation, GitHub publication, and agent-authored pull requests remain later work
 packages.
 

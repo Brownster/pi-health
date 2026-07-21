@@ -52,6 +52,8 @@ from mattermost_integration_service import MattermostIntegrationService
 from stack_notifications_service import StackNotificationsService
 from agent_integration_service import AgentIntegrationService
 from agent_actions.defaults import LazyAgentActionService, build_action_service
+from agent_actions.packages import package_job_status, package_repair_status
+from agent_actions.integrations import agent_integration_status, agent_repair_job_status
 from agent_findings.service import LazyFindingsService
 from alert_history import AlertEventLedger
 from media_profile_service import MediaProfileService
@@ -480,6 +482,10 @@ def _default_agent_action_service(container_inventory_service, stack_read_servic
                 name, include_env_values=False
             ),
             stack_status=stack_status,
+            package_status=package_repair_status,
+            package_job_status=package_job_status,
+            integration_status=agent_integration_status,
+            integration_job_status=agent_repair_job_status,
         )
     )
 

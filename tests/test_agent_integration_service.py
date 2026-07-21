@@ -39,6 +39,7 @@ class FakeHelper:
             "agent_bot_secret_write": {"success": True, "stored": True},
             "agent_configure": {"success": True, "configured": True},
             "agent_runtime_start": {"success": True, "started": True},
+            "agent_integration_repair": {"success": True, "repaired": True},
             "agent_runtime_disable": {"success": True, "disabled": True},
             "agent_runtime_uninstall": {"success": True, "steps": []},
             "agent_delivery_test": {"success": True, "delivered": True},
@@ -445,19 +446,15 @@ def test_guided_auth_drops_non_claude_authorization_urls():
     assert "evil.example" not in json.dumps(events)
 
 
-def test_repair_reinstalls_provider_and_runtime_before_starting():
+def test_repair_delegates_to_the_fixed_helper_workflow():
     helper = FakeHelper()
     helper.responses["agent_runtime_status"].update(
         configured=True, claude_authenticated=True
     )
     events = list(_service(helper).stream_repair({}))
     assert events[-1]["done"] is True
-    assert [call[0] for call in helper.calls] == [
-        "agent_provider_install",
-        "agent_runtime_install",
-        "agent_runtime_status",
-        "agent_runtime_start",
-    ]
+    assert [call[0] for call in helper.calls] == ["agent_integration_repair"]
+    assert helper.calls[0][2] == 1800
 
 
 def test_repair_with_admin_credentials_rebuilds_bot_and_configuration():

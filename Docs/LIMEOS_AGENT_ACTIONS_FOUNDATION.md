@@ -7,8 +7,10 @@ Status: Implemented with all mutations disabled by default
 ## Shipped Scope
 
 The assistant can diagnose the host, create exact repair proposals, and draft private
-bug or feature findings. Only the isolated actuator can change Docker state. The first
-write capabilities are `container.start`, `container.restart`, and `stack.reconcile`.
+bug or feature findings. Only the isolated actuator can start mutations. The first write
+capabilities are `container.start`, `container.restart`, `stack.reconcile`, and
+`packages.reconcile`, plus `integration.repair` for the built-in AI Agents integration
+and `job.retry` for the fixed package reconciliation job.
 
 The release does not grant the model a shell, Docker socket, helper socket, arbitrary
 filesystem access, GitHub credential, or actuator-socket access. It does not publish
@@ -25,10 +27,12 @@ The `limeops-action-worker` forwards only an authorised action ID. The
 `limeops-actuatord` process reloads policy and rechecks the kill switch, contract
 version, target, payload hash, approval, expiry, and live precondition before it calls
 `ContainerOperationsService.control` or the fixed existing-stack reconcile path in
-`StackOperationsService`. It then checks container or Compose service state and health.
-A container restart must also produce a new start timestamp. Stack reconciliation
-succeeds only when the Compose definition is unchanged, every declared service is
-running, and no resulting container is unhealthy.
+`StackOperationsService`, or a fixed helper-owned package or integration job. It then
+checks container, Compose service, package, integration, or job state. A container restart
+must also produce a new start timestamp. Stack reconciliation succeeds only when the
+Compose definition is unchanged, every declared service is running, and no resulting
+container is unhealthy. Package and integration jobs stay in `verifying` while they run;
+the action worker resumes those checks after its own restart.
 
 The service boundary uses these paths:
 
@@ -93,6 +97,21 @@ mode:
       "enabled": false,
       "approvers": [],
       "targets": {}
+    },
+    "packages.reconcile": {
+      "enabled": false,
+      "approvers": [],
+      "targets": {}
+    },
+    "integration.repair": {
+      "enabled": false,
+      "approvers": [],
+      "targets": {}
+    },
+    "job.retry": {
+      "enabled": false,
+      "approvers": [],
+      "targets": {}
     }
   }
 }
@@ -148,6 +167,53 @@ verification to roughly 10 seconds. Canary it only on a non-critical stack after
 recording its declared services and current health. A partial, missing, unhealthy, or
 changed-definition result fails verification and escalates; LimeOS does not attempt an
 unsafe automatic rollback that would require stopping services.
+
+`packages.reconcile` is an R2 approval-only operation with one fixed target:
+`shipped-manifest`. It accepts an empty parameter object. The helper derives every
+package name and version from the validated manifest. This first adapter excludes pinned
+packages and feature-owned packages, which remain behind their existing version-approval
+and integration-lifecycle controls. The action starts
+`limeos-package-reconcile-action.service` without waiting for apt, persists in
+`verifying`, and resumes checks after worker or actuator restarts. It fails after one hour
+or when systemd reports a failed job. Success requires a new completed invocation and no
+remaining drift. Automatic downgrade and package removal are outside its rollback path.
+
+`integration.repair` is an R2 approval-only operation with one exact target: `agents`.
+It applies only to an installed, enabled AI Agents integration. A disabled integration
+must use its ordinary enable flow, and unfinished lifecycle cleanup must finish before
+repair. The operation accepts only `{"name": "agents"}`; it cannot select another
+integration, unit, provider, command, or path.
+
+The actuator starts `limeos-agent-repair.service`, a helper-backed oneshot job. The job
+repairs the fixed Claude Code provider, reinstalls the code-owned agent runtime, preserves
+settings and credentials, and restarts the agent, read broker, actuator, and action
+worker. The action remains in `verifying` across those restarts. It succeeds only after a
+new systemd invocation completes successfully, all four runtime units are loaded and
+active, Claude Code is installed and compatible, authentication and configuration remain
+valid, and the integration is enabled. The one-hour verification limit covers package
+download and runtime installation time.
+
+Canary this operation only on a configured AI Agents installation with current Claude
+authentication. Expect a brief interruption to assistant replies and action processing.
+If the job or health check fails, keep the action record and inspect the fixed unit and
+helper logs. LimeOS does not downgrade the provider or restore old runtime files
+automatically. Disable the operation in action policy until an operator resolves the
+cause.
+
+`job.retry` is an R2 approval-only operation with one exact target:
+`package-reconcile`. Use it only after `limeos-package-reconcile-action.service` has
+failed and shipped-manifest drift remains. Ordinary convergence should use
+`packages.reconcile`; the retry operation exists to recover a failed invocation without
+granting a general systemd control surface.
+
+The operation accepts only `{"name": "package-reconcile"}`. The helper resets the
+failed state and starts the fixed unit without blocking. It cannot accept a unit,
+command, package, version, or extra argument. The action stays in `verifying` while the
+job runs and succeeds only when a different systemd invocation completes successfully
+and the manifest is compliant with no remaining drift. It fails after one hour or when
+the new invocation fails. Package downgrade and removal remain outside the rollback
+allowlist. Keep the operation disabled until a target-Pi canary demonstrates the failed
+job, retry, and verification sequence.
 
 When a Mattermost turn creates a proposal, the listener posts a separate bounded card in
 the originating thread with the operation, exact target, risk, reason, expected impact,
@@ -206,8 +272,8 @@ agent audit logs for incident review.
 
 ## Current Limits
 
-This slice completes the action foundation and the first three repair adapters. It does
-not yet include extension or integration repair, package reconciliation, job retry,
-report-only schedules, maturity promotion, cooldowns, disruption budgets, installation,
+This slice completes the action foundation and the first six repair adapters. It does
+not yet include extension repair, Mattermost integration repair, report-only schedules,
+maturity promotion, cooldowns, disruption budgets, installation,
 configuration, review experiments, optimisation, or GitHub publication. Those features
 remain gated by the accepted implementation plan and target-Pi canary evidence.

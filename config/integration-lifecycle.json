@@ -159,6 +159,7 @@
         "retry_cleanup"
       ],
       "units": [
+        "limeos-agent-repair.service",
         "limeos-agent.service",
         "limeopsd.service",
         "limeops-actuatord.service",

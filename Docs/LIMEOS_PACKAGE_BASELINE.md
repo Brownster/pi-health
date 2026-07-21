@@ -134,7 +134,15 @@ update's migrate step (`cmd_configure_package_reconcile_schedule`). The timer ru
 `cmd_packages_nightly_reconcile` back through the helper socket (audited), which: (1) `apt-mark hold`s
 every *critical* manifest entry, (2) auto-applies non-critical security updates via
 `unattended-upgrade` (skipped cleanly when absent), (3) runs the manifest `reconcile apply`, and
-returns a structured report (`held`, `security`, `reconcile`).
+returns a structured report (`held`, `security`, `reconcile`). The helper client now uses an
+1,800-second deadline for this long-running service instead of its 30-second interactive default.
+
+AO-006 adds an approval-owned `limeos-package-reconcile-action.service`. The action starts this
+oneshot unit without blocking the actuator, persists in `verifying`, and resumes verification after
+worker restarts. Its helper command accepts no parameters and filters the shipped manifest to
+non-feature, non-pinned packages. Pinned versions and feature-owned packages remain behind their
+existing approval and lifecycle controls. The action succeeds only after systemd records a new
+successful invocation and the selected subset reports no drift.
 
 PB-003 slice 2 landed: `pending_updates`/`render_updates_message` (pure) surface held/critical entries
 whose apt candidate is newer than installed; the nightly run computes candidates (`apt-cache policy`)

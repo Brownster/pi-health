@@ -65,3 +65,21 @@ def test_reconcile_apply_pins_the_cli_and_installs_missing():
     touched = {call[-1].split("=")[0] for call in fake.calls if call[0] in {"apt-get", "apt-mark"}
                and call[-1] not in {"update"}}
     assert touched <= {"claude-code", "python3-psutil", "unattended-upgrades"}
+
+
+def test_agent_reconcile_excludes_feature_owned_and_pinned_packages():
+    fake = FakeRun(
+        {
+            "claude-code": None,
+            "python3-psutil": None,
+            "unattended-upgrades": "2.9",
+        }
+    )
+    with patch.object(helper, "run_command", side_effect=fake):
+        result = helper.cmd_packages_agent_reconcile({})
+
+    assert result["success"] is True
+    touched = " ".join(" ".join(call) for call in fake.calls)
+    assert "python3-psutil" in touched
+    assert "claude-code" not in touched
+    assert helper.cmd_packages_agent_reconcile({"package": "curl"})["success"] is False

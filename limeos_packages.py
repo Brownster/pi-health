@@ -145,6 +145,19 @@ def managed_packages(
     ]
 
 
+def repair_managed_packages(specs: list[PackageSpec]) -> list[PackageSpec]:
+    """Return the fixed package subset eligible for agent-triggered repair.
+
+    Feature-owned packages and pinned packages stay behind their owning lifecycle and
+    explicit version-approval flows. The caller cannot add names or versions.
+    """
+    return [
+        spec
+        for spec in specs
+        if spec.feature is None and spec.policy != "pinned"
+    ]
+
+
 # -- reconcile logic (pure) ------------------------------------------------------
 #: Query an installed version for a spec; returns None when the package is absent.
 VersionOf = Callable[["PackageSpec"], "str | None"]

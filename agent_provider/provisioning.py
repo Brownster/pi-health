@@ -23,6 +23,7 @@ AGENT_UNIT_PATH = "/etc/systemd/system/limeos-agent.service"
 LIMEOPS_UNIT_PATH = "/etc/systemd/system/limeopsd.service"
 ACTION_BROKER_UNIT_PATH = "/etc/systemd/system/limeops-actuatord.service"
 ACTION_WORKER_UNIT_PATH = "/etc/systemd/system/limeops-action-worker.service"
+AGENT_REPAIR_UNIT_PATH = "/etc/systemd/system/limeos-agent-repair.service"
 
 
 def render_agent_unit(repo_dir: str, python_bin: str) -> str:
@@ -187,4 +188,50 @@ CapabilityBoundingSet=
 
 [Install]
 WantedBy=multi-user.target
+"""
+
+
+def render_agent_repair_unit(repo_dir: str) -> str:
+    """Render the fixed, helper-backed AI Agents repair job."""
+    exec_start = (
+        "/usr/bin/python3 -c "
+        "'import sys; from helper_client import helper_call; "
+        'sys.exit(0 if (helper_call("agent_integration_repair", {}, timeout=1800) '
+        "or {}).get(\"success\") else 1)'"
+    )
+    return f"""[Unit]
+Description=LimeOS approved AI Agents integration repair
+After=network-online.target pihealth-helper.service
+Wants=network-online.target
+Requires=pihealth-helper.service
+
+[Service]
+Type=oneshot
+User=limeops-action-worker
+Group=limeops-action-worker
+SupplementaryGroups=pihealth
+WorkingDirectory={ACTION_STATE_DIR}
+Environment=PYTHONPATH={AGENT_LIB_DIR}
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart={exec_start}
+TimeoutStartSec=1800
+UMask=0077
+Nice=19
+IOSchedulingClass=idle
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX
+ReadOnlyPaths={AGENT_LIB_DIR}
+InaccessiblePaths=/root {repo_dir} /var/run/docker.sock /etc/limeos/credentials.env
+CapabilityBoundingSet=
+SystemCallArchitectures=native
 """

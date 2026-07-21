@@ -609,6 +609,41 @@ def test_actuator_closes_execution_and_verification_failures(tmp_path):
     assert result["terminal_code"] == "verification_failed:no_safe_rollback"
 
 
+def test_actuator_resumes_pending_verification_without_reexecuting(tmp_path):
+    state = {"generation": 1}
+    ledger, registry, policy = _authorised_action(tmp_path, state)
+    calls = []
+    verification = iter(
+        [
+            (None, {"job": {"active_state": "activating"}}),
+            (True, {"job": {"active_state": "inactive", "result": "success"}}),
+        ]
+    )
+    executor = ExecutionSpec(
+        operation="container.restart",
+        version="1",
+        execute=lambda params: calls.append(dict(params)) or {"started": True},
+        verify=lambda params, before: next(verification),
+        no_rollback_reason="No safe rollback",
+        max_verification_seconds=3600,
+    )
+
+    first = _actuator(ledger, registry, policy, executor).execute(
+        "action-1", audit_id="action-audit-1"
+    )
+    resumed = _actuator(
+        ledger,
+        registry,
+        policy,
+        executor,
+        clock=lambda: NOW + timedelta(minutes=20),
+    ).execute("action-1", audit_id="action-audit-2")
+
+    assert first["state"] == "verifying"
+    assert resumed["state"] == "succeeded"
+    assert calls == [{"name": "jellyfin"}]
+
+
 def test_container_restart_executor_requires_running_and_new_start_time():
     statuses = iter(
         [

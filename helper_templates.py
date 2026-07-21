@@ -65,17 +65,13 @@ def cron_to_oncalendar(cron):
     return f"*-{month}-{day} {time_value}"
 
 
-def render_package_reconcile_schedule(on_calendar, exec_start, *, user, working_dir, pythonpath):
-    """systemd (service, timer) for the nightly package-baseline reconcile.
-
-    ``exec_start`` is supplied by the helper so the unit routes the run back through the
-    privileged helper over its socket (audited), rather than shelling apt directly from the
-    timer. It therefore runs as ``user`` (in the helper's client group) with the app on the
-    ``pythonpath`` so ``helper_client`` is importable.
-    """
-    service = (
+def render_package_reconcile_service(
+    exec_start, *, user, working_dir, pythonpath, description
+):
+    """Render one low-priority helper-backed package reconciliation service."""
+    return (
         "[Unit]\n"
-        "Description=LimeOS nightly package baseline reconcile\n"
+        f"Description={description}\n"
         "After=network-online.target\n"
         "Wants=network-online.target\n\n"
         "[Service]\n"
@@ -86,6 +82,23 @@ def render_package_reconcile_schedule(on_calendar, exec_start, *, user, working_
         f"ExecStart={exec_start}\n"
         "Nice=19\n"
         "IOSchedulingClass=idle\n"
+    )
+
+
+def render_package_reconcile_schedule(on_calendar, exec_start, *, user, working_dir, pythonpath):
+    """systemd (service, timer) for the nightly package-baseline reconcile.
+
+    ``exec_start`` is supplied by the helper so the unit routes the run back through the
+    privileged helper over its socket (audited), rather than shelling apt directly from the
+    timer. It therefore runs as ``user`` (in the helper's client group) with the app on the
+    ``pythonpath`` so ``helper_client`` is importable.
+    """
+    service = render_package_reconcile_service(
+        exec_start,
+        user=user,
+        working_dir=working_dir,
+        pythonpath=pythonpath,
+        description="LimeOS nightly package baseline reconcile",
     )
     timer = (
         "[Unit]\n"

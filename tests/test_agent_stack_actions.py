@@ -36,6 +36,10 @@ def test_stack_capability_is_exact_approval_bound_r2():
     registry = build_repair_registry(
         container_status=lambda name: {"name": name, "status": "running"},
         stack_status=lambda _name: _stack_status(),
+        package_status=lambda: {"ok": True, "drift": [], "packages": [{"name": "base"}]},
+        package_job_status=lambda: {"active_state": "inactive"},
+        integration_status=lambda: {"units": []},
+        integration_job_status=lambda: {"active_state": "inactive"},
     )
     capability = registry.require("stack.reconcile")
 
@@ -53,6 +57,10 @@ def test_stack_capability_rejects_names_disallowed_by_stack_manager(name):
     capability = build_repair_registry(
         container_status=lambda value: {"name": value, "status": "running"},
         stack_status=lambda _name: _stack_status(),
+        package_status=lambda: {"ok": True, "drift": [], "packages": [{"name": "base"}]},
+        package_job_status=lambda: {"active_state": "inactive"},
+        integration_status=lambda: {"units": []},
+        integration_job_status=lambda: {"active_state": "inactive"},
     ).require("stack.reconcile")
 
     with pytest.raises(CapabilityError, match="Stack name is invalid"):

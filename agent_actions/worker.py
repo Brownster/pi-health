@@ -17,7 +17,11 @@ DEFAULT_LEDGER_PATH = "/var/lib/limeos/agent-actions/actions.sqlite3"
 
 def run_once(ledger: ActionLedger, client: LimeOpsClient) -> bool:
     action = next(
-        (item for item in reversed(ledger.list(limit=200)) if item.state == ActionState.AUTHORISED),
+        (
+            item
+            for item in reversed(ledger.list(limit=200))
+            if item.state in {ActionState.AUTHORISED, ActionState.VERIFYING}
+        ),
         None,
     )
     if action is None:
@@ -27,7 +31,14 @@ def run_once(ledger: ActionLedger, client: LimeOpsClient) -> bool:
         {"action_id": action.action_id},
         {"type": "system", "id": "limeops-action-worker"},
     )
-    return bool(response.get("ok"))
+    data = response.get("data")
+    return bool(
+        response.get("ok")
+        and not (
+            isinstance(data, dict)
+            and data.get("state") == ActionState.VERIFYING.value
+        )
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
