@@ -575,3 +575,80 @@ def build_integration_executors(
             max_verification_seconds=max_verification_seconds,
         )
     }
+
+
+def build_job_retry_executors(
+    *,
+    start: Callable[[str], Mapping[str, Any]],
+    status_reader: Callable[[], Mapping[str, Any]],
+    job_status_reader: Callable[[], Mapping[str, Any]],
+    max_verification_seconds: int = 3600,
+) -> dict[str, ExecutionSpec]:
+    """Retry one failed fixed job and verify a distinct successful invocation."""
+
+    def execute(params: Mapping[str, Any]) -> Mapping[str, Any]:
+        return start(params["name"])
+
+    def verify(
+        params: Mapping[str, Any], before: Mapping[str, Any]
+    ) -> tuple[bool | None, Mapping[str, Any]]:
+        job = job_status_reader()
+        active_state = str(job.get("active_state") or "unknown").lower()
+        result = str(job.get("result") or "unknown").lower()
+        invocation_id = str(job.get("invocation_id") or "")
+        after: dict[str, Any] = {
+            "name": params["name"],
+            "job": {
+                "active_state": active_state,
+                "result": result,
+                "invocation_id": invocation_id,
+            },
+        }
+        if active_state in {"activating", "active", "reloading", "deactivating"}:
+            return None, after
+        if active_state in {"failed", "unavailable", "unknown"} or result in {
+            "failed",
+            "timeout",
+            "watchdog",
+            "exit-code",
+            "signal",
+            "core-dump",
+            "start-limit-hit",
+            "resources",
+        }:
+            return False, after
+
+        previous_invocation = str(
+            (before.get("job") or {}).get("invocation_id")
+            if isinstance(before.get("job"), Mapping)
+            else ""
+        )
+        status = status_reader()
+        after.update(
+            {
+                "ok": status.get("ok") is True,
+                "drift": sorted(str(item) for item in status.get("drift") or []),
+            }
+        )
+        if (
+            result == "success"
+            and status.get("ok") is True
+            and invocation_id
+            and invocation_id != previous_invocation
+        ):
+            return True, after
+        return None, after
+
+    return {
+        "job.retry": ExecutionSpec(
+            operation="job.retry",
+            version="1",
+            execute=execute,
+            verify=verify,
+            no_rollback_reason=(
+                "Package downgrades or removal are outside the retry allowlist; "
+                "escalate for operator review."
+            ),
+            max_verification_seconds=max_verification_seconds,
+        )
+    }

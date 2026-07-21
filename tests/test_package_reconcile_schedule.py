@@ -213,6 +213,33 @@ def test_agent_reconcile_start_uses_only_fixed_nonblocking_unit():
     ] is False
 
 
+def test_agent_job_retry_resets_and_starts_only_the_fixed_package_job():
+    with patch("pihealth_helper.run_command", return_value={"returncode": 0}) as run:
+        result = helper.cmd_agent_job_retry_start({"name": "package-reconcile"})
+
+    assert result == {"success": True, "started": True}
+    assert [call.args[0] for call in run.call_args_list] == [
+        [
+            "systemctl",
+            "reset-failed",
+            "limeos-package-reconcile-action.service",
+        ],
+        [
+            "systemctl",
+            "start",
+            "--no-block",
+            "limeos-package-reconcile-action.service",
+        ],
+    ]
+    assert helper.cmd_agent_job_retry_start({"name": "ssh.service"}) == {
+        "success": False,
+        "error": "Unknown retryable job",
+    }
+    assert helper.cmd_agent_job_retry_start(
+        {"name": "package-reconcile", "unit": "ssh.service"}
+    )["success"] is False
+
+
 def test_startup_ensure_invokes_timer_install_with_app_dir_and_user():
     import app as app_module
 

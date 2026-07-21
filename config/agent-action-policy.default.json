@@ -29,6 +29,11 @@
       "enabled": false,
       "approvers": [],
       "targets": {}
+    },
+    "job.retry": {
+      "enabled": false,
+      "approvers": [],
+      "targets": {}
     }
   }
 }

@@ -4784,6 +4784,26 @@ def cmd_packages_agent_reconcile_start(params):
     return {'success': True, 'started': True}
 
 
+def cmd_agent_job_retry_start(params):
+    """Reset and retry one code-owned failed job target."""
+    if not isinstance(params, dict) or set(params) != {'name'}:
+        return {'success': False, 'error': 'agent.job_retry accepts only a name'}
+    units = {'package-reconcile': f'{PACKAGE_ACTION_RECONCILE_UNIT}.service'}
+    unit = units.get(params.get('name'))
+    if unit is None:
+        return {'success': False, 'error': 'Unknown retryable job'}
+    reset = run_command(['systemctl', 'reset-failed', unit], timeout=15)
+    if reset.get('returncode') != 0:
+        return {'success': False, 'error': 'Job failed state could not be reset'}
+    started = run_command(
+        ['systemctl', 'start', '--no-block', unit],
+        timeout=15,
+    )
+    if started.get('returncode') != 0:
+        return {'success': False, 'error': 'Job retry could not be started'}
+    return {'success': True, 'started': True}
+
+
 def cmd_configure_package_reconcile_schedule(params):
     """Install and enable the nightly package-reconcile timer. Params: {app_dir, user,
     on_calendar?}. The timer runs the reconcile back through the helper socket (audited)."""
@@ -4917,6 +4937,7 @@ COMMANDS = {
     'packages_reconcile': cmd_packages_reconcile,
     'packages_agent_reconcile': cmd_packages_agent_reconcile,
     'packages_agent_reconcile_start': cmd_packages_agent_reconcile_start,
+    'agent_job_retry_start': cmd_agent_job_retry_start,
     'packages_pending': cmd_packages_pending,
     'packages_approve': cmd_packages_approve,
     'packages_nightly_reconcile': cmd_packages_nightly_reconcile,
@@ -4952,6 +4973,7 @@ _MUTATING_COMMANDS = frozenset({
     'agent_integration_repair', 'agent_integration_repair_start',
     'packages_reconcile', 'packages_agent_reconcile',
     'packages_agent_reconcile_start', 'packages_approve',
+    'agent_job_retry_start',
     'packages_nightly_reconcile',
     'configure_package_reconcile_schedule', 'agent_converge_if_stale',
     'mattermost_recovery_credential_retain',

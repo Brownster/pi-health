@@ -130,6 +130,12 @@ def _integration_params(params: Mapping[str, Any]) -> dict[str, Any]:
     return {"name": "agents"}
 
 
+def _job_retry_params(params: Mapping[str, Any]) -> dict[str, Any]:
+    if set(params) != {"name"} or params.get("name") != "package-reconcile":
+        raise CapabilityError("Job retry accepts only the package-reconcile target")
+    return {"name": "package-reconcile"}
+
+
 def safe_integration_precondition(
     status_reader: Callable[[], Mapping[str, Any]],
     job_status_reader: Callable[[], Mapping[str, Any]],
@@ -233,6 +239,25 @@ def safe_package_precondition(
     }
 
 
+def safe_job_retry_precondition(
+    status_reader: Callable[[], Mapping[str, Any]],
+    job_status_reader: Callable[[], Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Require one failed fixed package job with work still outstanding."""
+    package = safe_package_precondition(status_reader, job_status_reader)
+    if package["job"]["active_state"] != "failed":
+        raise CapabilityError("Package reconciliation job has not failed")
+    if package["ok"] or not package["drift"]:
+        raise CapabilityError("Package reconciliation has no remaining drift")
+    return {
+        "name": "package-reconcile",
+        "ok": package["ok"],
+        "drift": package["drift"],
+        "packages": package["packages"],
+        "job": package["job"],
+    }
+
+
 def build_repair_registry(
     *,
     container_status: Callable[[str], Mapping[str, Any]],
@@ -318,6 +343,23 @@ def build_repair_registry(
         ),
     )
 
+    job_retry_capability = CapabilitySpec(
+        operation="job.retry",
+        version="1",
+        risk=RiskClass.MUTATING,
+        eligible_modes=(AuthorityMode.PROPOSE, AuthorityMode.APPROVAL),
+        normalize_params=_job_retry_params,
+        select_target=lambda params: params["name"],
+        read_precondition=lambda _params: safe_job_retry_precondition(
+            package_status, package_job_status
+        ),
+        render_impact=lambda _params: (
+            "Reset and retry the failed fixed package reconciliation job. Apt metadata "
+            "may be refreshed and missing baseline packages installed; the unit, "
+            "package names, and versions cannot be supplied."
+        ),
+    )
+
     return CapabilityRegistry(
         [
             container_capability("container.start", "Start"),
@@ -325,6 +367,7 @@ def build_repair_registry(
             stack_capability,
             package_capability,
             integration_capability,
+            job_retry_capability,
         ]
     )
 

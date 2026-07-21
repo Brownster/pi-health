@@ -12,6 +12,7 @@ from agent_actions.actuator import (
     ActionActuator,
     build_container_executors,
     build_integration_executors,
+    build_job_retry_executors,
     build_package_executors,
     build_stack_executors,
 )
@@ -130,6 +131,25 @@ def _build_actuator(action_policy_path: str, ledger_path: str) -> ActionActuator
             status_reader=agent_integration_status,
             job_status_reader=agent_repair_job_status,
             runtime_status_reader=agent_runtime_health,
+        )
+    )
+
+    def retry_job(name: str):
+        try:
+            result = helper_call(
+                "agent_job_retry_start", {"name": name}, timeout=15
+            )
+        except HelperError:
+            return {"error": "job_retry_unavailable"}
+        if not isinstance(result, dict) or result.get("success") is not True:
+            return {"error": "job_retry_start_failed"}
+        return {"started": True}
+
+    executors.update(
+        build_job_retry_executors(
+            start=retry_job,
+            status_reader=package_repair_status,
+            job_status_reader=package_job_status,
         )
     )
     return ActionActuator(
