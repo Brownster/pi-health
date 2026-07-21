@@ -40,7 +40,10 @@ _NETWORK_TARGETS = {
 }
 
 _ACTION_SERVICE = LazyAgentActionService(
-    lambda: build_action_service(container_status=_container_action_status)
+    lambda: build_action_service(
+        container_status=_container_action_status,
+        stack_status=_stack_inspect,
+    )
 )
 _FINDINGS_SERVICE = LazyFindingsService(STATE_DIR / "agent-actions" / "findings.sqlite3")
 

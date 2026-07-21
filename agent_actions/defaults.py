@@ -54,8 +54,74 @@ def _safe_container_precondition(
     }
 
 
+def _stack_params(params: Mapping[str, Any]) -> dict[str, Any]:
+    if set(params) != {"name"}:
+        raise CapabilityError("Stack action accepts only a name")
+    name = params.get("name")
+    if (
+        not isinstance(name, str)
+        or not name
+        or len(name) > 64
+        or not name[0].isalnum()
+        or ".." in name
+        or any(
+            character
+            not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-"
+            for character in name
+        )
+    ):
+        raise CapabilityError("Stack name is invalid")
+    return {"name": name}
+
+
+def safe_stack_precondition(
+    status_reader: Callable[[str], Mapping[str, Any]], name: str
+) -> dict[str, Any]:
+    value = status_reader(name)
+    if not isinstance(value, Mapping):
+        raise CapabilityError("Stack status is unavailable")
+    raw_services = value.get("services")
+    runtime = value.get("status")
+    if not isinstance(raw_services, list) or not isinstance(runtime, Mapping):
+        raise CapabilityError("Stack status is unavailable")
+    expected_services = sorted(
+        {
+            str(item.get("name"))
+            for item in raw_services
+            if isinstance(item, Mapping) and item.get("name")
+        }
+    )
+    if not expected_services:
+        raise CapabilityError("Stack has no reconcilable services")
+    raw_containers = runtime.get("containers")
+    if not isinstance(raw_containers, list):
+        raise CapabilityError("Stack runtime status is unavailable")
+    containers = sorted(
+        (
+            {
+                "name": str(item.get("name") or ""),
+                "service": str(item.get("service") or ""),
+                "status": str(item.get("status") or "unknown"),
+                "health": str(item.get("health") or ""),
+            }
+            for item in raw_containers
+            if isinstance(item, Mapping)
+        ),
+        key=lambda item: (item["service"], item["name"]),
+    )
+    return {
+        "name": name,
+        "compose_file": str(value.get("compose_file") or ""),
+        "expected_services": expected_services,
+        "status": str(runtime.get("status") or "unknown"),
+        "containers": containers,
+    }
+
+
 def build_repair_registry(
-    *, container_status: Callable[[str], Mapping[str, Any]]
+    *,
+    container_status: Callable[[str], Mapping[str, Any]],
+    stack_status: Callable[[str], Mapping[str, Any]],
 ) -> CapabilityRegistry:
     modes = (
         AuthorityMode.PROPOSE,
@@ -81,10 +147,29 @@ def build_repair_registry(
             ),
         )
 
+    stack_modes = (AuthorityMode.PROPOSE, AuthorityMode.APPROVAL)
+    stack_capability = CapabilitySpec(
+        operation="stack.reconcile",
+        version="1",
+        risk=RiskClass.MUTATING,
+        eligible_modes=stack_modes,
+        normalize_params=_stack_params,
+        select_target=lambda params: params["name"],
+        read_precondition=lambda params: safe_stack_precondition(
+            stack_status, params["name"]
+        ),
+        render_impact=lambda params: (
+            f"Reconcile the allowlisted {params['name']} stack to its existing Compose "
+            "definition. Services may be recreated or briefly unavailable, and "
+            "same-project orphan containers will be removed."
+        ),
+    )
+
     return CapabilityRegistry(
         [
             container_capability("container.start", "Start"),
             container_capability("container.restart", "Restart"),
+            stack_capability,
         ]
     )
 
@@ -92,11 +177,15 @@ def build_repair_registry(
 def build_action_service(
     *,
     container_status: Callable[[str], Mapping[str, Any]],
+    stack_status: Callable[[str], Mapping[str, Any]],
     policy_path: str | Path = DEFAULT_ACTION_POLICY_PATH,
     ledger_path: str | Path = DEFAULT_ACTION_LEDGER_PATH,
 ) -> AgentActionService:
     return AgentActionService(
-        registry=build_repair_registry(container_status=container_status),
+        registry=build_repair_registry(
+            container_status=container_status,
+            stack_status=stack_status,
+        ),
         policy_provider=lambda: ActionPolicy.from_file(policy_path),
         ledger=ActionLedger(ledger_path),
     )

@@ -18,6 +18,7 @@ from agent_actions.capability import (
 )
 from agent_actions.ledger import ActionLedger, ActionLedgerError, ActionState
 from agent_actions.policy import ActionPolicy, ActionPolicyError
+from agent_actions.defaults import safe_stack_precondition
 
 
 _ACTION_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
@@ -295,4 +296,61 @@ def build_container_executors(
     return {
         "container.start": executor("container.start", "start"),
         "container.restart": executor("container.restart", "restart"),
+    }
+
+
+def build_stack_executors(
+    *,
+    reconcile: Callable[[str], Mapping[str, Any]],
+    status_reader: Callable[[str], Mapping[str, Any]],
+    attempts: int = 6,
+    interval_seconds: float = 2,
+    sleeper: Callable[[float], None] = time.sleep,
+) -> dict[str, ExecutionSpec]:
+    """Reconcile one existing stack and verify every declared service."""
+
+    def execute(params: Mapping[str, Any]) -> Mapping[str, Any]:
+        return reconcile(params["name"])
+
+    def verify(
+        params: Mapping[str, Any], before: Mapping[str, Any]
+    ) -> tuple[bool, Mapping[str, Any]]:
+        after: Mapping[str, Any] = {
+            "name": params["name"],
+            "status": "unknown",
+            "expected_services": before.get("expected_services", []),
+            "containers": [],
+        }
+        expected = set(before.get("expected_services") or [])
+        for attempt in range(attempts):
+            after = safe_stack_precondition(status_reader, params["name"])
+            containers = after.get("containers") or []
+            running_services = {
+                item.get("service")
+                for item in containers
+                if str(item.get("status") or "").lower() == "running"
+                and str(item.get("health") or "").lower() != "unhealthy"
+            }
+            unhealthy = any(
+                str(item.get("health") or "").lower() == "unhealthy"
+                for item in containers
+            )
+            definition_unchanged = set(after.get("expected_services") or []) == expected
+            if expected and expected <= running_services and not unhealthy and definition_unchanged:
+                return True, after
+            if attempt + 1 < attempts:
+                sleeper(interval_seconds)
+        return False, after
+
+    return {
+        "stack.reconcile": ExecutionSpec(
+            operation="stack.reconcile",
+            version="1",
+            execute=execute,
+            verify=verify,
+            no_rollback_reason=(
+                "The prior runtime state cannot be restored safely without stopping "
+                "services; escalate for review."
+            ),
+        )
     }

@@ -465,12 +465,21 @@ def _default_metric_history_service():
     return MetricHistoryStore(RUNTIME_STATE_DIR / "metrics.sqlite3")
 
 
-def _default_agent_action_service(container_inventory_service):
+def _default_agent_action_service(container_inventory_service, stack_read_service):
+    def stack_status(name):
+        from compose_yaml import load_compose_yaml
+        from limeops.operations import sanitize_stack_details
+
+        details = stack_read_service.stack_details(name)
+        compose = load_compose_yaml(details.get("compose_content") or "") or {}
+        return sanitize_stack_details(details, compose)
+
     return LazyAgentActionService(
         lambda: build_action_service(
             container_status=lambda name: container_inventory_service.inspect(
                 name, include_env_values=False
-            )
+            ),
+            stack_status=stack_status,
         )
     )
 
@@ -1561,7 +1570,8 @@ def create_app(config=None, dependencies=None):
     application.extensions["agent_action_service"] = (
         resolved.agent_action_service
         or _default_agent_action_service(
-            application.extensions["container_inventory_service"]
+            application.extensions["container_inventory_service"],
+            application.extensions["stack_read_service"],
         )
     )
     application.extensions["agent_findings_service"] = (

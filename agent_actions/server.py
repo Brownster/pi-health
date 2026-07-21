@@ -8,7 +8,11 @@ import signal
 import subprocess
 import sys
 
-from agent_actions.actuator import ActionActuator, build_container_executors
+from agent_actions.actuator import (
+    ActionActuator,
+    build_container_executors,
+    build_stack_executors,
+)
 from agent_actions.broker import build_actuator_operations
 from agent_actions.defaults import build_repair_registry
 from agent_actions.ledger import ActionLedger
@@ -17,8 +21,9 @@ from container_operations_service import ContainerOperationsService
 from limeops.broker import JsonlAuditWriter, LimeOpsBroker
 from limeops.policy import LimeOpsPolicy, PolicyError
 from limeops.server import LimeOpsUnixServer
-from limeops.wiring import _container_action_status
+from limeops.wiring import _container_action_status, _stack_inspect
 from ports import DockerClientAdapter
+from stack_manager import default_stack_operations_service
 
 
 DEFAULT_SOCKET_PATH = "/run/limeos-actions/actions.sock"
@@ -52,13 +57,33 @@ def _build_actuator(action_policy_path: str, ledger_path: str) -> ActionActuator
         compose_runner=subprocess.run,
         update_writer=lambda container_id, available: None,
     )
-    registry = build_repair_registry(container_status=_container_action_status)
+    stack_service = default_stack_operations_service()
+
+    def reconcile_stack(name: str):
+        result, error = stack_service.run(
+            name, "up", detach=True, timeout_seconds=60
+        )
+        if error or not result or result.get("success") is not True:
+            return {"error": "stack_reconcile_failed"}
+        return {"reconciled": True}
+
+    registry = build_repair_registry(
+        container_status=_container_action_status,
+        stack_status=_stack_inspect,
+    )
+    executors = build_container_executors(
+        control=container_service.control,
+        status_reader=_container_action_status,
+    )
+    executors.update(
+        build_stack_executors(
+            reconcile=reconcile_stack,
+            status_reader=_stack_inspect,
+        )
+    )
     return ActionActuator(
         registry=registry,
-        executors=build_container_executors(
-            control=container_service.control,
-            status_reader=_container_action_status,
-        ),
+        executors=executors,
         policy_provider=lambda: ActionPolicy.from_file(action_policy_path),
         ledger=ActionLedger(ledger_path),
     )

@@ -102,6 +102,24 @@ def test_run_maps_missing_unknown_and_runner_errors(tmp_path, stack_dir):
     )
 
 
+def test_run_accepts_a_shorter_bounded_timeout_for_trusted_callers(tmp_path, stack_dir):
+    calls = []
+
+    def runner(command, **kwargs):
+        calls.append((command, kwargs))
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    service = make_service(tmp_path, runner)
+    result, error = service.run("alpha", "up", timeout_seconds=60)
+
+    assert error is None and result["success"] is True
+    assert calls[0][1]["timeout"] == 60
+    assert service.run("alpha", "up", timeout_seconds=301) == (
+        None,
+        "Invalid command timeout",
+    )
+
+
 def test_logs_preserves_output_and_does_not_take_lock(tmp_path, stack_dir):
     calls = []
     lock_events = []
