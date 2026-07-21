@@ -21,6 +21,7 @@ from pathlib import Path
 
 from agent_actions.defaults import LazyAgentActionService, build_action_service
 from agent_actions.packages import package_job_status, package_repair_status
+from agent_actions.integrations import agent_integration_status, agent_repair_job_status
 from agent_actions.service import AgentActionError
 from agent_findings.service import LazyFindingsService
 from limeops.operations import DiagnosticDependencies, build_operations
@@ -46,6 +47,8 @@ _ACTION_SERVICE = LazyAgentActionService(
         stack_status=_stack_inspect,
         package_status=package_repair_status,
         package_job_status=package_job_status,
+        integration_status=agent_integration_status,
+        integration_job_status=agent_repair_job_status,
     )
 )
 _FINDINGS_SERVICE = LazyFindingsService(STATE_DIR / "agent-actions" / "findings.sqlite3")

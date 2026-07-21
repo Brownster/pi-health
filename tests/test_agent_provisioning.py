@@ -16,6 +16,7 @@ from agent_provider.provisioning import (
     ACTION_SOCKET_DIR,
     ACTION_STATE_DIR,
     ACTION_WORKER_UNIT_PATH,
+    AGENT_REPAIR_UNIT_PATH,
     AGENT_ENV_PATH,
     AGENT_LIB_DIR,
     AGENT_STATE_DIR,
@@ -24,6 +25,7 @@ from agent_provider.provisioning import (
     render_agent_unit,
     render_action_broker_unit,
     render_action_worker_unit,
+    render_agent_repair_unit,
     render_limeops_unit,
 )
 from agent_runtime.service import DEFAULT_STATE_DIR
@@ -95,6 +97,19 @@ def test_action_units_keep_worker_unprivileged_and_socket_separate():
     assert "limeops-client" not in worker
 
 
+def test_agent_repair_unit_is_fixed_unprivileged_and_helper_backed():
+    unit = render_agent_repair_unit("/opt/pi-health")
+
+    assert "User=limeops-action-worker" in unit
+    assert "SupplementaryGroups=pihealth" in unit
+    assert 'helper_call("agent_integration_repair", {}, timeout=1800)' in unit
+    assert "RestrictAddressFamilies=AF_UNIX" in unit
+    assert "ProtectSystem=strict" in unit
+    assert "Environment=PYTHONPATH=/usr/lib/limeos-agent" in unit
+    assert "InaccessiblePaths=/root /opt/pi-health" in unit
+    assert "SupplementaryGroups=docker" not in unit
+
+
 def test_helper_agent_commands_reject_all_caller_controlled_parameters():
     for command in (
         helper.cmd_agent_runtime_install,
@@ -103,6 +118,8 @@ def test_helper_agent_commands_reject_all_caller_controlled_parameters():
         helper.cmd_agent_runtime_uninstall,
         helper.cmd_agent_provider_install,
         helper.cmd_agent_action_policy_write,
+        helper.cmd_agent_integration_repair,
+        helper.cmd_agent_integration_repair_start,
     ):
         result = command({"path": "/tmp/evil"})
         assert result["success"] is False
@@ -123,12 +140,93 @@ def test_helper_exposes_only_fixed_agent_operations():
         "agent_configure",
         "agent_action_policy_write",
         "agent_runtime_start",
+        "agent_integration_repair",
+        "agent_integration_repair_start",
         "agent_usage_read",
         "agent_audit_read",
         "agent_delivery_test",
     } <= helper.COMMANDS.keys()
     assert "agent_write_unit" not in helper.COMMANDS
     assert "agent_run_command" not in helper.COMMANDS
+
+
+def test_helper_agent_repair_runs_only_the_fixed_convergence_sequence():
+    healthy = {"configured": True, "claude_authenticated": True}
+    calls = []
+
+    def record(name, result):
+        def command(params):
+            calls.append((name, params))
+            return result
+
+        return command
+
+    with (
+        patch.object(
+            helper,
+            "_read_agent_lifecycle_feature_state",
+            return_value={"reconcile_allowed": True},
+        ),
+        patch.object(
+            helper,
+            "cmd_agent_provider_install",
+            side_effect=record("provider", {"success": True}),
+        ),
+        patch.object(
+            helper,
+            "cmd_agent_runtime_install",
+            side_effect=record("runtime", {"success": True}),
+        ),
+        patch.object(
+            helper,
+            "cmd_agent_runtime_status",
+            side_effect=record("status", healthy),
+        ),
+        patch.object(
+            helper,
+            "cmd_agent_runtime_start",
+            side_effect=record("start", {"success": True}),
+        ),
+    ):
+        result = helper.cmd_agent_integration_repair({})
+
+    assert result == {"success": True, "repaired": True}
+    assert calls == [
+        ("provider", {}),
+        ("runtime", {}),
+        ("status", {}),
+        ("start", {}),
+    ]
+
+
+def test_helper_agent_repair_fails_closed_for_lifecycle_cleanup():
+    with (
+        patch.object(
+            helper,
+            "_read_agent_lifecycle_feature_state",
+            return_value={"reconcile_allowed": False},
+        ),
+        patch.object(helper, "cmd_agent_provider_install") as provider,
+    ):
+        result = helper.cmd_agent_integration_repair({})
+
+    assert result["success"] is False
+    provider.assert_not_called()
+
+
+def test_helper_agent_repair_start_uses_only_the_fixed_nonblocking_unit():
+    with patch.object(
+        helper, "run_command", return_value={"returncode": 0}
+    ) as run:
+        result = helper.cmd_agent_integration_repair_start({})
+
+    assert result == {"success": True, "started": True}
+    assert run.call_args.args[0] == [
+        "systemctl",
+        "start",
+        "--no-block",
+        "limeos-agent-repair.service",
+    ]
 
 
 def test_helper_auth_commands_validate_operation_fields():
@@ -196,6 +294,9 @@ def test_runtime_install_creates_fixed_identities_paths_and_units(tmp_path):
         patch.object(helper, "PIHEALTH_REPO_DIR", str(repo)),
         patch.object(helper, "_write_managed_file", side_effect=fake_write),
         patch.object(helper, "_ensure_agent_file", return_value=True) as ensure_file,
+        patch.object(
+            helper, "_migrate_agent_action_policy", return_value={"success": True}
+        ),
         patch.object(helper, "run_command", side_effect=fake_run),
         patch.object(helper.shutil, "copytree"),
         patch.object(helper.shutil, "copy2") as copy2,
@@ -225,6 +326,7 @@ def test_runtime_install_creates_fixed_identities_paths_and_units(tmp_path):
     assert "/etc/systemd/system/limeopsd.service" in written
     assert ACTION_BROKER_UNIT_PATH in written
     assert ACTION_WORKER_UNIT_PATH in written
+    assert AGENT_REPAIR_UNIT_PATH in written
     preserved_paths = {call.args[0] for call in ensure_file.call_args_list}
     assert preserved_paths == {
         "/etc/limeos/agent-policy.json",
@@ -444,6 +546,57 @@ def test_runtime_repair_preserves_existing_agent_configuration(tmp_path):
         assert helper._ensure_agent_file(str(path), "defaults", 0o640, "root:limeops")
     assert path.read_text() == '{"enabled":true}'
     write_file.assert_not_called()
+
+
+def test_action_policy_migration_adds_disabled_operations_and_preserves_choices(
+    tmp_path,
+):
+    default = json.loads(
+        Path("config/agent-action-policy.default.json").read_text()
+    )
+    current = json.loads(json.dumps(default))
+    current["kill_switch"] = False
+    current["operations"].pop("integration.repair")
+    current["operations"]["container.restart"] = {
+        "enabled": True,
+        "approvers": ["local:admin"],
+        "targets": {
+            "jellyfin": {
+                "interactive": "approval",
+                "scheduled": "observe",
+                "event": "observe",
+            }
+        },
+    }
+    target = tmp_path / "agent-action-policy.json"
+    target.write_text(json.dumps(current))
+    written = {}
+    with (
+        patch.object(helper, "ACTION_POLICY_PATH", str(target)),
+        patch.object(helper, "PIHEALTH_REPO_DIR", str(Path.cwd())),
+        patch.object(
+            helper,
+            "_write_managed_file",
+            side_effect=lambda path, content, mode: written.update(
+                path=path, content=content, mode=mode
+            )
+            or {"success": True},
+        ),
+        patch.object(helper, "run_command", return_value={"returncode": 0}),
+    ):
+        result = helper._migrate_agent_action_policy()
+
+    migrated = json.loads(written["content"])
+    assert result["added_operations"] == ["integration.repair"]
+    assert migrated["kill_switch"] is False
+    assert migrated["operations"]["container.restart"] == current["operations"][
+        "container.restart"
+    ]
+    assert migrated["operations"]["integration.repair"] == {
+        "enabled": False,
+        "approvers": [],
+        "targets": {},
+    }
 
 
 def test_agent_configure_validates_both_settings_and_fixed_policy(tmp_path):

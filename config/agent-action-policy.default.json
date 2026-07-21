@@ -24,6 +24,11 @@
       "enabled": false,
       "approvers": [],
       "targets": {}
+    },
+    "integration.repair": {
+      "enabled": false,
+      "approvers": [],
+      "targets": {}
     }
   }
 }

@@ -16,6 +16,7 @@ from integration_lifecycle_service import LifecycleStateError
 from runtime_paths import STATIC_CONFIG_DIR
 
 SETUP_TIMEOUT_SECONDS = 1200
+REPAIR_TIMEOUT_SECONDS = 1800
 _USERNAME = re.compile(r"^[a-z0-9._-]{3,64}$")
 _RESOURCE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 _SETUP_FIELDS = frozenset({"admin_username", "admin_password", "limits"})
@@ -227,24 +228,12 @@ class AgentIntegrationService:
             try:
                 self._require_reentry(with_bot_credentials=False)
                 self._require_mattermost()
-                yield {"step": "provider", "line": "Repairing Claude Code installation"}
+                yield {"step": "runtime", "line": "Repairing AI Agents integration"}
                 self._call(
-                    "agent_provider_install",
-                    timeout=SETUP_TIMEOUT_SECONDS,
-                    public_error="Claude Code repair failed",
+                    "agent_integration_repair",
+                    timeout=REPAIR_TIMEOUT_SECONDS,
+                    public_error="AI Agents repair failed",
                 )
-                yield {"step": "runtime", "line": "Repairing isolated agent runtime"}
-                self._call(
-                    "agent_runtime_install",
-                    timeout=SETUP_TIMEOUT_SECONDS,
-                    public_error="Agent runtime repair failed",
-                )
-                runtime = self._call(
-                    "agent_runtime_status", public_error="Agent runtime is unavailable"
-                )
-                if not runtime.get("configured") or not runtime.get("claude_authenticated"):
-                    raise AgentIntegrationError("Agent setup or Claude authentication is required")
-                self._call("agent_runtime_start", public_error="Agent service failed to start")
                 self._complete_reentry()
                 yield {"step": "complete", "line": "AI Agents repair completed", "done": True}
             except AgentIntegrationError as exc:

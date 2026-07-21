@@ -46,6 +46,8 @@ def _registry():
         },
         package_status=lambda: _status(),
         package_job_status=lambda: _job(),
+        integration_status=lambda: {"units": []},
+        integration_job_status=lambda: _job(),
     )
 
 

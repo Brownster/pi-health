@@ -19,6 +19,7 @@ from agent_actions.capability import (
 from agent_actions.ledger import ActionLedger, ActionLedgerError, ActionState
 from agent_actions.policy import ActionPolicy, ActionPolicyError
 from agent_actions.defaults import safe_stack_precondition
+from agent_actions.integrations import safe_agent_runtime_health
 
 
 _ACTION_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
@@ -465,6 +466,111 @@ def build_package_executors(
             no_rollback_reason=(
                 "Package downgrades or removal are outside the repair allowlist; "
                 "escalate for operator review."
+            ),
+            max_verification_seconds=max_verification_seconds,
+        )
+    }
+
+
+def build_integration_executors(
+    *,
+    start: Callable[[], Mapping[str, Any]],
+    status_reader: Callable[[], Mapping[str, Any]],
+    job_status_reader: Callable[[], Mapping[str, Any]],
+    runtime_status_reader: Callable[[], Mapping[str, Any]],
+    max_verification_seconds: int = 3600,
+) -> dict[str, ExecutionSpec]:
+    """Start the fixed AI Agents repair job and verify it across restarts."""
+
+    def execute(_params: Mapping[str, Any]) -> Mapping[str, Any]:
+        return start()
+
+    def verify(
+        _params: Mapping[str, Any], before: Mapping[str, Any]
+    ) -> tuple[bool | None, Mapping[str, Any]]:
+        job = job_status_reader()
+        active_state = str(job.get("active_state") or "unknown").lower()
+        result = str(job.get("result") or "unknown").lower()
+        invocation_id = str(job.get("invocation_id") or "")
+        after: dict[str, Any] = {
+            "name": "agents",
+            "job": {
+                "active_state": active_state,
+                "result": result,
+                "invocation_id": invocation_id,
+            },
+        }
+        if active_state in {"activating", "active", "reloading", "deactivating"}:
+            return None, after
+        if active_state in {"failed", "unavailable", "unknown"} or result in {
+            "failed",
+            "timeout",
+            "watchdog",
+            "exit-code",
+            "signal",
+            "core-dump",
+            "start-limit-hit",
+            "resources",
+        }:
+            return False, after
+
+        previous_invocation = str(
+            (before.get("job") or {}).get("invocation_id")
+            if isinstance(before.get("job"), Mapping)
+            else ""
+        )
+        if previous_invocation and invocation_id == previous_invocation:
+            return None, after
+
+        integration = status_reader()
+        raw_units = integration.get("units")
+        units = [
+            {
+                "name": str(item.get("name") or ""),
+                "load_state": str(item.get("load_state") or "unknown").lower(),
+                "active_state": str(
+                    item.get("active_state") or "unknown"
+                ).lower(),
+            }
+            for item in raw_units or []
+            if isinstance(item, Mapping)
+        ]
+        health = safe_agent_runtime_health(runtime_status_reader())
+        after.update({"units": units, "health": health})
+        healthy_units = len(units) == 4 and all(
+            item["load_state"] == "loaded" and item["active_state"] == "active"
+            for item in units
+        )
+        healthy_runtime = all(
+            health[field] is True
+            for field in (
+                "runtime_installed",
+                "claude_installed",
+                "claude_compatible",
+                "claude_authenticated",
+                "configured",
+                "enabled",
+            )
+        ) and all(
+            health[field] == "active"
+            for field in (
+                "agent_active",
+                "broker_active",
+                "action_broker_active",
+                "action_worker_active",
+            )
+        )
+        return result == "success" and healthy_units and healthy_runtime, after
+
+    return {
+        "integration.repair": ExecutionSpec(
+            operation="integration.repair",
+            version="1",
+            execute=execute,
+            verify=verify,
+            no_rollback_reason=(
+                "Downgrading the provider or restoring prior runtime files is outside "
+                "the repair allowlist; escalate for operator review."
             ),
             max_verification_seconds=max_verification_seconds,
         )

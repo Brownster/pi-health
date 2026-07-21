@@ -11,11 +11,13 @@ import sys
 from agent_actions.actuator import (
     ActionActuator,
     build_container_executors,
+    build_integration_executors,
     build_package_executors,
     build_stack_executors,
 )
 from agent_actions.broker import build_actuator_operations
 from agent_actions.defaults import build_repair_registry
+from agent_actions.integrations import agent_integration_status, agent_repair_job_status
 from agent_actions.ledger import ActionLedger
 from agent_actions.packages import package_job_status, package_repair_status
 from agent_actions.policy import ActionPolicy, ActionPolicyError
@@ -75,6 +77,8 @@ def _build_actuator(action_policy_path: str, ledger_path: str) -> ActionActuator
         stack_status=_stack_inspect,
         package_status=package_repair_status,
         package_job_status=package_job_status,
+        integration_status=agent_integration_status,
+        integration_job_status=agent_repair_job_status,
     )
     executors = build_container_executors(
         control=container_service.control,
@@ -101,6 +105,31 @@ def _build_actuator(action_policy_path: str, ledger_path: str) -> ActionActuator
             start=start_package_reconcile,
             status_reader=package_repair_status,
             job_status_reader=package_job_status,
+        )
+    )
+
+    def start_agent_repair():
+        try:
+            result = helper_call("agent_integration_repair_start", {}, timeout=15)
+        except HelperError:
+            return {"error": "agent_repair_unavailable"}
+        if not isinstance(result, dict) or result.get("success") is not True:
+            return {"error": "agent_repair_start_failed"}
+        return {"started": True}
+
+    def agent_runtime_health():
+        try:
+            result = helper_call("agent_runtime_status", {}, timeout=30)
+        except HelperError:
+            return {}
+        return result if isinstance(result, dict) else {}
+
+    executors.update(
+        build_integration_executors(
+            start=start_agent_repair,
+            status_reader=agent_integration_status,
+            job_status_reader=agent_repair_job_status,
+            runtime_status_reader=agent_runtime_health,
         )
     )
     return ActionActuator(

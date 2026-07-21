@@ -49,6 +49,7 @@ from agent_provider.provisioning import (
     ACTION_SOCKET_PATH,
     ACTION_STATE_DIR,
     ACTION_WORKER_UNIT_PATH,
+    AGENT_REPAIR_UNIT_PATH,
     AGENT_CONFIG_PATH,
     AGENT_ENV_PATH,
     AGENT_LIB_DIR,
@@ -65,6 +66,7 @@ from agent_provider.provisioning import (
     render_agent_unit,
     render_action_broker_unit,
     render_action_worker_unit,
+    render_agent_repair_unit,
     render_limeops_unit,
 )
 from agent_provider.auth import (
@@ -161,6 +163,7 @@ MATTERMOST_RECOVERY_CREDENTIAL = os.path.join(
 MATTERMOST_CREDENTIAL_LIMIT = 64 * 1024
 AGENT_LIFECYCLE_TOMBSTONE = '/var/lib/limeos/integrations/agents-lifecycle.json'
 AGENT_CLEANUP_UNITS = (
+    ('limeos-agent-repair.service', AGENT_REPAIR_UNIT_PATH),
     ('limeos-agent.service', AGENT_UNIT_PATH),
     ('limeopsd.service', LIMEOPS_UNIT_PATH),
     ('limeops-action-worker.service', ACTION_WORKER_UNIT_PATH),
@@ -2915,6 +2918,46 @@ def _migrate_agent_policy():
     return {'success': True, 'migrated': True, 'added_operations': added}
 
 
+def _migrate_agent_action_policy():
+    """Converge the action operation set while preserving operator authority choices."""
+    if not os.path.exists(ACTION_POLICY_PATH):
+        return {'success': True, 'skipped': True, 'reason': 'action policy not installed'}
+    repo_dir = _agent_repo_dir()
+    try:
+        with open(os.path.join(
+            repo_dir, 'config', 'agent-action-policy.default.json'
+        )) as handle:
+            default_policy = json.load(handle)
+        with open(ACTION_POLICY_PATH) as handle:
+            current = json.load(handle)
+        from agent_actions.policy import ActionPolicy
+
+        ActionPolicy.from_mapping(current)
+    except Exception:
+        return {'success': False, 'error': 'Unable to read the action policy'}
+    current_ops = current.get('operations', {})
+    default_ops = default_policy.get('operations', {})
+    merged = dict(current)
+    merged['operations'] = {
+        name: current_ops.get(name, spec) for name, spec in default_ops.items()
+    }
+    try:
+        parsed = ActionPolicy.from_mapping(merged)
+    except Exception:
+        return {'success': False, 'error': 'Migrated action policy failed validation'}
+    written = _write_managed_file(
+        ACTION_POLICY_PATH,
+        json.dumps(parsed.public_dict(), indent=2, sort_keys=True) + '\n',
+        0o640,
+    )
+    if not written.get('success'):
+        return {'success': False, 'error': 'Failed to write the action policy'}
+    if run_command(['chown', 'root:pihealth', ACTION_POLICY_PATH]).get('returncode') != 0:
+        return {'success': False, 'error': 'Failed to secure the action policy'}
+    added = sorted(set(default_ops) - set(current_ops))
+    return {'success': True, 'migrated': True, 'added_operations': added}
+
+
 def _pihealth_update_agent(ctx):
     """Converge the deployed AI agent runtime to the pulled release.
 
@@ -3379,6 +3422,7 @@ def cmd_agent_runtime_install(params):
             shutil.copy2(manifest_source, os.path.join(manifest_dir, 'limeos-packages.json'))
         for module_name in (
             'container_operations_service.py',
+            'helper_client.py',
             'ports.py',
             'runtime_paths.py',
         ):
@@ -3434,8 +3478,22 @@ def cmd_agent_runtime_install(params):
     )
     if not all(_ensure_agent_file(*item) for item in preserved_files):
         return {'success': False, 'error': 'Failed to secure agent configuration files'}
+    action_policy_migration = _migrate_agent_action_policy()
+    if not action_policy_migration.get('success'):
+        return {
+            'success': False,
+            'error': action_policy_migration.get(
+                'error', 'Action policy migration failed'
+            ),
+        }
 
     managed_files = (
+        (
+            AGENT_REPAIR_UNIT_PATH,
+            render_agent_repair_unit(repo_dir),
+            0o644,
+            'root:root',
+        ),
         (LIMEOPS_UNIT_PATH, render_limeops_unit(repo_dir), 0o644, 'root:root'),
         (
             ACTION_BROKER_UNIT_PATH,
@@ -3615,6 +3673,9 @@ def cmd_agent_runtime_status(params):
         'agent_active': _unit_state('limeos-agent.service', 'is-active'),
         'broker_active': _agent_broker_state(),
         'action_broker_active': _agent_action_broker_state(),
+        'action_worker_active': _unit_state(
+            'limeops-action-worker.service', 'is-active'
+        ),
         'claude_installed': version_result.get('returncode') == 0,
         'claude_version': version_match.group(0) if version_match else None,
         'claude_compatible': bool(version_tuple and version_tuple >= (2, 1, 205)),
@@ -4089,6 +4150,47 @@ def cmd_agent_runtime_start(params):
     result = run_command(['systemctl', 'enable', '--now', 'limeos-agent.service'], timeout=60)
     if result.get('returncode') != 0:
         return {'success': False, 'error': 'Failed to start the agent runtime'}
+    return {'success': True, 'started': True}
+
+
+def cmd_agent_integration_repair(params):
+    """Converge the fixed installed AI Agents integration and restore service health."""
+    rejected = _agent_reject_params(params)
+    if rejected:
+        return rejected
+    feature = _read_agent_lifecycle_feature_state()
+    if not feature.get('reconcile_allowed'):
+        return {'success': False, 'error': 'AI Agents repair is not available in this state'}
+    for repair, error in (
+        (cmd_agent_provider_install, 'Claude Code repair failed'),
+        (cmd_agent_runtime_install, 'Agent runtime repair failed'),
+    ):
+        result = repair({})
+        if not isinstance(result, dict) or result.get('success') is not True:
+            return {'success': False, 'error': error}
+    status = cmd_agent_runtime_status({})
+    if not status.get('configured') or not status.get('claude_authenticated'):
+        return {
+            'success': False,
+            'error': 'Agent setup or Claude authentication is required',
+        }
+    started = cmd_agent_runtime_start({})
+    if started.get('success') is not True:
+        return {'success': False, 'error': 'Agent service failed to start'}
+    return {'success': True, 'repaired': True}
+
+
+def cmd_agent_integration_repair_start(params):
+    """Start the fixed repair job without waiting for its service restarts."""
+    rejected = _agent_reject_params(params)
+    if rejected:
+        return rejected
+    result = run_command(
+        ['systemctl', 'start', '--no-block', 'limeos-agent-repair.service'],
+        timeout=15,
+    )
+    if result.get('returncode') != 0:
+        return {'success': False, 'error': 'AI Agents repair could not be started'}
     return {'success': True, 'started': True}
 
 
@@ -4807,6 +4909,8 @@ COMMANDS = {
     'agent_configure': cmd_agent_configure,
     'agent_action_policy_write': cmd_agent_action_policy_write,
     'agent_runtime_start': cmd_agent_runtime_start,
+    'agent_integration_repair': cmd_agent_integration_repair,
+    'agent_integration_repair_start': cmd_agent_integration_repair_start,
     'agent_usage_read': cmd_agent_usage_read,
     'agent_audit_read': cmd_agent_audit_read,
     'agent_delivery_test': cmd_agent_delivery_test,
@@ -4845,6 +4949,7 @@ _MUTATING_COMMANDS = frozenset({
     'agent_provider_auth_start', 'agent_provider_auth_submit', 'agent_provider_auth_cancel',
     'agent_bot_secret_write', 'agent_configure', 'agent_action_policy_write',
     'agent_runtime_start',
+    'agent_integration_repair', 'agent_integration_repair_start',
     'packages_reconcile', 'packages_agent_reconcile',
     'packages_agent_reconcile_start', 'packages_approve',
     'packages_nightly_reconcile',
