@@ -15,7 +15,7 @@ from agent_gateway.gateway import AgentGateway, GatewayConfig, limeops_client_ex
 from agent_provider.claude import ClaudeCodeProvider
 from agent_transport.bot_client import MattermostBotApi
 from agent_transport.listener import ListenerConfig, MentionListener, websocket_frames
-from agent_transport.state import EventDedup, ThreadMap
+from agent_transport.state import ApprovalPostMap, EventDedup, ThreadMap
 from limeops.client import LimeOpsClient
 
 DEFAULT_CONFIG_PATH = "/etc/limeos/integrations/agents.json"
@@ -161,6 +161,14 @@ def build_listener(
     )
     api = MattermostBotApi(config.site_url)
     api.use_token(bot_token)
+
+    def decide_action(action_id: str, decision: str, actor: dict) -> dict:
+        if decision not in {"approve", "reject"}:
+            return {"ok": False, "error": {"code": "invalid_input"}}
+        return limeops_client.request(
+            f"action.{decision}", {"action_id": action_id}, actor
+        )
+
     return MentionListener(
         config=ListenerConfig(
             bot_username=config.bot_username,
@@ -172,6 +180,11 @@ def build_listener(
         dedup=EventDedup(state_dir),
         threads=ThreadMap(state_dir),
         fetch_post=api.get_post,
+        approvals=ApprovalPostMap(state_dir),
+        action_decider=decide_action,
+        add_reaction=lambda **values: api.add_reaction(
+            user_id=config.bot_user_id, **values
+        ),
     )
 
 

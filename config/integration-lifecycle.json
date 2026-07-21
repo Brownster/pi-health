@@ -160,12 +160,16 @@
       ],
       "units": [
         "limeos-agent.service",
-        "limeopsd.service"
+        "limeopsd.service",
+        "limeops-actuatord.service",
+        "limeops-action-worker.service"
       ],
       "owned_files": [
         "/etc/limeos/integrations/agents.json",
         "/etc/limeos/integrations/agents.env",
-        "/etc/limeos/agent-policy.json"
+        "/etc/limeos/agent-policy.json",
+        "/etc/limeos/agent-action-policy.json",
+        "/etc/limeos/agent-actuator-policy.json"
       ],
       "owned_directories": [
         "/usr/lib/limeos-agent",
@@ -182,11 +186,18 @@
       },
       "preserved_on_uninstall": [
         "/var/log/limeos/agent-audit.jsonl",
+        "/var/log/limeos/agent-action-audit.jsonl",
+        "/var/lib/limeos/agent-actions",
         "lime-agent user",
         "lime-agent group",
         "limeops user",
         "limeops group",
-        "limeops-client group"
+        "limeops-client group",
+        "limeops-actuator user",
+        "limeops-actuator group",
+        "limeops-action-worker user",
+        "limeops-action-worker group",
+        "limeops-action group"
       ],
       "never_owned": [
         "mattermost_stack",

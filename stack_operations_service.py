@@ -58,8 +58,15 @@ class StackOperationsService:
         *,
         detach: bool = True,
         service: str | None = None,
+        timeout_seconds: float = 300,
     ) -> tuple[dict[str, Any] | None, str | None]:
         """Run a lifecycle command while holding the per-stack lock."""
+        if (
+            isinstance(timeout_seconds, bool)
+            or not isinstance(timeout_seconds, (int, float))
+            or not 1 <= timeout_seconds <= 300
+        ):
+            return None, "Invalid command timeout"
         with self._lock_provider(stack_name):
             stack_dir = os.path.join(self._stacks_path_provider(), stack_name)
             compose_file = find_compose_file(stack_dir)
@@ -87,7 +94,7 @@ class StackOperationsService:
                     cwd=stack_dir,
                     capture_output=True,
                     text=True,
-                    timeout=300,
+                    timeout=timeout_seconds,
                 )
             except subprocess.TimeoutExpired:
                 return None, "Command timed out"

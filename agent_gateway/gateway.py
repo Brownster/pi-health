@@ -4,7 +4,9 @@ Owns the tool loop from the baseline provider contract: each provider invocation
 either a final answer or exactly one typed `limeops` request; the gateway validates and
 executes the request through the injected executor, appends the bounded result to the
 conversation, and invokes the provider again — up to the round limit. Tool execution is
-therefore confined to `limeops` reads regardless of what the provider asks for.
+therefore confined to `limeops` reads and proposal creation regardless of what the
+provider asks for. Mattermost decisions bypass the provider and are absent from this
+gateway's operation allowlist.
 
 Failure contract: every failure maps to a typed `TurnError` from the frozen AA-005
 contract (safe to post in-thread); a failed turn is recorded as failed and can never be
@@ -37,6 +39,7 @@ from agent_gateway.provider import (
 )
 from agent_gateway.usage import UsageLedger
 from agent_transport.gateway_contract import (
+    ActionProposal,
     MAX_TURN_OUTPUT_BYTES,
     TurnBusyError,
     TurnError,
@@ -80,6 +83,8 @@ class GatewayConfig:
         "installation.inventory",
         "packages.status",
         "packages.pending",
+        "action.propose",
+        "finding.propose",
     )
 
 
@@ -88,6 +93,7 @@ class _TurnTrace:
     rounds: int = 0
     tool_operations: list[str] = field(default_factory=list)
     tool_audit_ids: list[str] = field(default_factory=list)
+    action_proposals: list[ActionProposal] = field(default_factory=list)
 
 
 class AgentGateway:
@@ -189,7 +195,7 @@ class AgentGateway:
         # audit ids captured per tool call.
         actor = {
             "type": "mattermost",
-            "id": request.actor_username,
+            "id": request.actor_id,
             "username": request.actor_username,
         }
 
@@ -216,7 +222,7 @@ class AgentGateway:
                 messages = self._conversations.append(
                     request.conversation_id, Message(role="assistant", text=text)
                 )
-                return TurnResult(text=text)
+                return TurnResult(text=text, action_proposals=tuple(trace.action_proposals))
 
             if isinstance(reply, ToolCall):
                 trace.tool_operations.append(reply.operation)
@@ -246,6 +252,12 @@ class AgentGateway:
         audit_id = envelope.get("audit_id")
         if isinstance(audit_id, str) and audit_id:
             trace.tool_audit_ids.append(audit_id)
+        if call.operation == "action.propose" and envelope.get("ok") is True:
+            proposal = _action_proposal(envelope.get("data"))
+            if proposal is not None and all(
+                existing.id != proposal.id for existing in trace.action_proposals
+            ):
+                trace.action_proposals.append(proposal)
         summary = {
             "ok": envelope.get("ok"),
             "data": envelope.get("data"),
@@ -271,6 +283,18 @@ class AgentGateway:
 def _truncate(text: str, limit_bytes: int) -> str:
     encoded = text.encode("utf-8")[:limit_bytes]
     return encoded.decode("utf-8", errors="ignore")
+
+
+def _action_proposal(value) -> ActionProposal | None:
+    if not isinstance(value, dict) or not isinstance(value.get("action"), dict):
+        return None
+    action = value["action"]
+    fields = ("id", "operation", "target", "risk", "reason", "impact", "state", "expires_at")
+    if any(not isinstance(action.get(field), str) or not action[field] for field in fields):
+        return None
+    if any(len(action[field]) > (1000 if field in {"reason", "impact"} else 160) for field in fields):
+        return None
+    return ActionProposal(**{field: action[field] for field in fields})
 
 
 def limeops_client_executor(client) -> LimeOpsExecutor:  # pragma: no cover - thin adapter

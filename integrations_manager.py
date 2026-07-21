@@ -9,6 +9,8 @@ from collections.abc import Mapping
 from flask import Blueprint, current_app, jsonify, request, session
 
 from alert_policy import AlertPolicyError
+from agent_actions.service import AgentActionError
+from agent_findings.service import FindingError
 from agent_integration_service import AgentIntegrationError
 from auth_utils import csrf_protect, login_required
 from helper_client import helper_call
@@ -41,8 +43,68 @@ def _agent_service():
     return current_app.extensions["agent_integration_service"]
 
 
+def _agent_action_service():
+    return current_app.extensions["agent_action_service"]
+
+
+def _agent_findings_service():
+    return current_app.extensions["agent_findings_service"]
+
+
 def _stack_notifications_service():
     return current_app.extensions["stack_notifications_service"]
+
+
+def _require_action_permission(permission):
+    authorizer = current_app.extensions.get("capability_authorizer")
+    try:
+        allowed = bool(
+            authorizer
+            and authorizer.allows(session.get("username", "unknown"), permission)
+        )
+    except Exception:
+        logger.error("Agent action authorization failed")
+        return _lifecycle_error(
+            "action_authorization_unavailable",
+            "Agent action authorization is unavailable.",
+            503,
+        )
+    if not allowed:
+        return _lifecycle_error(
+            "action_forbidden",
+            "Required agent action permission is missing.",
+            403,
+        )
+    return None
+
+
+def _action_error(exc):
+    status = {
+        "not_found": 404,
+        "denied_approver": 403,
+        "denied_operation": 403,
+        "denied_target": 403,
+        "kill_switch": 409,
+        "expired": 409,
+        "precondition_changed": 409,
+        "policy_changed": 409,
+        "contract_changed": 409,
+        "invalid_state": 409,
+        "conflict": 409,
+        "idempotency_conflict": 409,
+    }.get(exc.code, 400)
+    return _lifecycle_error(exc.code, str(exc), status)
+
+
+def _finding_error(exc):
+    status = {
+        "not_found": 404,
+        "invalid_state": 409,
+        "conflict": 409,
+        "store_unavailable": 503,
+        "store_failure": 503,
+    }.get(exc.code, 400)
+    return _lifecycle_error(exc.code, str(exc), status)
 
 
 #: *arr webhook bodies are small; reject anything implausibly large before parsing.
@@ -814,6 +876,236 @@ def agent_permissions():
         return jsonify(_agent_service().permissions())
     except AgentIntegrationError as exc:
         return jsonify({"error": str(exc)}), 503
+
+
+@integrations_manager.route("/api/integrations/agents/actions", methods=["GET"])
+@login_required
+def agent_actions():
+    denied = _require_action_permission("capability.view")
+    if denied is not None:
+        return denied
+    try:
+        result = _agent_action_service().list(limit=_query_limit())
+    except AgentActionError as exc:
+        return _action_error(exc)
+    response = jsonify(result)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@integrations_manager.route(
+    "/api/integrations/agents/actions/capabilities", methods=["GET"]
+)
+@login_required
+def agent_action_capabilities():
+    denied = _require_action_permission("capability.view")
+    if denied is not None:
+        return denied
+    try:
+        result = _agent_action_service().capabilities()
+    except AgentActionError as exc:
+        return _action_error(exc)
+    response = jsonify(result)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@integrations_manager.route(
+    "/api/integrations/agents/actions/<action_id>", methods=["GET"]
+)
+@login_required
+def agent_action_details(action_id):
+    denied = _require_action_permission("capability.view")
+    if denied is not None:
+        return denied
+    try:
+        result = _agent_action_service().get(action_id)
+    except AgentActionError as exc:
+        return _action_error(exc)
+    response = jsonify({"action": result})
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@integrations_manager.route(
+    "/api/integrations/agents/actions/<action_id>/approve", methods=["POST"]
+)
+@login_required
+@csrf_protect
+def approve_agent_action(action_id):
+    denied = _require_action_permission("extensions.admin")
+    if denied is not None:
+        return denied
+    values = request.get_json(silent=True)
+    if values not in ({}, None):
+        return _lifecycle_error(
+            "invalid_action_approval",
+            "Action approval accepts no parameters.",
+            400,
+        )
+    username = session.get("username", "unknown")
+    try:
+        action = _agent_action_service().approve(
+            action_id,
+            approver={"type": "local", "id": username, "username": username},
+        )
+    except AgentActionError as exc:
+        return _action_error(exc)
+    response = jsonify({"action": action})
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@integrations_manager.route(
+    "/api/integrations/agents/actions/<action_id>/reject", methods=["POST"]
+)
+@login_required
+@csrf_protect
+def reject_agent_action(action_id):
+    denied = _require_action_permission("extensions.admin")
+    if denied is not None:
+        return denied
+    values = request.get_json(silent=True)
+    if values not in ({}, None):
+        return _lifecycle_error(
+            "invalid_action_rejection",
+            "Action rejection accepts no parameters.",
+            400,
+        )
+    try:
+        action = _agent_action_service().reject(action_id)
+    except AgentActionError as exc:
+        return _action_error(exc)
+    response = jsonify({"action": action})
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@integrations_manager.route(
+    "/api/integrations/agents/actions/<action_id>/cancel", methods=["POST"]
+)
+@login_required
+@csrf_protect
+def cancel_agent_action(action_id):
+    denied = _require_action_permission("extensions.admin")
+    if denied is not None:
+        return denied
+    if request.get_json(silent=True) not in ({}, None):
+        return _lifecycle_error(
+            "invalid_action_cancellation",
+            "Action cancellation accepts no parameters.",
+            400,
+        )
+    try:
+        action = _agent_action_service().cancel(action_id)
+    except AgentActionError as exc:
+        return _action_error(exc)
+    response = jsonify({"action": action})
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@integrations_manager.route(
+    "/api/integrations/agents/automation/policy", methods=["GET", "PUT"]
+)
+@login_required
+def agent_automation_policy():
+    denied = _require_action_permission("extensions.admin")
+    if denied is not None:
+        return denied
+    try:
+        if request.method == "GET":
+            policy = _agent_action_service().policy()
+        else:
+            values = request.get_json(silent=True)
+            if not isinstance(values, dict):
+                return _lifecycle_error(
+                    "invalid_policy", "Action policy must be an object.", 400
+                )
+            policy = _agent_action_service().validate_policy(values)
+            helper = current_app.extensions.get("helper")
+            result = helper.call("agent_action_policy_write", {"policy": policy})
+            if not isinstance(result, dict) or not result.get("success"):
+                return _lifecycle_error(
+                    "policy_write_failed",
+                    "Action policy could not be saved.",
+                    503,
+                )
+    except AgentActionError as exc:
+        return _action_error(exc)
+    except Exception:
+        logger.error("Agent action policy update failed")
+        return _lifecycle_error(
+            "policy_write_failed", "Action policy could not be saved.", 503
+        )
+    response = jsonify({"policy": policy})
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@integrations_manager.route("/api/integrations/agents/findings", methods=["GET"])
+@login_required
+def agent_findings():
+    denied = _require_action_permission("capability.view")
+    if denied is not None:
+        return denied
+    try:
+        result = _agent_findings_service().list(limit=_query_limit())
+    except FindingError as exc:
+        return _finding_error(exc)
+    response = jsonify(result)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@integrations_manager.route(
+    "/api/integrations/agents/findings/<finding_id>", methods=["GET", "PUT"]
+)
+@login_required
+def agent_finding_details(finding_id):
+    permission = "capability.view" if request.method == "GET" else "extensions.admin"
+    denied = _require_action_permission(permission)
+    if denied is not None:
+        return denied
+    try:
+        if request.method == "GET":
+            finding = _agent_findings_service().get(finding_id)
+        else:
+            values = request.get_json(silent=True)
+            if not isinstance(values, dict):
+                return _lifecycle_error(
+                    "invalid_finding", "Finding must be an object.", 400
+                )
+            finding = _agent_findings_service().update(finding_id, values)
+    except FindingError as exc:
+        return _finding_error(exc)
+    response = jsonify({"finding": finding})
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@integrations_manager.route(
+    "/api/integrations/agents/findings/<finding_id>/reject", methods=["POST"]
+)
+@login_required
+@csrf_protect
+def reject_agent_finding(finding_id):
+    denied = _require_action_permission("extensions.admin")
+    if denied is not None:
+        return denied
+    if request.get_json(silent=True) not in ({}, None):
+        return _lifecycle_error(
+            "invalid_finding_rejection",
+            "Finding rejection accepts no parameters.",
+            400,
+        )
+    try:
+        finding = _agent_findings_service().reject(finding_id)
+    except FindingError as exc:
+        return _finding_error(exc)
+    response = jsonify({"finding": finding})
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @integrations_manager.route("/api/integrations/stack-notifications", methods=["GET"])

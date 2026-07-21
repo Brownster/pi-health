@@ -11,12 +11,19 @@ import pihealth_helper as helper
 
 from agent_provider.claude import ClaudeCodeConfig
 from agent_provider.provisioning import (
+    ACTION_BROKER_UNIT_PATH,
+    ACTION_POLICY_PATH,
+    ACTION_SOCKET_DIR,
+    ACTION_STATE_DIR,
+    ACTION_WORKER_UNIT_PATH,
     AGENT_ENV_PATH,
     AGENT_LIB_DIR,
     AGENT_STATE_DIR,
     CLAUDE_CONFIG_DIR,
     LIMEOPS_STATE_DIR,
     render_agent_unit,
+    render_action_broker_unit,
+    render_action_worker_unit,
     render_limeops_unit,
 )
 from agent_runtime.service import DEFAULT_STATE_DIR
@@ -39,7 +46,8 @@ def test_agent_unit_has_no_privileged_sockets_or_source_access():
     assert f"ReadWritePaths={AGENT_STATE_DIR} {CLAUDE_CONFIG_DIR}" in unit
     assert f"ReadOnlyPaths={AGENT_LIB_DIR}" in unit
     assert (
-        "InaccessiblePaths=/root /opt/pi-health /run/pihealth /var/run/docker.sock "
+        "InaccessiblePaths=/root /opt/pi-health /run/pihealth /run/limeos-actions "
+        "/var/run/docker.sock "
         "/etc/limeos/credentials.env"
     ) in unit
     assert "ANTHROPIC_API_KEY" not in unit
@@ -66,6 +74,25 @@ def test_limeops_unit_owns_privileged_read_boundary():
     assert "/opt/pi-health/.venv/bin/python" not in unit
     assert "ReadWritePaths=/run/limeos /var/log/limeos" in unit
     assert "agent-policy.json" in unit
+    assert ACTION_STATE_DIR in unit
+
+
+def test_action_units_keep_worker_unprivileged_and_socket_separate():
+    broker = render_action_broker_unit("/opt/pi-health")
+    worker = render_action_worker_unit("/opt/pi-health")
+    assert "User=limeops-actuator" in broker
+    assert "SupplementaryGroups=docker pihealth limeops-action" in broker
+    assert "python3 -m agent_actions.server" in broker
+    assert "agent-action-policy.json" in broker
+    assert "agent-actuator-policy.json" in broker
+    assert ACTION_SOCKET_DIR in broker
+    assert "User=limeops-action-worker" in worker
+    assert "SupplementaryGroups=pihealth limeops-action" in worker
+    assert "python3 -m agent_actions.worker" in worker
+    assert "/var/run/docker.sock" in worker
+    assert "SupplementaryGroups=docker" not in worker
+    assert "limeops-client" not in broker
+    assert "limeops-client" not in worker
 
 
 def test_helper_agent_commands_reject_all_caller_controlled_parameters():
@@ -75,6 +102,7 @@ def test_helper_agent_commands_reject_all_caller_controlled_parameters():
         helper.cmd_agent_runtime_disable,
         helper.cmd_agent_runtime_uninstall,
         helper.cmd_agent_provider_install,
+        helper.cmd_agent_action_policy_write,
     ):
         result = command({"path": "/tmp/evil"})
         assert result["success"] is False
@@ -93,6 +121,7 @@ def test_helper_exposes_only_fixed_agent_operations():
         "agent_provider_auth_cancel",
         "agent_bot_secret_write",
         "agent_configure",
+        "agent_action_policy_write",
         "agent_runtime_start",
         "agent_usage_read",
         "agent_audit_read",
@@ -142,6 +171,8 @@ def test_runtime_install_creates_fixed_identities_paths_and_units(tmp_path):
     repo.mkdir()
     (repo / "config").mkdir()
     (repo / "config" / "agent-policy.default.json").write_text("{}")
+    (repo / "config" / "agent-action-policy.default.json").write_text("{}")
+    (repo / "config" / "agent-actuator-policy.default.json").write_text("{}")
     (repo / "config" / "agents.default.json").write_text("{}")
     (repo / ".venv" / "bin").mkdir(parents=True)
     (repo / ".venv" / "bin" / "python").touch()
@@ -181,6 +212,8 @@ def test_runtime_install_creates_fixed_identities_paths_and_units(tmp_path):
     assert any(src.endswith("config/limeos-packages.json") for src in copied_sources)
     flat = [item for command in commands for item in command]
     assert "lime-agent" in flat and "limeops" in flat and "limeops-client" in flat
+    assert "limeops-actuator" in flat and "limeops-action-worker" in flat
+    assert "limeops-action" in flat
     account_commands = [
         command
         for command in commands
@@ -190,9 +223,13 @@ def test_runtime_install_creates_fixed_identities_paths_and_units(tmp_path):
     assert all(command[0] == "systemd-run" for command in account_commands)
     assert "/etc/systemd/system/limeos-agent.service" in written
     assert "/etc/systemd/system/limeopsd.service" in written
+    assert ACTION_BROKER_UNIT_PATH in written
+    assert ACTION_WORKER_UNIT_PATH in written
     preserved_paths = {call.args[0] for call in ensure_file.call_args_list}
     assert preserved_paths == {
         "/etc/limeos/agent-policy.json",
+        ACTION_POLICY_PATH,
+        "/etc/limeos/agent-actuator-policy.json",
         "/etc/limeos/integrations/agents.json",
         "/etc/limeos/integrations/agents.env",
     }
@@ -201,10 +238,16 @@ def test_runtime_install_creates_fixed_identities_paths_and_units(tmp_path):
     assert not any("/etc/limeos/integrations" in command for command in install_dirs)
     assert any(CLAUDE_CONFIG_DIR in command for command in install_dirs)
     assert any(LIMEOPS_STATE_DIR in command for command in install_dirs)
+    assert any(ACTION_STATE_DIR in command for command in install_dirs)
+    assert any(ACTION_SOCKET_DIR in command for command in install_dirs)
     assert ["chmod", "-R", "u=rwX,go=rX", AGENT_LIB_DIR] in commands
     assert ["systemctl", "restart", "limeopsd.service"] in commands
+    assert ["systemctl", "restart", "limeops-actuatord.service"] in commands
+    assert ["systemctl", "restart", "limeops-action-worker.service"] in commands
     # psutil is guaranteed for the broker so system.status cannot fail on a fresh install.
-    assert ["apt-get", "install", "-y", "python3-psutil"] in commands
+    assert [
+        "apt-get", "install", "-y", "python3-psutil", "python3-docker"
+    ] in commands
 
 
 def test_broker_state_requires_the_limeops_socket():
@@ -431,6 +474,54 @@ def test_agent_configure_validates_both_settings_and_fixed_policy(tmp_path):
     assert helper.cmd_agent_configure({"settings": settings, "policy": policy})[
         "success"
     ] is False
+
+
+def test_action_policy_writer_is_fixed_validated_and_canary_gated(tmp_path):
+    policy = json.loads(
+        Path("config/agent-action-policy.default.json").read_text()
+    )
+    policy["kill_switch"] = False
+    policy["operations"]["container.restart"] = {
+        "enabled": True,
+        "approvers": ["local:admin"],
+        "targets": {
+            "jellyfin": {
+                "interactive": "approval",
+                "scheduled": "observe",
+                "event": "observe",
+            }
+        },
+    }
+    target = tmp_path / "agent-action-policy.json"
+    written = {}
+    with (
+        patch.object(helper, "ACTION_POLICY_PATH", str(target)),
+        patch.object(
+            helper,
+            "_write_managed_file",
+            side_effect=lambda path, content, mode: written.update(
+                path=path, content=content, mode=mode
+            )
+            or {"success": True},
+        ),
+        patch.object(helper, "run_command", return_value={"returncode": 0}) as run,
+    ):
+        result = helper.cmd_agent_action_policy_write({"policy": policy})
+    assert result["success"] is True
+    assert written["path"] == str(target) and written["mode"] == 0o640
+    run.assert_called_once_with(["chown", "root:pihealth", str(target)])
+
+    automatic = json.loads(json.dumps(policy))
+    automatic["operations"]["container.restart"]["targets"]["jellyfin"][
+        "interactive"
+    ] = "autonomous"
+    assert helper.cmd_agent_action_policy_write({"policy": automatic}) == {
+        "success": False,
+        "error": "Automatic authority requires the repair canary gate",
+    }
+    unknown = json.loads(json.dumps(policy))
+    unknown["operations"]["shell.execute"] = {"enabled": False, "approvers": [], "targets": {}}
+    assert helper.cmd_agent_action_policy_write({"policy": unknown})["success"] is False
 
 
 def test_agent_usage_and_audit_reads_are_bounded_and_field_allowlisted(tmp_path):

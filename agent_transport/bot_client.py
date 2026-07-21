@@ -150,6 +150,16 @@ class MattermostBotApi:
         post, _headers = self._request("POST", "/api/v4/posts", payload)
         return str(post["id"])
 
+    def add_reaction(self, *, user_id: str, post_id: str, emoji_name: str) -> None:
+        for value in (user_id, post_id, emoji_name):
+            if not isinstance(value, str) or not _IDENTIFIER.fullmatch(value):
+                raise BotApiError("Mattermost reaction identifier is invalid")
+        self._request(
+            "POST",
+            f"/api/v4/users/{user_id}/posts/{post_id}/reactions",
+            {"user_id": user_id, "post_id": post_id, "emoji_name": emoji_name},
+        )
+
     # -- plumbing ----------------------------------------------------------------
     def _request(
         self,

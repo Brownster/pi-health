@@ -177,14 +177,16 @@ def test_gateway_allowlist_matches_the_shipped_read_only_policy():
 
     with open("config/agent-policy.default.json") as handle:
         policy_operations = set(json.load(handle)["operations"])
-    assert set(GatewayConfig().allowed_operations) == policy_operations
+    model_operations = set(GatewayConfig().allowed_operations)
+    assert policy_operations - model_operations == {"action.approve", "action.reject"}
+    assert model_operations < policy_operations
     assert set(build_operations(make_deps())) == policy_operations
 
 
-def test_context_reports_readonly_capabilities_and_operations():
+def test_context_reports_read_and_propose_capabilities_and_operations():
     operations = build_operations(make_deps())
     data = operations["context"].handler({}, None)
-    assert data["capabilities"] == "read-only"
+    assert data["capabilities"] == "read-and-propose"
     assert "container.logs" in data["operations"]
 
 
@@ -218,6 +220,126 @@ def test_packages_pending_read_op_returns_held_updates():
     response = call(broker, "packages.pending")
     assert response["ok"] is True
     assert response["data"]["pending"][0]["candidate"] == "2.1.212-1"
+
+
+def test_action_propose_forwards_actor_and_current_audit_as_evidence():
+    calls = []
+
+    def propose(params, actor, audit_id):
+        calls.append((params, actor, audit_id))
+        return {"action": {"id": "action-1", "state": "awaiting_approval"}, "created": True}
+
+    broker = make_broker(build_operations(make_deps(action_propose=propose)))
+    response = call(
+        broker,
+        "action.propose",
+        {
+            "operation": "container.restart",
+            "params": {"name": "jellyfin"},
+            "reason": "Container is unhealthy",
+            "evidence_ids": ["earlier-audit"],
+            "idempotency_key": "mattermost:post-1:restart",
+        },
+    )
+
+    assert response["ok"] is True
+    assert response["data"]["action"]["state"] == "awaiting_approval"
+    params, actor, audit_id = calls[0]
+    assert params["evidence_ids"] == ["earlier-audit"]
+    assert actor == ACTOR
+    assert audit_id == response["audit_id"]
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"operation": "container.restart", "params": {}, "reason": "needed",
+         "idempotency_key": "valid-key", "trigger": "autonomous"},
+        {"operation": "container.restart", "params": [], "reason": "needed",
+         "idempotency_key": "valid-key"},
+        {"operation": "container.restart", "params": {}, "reason": "",
+         "idempotency_key": "valid-key"},
+    ],
+)
+def test_action_propose_rejects_malformed_or_authority_bypass_params(params):
+    calls = []
+    broker = make_broker(
+        build_operations(make_deps(action_propose=lambda *args: calls.append(args)))
+    )
+    response = call(broker, "action.propose", params)
+    assert response["ok"] is False
+    assert response["error"]["code"] == "invalid_input"
+    assert calls == []
+
+
+@pytest.mark.parametrize("decision", ["approve", "reject"])
+def test_action_decisions_forward_immutable_actor_outside_model_allowlist(decision):
+    calls = []
+
+    def decide(action_id, actor):
+        calls.append((action_id, actor))
+        return {"decision_applied": True, "action": {"id": action_id}}
+
+    broker = make_broker(
+        build_operations(make_deps(**{f"action_{decision}": decide}))
+    )
+    response = call(broker, f"action.{decision}", {"action_id": "action-1"})
+
+    assert response["ok"] is True
+    assert response["data"]["decision_applied"] is True
+    assert calls == [("action-1", ACTOR)]
+
+
+def test_action_decision_rejects_unknown_fields_before_handler():
+    calls = []
+    broker = make_broker(
+        build_operations(make_deps(action_approve=lambda *args: calls.append(args)))
+    )
+    response = call(
+        broker,
+        "action.approve",
+        {"action_id": "action-1", "authority_mode": "autonomous"},
+    )
+    assert response["ok"] is False
+    assert response["error"]["code"] == "invalid_input"
+    assert calls == []
+
+
+def test_finding_propose_forwards_only_a_local_draft_and_current_audit():
+    calls = []
+
+    def propose(params, actor, audit_id):
+        calls.append((params, actor, audit_id))
+        return {"finding": {"id": "finding-1", "state": "draft", "publication": None},
+                "created": True}
+
+    broker = make_broker(build_operations(make_deps(finding_propose=propose)))
+    finding = {
+        "kind": "feature_request",
+        "title": "Add bounded stack repair",
+        "summary": "A typed repair capability is missing.",
+        "component": "agent-actions",
+        "affected_version": "",
+        "expected_behavior": "",
+        "actual_behavior": "",
+        "reproduction_steps": [],
+        "impact": "Operators must repair the stack manually.",
+        "frequency": "",
+        "workaround": "",
+        "confidence": "medium",
+        "acceptance_criteria": ["Add verified stack.reconcile."],
+        "source_type": "user_discussion",
+    }
+    response = call(
+        broker,
+        "finding.propose",
+        {"finding": finding, "evidence_ids": ["audit-earlier"]},
+    )
+    assert response["ok"] is True
+    assert response["data"]["finding"]["publication"] is None
+    assert calls[0][0] == {"finding": finding, "evidence_ids": ["audit-earlier"]}
+    assert calls[0][1] == ACTOR
+    assert calls[0][2] == response["audit_id"]
 
 
 def test_container_logs_flow_redacts_and_defaults_lines():
@@ -311,6 +433,7 @@ def test_gateway_tool_call_reaches_diagnostics_through_the_broker(tmp_path):
             channel_id="chan-1",
             root_post_id="root-1",
             post_id="p1",
+            actor_id="user-1",
             actor_username="marc",
             text="@limeos what happened to jellyfin?",
         )

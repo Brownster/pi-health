@@ -51,6 +51,8 @@ from integrations_manager import integrations_manager
 from mattermost_integration_service import MattermostIntegrationService
 from stack_notifications_service import StackNotificationsService
 from agent_integration_service import AgentIntegrationService
+from agent_actions.defaults import LazyAgentActionService, build_action_service
+from agent_findings.service import LazyFindingsService
 from alert_history import AlertEventLedger
 from media_profile_service import MediaProfileService
 from media_quickstart_service import MediaQuickstartService
@@ -235,6 +237,8 @@ class AppDependencies:
     mattermost_integration_service: MattermostIntegrationService | None = None
     stack_notifications_service: StackNotificationsService | None = None
     agent_integration_service: AgentIntegrationService | None = None
+    agent_action_service: object | None = None
+    agent_findings_service: object | None = None
     overview_service: OverviewService | None = None
     metric_history_service: MetricHistoryStore | None = None
     capability_registry_service: CapabilityRegistryService | None = None
@@ -459,6 +463,29 @@ def _default_overview_service(
 
 def _default_metric_history_service():
     return MetricHistoryStore(RUNTIME_STATE_DIR / "metrics.sqlite3")
+
+
+def _default_agent_action_service(container_inventory_service, stack_read_service):
+    def stack_status(name):
+        from compose_yaml import load_compose_yaml
+        from limeops.operations import sanitize_stack_details
+
+        details = stack_read_service.stack_details(name)
+        compose = load_compose_yaml(details.get("compose_content") or "") or {}
+        return sanitize_stack_details(details, compose)
+
+    return LazyAgentActionService(
+        lambda: build_action_service(
+            container_status=lambda name: container_inventory_service.inspect(
+                name, include_env_values=False
+            ),
+            stack_status=stack_status,
+        )
+    )
+
+
+def _default_agent_findings_service():
+    return LazyFindingsService(RUNTIME_STATE_DIR / "agent-actions" / "findings.sqlite3")
 
 
 def _write_container_update(container_id, update_available):
@@ -1539,6 +1566,16 @@ def create_app(config=None, dependencies=None):
             application.extensions["docker"],
             application.extensions["stack_read_service"],
         )
+    )
+    application.extensions["agent_action_service"] = (
+        resolved.agent_action_service
+        or _default_agent_action_service(
+            application.extensions["container_inventory_service"],
+            application.extensions["stack_read_service"],
+        )
+    )
+    application.extensions["agent_findings_service"] = (
+        resolved.agent_findings_service or _default_agent_findings_service()
     )
     application.extensions["overview_service"] = (
         resolved.overview_service

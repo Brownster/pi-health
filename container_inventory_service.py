@@ -166,6 +166,7 @@ class ContainerInventoryService:
             "id": container.id,
             "name": container.name,
             "status": container.status,
+            "health": ((state.get("Health") or {}).get("Status")) or None,
             "stack": self._stack(container),
             "image": config.get("Image")
             or (image_tags[0] if image_tags else "unknown"),

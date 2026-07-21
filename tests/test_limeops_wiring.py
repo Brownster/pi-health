@@ -67,3 +67,24 @@ def test_container_status_and_logs_end_options_before_resource_name(monkeypatch)
         ["docker", "container", "inspect", "--", "--help"],
         ["docker", "container", "logs", "--tail", "20", "--", "--help"],
     ]
+
+
+def test_action_container_status_adds_private_fingerprint_fields(monkeypatch):
+    inspect_data = [{
+        "Id": "container-id",
+        "Image": "sha256:image-id",
+        "Name": "/jellyfin",
+        "Config": {"Image": "jellyfin:latest"},
+        "State": {"Status": "running", "StartedAt": "2026-07-21T10:00:00Z"},
+        "HostConfig": {},
+    }]
+    monkeypatch.setattr(
+        wiring.subprocess,
+        "run",
+        lambda argv, **kwargs: _completed(json.dumps(inspect_data)),
+    )
+    status = wiring._container_action_status("jellyfin")
+    assert status["id"] == "container-id"
+    assert status["image_id"] == "sha256:image-id"
+    assert status["started_at"] == "2026-07-21T10:00:00Z"
+    assert "id" not in wiring._container_summary(inspect_data[0])

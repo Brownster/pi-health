@@ -22,6 +22,11 @@ import {
 } from "lucide-react";
 
 import { IntegrationLifecycleDialog } from "@/components/integrations/integration-lifecycle-dialog";
+import {
+  AgentActionsView,
+  AgentAutomationView,
+  AgentFindingsView,
+} from "@/components/integrations/agent-operations-views";
 import { useIntegrationLifecycle } from "@/components/integrations/use-integration-lifecycle";
 import { useAuth } from "@/components/auth/auth-provider";
 import { ActionMenu, type ActionMenuItem } from "@/components/ui/action-menu";
@@ -60,12 +65,23 @@ import { handleTabKeyDown } from "@/lib/tab-keyboard";
 const FIELD_CLASS =
   "min-h-11 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
-type AgentTab = "overview" | "providers" | "permissions" | "usage" | "audit";
+type AgentTab =
+  | "overview"
+  | "actions"
+  | "findings"
+  | "automation"
+  | "providers"
+  | "permissions"
+  | "usage"
+  | "audit";
 type OperationMode = "install" | "repair";
 type AgentLifecycleMode = "disable" | "uninstall" | "retry_disable" | "retry_uninstall";
 
-const TABS: Array<{ id: AgentTab; label: string }> = [
+const TABS: Array<{ id: AgentTab; label: string; adminOnly?: boolean }> = [
   { id: "overview", label: "Overview" },
+  { id: "actions", label: "Actions" },
+  { id: "findings", label: "Findings" },
+  { id: "automation", label: "Automation", adminOnly: true },
   { id: "providers", label: "Providers" },
   { id: "permissions", label: "Permissions" },
   { id: "usage", label: "Usage" },
@@ -182,7 +198,7 @@ export function AgentsIntegrationCard({
   }, [loadStatus, refreshKey]);
 
   useEffect(() => {
-    if (!status?.installed || tab === "overview") return;
+    if (!status?.installed || ["overview", "actions", "findings", "automation"].includes(tab)) return;
     const controller = new AbortController();
     setDetailLoading(true);
     const request =
@@ -526,7 +542,7 @@ export function AgentsIntegrationCard({
               </span>
               <div>
                 <CardTitle>AI Agents</CardTitle>
-                <CardDescription>Provider-neutral assistance for Mattermost investigations</CardDescription>
+                <CardDescription>Provider-neutral investigation and policy-bound operations</CardDescription>
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -588,7 +604,7 @@ export function AgentsIntegrationCard({
         ) : status?.installed ? (
           <>
             <div className="flex overflow-x-auto border-b border-border px-2 sm:px-4" role="tablist" aria-label="AI Agents views">
-              {TABS.map((item) => (
+              {TABS.filter((item) => !item.adminOnly || canAdmin).map((item) => (
                 <button
                   aria-controls={`agent-panel-${item.id}`}
                   aria-selected={tab === item.id}
@@ -640,6 +656,9 @@ export function AgentsIntegrationCard({
               ) : null}
 
               {!detailLoading && tab === "providers" ? <ProvidersView canAuthenticate={canAdmin && allowedActions.has("authenticate")} providers={providers ?? []} onAuthenticate={() => void beginAuth()} /> : null}
+              {tab === "actions" ? <AgentActionsView canAdmin={canAdmin} /> : null}
+              {tab === "findings" ? <AgentFindingsView canAdmin={canAdmin} /> : null}
+              {tab === "automation" && canAdmin ? <AgentAutomationView /> : null}
               {!detailLoading && tab === "permissions" ? <PermissionsView permissions={permissions} /> : null}
               {!detailLoading && tab === "usage" ? <UsageView usage={usage} /> : null}
               {!detailLoading && tab === "audit" ? <AuditView audit={audit} /> : null}

@@ -10,8 +10,9 @@ import pytest
 
 from agent_transport.bot_client import BotApiError, MattermostBotApi
 from agent_transport.bot_setup import BotSetupRequest, run_bot_setup, verify_threaded_delivery
-from agent_transport.events import parse_frame
+from agent_transport.events import parse_frame, parse_reaction_frame
 from agent_transport.gateway_contract import (
+    ActionProposal,
     MAX_TURN_INPUT_BYTES,
     TurnBusyError,
     TurnRequest,
@@ -24,7 +25,7 @@ from agent_transport.listener import (
     chunk_reply,
     websocket_frames,
 )
-from agent_transport.state import EventDedup, ThreadMap
+from agent_transport.state import ApprovalPostMap, EventDedup, ThreadMap
 
 BOT = {"bot_username": "limeos", "bot_user_id": "bot-1"}
 
@@ -43,6 +44,21 @@ def _frame(message, *, post_id="p1", root_id="", channel="chan-1", user="user-1"
                         "user_id": user,
                         "message": message,
                     }
+                ),
+            },
+        }
+    )
+
+
+def _reaction_frame(*, post_id="proposal-1", channel="chan-1", user="user-1", emoji="white_check_mark"):
+    return json.dumps(
+        {
+            "event": "reaction_added",
+            "data": {
+                "channel_id": channel,
+                "sender_name": "@marc",
+                "reaction": json.dumps(
+                    {"post_id": post_id, "user_id": user, "emoji_name": emoji}
                 ),
             },
         }
@@ -82,6 +98,17 @@ def test_parse_frame_enforces_channel_allowlist():
     assert parse_frame(_frame("@limeos hi"), allowed_channels=("chan-1",), **BOT) is not None
 
 
+def test_parse_reaction_frame_keeps_immutable_actor_and_channel_ids():
+    event = parse_reaction_frame(_reaction_frame(), bot_user_id="bot-1")
+    assert event is not None
+    assert (event.post_id, event.channel_id, event.user_id, event.username) == (
+        "proposal-1", "chan-1", "user-1", "marc"
+    )
+    assert parse_reaction_frame(
+        _reaction_frame(user="bot-1"), bot_user_id="bot-1"
+    ) is None
+
+
 # -- state ---------------------------------------------------------------------
 def test_dedup_and_thread_map_survive_restart(tmp_path):
     dedup, threads = EventDedup(tmp_path), ThreadMap(tmp_path)
@@ -92,6 +119,16 @@ def test_dedup_and_thread_map_survive_restart(tmp_path):
     dedup2, threads2 = EventDedup(tmp_path), ThreadMap(tmp_path)
     assert dedup2.seen("p1")
     assert threads2.conversation_for("root-1") == conversation
+
+
+def test_approval_post_bindings_survive_restart_and_resolve_once(tmp_path):
+    approvals = ApprovalPostMap(tmp_path)
+    approvals.bind(
+        "post-1", action_id="action-1", channel_id="chan-1", root_id="root-1"
+    )
+    assert ApprovalPostMap(tmp_path).pending("post-1")["action_id"] == "action-1"
+    approvals.resolve("post-1")
+    assert ApprovalPostMap(tmp_path).pending("post-1") is None
 
 
 def test_dedup_is_bounded(tmp_path):
@@ -190,6 +227,19 @@ def test_verify_threaded_delivery_posts_root_then_reply():
     assert opener.requests[1][2]["root_id"] == "post-1"  # second post is threaded
 
 
+def test_bot_client_adds_only_bounded_reactions():
+    routes = {
+        ("POST", "/api/v4/users/bot-1/posts/post-1/reactions"): (200, {}, {})
+    }
+    opener = FakeOpener(routes)
+    api = MattermostBotApi("http://mm:8065", opener=opener)
+    api.use_token("bot-token")
+    api.add_reaction(user_id="bot-1", post_id="post-1", emoji_name="white_check_mark")
+    assert opener.requests[0][2]["emoji_name"] == "white_check_mark"
+    with pytest.raises(BotApiError):
+        api.add_reaction(user_id="bot-1", post_id="../post", emoji_name="x")
+
+
 def test_bot_client_raises_typed_error_with_status():
     opener = FakeOpener({("POST", "/api/v4/users/login"): (401, {}, {})})
     with pytest.raises(BotApiError) as excinfo:
@@ -236,19 +286,30 @@ def test_bot_client_deletes_bot_idempotently_and_rejects_unsafe_ids():
 
 # -- listener --------------------------------------------------------------------
 class FakeGateway:
-    def __init__(self, result_text="All healthy.", raises=None):
+    def __init__(self, result_text="All healthy.", raises=None, action_proposals=()):
         self.requests: list[TurnRequest] = []
         self.result_text = result_text
         self.raises = raises
+        self.action_proposals = action_proposals
 
     def handle_turn(self, request):
         self.requests.append(request)
         if self.raises:
             raise self.raises
-        return TurnResult(text=self.result_text)
+        return TurnResult(text=self.result_text, action_proposals=self.action_proposals)
 
 
-def _listener(tmp_path, gateway, posts, *, fetch_post=None, **config_overrides):
+def _listener(
+    tmp_path,
+    gateway,
+    posts,
+    *,
+    fetch_post=None,
+    approvals=None,
+    action_decider=None,
+    add_reaction=None,
+    **config_overrides,
+):
     def post_reply(*, channel_id, message, root_id):
         posts.append((channel_id, root_id, message))
         return f"reply-{len(posts)}"
@@ -260,6 +321,9 @@ def _listener(tmp_path, gateway, posts, *, fetch_post=None, **config_overrides):
         dedup=EventDedup(tmp_path),
         threads=ThreadMap(tmp_path),
         fetch_post=fetch_post,
+        approvals=approvals,
+        action_decider=action_decider,
+        add_reaction=add_reaction,
     )
 
 
@@ -341,8 +405,116 @@ def test_listener_runs_turn_and_replies_in_thread(tmp_path):
     assert listener.handle_frame(_frame("@limeos status please", root_id="root-1")) is True
     assert gateway.requests[0].text == "status please"
     assert gateway.requests[0].root_post_id == "root-1"
+    assert gateway.requests[0].actor_id == "user-1"
+    assert gateway.requests[0].actor_username == "marc"
     assert gateway.requests[0].conversation_id.startswith("conv-")
     assert posts == [("chan-1", "root-1", "All healthy.")]
+
+
+def _proposal(state="awaiting_approval"):
+    return ActionProposal(
+        id="action-1",
+        operation="container.restart",
+        target="jellyfin",
+        risk="R1",
+        reason="Three health checks failed.",
+        impact="Jellyfin may be briefly unavailable.",
+        state=state,
+        expires_at="2026-07-21T12:15:00+00:00",
+    )
+
+
+def test_listener_posts_exact_proposal_and_seeds_approval_reactions(tmp_path):
+    posts, reactions = [], []
+    listener = _listener(
+        tmp_path,
+        FakeGateway(action_proposals=(_proposal(),)),
+        posts,
+        approvals=ApprovalPostMap(tmp_path),
+        action_decider=lambda *_args: {},
+        add_reaction=lambda **values: reactions.append(values),
+    )
+
+    assert listener.handle_frame(_frame("@limeos repair jellyfin", root_id="root-1")) is True
+
+    proposal_message = posts[1][2]
+    assert "container.restart" in proposal_message
+    assert "jellyfin" in proposal_message
+    assert "Jellyfin may be briefly unavailable" in proposal_message
+    assert "2026-07-21T12:15:00+00:00" in proposal_message
+    assert reactions == [
+        {"post_id": "reply-2", "emoji_name": "white_check_mark"},
+        {"post_id": "reply-2", "emoji_name": "x"},
+    ]
+    assert ApprovalPostMap(tmp_path).pending("reply-2")["action_id"] == "action-1"
+
+
+@pytest.mark.parametrize(
+    ("emoji", "decision", "state"),
+    [("white_check_mark", "approve", "authorised"), ("x", "reject", "rejected")],
+)
+def test_listener_applies_reaction_decision_once_with_immutable_actor(
+    tmp_path, emoji, decision, state
+):
+    posts, decisions = [], []
+    approvals = ApprovalPostMap(tmp_path)
+    approvals.bind(
+        "proposal-1", action_id="action-1", channel_id="chan-1", root_id="root-1"
+    )
+
+    def decide(action_id, selected, actor):
+        decisions.append((action_id, selected, actor))
+        return {
+            "ok": True,
+            "data": {
+                "decision_applied": True,
+                "action": {"id": action_id, "state": state},
+            },
+        }
+
+    listener = _listener(
+        tmp_path,
+        FakeGateway(),
+        posts,
+        approvals=approvals,
+        action_decider=decide,
+    )
+    frame = _reaction_frame(emoji=emoji)
+    assert listener.handle_frame(frame) is True
+    assert listener.handle_frame(frame) is False
+    assert decisions == [
+        (
+            "action-1",
+            decision,
+            {"type": "mattermost", "id": "user-1", "username": "marc"},
+        )
+    ]
+    assert f"Action **{'approved' if decision == 'approve' else 'rejected'}**" in posts[0][2]
+    assert ApprovalPostMap(tmp_path).pending("proposal-1") is None
+
+
+def test_listener_rejects_wrong_channel_and_maps_approver_denial_without_secrets(tmp_path):
+    posts, decisions = [], []
+    approvals = ApprovalPostMap(tmp_path)
+    approvals.bind(
+        "proposal-1", action_id="action-1", channel_id="chan-1", root_id="root-1"
+    )
+    listener = _listener(
+        tmp_path,
+        FakeGateway(),
+        posts,
+        approvals=approvals,
+        action_decider=lambda *args: decisions.append(args) or {
+            "ok": True,
+            "data": {"decision_applied": False, "error_code": "denied_approver"},
+        },
+    )
+
+    assert listener.handle_frame(_reaction_frame(channel="other")) is False
+    assert listener.handle_frame(_reaction_frame()) is True
+    assert len(decisions) == 1
+    assert posts[0][2] == "You are not allowed to approve this action."
+    assert approvals.pending("proposal-1") is not None
 
 
 def test_listener_dedups_duplicate_frames(tmp_path):

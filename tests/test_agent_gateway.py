@@ -31,6 +31,7 @@ def _request(text="why is jellyfin down?", conversation="conv-1"):
         channel_id="chan-1",
         root_post_id="root-1",
         post_id="p1",
+        actor_id="user-1",
         actor_username="marc",
         text=text,
     )
@@ -155,7 +156,7 @@ def test_tool_loop_executes_limeops_and_feeds_result_back(tmp_path):
     operation, params, actor = executor.calls[0]
     assert operation == "container.status" and params == {"name": "jellyfin"}
     # The broker's frozen actor contract: {type, id, username?}.
-    assert actor == {"type": "mattermost", "id": "marc", "username": "marc"}
+    assert actor == {"type": "mattermost", "id": "user-1", "username": "marc"}
     # The broker audit id is captured for the usage/audit views.
     records = [
         json.loads(line)
@@ -167,6 +168,48 @@ def test_tool_loop_executes_limeops_and_feeds_result_back(tmp_path):
     tool_messages = [m for m in second_context.messages if m.role == "tool"]
     assert "container.status" in tool_messages[0].text
     assert '"status": "exited"' in tool_messages[0].text
+
+
+def test_action_proposal_is_returned_as_typed_transport_metadata(tmp_path):
+    provider = ScriptedProvider([
+        ToolCall(operation="action.propose", params={}),
+        FinalAnswer(text="I prepared a restart for review."),
+    ])
+    executor = FakeExecutor(envelope={
+        "ok": True,
+        "data": {
+            "action": {
+                "id": "action-1",
+                "operation": "container.restart",
+                "target": "jellyfin",
+                "risk": "R1",
+                "reason": "Health checks failed.",
+                "impact": "Jellyfin may be briefly unavailable.",
+                "state": "awaiting_approval",
+                "expires_at": "2026-07-21T12:15:00+00:00",
+            },
+            "created": True,
+        },
+        "warnings": [],
+        "error": None,
+        "audit_id": "audit-1",
+    })
+
+    result = _gateway(tmp_path, provider, executor).handle_turn(_request())
+
+    assert result.action_proposals[0].id == "action-1"
+    assert result.action_proposals[0].target == "jellyfin"
+
+
+@pytest.mark.parametrize("operation", ["action.approve", "action.reject"])
+def test_provider_cannot_invoke_mattermost_decision_operations(tmp_path, operation):
+    provider = ScriptedProvider([
+        ToolCall(operation=operation, params={"action_id": "action-1"}),
+        FinalAnswer(text="not applied"),
+    ])
+    executor = FakeExecutor()
+    _gateway(tmp_path, provider, executor).handle_turn(_request())
+    assert executor.calls == []
 
 
 def test_disallowed_operation_is_refused_without_reaching_the_broker(tmp_path):

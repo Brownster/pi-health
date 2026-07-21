@@ -1,0 +1,24 @@
+{
+  "schema_version": "1",
+  "kill_switch": true,
+  "defaults": {
+    "proposal_ttl_seconds": 900
+  },
+  "operations": {
+    "container.start": {
+      "enabled": false,
+      "approvers": [],
+      "targets": {}
+    },
+    "container.restart": {
+      "enabled": false,
+      "approvers": [],
+      "targets": {}
+    },
+    "stack.reconcile": {
+      "enabled": false,
+      "approvers": [],
+      "targets": {}
+    }
+  }
+}
