@@ -7,8 +7,9 @@ Status: Implemented with all mutations disabled by default
 ## Shipped Scope
 
 The assistant can diagnose the host, create exact repair proposals, and draft private
-bug or feature findings. Only the isolated actuator can change Docker state. The first
-write capabilities are `container.start`, `container.restart`, and `stack.reconcile`.
+bug or feature findings. Only the isolated actuator can start mutations. The first write
+capabilities are `container.start`, `container.restart`, `stack.reconcile`, and
+`packages.reconcile`.
 
 The release does not grant the model a shell, Docker socket, helper socket, arbitrary
 filesystem access, GitHub credential, or actuator-socket access. It does not publish
@@ -25,10 +26,12 @@ The `limeops-action-worker` forwards only an authorised action ID. The
 `limeops-actuatord` process reloads policy and rechecks the kill switch, contract
 version, target, payload hash, approval, expiry, and live precondition before it calls
 `ContainerOperationsService.control` or the fixed existing-stack reconcile path in
-`StackOperationsService`. It then checks container or Compose service state and health.
-A container restart must also produce a new start timestamp. Stack reconciliation
-succeeds only when the Compose definition is unchanged, every declared service is
-running, and no resulting container is unhealthy.
+`StackOperationsService`, or the fixed helper-owned package job. It then checks container,
+Compose service, or package state. A container restart must also produce a new start
+timestamp. Stack reconciliation succeeds only when the Compose definition is unchanged,
+every declared service is running, and no resulting container is unhealthy. Package
+reconciliation stays in `verifying` while its systemd job runs and succeeds only after
+the fixed manifest subset is compliant.
 
 The service boundary uses these paths:
 
@@ -93,6 +96,11 @@ mode:
       "enabled": false,
       "approvers": [],
       "targets": {}
+    },
+    "packages.reconcile": {
+      "enabled": false,
+      "approvers": [],
+      "targets": {}
     }
   }
 }
@@ -148,6 +156,16 @@ verification to roughly 10 seconds. Canary it only on a non-critical stack after
 recording its declared services and current health. A partial, missing, unhealthy, or
 changed-definition result fails verification and escalates; LimeOS does not attempt an
 unsafe automatic rollback that would require stopping services.
+
+`packages.reconcile` is an R2 approval-only operation with one fixed target:
+`shipped-manifest`. It accepts an empty parameter object. The helper derives every
+package name and version from the validated manifest. This first adapter excludes pinned
+packages and feature-owned packages, which remain behind their existing version-approval
+and integration-lifecycle controls. The action starts
+`limeos-package-reconcile-action.service` without waiting for apt, persists in
+`verifying`, and resumes checks after worker or actuator restarts. It fails after one hour
+or when systemd reports a failed job. Success requires a new completed invocation and no
+remaining drift. Automatic downgrade and package removal are outside its rollback path.
 
 When a Mattermost turn creates a proposal, the listener posts a separate bounded card in
 the originating thread with the operation, exact target, risk, reason, expected impact,
@@ -206,8 +224,8 @@ agent audit logs for incident review.
 
 ## Current Limits
 
-This slice completes the action foundation and the first three repair adapters. It does
-not yet include extension or integration repair, package reconciliation, job retry,
-report-only schedules, maturity promotion, cooldowns, disruption budgets, installation,
-configuration, review experiments, optimisation, or GitHub publication. Those features
-remain gated by the accepted implementation plan and target-Pi canary evidence.
+This slice completes the action foundation and the first four repair adapters. It does
+not yet include extension or integration repair, job retry, report-only schedules,
+maturity promotion, cooldowns, disruption budgets, installation, configuration, review
+experiments, optimisation, or GitHub publication. Those features remain gated by the
+accepted implementation plan and target-Pi canary evidence.
