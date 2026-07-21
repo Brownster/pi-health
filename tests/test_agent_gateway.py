@@ -170,6 +170,48 @@ def test_tool_loop_executes_limeops_and_feeds_result_back(tmp_path):
     assert '"status": "exited"' in tool_messages[0].text
 
 
+def test_action_proposal_is_returned_as_typed_transport_metadata(tmp_path):
+    provider = ScriptedProvider([
+        ToolCall(operation="action.propose", params={}),
+        FinalAnswer(text="I prepared a restart for review."),
+    ])
+    executor = FakeExecutor(envelope={
+        "ok": True,
+        "data": {
+            "action": {
+                "id": "action-1",
+                "operation": "container.restart",
+                "target": "jellyfin",
+                "risk": "R1",
+                "reason": "Health checks failed.",
+                "impact": "Jellyfin may be briefly unavailable.",
+                "state": "awaiting_approval",
+                "expires_at": "2026-07-21T12:15:00+00:00",
+            },
+            "created": True,
+        },
+        "warnings": [],
+        "error": None,
+        "audit_id": "audit-1",
+    })
+
+    result = _gateway(tmp_path, provider, executor).handle_turn(_request())
+
+    assert result.action_proposals[0].id == "action-1"
+    assert result.action_proposals[0].target == "jellyfin"
+
+
+@pytest.mark.parametrize("operation", ["action.approve", "action.reject"])
+def test_provider_cannot_invoke_mattermost_decision_operations(tmp_path, operation):
+    provider = ScriptedProvider([
+        ToolCall(operation=operation, params={"action_id": "action-1"}),
+        FinalAnswer(text="not applied"),
+    ])
+    executor = FakeExecutor()
+    _gateway(tmp_path, provider, executor).handle_turn(_request())
+    assert executor.calls == []
+
+
 def test_disallowed_operation_is_refused_without_reaching_the_broker(tmp_path):
     provider = ScriptedProvider([
         ToolCall(operation="container.restart", params={"name": "jellyfin"}),

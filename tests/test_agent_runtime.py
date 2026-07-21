@@ -144,6 +144,49 @@ def test_runtime_listener_uses_system_actor_for_context_and_mattermost_actor_for
     assert client.calls[0] == ("context", {}, {"type": "system", "id": "lime-agent"})
 
 
+def test_runtime_reaction_uses_non_model_action_decision_path(tmp_path):
+    path = tmp_path / "agents.json"
+    path.write_text(json.dumps(_settings()))
+    client = FakeLimeOps()
+    listener = build_listener(
+        load_config(path),
+        bot_token="bot-token",
+        state_dir=tmp_path / "state",
+        provider=FinalProvider(),
+        limeops_client=client,
+    )
+    listener._post_reply = lambda **_kwargs: "reply-1"
+    listener._approvals.bind(
+        "proposal-1",
+        action_id="action-1",
+        channel_id="channel-1",
+        root_id="root-1",
+    )
+    reaction = json.dumps(
+        {
+            "event": "reaction_added",
+            "data": {
+                "channel_id": "channel-1",
+                "sender_name": "@marc",
+                "reaction": json.dumps(
+                    {
+                        "post_id": "proposal-1",
+                        "user_id": "user-1",
+                        "emoji_name": "white_check_mark",
+                    }
+                ),
+            },
+        }
+    )
+
+    assert listener.handle_frame(reaction) is True
+    assert client.calls[-1] == (
+        "action.approve",
+        {"action_id": "action-1"},
+        {"type": "mattermost", "id": "user-1", "username": "marc"},
+    )
+
+
 def test_runtime_rejects_missing_or_multiline_bot_token(tmp_path):
     path = tmp_path / "agents.json"
     path.write_text(json.dumps(_settings()))

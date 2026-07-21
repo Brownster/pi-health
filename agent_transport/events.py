@@ -23,6 +23,15 @@ class MentionEvent:
     text: str  # mention-stripped
 
 
+@dataclass(frozen=True)
+class ReactionEvent:
+    post_id: str
+    channel_id: str
+    user_id: str
+    username: str
+    emoji_name: str
+
+
 #: Bound for thread-root context included in a turn (alert posts are small; hostile
 #: or pathological roots must not eat the 32 KiB turn budget).
 MAX_ROOT_TEXT_CHARS = 4096
@@ -98,4 +107,33 @@ def parse_frame(
         user_id=str(post.get("user_id") or ""),
         username=str(data.get("sender_name") or "").lstrip("@"),
         text=_strip_mention(message, bot_username),
+    )
+
+
+def parse_reaction_frame(frame_text: str, *, bot_user_id: str) -> ReactionEvent | None:
+    try:
+        frame = json.loads(frame_text)
+    except ValueError:
+        return None
+    if not isinstance(frame, dict) or frame.get("event") != "reaction_added":
+        return None
+    data = frame.get("data") or {}
+    try:
+        reaction = json.loads(data.get("reaction") or "{}")
+    except ValueError:
+        return None
+    if not isinstance(reaction, dict) or reaction.get("user_id") == bot_user_id:
+        return None
+    post_id = reaction.get("post_id")
+    user_id = reaction.get("user_id")
+    emoji_name = reaction.get("emoji_name")
+    channel_id = data.get("channel_id") or (frame.get("broadcast") or {}).get("channel_id")
+    if not all(isinstance(value, str) and value for value in (post_id, user_id, emoji_name, channel_id)):
+        return None
+    return ReactionEvent(
+        post_id=post_id,
+        channel_id=channel_id,
+        user_id=user_id,
+        username=str(data.get("sender_name") or "").lstrip("@"),
+        emoji_name=emoji_name,
     )

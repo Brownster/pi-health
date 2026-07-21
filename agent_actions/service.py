@@ -173,11 +173,28 @@ class AgentActionService:
         except (CapabilityError, ActionPolicyError, ActionLedgerError, ValueError) as exc:
             raise self._public_error(exc) from exc
 
-    def reject(self, action_id: str) -> dict[str, Any]:
+    def reject(self, action_id: str, *, rejector: Any | None = None) -> dict[str, Any]:
         try:
             now = self._aware_now().isoformat()
-            return self._ledger.reject(action_id, rejected_at=now).public_dict()
-        except ActionLedgerError as exc:
+            actor = ActionActor.from_mapping(rejector) if rejector is not None else None
+            if actor is not None:
+                action = self._ledger.get(action_id)
+                self._policy_provider().require_approver(action.operation, actor)
+            action = self._ledger.reject(action_id, rejected_at=now)
+            self._ledger.record_event(
+                action_id,
+                phase="rejected",
+                created_at=now,
+                details={
+                    "actor": (
+                        {"type": actor.type, "id": actor.id, "username": actor.username}
+                        if actor is not None
+                        else {"type": "local_api"}
+                    )
+                },
+            )
+            return action.public_dict()
+        except (ActionLedgerError, ActionPolicyError, CapabilityError) as exc:
             raise self._public_error(exc) from exc
 
     def cancel(self, action_id: str) -> dict[str, Any]:

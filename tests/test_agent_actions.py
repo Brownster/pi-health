@@ -263,6 +263,35 @@ def test_ledger_can_cancel_only_before_execution(tmp_path):
     assert repeated.value.code == "invalid_state"
 
 
+def test_service_rejection_records_immutable_mattermost_actor(tmp_path):
+    service = _service(tmp_path, {"generation": 1})
+    _propose(service)
+    rejected = service.reject(
+        "action-1",
+        rejector={"type": "mattermost", "id": "user-1", "username": "renamed"},
+    )
+    detail = service.get("action-1")
+
+    assert rejected["state"] == "rejected"
+    assert detail["events"][-1]["details"]["actor"] == {
+        "type": "mattermost",
+        "id": "user-1",
+        "username": "renamed",
+    }
+
+
+def test_service_rejection_denies_unconfigured_mattermost_actor(tmp_path):
+    service = _service(tmp_path, {"generation": 1})
+    _propose(service)
+    with pytest.raises(AgentActionError) as denied:
+        service.reject(
+            "action-1",
+            rejector={"type": "mattermost", "id": "other", "username": "marc"},
+        )
+    assert denied.value.code == "denied_approver"
+    assert service.get("action-1")["state"] == "awaiting_approval"
+
+
 def test_ledger_rejects_symlink_store(tmp_path):
     target = tmp_path / "real.sqlite3"
     target.touch()

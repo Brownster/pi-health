@@ -177,7 +177,9 @@ def test_gateway_allowlist_matches_the_shipped_read_only_policy():
 
     with open("config/agent-policy.default.json") as handle:
         policy_operations = set(json.load(handle)["operations"])
-    assert set(GatewayConfig().allowed_operations) == policy_operations
+    model_operations = set(GatewayConfig().allowed_operations)
+    assert policy_operations - model_operations == {"action.approve", "action.reject"}
+    assert model_operations < policy_operations
     assert set(build_operations(make_deps())) == policy_operations
 
 
@@ -265,6 +267,39 @@ def test_action_propose_rejects_malformed_or_authority_bypass_params(params):
         build_operations(make_deps(action_propose=lambda *args: calls.append(args)))
     )
     response = call(broker, "action.propose", params)
+    assert response["ok"] is False
+    assert response["error"]["code"] == "invalid_input"
+    assert calls == []
+
+
+@pytest.mark.parametrize("decision", ["approve", "reject"])
+def test_action_decisions_forward_immutable_actor_outside_model_allowlist(decision):
+    calls = []
+
+    def decide(action_id, actor):
+        calls.append((action_id, actor))
+        return {"decision_applied": True, "action": {"id": action_id}}
+
+    broker = make_broker(
+        build_operations(make_deps(**{f"action_{decision}": decide}))
+    )
+    response = call(broker, f"action.{decision}", {"action_id": "action-1"})
+
+    assert response["ok"] is True
+    assert response["data"]["decision_applied"] is True
+    assert calls == [("action-1", ACTOR)]
+
+
+def test_action_decision_rejects_unknown_fields_before_handler():
+    calls = []
+    broker = make_broker(
+        build_operations(make_deps(action_approve=lambda *args: calls.append(args)))
+    )
+    response = call(
+        broker,
+        "action.approve",
+        {"action_id": "action-1", "authority_mode": "autonomous"},
+    )
     assert response["ok"] is False
     assert response["error"]["code"] == "invalid_input"
     assert calls == []

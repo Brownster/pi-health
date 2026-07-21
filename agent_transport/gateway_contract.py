@@ -30,8 +30,21 @@ class TurnRequest:
 
 
 @dataclass(frozen=True)
+class ActionProposal:
+    id: str
+    operation: str
+    target: str
+    risk: str
+    reason: str
+    impact: str
+    state: str
+    expires_at: str
+
+
+@dataclass(frozen=True)
 class TurnResult:
     text: str  # bounded by MAX_TURN_OUTPUT_BYTES
+    action_proposals: tuple[ActionProposal, ...] = ()
 
 
 class TurnError(Exception):

@@ -20,6 +20,7 @@ import time
 from pathlib import Path
 
 from agent_actions.defaults import LazyAgentActionService, build_action_service
+from agent_actions.service import AgentActionError
 from agent_findings.service import LazyFindingsService
 from limeops.operations import DiagnosticDependencies, build_operations
 from runtime_paths import STATE_DIR
@@ -342,6 +343,26 @@ def _finding_propose(params, actor, audit_id) -> dict:  # pragma: no cover - tar
     return {"finding": finding, "created": created}
 
 
+def _action_approve(action_id, actor) -> dict:  # pragma: no cover - target integration
+    try:
+        return {
+            "decision_applied": True,
+            "action": _ACTION_SERVICE.approve(action_id, approver=actor),
+        }
+    except AgentActionError as exc:
+        return {"decision_applied": False, "error_code": exc.code}
+
+
+def _action_reject(action_id, actor) -> dict:  # pragma: no cover - target integration
+    try:
+        return {
+            "decision_applied": True,
+            "action": _ACTION_SERVICE.reject(action_id, rejector=actor),
+        }
+    except AgentActionError as exc:
+        return {"decision_applied": False, "error_code": exc.code}
+
+
 def default_dependencies() -> DiagnosticDependencies:  # pragma: no cover - target integration
     return DiagnosticDependencies(
         system_status=_system_status,
@@ -362,6 +383,8 @@ def default_dependencies() -> DiagnosticDependencies:  # pragma: no cover - targ
         package_pending=_package_pending,
         action_propose=_action_propose,
         finding_propose=_finding_propose,
+        action_approve=_action_approve,
+        action_reject=_action_reject,
     )
 
 

@@ -1,10 +1,11 @@
-"""Bounded diagnostic and local action-proposal operations behind the broker.
+"""Bounded diagnostics, proposals, and non-model action decisions behind the broker.
 
-Every handler is a thin, bounded adapter over an injected domain reader — nothing here
-constructs Docker, helper, or filesystem access itself, and nothing mutates. The broker
-remains the authorization boundary (policy, resource allowlists, timeouts, output
-limits, audit); this module adds the diagnostic behavior, a proposal-only bridge, and
-the redaction/sanitization guarantees:
+Every handler is a thin, bounded adapter over an injected domain service. Nothing here
+constructs Docker, helper, or filesystem access itself, and the decision bridge can only
+authorise or reject an existing exact proposal; it cannot execute a host mutation. The
+broker remains the authorization boundary (policy, resource allowlists, timeouts,
+output limits, audit); this module adds the diagnostic behavior, proposal and decision
+bridges, and the redaction/sanitization guarantees:
 
 - Log text is redacted (passwords, tokens, bearer headers, webhook URLs, URL
   credentials) and byte-bounded below the policy output limit, with an explicit
@@ -186,6 +187,11 @@ def _finding_proposal_params(params: Mapping[str, Any]) -> Mapping[str, Any]:
     return {"finding": dict(finding), "evidence_ids": list(evidence_ids)}
 
 
+def _action_decision_params(params: Mapping[str, Any]) -> Mapping[str, Any]:
+    _require_fields(params, {"action_id"})
+    return {"action_id": _name(params, "action_id")}
+
+
 # -- dependencies ----------------------------------------------------------------
 @dataclass(frozen=True)
 class DiagnosticDependencies:
@@ -219,6 +225,18 @@ class DiagnosticDependencies:
             "message": "Finding proposal service is unavailable",
         }
     )
+    action_approve: Callable[[str, Mapping[str, str]], dict] = (
+        lambda action_id, actor: {
+            "available": False,
+            "message": "Action approval service is unavailable",
+        }
+    )
+    action_reject: Callable[[str, Mapping[str, str]], dict] = (
+        lambda action_id, actor: {
+            "available": False,
+            "message": "Action rejection service is unavailable",
+        }
+    )
 
 
 def build_operations(deps: DiagnosticDependencies) -> dict[str, OperationDefinition]:
@@ -237,7 +255,9 @@ def build_operations(deps: DiagnosticDependencies) -> dict[str, OperationDefinit
     def context_handler(_params: Mapping[str, Any], _context: Any) -> dict:
         return {
             "capabilities": "read-and-propose",
-            "operations": sorted(operations),
+            "operations": sorted(
+                name for name in operations if name not in {"action.approve", "action.reject"}
+            ),
         }
 
     add("context", context_handler, _no_params)
@@ -305,5 +325,15 @@ def build_operations(deps: DiagnosticDependencies) -> dict[str, OperationDefinit
         "finding.propose",
         lambda p, c: deps.finding_propose(p, c.actor, c.audit_id),
         _finding_proposal_params,
+    )
+    add(
+        "action.approve",
+        lambda p, c: deps.action_approve(p["action_id"], c.actor),
+        _action_decision_params,
+    )
+    add(
+        "action.reject",
+        lambda p, c: deps.action_reject(p["action_id"], c.actor),
+        _action_decision_params,
     )
     return operations

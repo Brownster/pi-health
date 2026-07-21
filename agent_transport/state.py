@@ -15,6 +15,7 @@ import uuid
 from pathlib import Path
 
 _DEDUP_KEEP = 500  # bounded: enough to cover reconnect replay windows
+_APPROVAL_KEEP = 200
 
 
 def _atomic_write(path: Path, payload: dict) -> None:
@@ -75,3 +76,40 @@ class ThreadMap:
         self._threads[root_post_id] = conversation_id
         _atomic_write(self._path, {"threads": self._threads})
         return conversation_id
+
+
+class ApprovalPostMap:
+    """Restart-safe Mattermost proposal post -> action binding."""
+
+    def __init__(self, state_dir: Path | str) -> None:
+        self._path = Path(state_dir) / "approval-posts.json"
+        loaded = _load(self._path).get("posts")
+        self._posts = dict(loaded) if isinstance(loaded, dict) else {}
+
+    def bind(self, post_id: str, *, action_id: str, channel_id: str, root_id: str) -> None:
+        self._posts[post_id] = {
+            "action_id": action_id,
+            "channel_id": channel_id,
+            "root_id": root_id,
+            "resolved": False,
+        }
+        while len(self._posts) > _APPROVAL_KEEP:
+            self._posts.pop(next(iter(self._posts)))
+        self._save()
+
+    def pending(self, post_id: str) -> dict[str, str] | None:
+        value = self._posts.get(post_id)
+        if not isinstance(value, dict) or value.get("resolved") is not False:
+            return None
+        required = ("action_id", "channel_id", "root_id")
+        if any(not isinstance(value.get(field), str) or not value[field] for field in required):
+            return None
+        return {field: value[field] for field in required}
+
+    def resolve(self, post_id: str) -> None:
+        if isinstance(self._posts.get(post_id), dict):
+            self._posts[post_id]["resolved"] = True
+            self._save()
+
+    def _save(self) -> None:
+        _atomic_write(self._path, {"posts": self._posts})
