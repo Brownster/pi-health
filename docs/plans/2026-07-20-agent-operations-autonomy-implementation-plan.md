@@ -17,9 +17,11 @@ expiring single-use approvals, a separate actuator socket and identities, verifi
 finding drafts. Shipped defaults keep the kill switch on and both repair operations
 disabled.
 
-AO-005 still needs its browser and Mattermost approval controls. AO-006 currently covers
-only container start and restart. Scheduling, installation, configuration, optimisation,
-GitHub publication, and agent-authored pull requests remain later work packages.
+AO-005 now has capability, policy, cancellation, approval, rejection, detail, history,
+and listing APIs; it still needs browser and Mattermost approval controls. AO-006
+currently covers only container start and restart. Scheduling, installation,
+configuration, optimisation, GitHub publication, and agent-authored pull requests remain
+later work packages.
 
 ## Goal
 

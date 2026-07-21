@@ -105,16 +105,26 @@ required after an atomic policy update.
 The authenticated API exposes:
 
 ```text
+GET  /api/integrations/agents/actions/capabilities
 GET  /api/integrations/agents/actions
 GET  /api/integrations/agents/actions/<id>
 POST /api/integrations/agents/actions/<id>/approve
 POST /api/integrations/agents/actions/<id>/reject
+POST /api/integrations/agents/actions/<id>/cancel
+GET  /api/integrations/agents/automation/policy
+PUT  /api/integrations/agents/automation/policy
 ```
 
 Reads require `capability.view`; approval and rejection require `extensions.admin` and
-CSRF protection. Approval accepts an empty body. The queue worker detects the authorised
-record, sends only its ID to the action broker, and consumes the approval in the same
-transaction that changes the state to `executing`.
+CSRF protection. Approval, rejection, and cancellation accept an empty body. The queue
+worker detects the authorised record, sends only its ID to the action broker, and
+consumes the approval in the same transaction that changes the state to `executing`.
+Action detail includes the bounded lifecycle event history.
+
+Policy reads and writes require `extensions.admin`. The application validates the exact
+code-owned operation catalogue before the privileged helper atomically replaces the
+file. This release accepts observe, propose, and approval modes. It rejects supervised
+and autonomous policy updates until the repair canary gate records the required evidence.
 
 Treat `succeeded` as the only successful terminal state. `execution_failed`,
 `verification_failed`, `precondition_changed`, `expired`, and `rejected` require review.
