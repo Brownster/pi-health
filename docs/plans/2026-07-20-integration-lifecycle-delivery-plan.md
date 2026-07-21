@@ -279,7 +279,7 @@ Goal: prove recovery, compatibility, and target behavior before release.
 
 | ID | Work package | Depends on | Status | Deliverable |
 | --- | --- | --- | --- | --- |
-| IL-009 | Cross-domain lifecycle hardening | IL-005, IL-007, IL-008 | Planned | Failure-at-every-step, security, startup, package reconciliation, accessibility, responsive, existing-workflow, full-suite, and committed-bundle release evidence |
+| IL-009 | Cross-domain lifecycle hardening | IL-005, IL-007, IL-008 | Complete (`9c59558`, `40d8408`) | Failure-at-every-step, security, startup, package reconciliation, accessibility, responsive, existing-workflow, full-suite, and committed-bundle release evidence |
 | IL-010 | Holly canary and release signoff | IL-009, CP-021 | Planned | Recorded upgrade, dependency gates, disable/enable, agent uninstall, retained-data uninstall/reinstall, recovery, rollback, purge disposition, and GO/NO-GO evidence on `holly@192.168.0.45` |
 
 Exit gate:
