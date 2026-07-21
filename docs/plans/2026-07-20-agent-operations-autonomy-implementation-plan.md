@@ -18,10 +18,12 @@ finding drafts. Shipped defaults keep the kill switch on and both repair operati
 disabled.
 
 AO-005 now has capability, policy, cancellation, approval, rejection, detail, history,
-and listing APIs; it still needs browser and Mattermost approval controls. AO-006
-currently covers only container start and restart. Scheduling, installation,
-configuration, optimisation, GitHub publication, and agent-authored pull requests remain
-later work packages.
+and listing APIs. The AI Agents browser card now provides action review and approval,
+private finding review and editing, and an administrator policy editor for exact target
+allowlists, approvers, proposal expiry, authority modes, and the kill switch. Mattermost
+approval controls remain outstanding. AO-006 currently covers only container start and
+restart. Scheduling, installation, configuration, optimisation, GitHub publication, and
+agent-authored pull requests remain later work packages.
 
 ## Goal
 

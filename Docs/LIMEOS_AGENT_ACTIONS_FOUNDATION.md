@@ -147,6 +147,15 @@ PUT  /api/integrations/agents/findings/<id>
 POST /api/integrations/agents/findings/<id>/reject
 ```
 
+The AI Agents card exposes the same bounded controls in the browser. Its **Actions** tab
+shows the immutable proposal, exact target, reason, expected impact, evidence references,
+expiry, verified parameters, and lifecycle history before offering a valid approve,
+reject, or cancel transition. **Findings** keeps redacted drafts private while allowing
+administrators to edit or reject them. **Automation** edits only registered operations,
+exact target allowlists, approver actor IDs, proposal expiry, and the emergency kill
+switch. It offers observe, propose, and approval modes; later authority levels remain
+server-rejected until the repair canary gate is complete.
+
 This release has no publication endpoint. Every finding returns `publication: null`.
 GitHub issue publication will use a separate repository allowlist, credential, preview,
 and fresh approval in AO-016. Pull requests remain deferred.
@@ -170,8 +179,7 @@ agent audit logs for incident review.
 ## Current Limits
 
 This slice completes the action foundation and the first two repair adapters. It does
-not yet include browser controls, Mattermost approval buttons, stack or integration
-repair, report-only schedules, maturity promotion, cooldowns, disruption budgets,
-installation, configuration, review experiments, optimisation, or GitHub publication.
-Those features remain gated by the accepted implementation plan and target-Pi canary
-evidence.
+not yet include Mattermost approval buttons, stack or integration repair, report-only
+schedules, maturity promotion, cooldowns, disruption budgets, installation,
+configuration, review experiments, optimisation, or GitHub publication. Those features
+remain gated by the accepted implementation plan and target-Pi canary evidence.
