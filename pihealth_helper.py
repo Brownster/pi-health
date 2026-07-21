@@ -4019,6 +4019,50 @@ def cmd_agent_configure(params):
     return {'success': True, 'configured': True}
 
 
+def cmd_agent_action_policy_write(params):
+    """Validate and atomically replace the fixed action-authority policy."""
+    if not isinstance(params, dict) or set(params) != {'policy'}:
+        return {'success': False, 'error': 'Invalid agent action policy request'}
+    policy = params.get('policy')
+    try:
+        from agent_actions.policy import ActionPolicy
+
+        parsed = ActionPolicy.from_mapping(policy)
+        with open(os.path.join(
+            _agent_repo_dir(), 'config', 'agent-action-policy.default.json'
+        )) as handle:
+            fixed_operations = set(json.load(handle).get('operations', {}))
+        if set(policy.get('operations', {})) != fixed_operations:
+            return {
+                'success': False,
+                'error': 'Action policy operations do not match the fixed profile',
+            }
+        configured = parsed.public_dict()
+        automatic_modes = {'supervised', 'autonomous'}
+        if any(
+            mode in automatic_modes
+            for operation in configured['operations'].values()
+            for target in operation['targets'].values()
+            for mode in target.values()
+        ):
+            return {
+                'success': False,
+                'error': 'Automatic authority requires the repair canary gate',
+            }
+    except Exception:
+        return {'success': False, 'error': 'Invalid agent action policy'}
+    written = _write_managed_file(
+        ACTION_POLICY_PATH,
+        json.dumps(configured, indent=2, sort_keys=True) + '\n',
+        0o640,
+    )
+    if not written.get('success'):
+        return {'success': False, 'error': 'Failed to write agent action policy'}
+    if run_command(['chown', 'root:pihealth', ACTION_POLICY_PATH]).get('returncode') != 0:
+        return {'success': False, 'error': 'Failed to secure agent action policy'}
+    return {'success': True, 'policy': configured}
+
+
 def cmd_agent_runtime_start(params):
     rejected = _agent_reject_params(params)
     if rejected:
@@ -4711,6 +4755,7 @@ COMMANDS = {
     'agent_provider_auth_cancel': cmd_agent_provider_auth_cancel,
     'agent_bot_secret_write': cmd_agent_bot_secret_write,
     'agent_configure': cmd_agent_configure,
+    'agent_action_policy_write': cmd_agent_action_policy_write,
     'agent_runtime_start': cmd_agent_runtime_start,
     'agent_usage_read': cmd_agent_usage_read,
     'agent_audit_read': cmd_agent_audit_read,
@@ -4746,7 +4791,8 @@ _MUTATING_COMMANDS = frozenset({
     'agent_runtime_install', 'agent_runtime_disable', 'agent_runtime_uninstall',
     'agent_provider_install',
     'agent_provider_auth_start', 'agent_provider_auth_submit', 'agent_provider_auth_cancel',
-    'agent_bot_secret_write', 'agent_configure', 'agent_runtime_start',
+    'agent_bot_secret_write', 'agent_configure', 'agent_action_policy_write',
+    'agent_runtime_start',
     'packages_reconcile', 'packages_approve', 'packages_nightly_reconcile',
     'configure_package_reconcile_schedule', 'agent_converge_if_stale',
     'mattermost_recovery_credential_retain',

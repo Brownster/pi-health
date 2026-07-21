@@ -29,6 +29,7 @@ def _client(
     thread_factory=ImmediateThread,
     action_service=None,
     findings_service=None,
+    helper=None,
     capability_roles=None,
 ):
     dependencies = AppDependencies(
@@ -39,6 +40,7 @@ def _client(
         agent_integration_service=service,
         agent_action_service=action_service,
         agent_findings_service=findings_service,
+        helper=helper,
         capability_roles=capability_roles,
     )
     app = create_app(
@@ -83,6 +85,10 @@ def _action_service():
     service.get.return_value = {"id": "action-1", "state": "awaiting_approval"}
     service.approve.return_value = {"id": "action-1", "state": "authorised"}
     service.reject.return_value = {"id": "action-1", "state": "rejected"}
+    service.cancel.return_value = {"id": "action-1", "state": "cancelled"}
+    service.capabilities.return_value = {"capabilities": [], "kill_switch": True}
+    service.policy.return_value = {"schema_version": "1", "operations": {}}
+    service.validate_policy.side_effect = lambda value: value
     return service
 
 
@@ -104,6 +110,8 @@ def test_all_agent_routes_require_authentication():
         "/api/integrations/agents/usage",
         "/api/integrations/agents/audit",
         "/api/integrations/agents/actions",
+        "/api/integrations/agents/actions/capabilities",
+        "/api/integrations/agents/automation/policy",
         "/api/integrations/agents/findings",
     ):
         assert client.get(path).status_code == 401
@@ -215,6 +223,16 @@ def test_action_routes_list_read_approve_and_reject_with_stable_local_actor():
     assert rejected.status_code == 200
     actions.reject.assert_called_once_with("action-2")
 
+    capabilities = client.get("/api/integrations/agents/actions/capabilities")
+    assert capabilities.status_code == 200
+    actions.capabilities.assert_called_once_with()
+
+    cancelled = client.post(
+        "/api/integrations/agents/actions/action-3/cancel", json={}
+    )
+    assert cancelled.status_code == 200
+    actions.cancel.assert_called_once_with("action-3")
+
 
 def test_action_mutations_require_admin_and_strict_empty_body():
     actions = _action_service()
@@ -249,6 +267,44 @@ def test_action_api_maps_bounded_domain_errors():
     )
     assert changed.status_code == 409
     assert changed.get_json()["code"] == "precondition_changed"
+
+
+def test_action_policy_api_is_admin_only_validated_and_helper_owned():
+    actions = _action_service()
+    helper = Mock()
+    helper.call.return_value = {"success": True}
+    client = _client(_service(), action_service=actions, helper=helper)
+    assert client.get("/api/integrations/agents/automation/policy").status_code == 200
+    policy = {
+        "schema_version": "1",
+        "kill_switch": True,
+        "defaults": {"proposal_ttl_seconds": 900},
+        "operations": {},
+    }
+    updated = client.put("/api/integrations/agents/automation/policy", json=policy)
+    assert updated.status_code == 200
+    actions.validate_policy.assert_called_once_with(policy)
+    helper.call.assert_called_once_with(
+        "agent_action_policy_write", {"policy": policy}
+    )
+
+    viewer = _client(
+        _service(),
+        action_service=actions,
+        helper=helper,
+        capability_roles={"admin": "viewer"},
+    )
+    assert viewer.get("/api/integrations/agents/automation/policy").status_code == 403
+
+
+def test_action_policy_api_fails_closed_when_helper_rejects_write():
+    actions = _action_service()
+    helper = Mock()
+    helper.call.return_value = {"success": False, "error": "private detail"}
+    client = _client(_service(), action_service=actions, helper=helper)
+    response = client.put("/api/integrations/agents/automation/policy", json={})
+    assert response.status_code == 503
+    assert "private detail" not in response.get_data(as_text=True)
 
 
 def test_finding_routes_are_private_editable_and_admin_bound():

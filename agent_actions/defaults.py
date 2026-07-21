@@ -125,8 +125,20 @@ class LazyAgentActionService:
     def reject(self, *args, **kwargs):
         return self._get().reject(*args, **kwargs)
 
+    def cancel(self, *args, **kwargs):
+        return self._get().cancel(*args, **kwargs)
+
     def get(self, *args, **kwargs):
         return self._get().get(*args, **kwargs)
 
     def list(self, **kwargs):
         return self._get().list(**kwargs)
+
+    def capabilities(self):
+        return self._get().capabilities()
+
+    def policy(self):
+        return self._get().policy()
+
+    def validate_policy(self, value):
+        return self._get().validate_policy(value)

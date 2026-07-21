@@ -163,6 +163,19 @@ class CapabilityRegistry:
     def operations(self) -> tuple[str, ...]:
         return tuple(sorted(self._capabilities))
 
+    def catalogue(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "operation": capability.operation,
+                "version": capability.version,
+                "risk": capability.risk.value,
+                "eligible_modes": [mode.value for mode in capability.eligible_modes],
+            }
+            for capability in sorted(
+                self._capabilities.values(), key=lambda item: item.operation
+            )
+        ]
+
 
 def canonical_json(value: Any) -> str:
     try:

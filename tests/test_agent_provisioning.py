@@ -102,6 +102,7 @@ def test_helper_agent_commands_reject_all_caller_controlled_parameters():
         helper.cmd_agent_runtime_disable,
         helper.cmd_agent_runtime_uninstall,
         helper.cmd_agent_provider_install,
+        helper.cmd_agent_action_policy_write,
     ):
         result = command({"path": "/tmp/evil"})
         assert result["success"] is False
@@ -120,6 +121,7 @@ def test_helper_exposes_only_fixed_agent_operations():
         "agent_provider_auth_cancel",
         "agent_bot_secret_write",
         "agent_configure",
+        "agent_action_policy_write",
         "agent_runtime_start",
         "agent_usage_read",
         "agent_audit_read",
@@ -472,6 +474,54 @@ def test_agent_configure_validates_both_settings_and_fixed_policy(tmp_path):
     assert helper.cmd_agent_configure({"settings": settings, "policy": policy})[
         "success"
     ] is False
+
+
+def test_action_policy_writer_is_fixed_validated_and_canary_gated(tmp_path):
+    policy = json.loads(
+        Path("config/agent-action-policy.default.json").read_text()
+    )
+    policy["kill_switch"] = False
+    policy["operations"]["container.restart"] = {
+        "enabled": True,
+        "approvers": ["local:admin"],
+        "targets": {
+            "jellyfin": {
+                "interactive": "approval",
+                "scheduled": "observe",
+                "event": "observe",
+            }
+        },
+    }
+    target = tmp_path / "agent-action-policy.json"
+    written = {}
+    with (
+        patch.object(helper, "ACTION_POLICY_PATH", str(target)),
+        patch.object(
+            helper,
+            "_write_managed_file",
+            side_effect=lambda path, content, mode: written.update(
+                path=path, content=content, mode=mode
+            )
+            or {"success": True},
+        ),
+        patch.object(helper, "run_command", return_value={"returncode": 0}) as run,
+    ):
+        result = helper.cmd_agent_action_policy_write({"policy": policy})
+    assert result["success"] is True
+    assert written["path"] == str(target) and written["mode"] == 0o640
+    run.assert_called_once_with(["chown", "root:pihealth", str(target)])
+
+    automatic = json.loads(json.dumps(policy))
+    automatic["operations"]["container.restart"]["targets"]["jellyfin"][
+        "interactive"
+    ] = "autonomous"
+    assert helper.cmd_agent_action_policy_write({"policy": automatic}) == {
+        "success": False,
+        "error": "Automatic authority requires the repair canary gate",
+    }
+    unknown = json.loads(json.dumps(policy))
+    unknown["operations"]["shell.execute"] = {"enabled": False, "approvers": [], "targets": {}}
+    assert helper.cmd_agent_action_policy_write({"policy": unknown})["success"] is False
 
 
 def test_agent_usage_and_audit_reads_are_bounded_and_field_allowlisted(tmp_path):

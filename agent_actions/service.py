@@ -180,10 +180,78 @@ class AgentActionService:
         except ActionLedgerError as exc:
             raise self._public_error(exc) from exc
 
+    def cancel(self, action_id: str) -> dict[str, Any]:
+        try:
+            now = self._aware_now().isoformat()
+            action = self._ledger.cancel(action_id, cancelled_at=now)
+            self._ledger.record_event(
+                action_id,
+                phase="cancelled",
+                created_at=now,
+                details={"code": "cancelled_by_administrator"},
+            )
+            return action.public_dict()
+        except ActionLedgerError as exc:
+            raise self._public_error(exc) from exc
+
     def get(self, action_id: str) -> dict[str, Any]:
         try:
-            return self._ledger.get(action_id).public_dict()
+            action = self._ledger.get(action_id).public_dict()
+            action["events"] = self._ledger.events(action_id)
+            return action
         except ActionLedgerError as exc:
+            raise self._public_error(exc) from exc
+
+    def capabilities(self) -> dict[str, Any]:
+        try:
+            policy = self._policy_provider()
+            capabilities = []
+            for capability in self._registry.catalogue():
+                capabilities.append(
+                    {**capability, "policy": policy.capability_policy(capability["operation"])}
+                )
+            return {"capabilities": capabilities, "kill_switch": policy.kill_switch}
+        except (ActionPolicyError, CapabilityError) as exc:
+            raise self._public_error(exc) from exc
+
+    def policy(self) -> dict[str, Any]:
+        try:
+            return self._policy_provider().public_dict()
+        except ActionPolicyError as exc:
+            raise self._public_error(exc) from exc
+
+    def validate_policy(self, value: Any) -> dict[str, Any]:
+        try:
+            policy = ActionPolicy.from_mapping(value)
+            configured = set(policy.public_dict()["operations"])
+            registered = set(self._registry.operations)
+            if configured != registered:
+                raise AgentActionError(
+                    "invalid_policy", "Action policy operations do not match the registry"
+                )
+            for operation in self._registry.operations:
+                capability = self._registry.require(operation)
+                operation_policy = policy.public_dict()["operations"][operation]
+                for target in operation_policy["targets"]:
+                    for raw_mode in operation_policy["targets"][target].values():
+                        mode = AuthorityMode(raw_mode)
+                        if mode in {
+                            AuthorityMode.SUPERVISED,
+                            AuthorityMode.AUTONOMOUS,
+                        }:
+                            raise AgentActionError(
+                                "invalid_policy",
+                                "Automatic authority requires the repair canary gate",
+                            )
+                        if mode != AuthorityMode.OBSERVE and mode not in capability.eligible_modes:
+                            raise AgentActionError(
+                                "invalid_policy",
+                                "Action policy grants an ineligible authority mode",
+                            )
+            return policy.public_dict()
+        except AgentActionError:
+            raise
+        except (ActionPolicyError, CapabilityError, ValueError) as exc:
             raise self._public_error(exc) from exc
 
     def list(self, *, limit: int = 50) -> dict[str, Any]:

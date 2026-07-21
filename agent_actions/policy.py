@@ -55,10 +55,12 @@ class ActionPolicy:
         kill_switch: bool,
         proposal_ttl_seconds: int,
         operations: Mapping[str, OperationActionPolicy],
+        configuration: Mapping[str, Any],
     ) -> None:
         self.kill_switch = kill_switch
         self.proposal_ttl_seconds = proposal_ttl_seconds
         self._operations = dict(operations)
+        self._configuration = dict(configuration)
 
     @classmethod
     def from_file(cls, path: str | Path) -> ActionPolicy:
@@ -92,6 +94,7 @@ class ActionPolicy:
             raise ActionPolicyError("invalid_policy", "Too many action operations")
 
         normalized: dict[str, OperationActionPolicy] = {}
+        configuration_operations: dict[str, Any] = {}
         for operation, raw in operations.items():
             if not isinstance(operation, str) or not CAPABILITY_ID_RE.fullmatch(operation):
                 raise ActionPolicyError("invalid_policy", "Action operation is invalid")
@@ -103,6 +106,17 @@ class ActionPolicy:
                 raise ActionPolicyError("invalid_policy", "Action enabled flag is invalid")
             approvers = cls._approvers(raw.get("approvers", []))
             targets = cls._targets(raw.get("targets", {}))
+            configuration_operations[operation] = {
+                "enabled": enabled,
+                "approvers": list(approvers),
+                "targets": {
+                    target: {
+                        trigger.value: target_policy.mode_for(trigger).value
+                        for trigger in TriggerType
+                    }
+                    for target, target_policy in targets.items()
+                },
+            }
             if enabled:
                 normalized[operation] = OperationActionPolicy(
                     approvers=approvers,
@@ -112,6 +126,12 @@ class ActionPolicy:
             kill_switch=kill_switch,
             proposal_ttl_seconds=ttl,
             operations=normalized,
+            configuration={
+                "schema_version": "1",
+                "kill_switch": kill_switch,
+                "defaults": {"proposal_ttl_seconds": ttl},
+                "operations": configuration_operations,
+            },
         )
 
     def mode_for(
@@ -137,6 +157,18 @@ class ActionPolicy:
     @property
     def operations(self) -> tuple[str, ...]:
         return tuple(sorted(self._operations))
+
+    def public_dict(self) -> dict[str, Any]:
+        return json.loads(json.dumps(self._configuration))
+
+    def capability_policy(self, operation: str) -> dict[str, Any]:
+        raw = self._configuration["operations"].get(operation)
+        if raw is None:
+            return {"enabled": False, "targets": {}}
+        return {
+            "enabled": raw["enabled"],
+            "targets": json.loads(json.dumps(raw["targets"])),
+        }
 
     @staticmethod
     def _reject_unknown(value: Mapping, allowed: frozenset[str], label: str) -> None:

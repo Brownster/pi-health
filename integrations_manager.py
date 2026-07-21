@@ -894,6 +894,23 @@ def agent_actions():
 
 
 @integrations_manager.route(
+    "/api/integrations/agents/actions/capabilities", methods=["GET"]
+)
+@login_required
+def agent_action_capabilities():
+    denied = _require_action_permission("capability.view")
+    if denied is not None:
+        return denied
+    try:
+        result = _agent_action_service().capabilities()
+    except AgentActionError as exc:
+        return _action_error(exc)
+    response = jsonify(result)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@integrations_manager.route(
     "/api/integrations/agents/actions/<action_id>", methods=["GET"]
 )
 @login_required
@@ -960,6 +977,68 @@ def reject_agent_action(action_id):
     except AgentActionError as exc:
         return _action_error(exc)
     response = jsonify({"action": action})
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@integrations_manager.route(
+    "/api/integrations/agents/actions/<action_id>/cancel", methods=["POST"]
+)
+@login_required
+@csrf_protect
+def cancel_agent_action(action_id):
+    denied = _require_action_permission("extensions.admin")
+    if denied is not None:
+        return denied
+    if request.get_json(silent=True) not in ({}, None):
+        return _lifecycle_error(
+            "invalid_action_cancellation",
+            "Action cancellation accepts no parameters.",
+            400,
+        )
+    try:
+        action = _agent_action_service().cancel(action_id)
+    except AgentActionError as exc:
+        return _action_error(exc)
+    response = jsonify({"action": action})
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@integrations_manager.route(
+    "/api/integrations/agents/automation/policy", methods=["GET", "PUT"]
+)
+@login_required
+def agent_automation_policy():
+    denied = _require_action_permission("extensions.admin")
+    if denied is not None:
+        return denied
+    try:
+        if request.method == "GET":
+            policy = _agent_action_service().policy()
+        else:
+            values = request.get_json(silent=True)
+            if not isinstance(values, dict):
+                return _lifecycle_error(
+                    "invalid_policy", "Action policy must be an object.", 400
+                )
+            policy = _agent_action_service().validate_policy(values)
+            helper = current_app.extensions.get("helper")
+            result = helper.call("agent_action_policy_write", {"policy": policy})
+            if not isinstance(result, dict) or not result.get("success"):
+                return _lifecycle_error(
+                    "policy_write_failed",
+                    "Action policy could not be saved.",
+                    503,
+                )
+    except AgentActionError as exc:
+        return _action_error(exc)
+    except Exception:
+        logger.error("Agent action policy update failed")
+        return _lifecycle_error(
+            "policy_write_failed", "Action policy could not be saved.", 503
+        )
+    response = jsonify({"policy": policy})
     response.headers["Cache-Control"] = "no-store"
     return response
 

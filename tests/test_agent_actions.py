@@ -253,6 +253,16 @@ def test_ledger_approval_is_single_transition_and_payload_bound(tmp_path):
     assert replay.value.code == "invalid_state"
 
 
+def test_ledger_can_cancel_only_before_execution(tmp_path):
+    ledger = ActionLedger(tmp_path / "actions.sqlite3")
+    ledger.create(_new_action())
+    cancelled = ledger.cancel("action-1", cancelled_at=NOW.isoformat())
+    assert cancelled.state == ActionState.CANCELLED
+    with pytest.raises(ActionLedgerError) as repeated:
+        ledger.cancel("action-1", cancelled_at=NOW.isoformat())
+    assert repeated.value.code == "invalid_state"
+
+
 def test_ledger_rejects_symlink_store(tmp_path):
     target = tmp_path / "real.sqlite3"
     target.touch()
@@ -365,6 +375,69 @@ def test_automatic_mode_still_obeys_kill_switch(tmp_path):
     with pytest.raises(AgentActionError) as disabled:
         _propose(service)
     assert disabled.value.code == "kill_switch"
+
+
+def test_service_exposes_server_owned_capabilities_and_policy(tmp_path):
+    service = _service(tmp_path, {"generation": 1})
+    catalogue = service.capabilities()
+    assert catalogue["kill_switch"] is False
+    assert catalogue["capabilities"] == [
+        {
+            "operation": "container.restart",
+            "version": "1",
+            "risk": "R1",
+            "eligible_modes": ["propose", "approval", "supervised", "autonomous"],
+            "policy": {
+                "enabled": True,
+                "targets": {
+                    "jellyfin": {
+                        "interactive": "approval",
+                        "scheduled": "observe",
+                        "event": "observe",
+                    }
+                },
+            },
+        }
+    ]
+    assert service.policy()["operations"]["container.restart"]["approvers"] == [
+        "mattermost:user-1",
+        "local:admin",
+    ]
+
+
+def test_service_cancels_authorised_action_and_records_event(tmp_path):
+    state = {"generation": 1}
+    ledger, registry, policy = _authorised_action(tmp_path, state)
+    service = AgentActionService(
+        registry=registry,
+        policy_provider=lambda: policy,
+        ledger=ledger,
+        clock=lambda: NOW,
+    )
+    cancelled = service.cancel("action-1")
+    assert cancelled["state"] == "cancelled"
+    assert service.get("action-1")["events"] == [
+        {
+            "phase": "cancelled",
+            "created_at": NOW.isoformat(),
+            "details": {"code": "cancelled_by_administrator"},
+        }
+    ]
+
+
+def test_policy_update_requires_exact_registry_and_blocks_automatic_modes(tmp_path):
+    service = _service(tmp_path, {"generation": 1})
+    valid = _policy().public_dict()
+    assert service.validate_policy(valid) == valid
+    invalid = _policy(interactive="supervised").public_dict()
+    with pytest.raises(AgentActionError) as gated:
+        service.validate_policy(invalid)
+    assert gated.value.code == "invalid_policy"
+    invalid["operations"]["unknown.operation"] = invalid["operations"].pop(
+        "container.restart"
+    )
+    with pytest.raises(AgentActionError):
+        service.validate_policy(invalid)
 
 
 # -- isolated execution ------------------------------------------------------

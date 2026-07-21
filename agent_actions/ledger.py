@@ -316,6 +316,18 @@ class ActionLedger:
             values={"terminal_code": f"rejected:{rejected_at}"},
         )
 
+    def cancel(self, action_id: str, *, cancelled_at: str) -> ActionRecord:
+        return self._transition(
+            action_id,
+            expected={
+                ActionState.PROPOSED,
+                ActionState.AWAITING_APPROVAL,
+                ActionState.AUTHORISED,
+            },
+            state=ActionState.CANCELLED,
+            values={"terminal_code": f"cancelled:{cancelled_at}"},
+        )
+
     def invalidate_precondition(self, action_id: str) -> ActionRecord:
         return self._transition(
             action_id,
