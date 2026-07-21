@@ -671,7 +671,7 @@ export function AgentsIntegrationCard({
       </Card>
 
       {operationMode ? (
-        <ModalOverlay onClose={operationRunning ? () => undefined : closeOperation}>
+        <ModalOverlay onClose={operationRunning ? () => undefined : closeOperation} restoreFocus={() => document.getElementById("ai-agents")?.focus()}>
           <Card aria-labelledby="agent-operation-title" aria-modal="true" className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden" role="dialog">
             <CardHeader className="flex flex-row items-start justify-between border-b border-border">
               <div><CardTitle id="agent-operation-title">{operationMode === "install" ? "Set up AI Agents" : finishSetup ? "Finish AI Agents setup" : "Repair AI Agents"}</CardTitle><CardDescription>{operationMode === "install" ? "Connect @limeos to Mattermost with Claude Code and read-only host access." : finishSetup ? "Create the missing Mattermost bot configuration and start the assistant." : "Reinstall the provider and isolated runtime while preserving agent data."}</CardDescription></div>
@@ -701,7 +701,7 @@ export function AgentsIntegrationCard({
       ) : null}
 
       {authOpen ? (
-        <ModalOverlay onClose={() => void closeAuth()}>
+        <ModalOverlay onClose={() => void closeAuth()} restoreFocus={() => document.getElementById("ai-agents")?.focus()}>
           <Card aria-labelledby="claude-auth-title" aria-modal="true" className="flex max-h-[92vh] w-full max-w-xl flex-col overflow-hidden" role="dialog">
             <CardHeader className="flex flex-row items-start justify-between border-b border-border"><div><CardTitle id="claude-auth-title">Connect Claude Code</CardTitle><CardDescription>Authorize the LimeOS assistant with your Claude subscription.</CardDescription></div><Button aria-label="Close Claude authentication" className="w-11 px-0" onClick={() => void closeAuth()} variant="ghost"><X className="h-4 w-4" /></Button></CardHeader>
             <CardContent className="space-y-4 overflow-auto p-4 sm:p-6">

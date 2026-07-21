@@ -52,6 +52,7 @@ import {
   lifecycleNavigationTarget,
   type IntegrationBlockedAction,
 } from "@/lib/integration-lifecycle-contract";
+import { handleTabKeyDown } from "@/lib/tab-keyboard";
 import { cn } from "@/lib/utils";
 
 const FIELD_CLASS =
@@ -454,19 +455,23 @@ export function IntegrationsPage() {
           </CardContent>
         ) : status?.installed ? (
           <>
-            <div className="flex overflow-x-auto border-b border-border px-4" role="tablist">
+            <div aria-label="Mattermost views" className="flex overflow-x-auto border-b border-border px-4" role="tablist">
               {(["overview", "policy"] as Tab[]).map((item) => (
                 <button
+                  aria-controls={`mattermost-panel-${item}`}
                   aria-selected={tab === item}
                   className={cn("min-h-11 border-b-2 px-4 font-mono text-xs capitalize", tab === item ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")}
+                  id={`mattermost-tab-${item}`}
                   key={item}
                   onClick={() => setTab(item)}
+                  onKeyDown={handleTabKeyDown}
                   role="tab"
+                  tabIndex={tab === item ? 0 : -1}
                   type="button"
                 >{item === "policy" ? "Alert policy" : item}</button>
               ))}
             </div>
-            <CardContent className="p-4 sm:p-6">
+            <CardContent aria-labelledby={`mattermost-tab-${tab}`} className="p-4 sm:p-6" id={`mattermost-panel-${tab}`} role="tabpanel">
               {tab === "overview" ? (
                 <div className="space-y-5">
                   {status.state === "disabled" ? (
@@ -552,7 +557,7 @@ export function IntegrationsPage() {
 
       <PackageUpdatesCard refreshKey={integrationRefreshKey} />
 
-      {setupOpen ? <ModalOverlay onClose={installing ? () => undefined : () => setSetupOpen(false)}><Card aria-labelledby="mattermost-setup-title" aria-modal="true" className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden" role="dialog"><CardHeader className="flex flex-row items-start justify-between border-b border-border"><div><CardTitle id="mattermost-setup-title">Set up Mattermost</CardTitle><CardDescription>Install chat and connect LimeOS alerts in one workflow.</CardDescription></div><Button aria-label="Close setup" className="w-11 px-0" disabled={installing} onClick={() => setSetupOpen(false)} variant="ghost"><X className="h-4 w-4" /></Button></CardHeader><CardContent className="space-y-4 overflow-auto p-4 sm:p-6">
+      {setupOpen ? <ModalOverlay onClose={installing ? () => undefined : () => setSetupOpen(false)} restoreFocus={() => document.getElementById("mattermost-integration")?.focus()}><Card aria-labelledby="mattermost-setup-title" aria-modal="true" className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden" role="dialog"><CardHeader className="flex flex-row items-start justify-between border-b border-border"><div><CardTitle id="mattermost-setup-title">Set up Mattermost</CardTitle><CardDescription>Install chat and connect LimeOS alerts in one workflow.</CardDescription></div><Button aria-label="Close setup" className="w-11 px-0" disabled={installing} onClick={() => setSetupOpen(false)} variant="ghost"><X className="h-4 w-4" /></Button></CardHeader><CardContent className="space-y-4 overflow-auto p-4 sm:p-6">
         {installing || installLines.length ? <div className="space-y-3"><div className={cn("flex items-center gap-2 text-sm", error ? "text-danger" : "text-info")}>{installing ? <Loader2 className="h-4 w-4 animate-spin" /> : error ? <TriangleAlert className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}{installing ? "Installing Mattermost" : error ? "Setup failed" : "Setup finished"}</div><pre className="max-h-72 overflow-auto rounded-md border border-border bg-black/30 p-3 font-mono text-xs leading-5 text-muted-foreground" data-mattermost-install-log>{installLines.join("\n")}</pre>{!installing ? <Button onClick={() => setSetupOpen(false)}>Close</Button> : null}</div> : <>
           <div className="grid gap-3 sm:grid-cols-2"><label className="space-y-1 sm:col-span-2"><span className="text-xs text-muted-foreground">Mattermost URL</span><input className={FIELD_CLASS} onChange={(event) => setSetup({ ...setup, site_url: event.target.value })} value={setup.site_url} /></label><label className="space-y-1"><span className="text-xs text-muted-foreground">Admin username</span><input autoComplete="username" className={FIELD_CLASS} onChange={(event) => setSetup({ ...setup, admin_username: event.target.value })} value={setup.admin_username} /></label><label className="space-y-1"><span className="text-xs text-muted-foreground">Admin email</span><input autoComplete="email" className={FIELD_CLASS} onChange={(event) => setSetup({ ...setup, admin_email: event.target.value })} type="email" value={setup.admin_email} /></label><label className="space-y-1 sm:col-span-2"><span className="text-xs text-muted-foreground">Admin password</span><input autoComplete="new-password" className={FIELD_CLASS} minLength={10} onChange={(event) => setSetup({ ...setup, admin_password: event.target.value })} type="password" value={setup.admin_password} /></label></div>
           <button className="flex min-h-11 items-center gap-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setAdvanced((value) => !value)} type="button"><ServerCog className="h-4 w-4" />Advanced settings</button>
@@ -602,7 +607,7 @@ export function IntegrationsPage() {
         </IntegrationLifecycleDialog>
       ) : null}
 
-      {silenceDraft ? <ModalOverlay onClose={() => setSilenceDraft(null)}><Card aria-modal="true" className="w-full max-w-md" role="dialog"><CardHeader><CardTitle>Silence {silenceDraft.resource.key}</CardTitle><CardDescription>Alerts remain visible in LimeOS while Mattermost delivery is paused.</CardDescription></CardHeader><CardContent className="space-y-3"><label className="block space-y-1"><span className="text-xs text-muted-foreground">Duration</span><select className={FIELD_CLASS} onChange={(event) => setSilenceDraft({ ...silenceDraft, duration: event.target.value as SilenceDraft["duration"] })} value={silenceDraft.duration}><option value="1h">1 hour</option><option value="24h">24 hours</option><option value="permanent">Until manually removed</option></select></label><label className="block space-y-1"><span className="text-xs text-muted-foreground">Reason (optional)</span><input className={FIELD_CLASS} maxLength={200} onChange={(event) => setSilenceDraft({ ...silenceDraft, reason: event.target.value })} value={silenceDraft.reason} /></label><div className="flex justify-end gap-2"><Button onClick={() => setSilenceDraft(null)} variant="ghost">Cancel</Button><Button className="gap-2" onClick={confirmSilence} variant="warning"><BellRing className="h-4 w-4" />Silence</Button></div></CardContent></Card></ModalOverlay> : null}
+      {silenceDraft ? <ModalOverlay onClose={() => setSilenceDraft(null)}><Card aria-labelledby="mattermost-silence-title" aria-modal="true" className="w-full max-w-md" role="dialog"><CardHeader><CardTitle id="mattermost-silence-title">Silence {silenceDraft.resource.key}</CardTitle><CardDescription>Alerts remain visible in LimeOS while Mattermost delivery is paused.</CardDescription></CardHeader><CardContent className="space-y-3"><label className="block space-y-1"><span className="text-xs text-muted-foreground">Duration</span><select className={FIELD_CLASS} onChange={(event) => setSilenceDraft({ ...silenceDraft, duration: event.target.value as SilenceDraft["duration"] })} value={silenceDraft.duration}><option value="1h">1 hour</option><option value="24h">24 hours</option><option value="permanent">Until manually removed</option></select></label><label className="block space-y-1"><span className="text-xs text-muted-foreground">Reason (optional)</span><input className={FIELD_CLASS} maxLength={200} onChange={(event) => setSilenceDraft({ ...silenceDraft, reason: event.target.value })} value={silenceDraft.reason} /></label><div className="flex justify-end gap-2"><Button onClick={() => setSilenceDraft(null)} variant="ghost">Cancel</Button><Button className="gap-2" onClick={confirmSilence} variant="warning"><BellRing className="h-4 w-4" />Silence</Button></div></CardContent></Card></ModalOverlay> : null}
     </section>
   );
 }

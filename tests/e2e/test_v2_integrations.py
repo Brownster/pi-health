@@ -57,7 +57,14 @@ def test_integrations_policy_and_silence(
     page = profiled_page
     _open(page, v2_server["base_url"], v2_login, install_v2_integrations_api_mocks)
 
-    page.get_by_role("tab", name="Alert policy").click()
+    mattermost = page.locator("[data-mattermost-integration]")
+    overview_tab = mattermost.get_by_role("tab", name="overview")
+    overview_tab.focus()
+    overview_tab.press("ArrowRight")
+    expect(mattermost.get_by_role("tab", name="Alert policy")).to_be_focused()
+    expect(mattermost.get_by_role("tabpanel")).to_have_attribute(
+        "aria-labelledby", "mattermost-tab-policy"
+    )
     expect(page.get_by_text("container:jellyfin").or_(page.get_by_text("jellyfin", exact=True))).to_be_visible()
     page.get_by_role("button", name="Silence container:jellyfin").click()
     expect(page.get_by_role("heading", name="Silence container:jellyfin")).to_be_visible()
@@ -269,6 +276,216 @@ def test_mattermost_cleanup_required_can_resume_after_refresh(
     expect(dialog.get_by_role("status")).to_contain_text("Operation completed")
     dialog.get_by_role("button", name="Close", exact=True).click()
     expect(mattermost.get_by_text("disabled", exact=True).first).to_be_visible()
+
+
+def test_mattermost_stale_action_is_not_retried_and_refreshes_both_cards(
+    page: Page,
+    v2_server,
+    v2_login,
+    install_v2_integrations_api_mocks,
+):
+    requests = []
+    page.on("request", lambda request: requests.append(request))
+    _open(
+        page,
+        v2_server["base_url"],
+        v2_login,
+        install_v2_integrations_api_mocks,
+        agent_installed=False,
+        mattermost_disable_stale_once=True,
+    )
+    initial_mattermost_reads = len([
+        request for request in requests
+        if request.method == "GET" and request.url.endswith("/api/integrations/mattermost")
+    ])
+    initial_agent_reads = len([
+        request for request in requests
+        if request.method == "GET" and request.url.endswith("/api/integrations/agents")
+    ])
+
+    trigger = page.locator("[data-mattermost-lifecycle-menu-trigger='mattermost']")
+    trigger.focus()
+    trigger.press("ArrowDown")
+    menu = page.locator("[data-mattermost-lifecycle-menu='mattermost']")
+    expect(menu.get_by_role("menuitem", name="Disable", exact=True)).to_be_focused()
+    menu.get_by_role("menuitem", name="Disable", exact=True).press("Enter")
+    dialog = page.get_by_role("dialog", name="Disable Mattermost?")
+    dialog.get_by_role("button", name="Disable Mattermost").click()
+
+    expect(dialog.get_by_role("alert")).to_contain_text(
+        "Mattermost state changed. Review the current actions."
+    )
+    expect(dialog.get_by_role("button", name="Retry", exact=True)).to_have_count(0)
+    expect(
+        page.locator("[data-mattermost-integration]").get_by_text("disabled", exact=True).first
+    ).to_be_visible()
+    assert len([
+        request for request in requests
+        if request.method == "GET" and request.url.endswith("/api/integrations/mattermost")
+    ]) >= initial_mattermost_reads + 1
+    assert len([
+        request for request in requests
+        if request.method == "GET" and request.url.endswith("/api/integrations/agents")
+    ]) >= initial_agent_reads + 1
+    dialog.get_by_role("button", name="Close", exact=True).click()
+    expect(trigger).to_be_focused()
+
+
+def test_mattermost_uninstall_failure_requires_fresh_confirmation_for_retry(
+    page: Page,
+    v2_server,
+    v2_login,
+    install_v2_integrations_api_mocks,
+):
+    requests = []
+    page.on("request", lambda request: requests.append(request))
+    _open(
+        page,
+        v2_server["base_url"],
+        v2_login,
+        install_v2_integrations_api_mocks,
+        agent_installed=False,
+        mattermost_uninstall_fails_once=True,
+    )
+
+    _, menu = _open_mattermost_manage_menu(page)
+    menu.get_by_role("menuitem", name="Uninstall", exact=True).click()
+    dialog = page.get_by_role("dialog", name="Uninstall Mattermost?")
+    dialog.locator("[data-lifecycle-confirmation]").fill("Mattermost")
+    dialog.locator("[data-lifecycle-confirm]").click()
+    expect(dialog.get_by_role("alert")).to_contain_text(
+        "Mattermost lifecycle operation failed"
+    )
+    expect(dialog.locator("[data-lifecycle-progress]")).to_contain_text(
+        "Removing Mattermost services"
+    )
+    expect(
+        page.locator("[data-mattermost-integration]").get_by_text(
+            "Cleanup needs attention", exact=True
+        )
+    ).to_be_visible()
+
+    dialog.get_by_role("button", name="Retry", exact=True).click()
+    retry = page.get_by_role("dialog", name="Retry Mattermost uninstall")
+    expect(retry.locator("[data-lifecycle-confirmation]")).to_have_value("")
+    retry.locator("[data-lifecycle-confirmation]").fill("Mattermost")
+    retry.locator("[data-lifecycle-confirm]").click()
+    expect(retry.get_by_role("status")).to_contain_text("Operation completed")
+    payloads = [
+        request.post_data_json for request in requests
+        if request.method == "POST" and request.url.endswith(
+            "/api/integrations/mattermost/uninstall"
+        )
+    ]
+    assert payloads == [
+        {"confirmation": "Mattermost"},
+        {"confirmation": "Mattermost"},
+    ]
+    retry.get_by_role("button", name="Close", exact=True).click()
+    expect(
+        page.locator("[data-mattermost-integration]").get_by_text(
+            "retained data", exact=True
+        )
+    ).to_be_visible()
+
+
+def test_mattermost_retained_data_reinstall_returns_to_connected(
+    page: Page,
+    v2_server,
+    v2_login,
+    install_v2_integrations_api_mocks,
+):
+    _open(
+        page,
+        v2_server["base_url"],
+        v2_login,
+        install_v2_integrations_api_mocks,
+        mattermost_retained_data=True,
+        agent_installed=False,
+    )
+    mattermost = page.locator("[data-mattermost-integration]")
+    mattermost.locator("[data-mattermost-retained-setup]").click()
+    setup = page.get_by_role("dialog", name="Set up Mattermost")
+    setup.get_by_label("Admin email").fill("admin@example.test")
+    setup.get_by_label("Admin password").fill("long-test-password")
+    setup.locator("[data-mattermost-install]").click()
+    expect(setup.locator("[data-mattermost-install-log]")).to_contain_text(
+        "Mattermost and LimeOS alerts are ready"
+    )
+    setup.get_by_role("button", name="Close", exact=True).click()
+    expect(mattermost.get_by_text("connected", exact=True).first).to_be_visible()
+    expect(mattermost.get_by_role("button", name="Send test alert")).to_be_visible()
+    expect(mattermost).to_be_focused()
+
+
+def test_mattermost_setup_is_hidden_from_viewers_when_server_allows_setup(
+    page: Page,
+    v2_server,
+    v2_login,
+    install_v2_integrations_api_mocks,
+):
+    _open(
+        page,
+        v2_server["base_url"],
+        v2_login,
+        install_v2_integrations_api_mocks,
+        installed=False,
+        agent_installed=False,
+    )
+    expect(page.locator("[data-mattermost-setup]")).to_be_visible()
+    page.route(
+        "**/api/auth/check",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body='{"authenticated":true,"username":"viewer","role":"viewer","permissions":["capability.view"],"csrf_token":"viewer-token"}',
+        ),
+    )
+    page.reload()
+    expect(page.locator("[data-mattermost-setup]")).to_have_count(0)
+    expect(page.locator("[data-agent-setup]")).to_have_count(0)
+
+
+def test_integration_lifecycle_interactions_emit_no_browser_errors(
+    page: Page,
+    v2_server,
+    v2_login,
+    install_v2_integrations_api_mocks,
+):
+    console_errors = []
+    page_errors = []
+    page.on(
+        "console",
+        lambda message: console_errors.append(message.text)
+        if message.type == "error"
+        else None,
+    )
+    page.on("pageerror", lambda error: page_errors.append(str(error)))
+    _open(page, v2_server["base_url"], v2_login, install_v2_integrations_api_mocks)
+    expect(page.get_by_role("heading", name="Package updates")).to_have_count(0)
+    console_errors.clear()
+
+    _, menu = _open_mattermost_manage_menu(page)
+    menu.get_by_role("menuitem", name="Disable (AI Agents first)").click()
+    page.locator("[data-mattermost-go-to-agents]").click()
+    expect(page.locator("#ai-agents")).to_be_focused()
+
+    trigger, menu = _open_agent_manage_menu(page)
+    menu.get_by_role("menuitem", name="Disable", exact=True).click()
+    dialog = page.get_by_role("dialog", name="Disable AI Agents?")
+    dialog.get_by_role("button", name="Cancel", exact=True).click()
+    expect(trigger).to_be_focused()
+
+    page.locator("[data-mattermost-integration]").get_by_role(
+        "tab", name="Alert policy"
+    ).click()
+    page.get_by_role("button", name="Silence container:jellyfin").click()
+    page.get_by_role("dialog", name="Silence container:jellyfin").get_by_role(
+        "button", name="Cancel", exact=True
+    ).click()
+
+    assert page_errors == []
+    assert console_errors == []
 
 
 def test_agent_integration_views_are_separate_and_operational(

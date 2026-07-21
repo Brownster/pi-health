@@ -1749,6 +1749,7 @@ def install_v2_integrations_api_mocks():
         mattermost_retained_data: bool = False,
         mattermost_cleanup_action: str | None = None,
         mattermost_disable_fails_once: bool = False,
+        mattermost_disable_stale_once: bool = False,
         mattermost_uninstall_fails_once: bool = False,
         mattermost_purge_enabled: bool = False,
     ) -> None:
@@ -1886,10 +1887,10 @@ def install_v2_integrations_api_mocks():
             if path == "/api/integrations/agents" and method == "GET":
                 if state["agent_cleanup_action"]:
                     agent_state = "cleanup_required"
-                elif not state["installed"]:
-                    agent_state = "setup_required"
                 elif not state["agent_installed"]:
                     agent_state = "not_installed"
+                elif not state["installed"]:
+                    agent_state = "setup_required"
                 elif not state["agent_enabled"]:
                     agent_state = "disabled"
                 elif not state["agent_authenticated"] or not state["agent_configured"]:
@@ -2252,6 +2253,29 @@ def install_v2_integrations_api_mocks():
             if path == "/api/integrations/mattermost" and method == "GET":
                 route.fulfill(status=200, content_type="application/json", body=json.dumps(_payload()))
                 return
+            if path == "/api/integrations/stack-notifications" and method == "GET":
+                route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps(
+                        {
+                            "enabled": False,
+                            "configured": False,
+                            "mode": "quiet",
+                            "source_default": "stack",
+                            "channel_name": None,
+                            "token": None,
+                        }
+                    ),
+                )
+                return
+            if path == "/api/integrations/packages/pending" and method == "GET":
+                route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps({"pending": [], "approvals": []}),
+                )
+                return
             if path == "/api/integrations/mattermost/policy" and method == "PUT":
                 state["policy"] = route.request.post_data_json
                 route.fulfill(
@@ -2269,6 +2293,22 @@ def install_v2_integrations_api_mocks():
                 return
             if path == "/api/integrations/mattermost/disable" and method == "POST":
                 state["mattermost_disable_attempts"] += 1
+                if (
+                    mattermost_disable_stale_once
+                    and state["mattermost_disable_attempts"] == 1
+                ):
+                    state["mattermost_disabled"] = True
+                    route.fulfill(
+                        status=409,
+                        content_type="application/json",
+                        body=json.dumps(
+                            {
+                                "code": "integration_action_unavailable",
+                                "error": "Mattermost state changed. Review the current actions.",
+                            }
+                        ),
+                    )
+                    return
                 route.fulfill(
                     status=202,
                     content_type="application/json",

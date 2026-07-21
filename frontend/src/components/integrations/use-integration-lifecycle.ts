@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 
+import { ApiError } from "@/lib/api";
 import { lifecycleWarnings, type IntegrationLifecycleWarning } from "@/lib/integration-lifecycle-contract";
 import type { OperationEvent } from "@/lib/operations";
 
@@ -11,6 +12,7 @@ export interface LifecycleDialogState {
   phase: LifecycleDialogPhase;
   lines: string[];
   error: string | null;
+  retryable: boolean;
   warnings: IntegrationLifecycleWarning[];
 }
 
@@ -19,8 +21,16 @@ const CLOSED_STATE: LifecycleDialogState = {
   phase: "confirm",
   lines: [],
   error: null,
+  retryable: false,
   warnings: [],
 };
+
+const NON_RETRYABLE_CODES = new Set([
+  "integration_action_unavailable",
+  "integration_lifecycle_forbidden",
+  "invalid_lifecycle_confirmation",
+  "invalid_lifecycle_parameters",
+]);
 
 function publicError(error: unknown): string {
   return error instanceof Error ? error.message : "Lifecycle operation failed";
@@ -53,6 +63,7 @@ export function useIntegrationLifecycle(onInvalidated: () => void) {
       phase: "running",
       lines: [],
       error: null,
+      retryable: false,
       warnings: [],
     }));
     try {
@@ -78,6 +89,7 @@ export function useIntegrationLifecycle(onInvalidated: () => void) {
         ...current,
         phase: "error",
         error: publicError(error),
+        retryable: !(error instanceof ApiError && NON_RETRYABLE_CODES.has(error.code)),
       }));
       return false;
     } finally {

@@ -174,7 +174,7 @@ export function IntegrationLifecycleDialog({
 
               {!running ? (
                 <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-4">
-                  {state.phase === "error" && onRetry ? (
+                  {state.phase === "error" && state.retryable && onRetry ? (
                     <Button className="gap-2" data-lifecycle-retry onClick={onRetry} variant="warning">
                       <RefreshCw aria-hidden="true" className="h-4 w-4" />Retry
                     </Button>

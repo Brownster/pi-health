@@ -347,6 +347,43 @@ def test_cleanup_retry_uses_recorded_action_and_fresh_agent_credentials_only():
     agents.stream_uninstall.assert_not_called()
 
 
+@pytest.mark.parametrize(
+    "action,path,values",
+    (
+        ("disable", "/api/integrations/mattermost/disable", {}),
+        ("enable", "/api/integrations/mattermost/enable", {}),
+        (
+            "uninstall",
+            "/api/integrations/mattermost/uninstall",
+            {"confirmation": "Mattermost"},
+        ),
+        (
+            "purge",
+            "/api/integrations/mattermost/purge",
+            {"confirmation": "Mattermost", "acknowledge_data_loss": True},
+        ),
+    ),
+)
+def test_mattermost_cleanup_retry_uses_only_the_recorded_fixed_action(
+    action, path, values
+):
+    mattermost = _service()
+    mattermost.status.return_value = {
+        "state": "cleanup_required",
+        "allowed_actions": ["retry_cleanup"],
+        "blocked_actions": [],
+        "cleanup_operation": {"action": action},
+    }
+    client, _agents, _mattermost = _client(mattermost=mattermost)
+
+    response = client.post(path, json=values)
+
+    assert response.status_code == 202
+    operation_id = response.get_json()["operation_id"]
+    mattermost.stream_retry_cleanup.assert_called_once_with(operation_id)
+    getattr(mattermost, f"stream_{action}").assert_not_called()
+
+
 def test_same_integration_operations_conflict_before_second_service_call():
     registry = OperationRegistry(thread_factory=DormantThread)
     client, agents, _mattermost = _client(registry=registry)
