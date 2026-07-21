@@ -255,7 +255,7 @@ Goal: complete both integration cards without duplicating lifecycle semantics.
 | ID | Work package | Depends on | Status | Deliverable |
 | --- | --- | --- | --- | --- |
 | IL-007 | AI Agents lifecycle UI | IL-004, IL-005, IL-006 | Complete (`53f6825`) | Streamed disable, enable/repair and uninstall; write-only Mattermost admin credentials; default-on Claude removal; remote warning result; cleanup retry; persistent not-installed card; and stable `#ai-agents` focus target |
-| IL-008 | Mattermost lifecycle UI | IL-002, IL-005, IL-006 | Planned | Dependency-blocked disable/uninstall, enable, retained-data uninstall/reinstall, release-gated purge confirmation, cleanup retry, persistent card, shared invalidation, and direct focus/link to AI Agents |
+| IL-008 | Mattermost lifecycle UI | IL-002, IL-005, IL-006 | Complete (`2be73c1`) | Dependency-blocked disable/uninstall, enable, retained-data uninstall/reinstall, release-gated purge confirmation, cleanup retry, persistent card, shared invalidation, and direct focus/link to AI Agents |
 
 Exit gate:
 
