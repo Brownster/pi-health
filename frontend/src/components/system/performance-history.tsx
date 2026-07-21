@@ -1,13 +1,4 @@
-import { useEffect, useState } from "react";
-import {
-  CartesianGrid,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+import { useEffect, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Activity, Database, Thermometer, TriangleAlert } from "lucide-react";
 
 import { Card, CardContent } from "@/components/ui/card";
@@ -32,6 +23,9 @@ const metricLabels: Record<HistoricalMetric, string> = {
   temperature_celsius: "Temperature",
   disk_percent: "Storage",
 };
+
+const chartWidth = 1000;
+const chartHeight = 190;
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error && error.message ? error.message : "Unable to load metric history";
@@ -63,6 +57,39 @@ function formatTooltipTime(value: string): string {
     minute: "2-digit",
     month: "short",
   }).format(date);
+}
+
+function buildChartPaths(
+  history: MetricHistoryResponse,
+  metric: HistoricalMetric,
+  domain: [number, number],
+): string[] {
+  const paths: string[] = [];
+  let commands: string[] = [];
+  const [minimum, maximum] = domain;
+  const span = Math.max(maximum - minimum, 1);
+
+  const flush = () => {
+    if (commands.length) {
+      paths.push(commands.join(" "));
+      commands = [];
+    }
+  };
+
+  history.points.forEach((point, index) => {
+    const value = point[metric];
+    if (value === null || !Number.isFinite(value)) {
+      flush();
+      return;
+    }
+
+    const x = history.points.length === 1 ? chartWidth / 2 : (index / (history.points.length - 1)) * chartWidth;
+    const boundedValue = Math.min(maximum, Math.max(minimum, value));
+    const y = chartHeight - ((boundedValue - minimum) / span) * chartHeight;
+    commands.push(`${commands.length ? "L" : "M"} ${x.toFixed(2)} ${y.toFixed(2)}`);
+  });
+  flush();
+  return paths;
 }
 
 function SummaryRow({
@@ -115,6 +142,25 @@ function HistoryChart({
   unit: "%" | "°C";
   domain: [number, number];
 }) {
+  const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  const activePoint = activeIndex === null ? null : history.points[activeIndex];
+  const activeRatio = activeIndex === null || history.points.length < 2 ? 0.5 : activeIndex / (history.points.length - 1);
+  const axisPoints = [history.points[0], history.points[Math.floor((history.points.length - 1) / 2)], history.points.at(-1)];
+  const midpoint = (domain[0] + domain[1]) / 2;
+
+  const selectNearestPoint = (event: ReactPointerEvent<SVGSVGElement>) => {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const ratio = Math.min(1, Math.max(0, (event.clientX - bounds.left) / Math.max(bounds.width, 1)));
+    setActiveIndex(Math.round(ratio * (history.points.length - 1)));
+  };
+
+  const moveActivePoint = (direction: -1 | 1) => {
+    setActiveIndex((current) => {
+      const base = current ?? history.points.length - 1;
+      return Math.min(history.points.length - 1, Math.max(0, base + direction));
+    });
+  };
+
   return (
     <Card className="min-w-0">
       <CardContent className="p-4 sm:p-5">
@@ -123,59 +169,97 @@ function HistoryChart({
           <h3 className="font-mono text-sm font-semibold text-foreground">{title}</h3>
         </div>
         <div className="mt-4 h-[240px] min-w-0" data-testid={`history-chart-${metrics[0].key}`}>
-          <ResponsiveContainer height="100%" minWidth={0} width="100%">
-            <LineChart data={history.points} margin={{ bottom: 0, left: -20, right: 8, top: 4 }}>
-              <CartesianGrid stroke="var(--divider)" strokeDasharray="3 3" vertical={false} />
-              <XAxis
-                axisLine={false}
-                dataKey="at"
-                minTickGap={36}
-                padding={{ left: 8, right: 8 }}
-                tick={{ fill: "var(--dim)", fontFamily: "var(--font-mono)", fontSize: 10 }}
-                tickFormatter={(value) => formatAxisTime(String(value), history.range)}
-                tickLine={false}
-              />
-              <YAxis
-                axisLine={false}
-                domain={domain}
-                tick={{ fill: "var(--dim)", fontFamily: "var(--font-mono)", fontSize: 10 }}
-                tickFormatter={(value) => `${value}${unit}`}
-                tickLine={false}
-                width={50}
-              />
-              <Tooltip
-                contentStyle={{
-                  background: "var(--card)",
-                  border: "1px solid var(--border)",
-                  borderRadius: "6px",
-                  color: "var(--foreground)",
-                  fontFamily: "var(--font-mono)",
-                  fontSize: "11px",
+          <div className="grid h-full min-w-0 grid-cols-[3rem_minmax(0,1fr)] grid-rows-[minmax(0,1fr)_1.5rem] gap-x-2">
+            <div aria-hidden="true" className="flex flex-col justify-between pb-1 text-right font-mono text-[10px] text-dim">
+              <span>{domain[1]}{unit}</span>
+              <span>{midpoint}{unit}</span>
+              <span>{domain[0]}{unit}</span>
+            </div>
+            <div className="relative min-h-0 min-w-0">
+              <svg
+                aria-label={`${title} trend chart. Use the left and right arrow keys to inspect samples.`}
+                className="h-full w-full rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                onBlur={() => setActiveIndex(null)}
+                onFocus={() => setActiveIndex(history.points.length - 1)}
+                onKeyDown={(event) => {
+                  if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+                    event.preventDefault();
+                    moveActivePoint(event.key === "ArrowLeft" ? -1 : 1);
+                  }
                 }}
-                cursor={{ stroke: "var(--dim)", strokeDasharray: "3 3" }}
-                formatter={(value, name) => [
-                  formatValue(typeof value === "number" ? value : Number(value), unit),
-                  metricLabels[String(name) as HistoricalMetric] ?? String(name),
-                ]}
-                isAnimationActive={false}
-                labelFormatter={(value) => formatTooltipTime(String(value))}
-              />
-              {metrics.map((metric) => (
-                <Line
-                  activeDot={{ r: 3, strokeWidth: 0 }}
-                  connectNulls={false}
-                  dataKey={metric.key}
-                  dot={false}
-                  isAnimationActive={false}
-                  key={metric.key}
-                  name={metric.key}
-                  stroke={metric.color}
-                  strokeWidth={2}
-                  type="monotone"
-                />
+                onPointerLeave={() => setActiveIndex(null)}
+                onPointerMove={selectNearestPoint}
+                preserveAspectRatio="none"
+                role="img"
+                tabIndex={0}
+                viewBox={`0 0 ${chartWidth} ${chartHeight}`}
+              >
+                {[0, 0.25, 0.5, 0.75, 1].map((ratio) => (
+                  <line
+                    key={ratio}
+                    stroke="var(--divider)"
+                    strokeDasharray="3 3"
+                    vectorEffect="non-scaling-stroke"
+                    x1="0"
+                    x2={chartWidth}
+                    y1={ratio * chartHeight}
+                    y2={ratio * chartHeight}
+                  />
+                ))}
+                {metrics.flatMap((metric) =>
+                  buildChartPaths(history, metric.key, domain).map((path, index) => (
+                    <path
+                      d={path}
+                      data-history-line={metric.key}
+                      fill="none"
+                      key={`${metric.key}-${index}`}
+                      stroke={metric.color}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      vectorEffect="non-scaling-stroke"
+                    />
+                  )),
+                )}
+                {activePoint ? (
+                  <line
+                    data-history-cursor="true"
+                    stroke="var(--dim)"
+                    strokeDasharray="3 3"
+                    vectorEffect="non-scaling-stroke"
+                    x1={activeRatio * chartWidth}
+                    x2={activeRatio * chartWidth}
+                    y1="0"
+                    y2={chartHeight}
+                  />
+                ) : null}
+              </svg>
+              {activePoint ? (
+                <div
+                  className="pointer-events-none absolute top-2 z-10 min-w-36 rounded-md border border-border bg-card p-2 font-mono text-[11px] text-foreground shadow-lg"
+                  data-history-tooltip="true"
+                  style={{
+                    left: `${activeRatio * 100}%`,
+                    transform: activeRatio < 0.25 ? "translateX(0)" : activeRatio > 0.75 ? "translateX(-100%)" : "translateX(-50%)",
+                  }}
+                >
+                  <p className="mb-1 text-dim">{formatTooltipTime(activePoint.at)}</p>
+                  {metrics.map((metric) => (
+                    <p className="flex items-center justify-between gap-3" key={metric.key}>
+                      <span>{metricLabels[metric.key]}</span>
+                      <span>{formatValue(activePoint[metric.key], unit)}</span>
+                    </p>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+            <div aria-hidden="true" />
+            <div aria-hidden="true" className="flex justify-between font-mono text-[10px] text-dim">
+              {axisPoints.map((point, index) => (
+                <span key={`${point?.at ?? "empty"}-${index}`}>{point ? formatAxisTime(point.at, history.range) : ""}</span>
               ))}
-            </LineChart>
-          </ResponsiveContainer>
+            </div>
+          </div>
         </div>
         <div className="mt-3 min-w-0" data-testid={`history-summary-${metrics[0].key}`}>
           <div>
