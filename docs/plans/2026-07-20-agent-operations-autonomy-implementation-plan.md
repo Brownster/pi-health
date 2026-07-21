@@ -13,18 +13,20 @@ Supersedes the delivery detail in: `Docs/LIMEOS_ASSISTANT_CAPABILITY_ROADMAP.md`
 The first deployable slice now includes immutable Mattermost actor IDs, code-owned
 capability contracts, deny-by-default action policy, a transactional action ledger,
 expiring single-use approvals, a separate actuator socket and identities, verified
-`container.start` and `container.restart`, authenticated action APIs, and private local
-finding drafts. Shipped defaults keep the kill switch on and both repair operations
-disabled.
+`container.start`, `container.restart`, and approval-only `stack.reconcile`, authenticated
+action APIs, and private local finding drafts. Shipped defaults keep the kill switch on
+and every repair operation disabled.
 
 AO-005 now has capability, policy, cancellation, approval, rejection, detail, history,
 and listing APIs. The AI Agents browser card now provides action review and approval,
 private finding review and editing, and an administrator policy editor for exact target
 allowlists, approvers, proposal expiry, authority modes, and the kill switch. Mattermost
 now renders exact proposals and uses restart-safe approve/reject reactions bound to the
-immutable reacting user and originating channel. AO-006 currently covers only container
-start and restart. Scheduling, installation, configuration, optimisation, GitHub
-publication, and agent-authored pull requests remain later work packages.
+immutable reacting user and originating channel. AO-006 now covers container start and
+restart plus existing-definition stack reconciliation. Extension/integration repair,
+package reconciliation, job retry, scheduling, installation, configuration,
+optimisation, GitHub publication, and agent-authored pull requests remain later work
+packages.
 
 ## Goal
 

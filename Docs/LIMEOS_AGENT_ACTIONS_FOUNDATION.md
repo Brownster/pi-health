@@ -8,7 +8,7 @@ Status: Implemented with all mutations disabled by default
 
 The assistant can diagnose the host, create exact repair proposals, and draft private
 bug or feature findings. Only the isolated actuator can change Docker state. The first
-write capabilities are `container.start` and `container.restart`.
+write capabilities are `container.start`, `container.restart`, and `stack.reconcile`.
 
 The release does not grant the model a shell, Docker socket, helper socket, arbitrary
 filesystem access, GitHub credential, or actuator-socket access. It does not publish
@@ -24,8 +24,11 @@ precondition hash, expiry, and policy decision.
 The `limeops-action-worker` forwards only an authorised action ID. The
 `limeops-actuatord` process reloads policy and rechecks the kill switch, contract
 version, target, payload hash, approval, expiry, and live precondition before it calls
-`ContainerOperationsService.control`. It then checks container state and health. A
-restart must also produce a new start timestamp.
+`ContainerOperationsService.control` or the fixed existing-stack reconcile path in
+`StackOperationsService`. It then checks container or Compose service state and health.
+A container restart must also produce a new start timestamp. Stack reconciliation
+succeeds only when the Compose definition is unchanged, every declared service is
+running, and no resulting container is unhealthy.
 
 The service boundary uses these paths:
 
@@ -45,7 +48,7 @@ inaccessible.
 
 ## Default State
 
-The shipped action policy sets `kill_switch` to `true`. Both registered operations are
+The shipped action policy sets `kill_switch` to `true`. All registered operations are
 disabled and have empty target maps. Installation or upgrade therefore changes no host
 state until an administrator edits the action policy.
 
@@ -85,6 +88,11 @@ mode:
           "event": "observe"
         }
       }
+    },
+    "stack.reconcile": {
+      "enabled": false,
+      "approvers": [],
+      "targets": {}
     }
   }
 }
@@ -130,6 +138,16 @@ Treat `succeeded` as the only successful terminal state. `execution_failed`,
 `verification_failed`, `precondition_changed`, `expired`, and `rejected` require review.
 The initial container actions have no safe automatic rollback because container stop is
 outside the allowlist.
+
+`stack.reconcile` is an R2 approval-only operation. It accepts only an exact existing
+stack name and always calls Compose `up -d --remove-orphans` against the stack's current
+managed file. It cannot accept Compose text, environment values, service names, or extra
+arguments. Its proposal warns that services may be recreated and that same-project
+orphans are removed. The actuator bounds Compose execution to 60 seconds and health
+verification to roughly 10 seconds. Canary it only on a non-critical stack after
+recording its declared services and current health. A partial, missing, unhealthy, or
+changed-definition result fails verification and escalates; LimeOS does not attempt an
+unsafe automatic rollback that would require stopping services.
 
 When a Mattermost turn creates a proposal, the listener posts a separate bounded card in
 the originating thread with the operation, exact target, risk, reason, expected impact,
@@ -188,8 +206,8 @@ agent audit logs for incident review.
 
 ## Current Limits
 
-This slice completes the action foundation and the first two repair adapters. It does
-not yet include stack or integration repair, report-only schedules, maturity promotion,
-cooldowns, disruption budgets, installation, configuration, review experiments,
-optimisation, or GitHub publication. Those features remain gated by the accepted
-implementation plan and target-Pi canary evidence.
+This slice completes the action foundation and the first three repair adapters. It does
+not yet include extension or integration repair, package reconciliation, job retry,
+report-only schedules, maturity promotion, cooldowns, disruption budgets, installation,
+configuration, review experiments, optimisation, or GitHub publication. Those features
+remain gated by the accepted implementation plan and target-Pi canary evidence.
