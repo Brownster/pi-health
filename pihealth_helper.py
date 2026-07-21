@@ -34,6 +34,7 @@ import urllib.error
 import shlex
 from helper_templates import (
     cron_to_oncalendar,
+    render_package_reconcile_service,
     render_package_reconcile_schedule,
     render_snapraid_schedule,
     render_startup_files,
@@ -4449,30 +4450,8 @@ def cmd_packages_approve(params):
     return {'success': True, 'approval': asdict(approval)}
 
 
-def cmd_packages_reconcile(params):
-    """Reconcile installed packages to the shipped manifest. Accepts only {mode}, where
-    mode is 'check' (read-only report) or 'apply' (enforce the manifest). Package names
-    and versions come only from the validated manifest, never from the caller."""
-    if not isinstance(params, dict) or set(params) - {'mode'}:
-        return {'success': False, 'error': 'packages.reconcile accepts only a mode'}
-    mode = params.get('mode', 'check')
-    if mode not in {'check', 'apply'}:
-        return {'success': False, 'error': 'mode must be check or apply'}
-    try:
-        from limeos_packages import (
-            apply_approvals,
-            check_packages,
-            compliance_report,
-            load_manifest,
-            plan_actions,
-        )
-        # Overlay admin-approved per-host pin bumps so reconcile enforces the approved
-        # version (the committed manifest stays the fleet default).
-        specs = _managed_package_specs(
-            apply_approvals(load_manifest(), _load_package_approvals())
-        )
-    except Exception:
-        return {'success': False, 'error': 'Unable to read the package manifest'}
+def _reconcile_package_specs(specs, mode):
+    from limeos_packages import check_packages, compliance_report, plan_actions
 
     def dpkg_version(spec):
         if spec.manager != 'apt':
@@ -4511,7 +4490,43 @@ def cmd_packages_reconcile(params):
     return {'success': not failed, 'mode': 'apply', 'applied': applied, 'failed': failed, **report}
 
 
+def cmd_packages_reconcile(params):
+    """Reconcile installed packages to the shipped manifest. Accepts only {mode}, where
+    mode is 'check' (read-only report) or 'apply' (enforce the manifest). Package names
+    and versions come only from the validated manifest, never from the caller."""
+    if not isinstance(params, dict) or set(params) - {'mode'}:
+        return {'success': False, 'error': 'packages.reconcile accepts only a mode'}
+    mode = params.get('mode', 'check')
+    if mode not in {'check', 'apply'}:
+        return {'success': False, 'error': 'mode must be check or apply'}
+    try:
+        from limeos_packages import apply_approvals, load_manifest
+
+        # Overlay admin-approved per-host pin bumps so reconcile enforces the approved
+        # version (the committed manifest stays the fleet default).
+        specs = _managed_package_specs(
+            apply_approvals(load_manifest(), _load_package_approvals())
+        )
+    except Exception:
+        return {'success': False, 'error': 'Unable to read the package manifest'}
+    return _reconcile_package_specs(specs, mode)
+
+
+def cmd_packages_agent_reconcile(params):
+    """Apply the immutable non-feature, non-pinned repair subset."""
+    if not isinstance(params, dict) or set(params):
+        return {'success': False, 'error': 'packages.agent_reconcile accepts no parameters'}
+    try:
+        from limeos_packages import load_manifest, repair_managed_packages
+
+        specs = repair_managed_packages(load_manifest())
+    except Exception:
+        return {'success': False, 'error': 'Unable to read the package manifest'}
+    return _reconcile_package_specs(specs, 'apply')
+
+
 PACKAGE_RECONCILE_UNIT = 'limeos-package-reconcile'
+PACKAGE_ACTION_RECONCILE_UNIT = 'limeos-package-reconcile-action'
 PACKAGE_UPDATES_CONFIG = '/etc/limeos/integrations/package-updates.json'
 MATTERMOST_SECRETS = '/etc/limeos/integrations/mattermost.env'
 
@@ -4654,6 +4669,19 @@ def cmd_packages_nightly_reconcile(params):
     }
 
 
+def cmd_packages_agent_reconcile_start(params):
+    """Start the fixed action-owned reconcile job without waiting for apt."""
+    if not isinstance(params, dict) or set(params):
+        return {'success': False, 'error': 'packages.agent_reconcile_start accepts no parameters'}
+    result = run_command(
+        ['systemctl', 'start', '--no-block', f'{PACKAGE_ACTION_RECONCILE_UNIT}.service'],
+        timeout=15,
+    )
+    if result.get('returncode') != 0:
+        return {'success': False, 'error': 'Package reconciliation could not be started'}
+    return {'success': True, 'started': True}
+
+
 def cmd_configure_package_reconcile_schedule(params):
     """Install and enable the nightly package-reconcile timer. Params: {app_dir, user,
     on_calendar?}. The timer runs the reconcile back through the helper socket (audited)."""
@@ -4672,14 +4700,31 @@ def cmd_configure_package_reconcile_schedule(params):
     exec_start = (
         '/usr/bin/python3 -c '
         "'import sys; from helper_client import helper_call; "
-        'sys.exit(0 if (helper_call("packages_nightly_reconcile", {}) or {}).get("success") else 1)\''
+        'sys.exit(0 if (helper_call("packages_nightly_reconcile", {}, timeout=1800) or {}).get("success") else 1)\''
     )
     service, timer = render_package_reconcile_schedule(
         on_calendar, exec_start, user=user, working_dir=app_dir, pythonpath=app_dir
     )
+    action_exec_start = (
+        '/usr/bin/python3 -c '
+        "'import sys; from helper_client import helper_call; "
+        'sys.exit(0 if (helper_call("packages_agent_reconcile", {}, timeout=1800) or {}).get("success") else 1)\''
+    )
+    action_service = render_package_reconcile_service(
+        action_exec_start,
+        user=user,
+        working_dir=app_dir,
+        pythonpath=app_dir,
+        description='LimeOS approved package baseline reconciliation',
+    )
     service_path = f'/etc/systemd/system/{PACKAGE_RECONCILE_UNIT}.service'
     timer_path = f'/etc/systemd/system/{PACKAGE_RECONCILE_UNIT}.timer'
-    for path, content in ((service_path, service), (timer_path, timer)):
+    action_service_path = f'/etc/systemd/system/{PACKAGE_ACTION_RECONCILE_UNIT}.service'
+    for path, content in (
+        (service_path, service),
+        (timer_path, timer),
+        (action_service_path, action_service),
+    ):
         result = _write_managed_file(path, content)
         if not result.get('success'):
             return result
@@ -4687,7 +4732,12 @@ def cmd_configure_package_reconcile_schedule(params):
     enable = run_command(['systemctl', 'enable', '--now', f'{PACKAGE_RECONCILE_UNIT}.timer'])
     if enable.get('returncode') != 0:
         return {'success': False, 'error': enable.get('stderr') or 'failed to enable timer'}
-    return {'success': True, 'service_path': service_path, 'timer_path': timer_path}
+    return {
+        'success': True,
+        'service_path': service_path,
+        'timer_path': timer_path,
+        'action_service_path': action_service_path,
+    }
 
 
 # Command whitelist
@@ -4761,6 +4811,8 @@ COMMANDS = {
     'agent_audit_read': cmd_agent_audit_read,
     'agent_delivery_test': cmd_agent_delivery_test,
     'packages_reconcile': cmd_packages_reconcile,
+    'packages_agent_reconcile': cmd_packages_agent_reconcile,
+    'packages_agent_reconcile_start': cmd_packages_agent_reconcile_start,
     'packages_pending': cmd_packages_pending,
     'packages_approve': cmd_packages_approve,
     'packages_nightly_reconcile': cmd_packages_nightly_reconcile,
@@ -4793,7 +4845,9 @@ _MUTATING_COMMANDS = frozenset({
     'agent_provider_auth_start', 'agent_provider_auth_submit', 'agent_provider_auth_cancel',
     'agent_bot_secret_write', 'agent_configure', 'agent_action_policy_write',
     'agent_runtime_start',
-    'packages_reconcile', 'packages_approve', 'packages_nightly_reconcile',
+    'packages_reconcile', 'packages_agent_reconcile',
+    'packages_agent_reconcile_start', 'packages_approve',
+    'packages_nightly_reconcile',
     'configure_package_reconcile_schedule', 'agent_converge_if_stale',
     'mattermost_recovery_credential_retain',
     'mattermost_recovery_credential_restore',

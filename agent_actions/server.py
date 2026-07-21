@@ -11,13 +11,16 @@ import sys
 from agent_actions.actuator import (
     ActionActuator,
     build_container_executors,
+    build_package_executors,
     build_stack_executors,
 )
 from agent_actions.broker import build_actuator_operations
 from agent_actions.defaults import build_repair_registry
 from agent_actions.ledger import ActionLedger
+from agent_actions.packages import package_job_status, package_repair_status
 from agent_actions.policy import ActionPolicy, ActionPolicyError
 from container_operations_service import ContainerOperationsService
+from helper_client import HelperError, helper_call
 from limeops.broker import JsonlAuditWriter, LimeOpsBroker
 from limeops.policy import LimeOpsPolicy, PolicyError
 from limeops.server import LimeOpsUnixServer
@@ -70,6 +73,8 @@ def _build_actuator(action_policy_path: str, ledger_path: str) -> ActionActuator
     registry = build_repair_registry(
         container_status=_container_action_status,
         stack_status=_stack_inspect,
+        package_status=package_repair_status,
+        package_job_status=package_job_status,
     )
     executors = build_container_executors(
         control=container_service.control,
@@ -79,6 +84,23 @@ def _build_actuator(action_policy_path: str, ledger_path: str) -> ActionActuator
         build_stack_executors(
             reconcile=reconcile_stack,
             status_reader=_stack_inspect,
+        )
+    )
+
+    def start_package_reconcile():
+        try:
+            result = helper_call("packages_agent_reconcile_start", {}, timeout=15)
+        except HelperError:
+            return {"error": "package_reconcile_unavailable"}
+        if not isinstance(result, dict) or result.get("success") is not True:
+            return {"error": "package_reconcile_start_failed"}
+        return {"started": True}
+
+    executors.update(
+        build_package_executors(
+            start=start_package_reconcile,
+            status_reader=package_repair_status,
+            job_status_reader=package_job_status,
         )
     )
     return ActionActuator(

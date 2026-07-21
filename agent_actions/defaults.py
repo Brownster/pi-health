@@ -118,10 +118,72 @@ def safe_stack_precondition(
     }
 
 
+def _packages_params(params: Mapping[str, Any]) -> dict[str, Any]:
+    if set(params):
+        raise CapabilityError("Package reconciliation accepts no parameters")
+    return {}
+
+
+def safe_package_precondition(
+    status_reader: Callable[[], Mapping[str, Any]],
+    job_status_reader: Callable[[], Mapping[str, Any]],
+) -> dict[str, Any]:
+    status = status_reader()
+    job = job_status_reader()
+    if not isinstance(status, Mapping) or not isinstance(job, Mapping):
+        raise CapabilityError("Package reconciliation status is unavailable")
+    active_state = str(job.get("active_state") or "unknown").lower()
+    if active_state in {"activating", "active", "reloading", "deactivating"}:
+        raise CapabilityError("Package reconciliation is already running")
+    if active_state not in {"inactive", "failed"}:
+        raise CapabilityError("Package reconciliation job is unavailable")
+    raw_packages = status.get("packages")
+    raw_drift = status.get("drift")
+    if (
+        not isinstance(status.get("ok"), bool)
+        or not isinstance(raw_packages, list)
+        or not isinstance(raw_drift, list)
+    ):
+        raise CapabilityError("Package reconciliation status is unavailable")
+    packages = sorted(
+        (
+            {
+                "name": str(item.get("name") or ""),
+                "policy": str(item.get("policy") or ""),
+                "expected": str(item.get("expected") or ""),
+                "installed": str(item.get("installed") or ""),
+                "compliant": item.get("compliant") is True,
+            }
+            for item in raw_packages
+            if isinstance(item, Mapping) and item.get("name")
+        ),
+        key=lambda item: item["name"],
+    )
+    if not packages:
+        raise CapabilityError("Package repair manifest is empty")
+    package_names = {item["name"] for item in packages}
+    drift = sorted(str(item) for item in raw_drift)
+    if any(item not in package_names for item in drift):
+        raise CapabilityError("Package reconciliation status is unavailable")
+    return {
+        "target": "shipped-manifest",
+        "ok": status["ok"],
+        "drift": drift,
+        "packages": packages,
+        "job": {
+            "active_state": active_state,
+            "result": str(job.get("result") or "unknown").lower(),
+            "invocation_id": str(job.get("invocation_id") or ""),
+        },
+    }
+
+
 def build_repair_registry(
     *,
     container_status: Callable[[str], Mapping[str, Any]],
     stack_status: Callable[[str], Mapping[str, Any]],
+    package_status: Callable[[], Mapping[str, Any]],
+    package_job_status: Callable[[], Mapping[str, Any]],
 ) -> CapabilityRegistry:
     modes = (
         AuthorityMode.PROPOSE,
@@ -165,11 +227,29 @@ def build_repair_registry(
         ),
     )
 
+    package_capability = CapabilitySpec(
+        operation="packages.reconcile",
+        version="1",
+        risk=RiskClass.MUTATING,
+        eligible_modes=(AuthorityMode.PROPOSE, AuthorityMode.APPROVAL),
+        normalize_params=_packages_params,
+        select_target=lambda _params: "shipped-manifest",
+        read_precondition=lambda _params: safe_package_precondition(
+            package_status, package_job_status
+        ),
+        render_impact=lambda _params: (
+            "Reconcile the fixed non-feature, non-pinned package subset from the "
+            "shipped LimeOS manifest. Apt metadata may be refreshed and missing "
+            "packages installed; package names and versions cannot be supplied."
+        ),
+    )
+
     return CapabilityRegistry(
         [
             container_capability("container.start", "Start"),
             container_capability("container.restart", "Restart"),
             stack_capability,
+            package_capability,
         ]
     )
 
@@ -178,6 +258,8 @@ def build_action_service(
     *,
     container_status: Callable[[str], Mapping[str, Any]],
     stack_status: Callable[[str], Mapping[str, Any]],
+    package_status: Callable[[], Mapping[str, Any]],
+    package_job_status: Callable[[], Mapping[str, Any]],
     policy_path: str | Path = DEFAULT_ACTION_POLICY_PATH,
     ledger_path: str | Path = DEFAULT_ACTION_LEDGER_PATH,
 ) -> AgentActionService:
@@ -185,6 +267,8 @@ def build_action_service(
         registry=build_repair_registry(
             container_status=container_status,
             stack_status=stack_status,
+            package_status=package_status,
+            package_job_status=package_job_status,
         ),
         policy_provider=lambda: ActionPolicy.from_file(policy_path),
         ledger=ActionLedger(ledger_path),

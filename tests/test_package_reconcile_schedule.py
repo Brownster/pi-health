@@ -9,7 +9,10 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from helper_templates import render_package_reconcile_schedule
+from helper_templates import (
+    render_package_reconcile_schedule,
+    render_package_reconcile_service,
+)
 
 with patch("logging.FileHandler", return_value=logging.StreamHandler()):
     helper = importlib.import_module("pihealth_helper")
@@ -31,6 +34,19 @@ def test_render_schedule_produces_oneshot_service_and_timer():
     assert "OnCalendar=daily" in timer
     assert "RandomizedDelaySec=" in timer
     assert "WantedBy=timers.target" in timer
+
+
+def test_render_action_reconcile_service_has_no_timer_or_shell_payload():
+    service = render_package_reconcile_service(
+        "/usr/bin/python3 -c 'pass'",
+        user="pihealth",
+        working_dir="/opt/pi-health",
+        pythonpath="/opt/pi-health",
+        description="LimeOS approved package reconciliation",
+    )
+    assert "Type=oneshot" in service
+    assert "approved package reconciliation" in service
+    assert "OnCalendar" not in service
 
 
 # -- nightly reconcile composition ----------------------------------------------
@@ -173,6 +189,28 @@ def test_configure_schedule_writes_units_and_enables_timer():
     written = [call.args[0] for call in write.call_args_list]
     assert any(p.endswith(".service") for p in written)
     assert any(p.endswith(".timer") for p in written)
+    assert result["action_service_path"].endswith(
+        "limeos-package-reconcile-action.service"
+    )
+    contents = [call.args[1] for call in write.call_args_list]
+    assert any("packages_agent_reconcile" in content for content in contents)
+    assert all("timeout=1800" in content for content in contents if "helper_call" in content)
+
+
+def test_agent_reconcile_start_uses_only_fixed_nonblocking_unit():
+    with patch("pihealth_helper.run_command", return_value={"returncode": 0}) as run:
+        result = helper.cmd_packages_agent_reconcile_start({})
+
+    assert result == {"success": True, "started": True}
+    assert run.call_args.args[0] == [
+        "systemctl",
+        "start",
+        "--no-block",
+        "limeos-package-reconcile-action.service",
+    ]
+    assert helper.cmd_packages_agent_reconcile_start({"unit": "ssh.service"})[
+        "success"
+    ] is False
 
 
 def test_startup_ensure_invokes_timer_install_with_app_dir_and_user():

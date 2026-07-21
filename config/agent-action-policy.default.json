@@ -19,6 +19,11 @@
       "enabled": false,
       "approvers": [],
       "targets": {}
+    },
+    "packages.reconcile": {
+      "enabled": false,
+      "approvers": [],
+      "targets": {}
     }
   }
 }

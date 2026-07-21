@@ -122,3 +122,37 @@ def test_worker_forwards_oldest_authorised_id_without_mutation_params(tmp_path):
             {"type": "system", "id": "limeops-action-worker"},
         )
     ]
+
+
+def test_worker_revisits_verification_without_hot_looping(tmp_path):
+    ledger = ActionLedger(tmp_path / "actions.sqlite3")
+    ledger.create(
+        NewAction(
+            action_id="action-1",
+            idempotency_key="idempotency-1",
+            operation="packages.reconcile",
+            capability_version="1",
+            target="shipped-manifest",
+            risk="R2",
+            trigger="interactive",
+            authority_mode="approval",
+            params={},
+            evidence_ids=[],
+            payload_hash="a" * 64,
+            reason="Repair package drift",
+            impact="Reconcile package baseline",
+            precondition_hash="b" * 64,
+            actor_type="mattermost",
+            actor_id="user-1",
+            actor_username="marc",
+            state=ActionState.VERIFYING,
+            created_at=NOW.isoformat(),
+            expires_at=(NOW + timedelta(minutes=15)).isoformat(),
+        )
+    )
+
+    class Client:
+        def request(self, operation, params, actor):
+            return {"ok": True, "data": {"id": params["action_id"], "state": "verifying"}}
+
+    assert run_once(ledger, Client()) is False
