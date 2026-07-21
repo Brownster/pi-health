@@ -19,7 +19,11 @@ from agent_actions.capability import (
 from agent_actions.ledger import ActionLedger, ActionLedgerError, ActionState
 from agent_actions.policy import ActionPolicy, ActionPolicyError
 from agent_actions.defaults import safe_stack_precondition
-from agent_actions.integrations import safe_agent_runtime_health
+from agent_actions.integrations import (
+    safe_agent_runtime_health,
+    safe_extension_health,
+    safe_mattermost_health,
+)
 
 
 _ACTION_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
@@ -79,17 +83,23 @@ class ActionActuator:
             capability = self._registry.require(action.operation)
             executor = self._executors.get(action.operation)
             if executor is None:
-                raise ActionActuatorError("unavailable_executor", "Executor is unavailable")
+                raise ActionActuatorError(
+                    "unavailable_executor", "Executor is unavailable"
+                )
             if (
                 capability.version != action.capability_version
                 or executor.version != action.capability_version
             ):
-                raise ActionActuatorError("contract_changed", "Action contract has changed")
+                raise ActionActuatorError(
+                    "contract_changed", "Action contract has changed"
+                )
 
             params = capability.normalize(action.params)
             target = capability.target(params)
             if target != action.target:
-                raise ActionActuatorError("payload_changed", "Action target has changed")
+                raise ActionActuatorError(
+                    "payload_changed", "Action target has changed"
+                )
             expected_payload_hash = canonical_hash(
                 {
                     "operation": action.operation,
@@ -101,7 +111,9 @@ class ActionActuator:
                 }
             )
             if expected_payload_hash != action.payload_hash:
-                raise ActionActuatorError("payload_changed", "Action payload has changed")
+                raise ActionActuatorError(
+                    "payload_changed", "Action payload has changed"
+                )
 
             trigger = TriggerType(action.trigger)
             if resuming_verification:
@@ -119,7 +131,9 @@ class ActionActuator:
                         "policy_changed", "Action authority has changed"
                     )
             if mode not in capability.eligible_modes:
-                raise ActionActuatorError("ineligible_mode", "Action authority is ineligible")
+                raise ActionActuatorError(
+                    "ineligible_mode", "Action authority is ineligible"
+                )
 
             if resuming_verification:
                 before, verification_started = self._verification_context(action_id)
@@ -215,7 +229,12 @@ class ActionActuator:
             return response
         except ActionActuatorError:
             raise
-        except (CapabilityError, ActionPolicyError, ActionLedgerError, ValueError) as exc:
+        except (
+            CapabilityError,
+            ActionPolicyError,
+            ActionLedgerError,
+            ValueError,
+        ) as exc:
             raise self._public_error(exc) from exc
         except Exception as exc:
             # Executor and status-reader details can contain host data. Keep them out of
@@ -236,9 +255,13 @@ class ActionActuator:
                     )
             except Exception:
                 pass
-            raise ActionActuatorError("execution_failure", "Action execution failed") from exc
+            raise ActionActuatorError(
+                "execution_failure", "Action execution failed"
+            ) from exc
 
-    def _record_outcome(self, action_id: str, phase: str, details: dict[str, Any]) -> None:
+    def _record_outcome(
+        self, action_id: str, phase: str, details: dict[str, Any]
+    ) -> None:
         self._ledger.record_event(
             action_id,
             phase=phase,
@@ -246,9 +269,7 @@ class ActionActuator:
             details=details,
         )
 
-    def _verification_context(
-        self, action_id: str
-    ) -> tuple[dict[str, Any], datetime]:
+    def _verification_context(self, action_id: str) -> tuple[dict[str, Any], datetime]:
         for event in reversed(self._ledger.events(action_id)):
             if event.get("phase") != "execution_started":
                 continue
@@ -272,7 +293,9 @@ class ActionActuator:
         try:
             parsed = datetime.fromisoformat(value)
         except (TypeError, ValueError) as exc:
-            raise ActionActuatorError("corrupt_store", "Action expiry is invalid") from exc
+            raise ActionActuatorError(
+                "corrupt_store", "Action expiry is invalid"
+            ) from exc
         if parsed.tzinfo is None:
             raise ActionActuatorError("corrupt_store", "Action expiry is invalid")
         return parsed.astimezone(timezone.utc)
@@ -378,7 +401,12 @@ def build_stack_executors(
                 for item in containers
             )
             definition_unchanged = set(after.get("expected_services") or []) == expected
-            if expected and expected <= running_services and not unhealthy and definition_unchanged:
+            if (
+                expected
+                and expected <= running_services
+                and not unhealthy
+                and definition_unchanged
+            ):
                 return True, after
             if attempt + 1 < attempts:
                 sleeper(interval_seconds)
@@ -478,22 +506,35 @@ def build_integration_executors(
     status_reader: Callable[[], Mapping[str, Any]],
     job_status_reader: Callable[[], Mapping[str, Any]],
     runtime_status_reader: Callable[[], Mapping[str, Any]],
+    mattermost_start: Callable[[], Mapping[str, Any]] | None = None,
+    mattermost_status_reader: Callable[[], Mapping[str, Any]] | None = None,
+    mattermost_job_status_reader: Callable[[], Mapping[str, Any]] | None = None,
     max_verification_seconds: int = 3600,
 ) -> dict[str, ExecutionSpec]:
-    """Start the fixed AI Agents repair job and verify it across restarts."""
+    """Start one fixed integration repair job and verify it across restarts."""
 
-    def execute(_params: Mapping[str, Any]) -> Mapping[str, Any]:
-        return start()
+    def execute(params: Mapping[str, Any]) -> Mapping[str, Any]:
+        if params["name"] == "agents":
+            return start()
+        if mattermost_start is None:
+            return {"error": "mattermost_repair_unavailable"}
+        return mattermost_start()
 
     def verify(
-        _params: Mapping[str, Any], before: Mapping[str, Any]
+        params: Mapping[str, Any], before: Mapping[str, Any]
     ) -> tuple[bool | None, Mapping[str, Any]]:
-        job = job_status_reader()
+        name = params["name"]
+        if name == "agents":
+            job = job_status_reader()
+        elif mattermost_job_status_reader is not None:
+            job = mattermost_job_status_reader()
+        else:
+            job = {}
         active_state = str(job.get("active_state") or "unknown").lower()
         result = str(job.get("result") or "unknown").lower()
         invocation_id = str(job.get("invocation_id") or "")
         after: dict[str, Any] = {
-            "name": "agents",
+            "name": name,
             "job": {
                 "active_state": active_state,
                 "result": result,
@@ -519,8 +560,26 @@ def build_integration_executors(
             if isinstance(before.get("job"), Mapping)
             else ""
         )
-        if previous_invocation and invocation_id == previous_invocation:
+        if not invocation_id or invocation_id == previous_invocation:
             return None, after
+
+        if name == "mattermost":
+            status = safe_mattermost_health(
+                mattermost_status_reader() if mattermost_status_reader else {}
+            )
+            after.update(status)
+            healthy_services = len(status["services"]) == 3 and all(
+                item["state"] == "running" and item["health"] != "unhealthy"
+                for item in status["services"]
+            )
+            return (
+                result == "success"
+                and status["state"] == "connected"
+                and status["installed"]
+                and status["webhook_configured"]
+                and healthy_services,
+                after,
+            )
 
         integration = status_reader()
         raw_units = integration.get("units")
@@ -528,9 +587,7 @@ def build_integration_executors(
             {
                 "name": str(item.get("name") or ""),
                 "load_state": str(item.get("load_state") or "unknown").lower(),
-                "active_state": str(
-                    item.get("active_state") or "unknown"
-                ).lower(),
+                "active_state": str(item.get("active_state") or "unknown").lower(),
             }
             for item in raw_units or []
             if isinstance(item, Mapping)
@@ -571,6 +628,80 @@ def build_integration_executors(
             no_rollback_reason=(
                 "Downgrading the provider or restoring prior runtime files is outside "
                 "the repair allowlist; escalate for operator review."
+            ),
+            max_verification_seconds=max_verification_seconds,
+        )
+    }
+
+
+def build_extension_executors(
+    *,
+    start: Callable[[str], Mapping[str, Any]],
+    status_reader: Callable[[str], Mapping[str, Any]],
+    job_status_reader: Callable[[str], Mapping[str, Any]],
+    max_verification_seconds: int = 3600,
+) -> dict[str, ExecutionSpec]:
+    """Repair one allowlisted extension and verify a fresh healthy import."""
+
+    def execute(params: Mapping[str, Any]) -> Mapping[str, Any]:
+        return start(params["name"])
+
+    def verify(
+        params: Mapping[str, Any], before: Mapping[str, Any]
+    ) -> tuple[bool | None, Mapping[str, Any]]:
+        name = params["name"]
+        job = job_status_reader(name)
+        active_state = str(job.get("active_state") or "unknown").lower()
+        result = str(job.get("result") or "unknown").lower()
+        invocation_id = str(job.get("invocation_id") or "")
+        after: dict[str, Any] = {
+            "name": name,
+            "job": {
+                "active_state": active_state,
+                "result": result,
+                "invocation_id": invocation_id,
+            },
+        }
+        if active_state in {"activating", "active", "reloading", "deactivating"}:
+            return None, after
+        if active_state in {"failed", "unavailable", "unknown"} or result in {
+            "failed",
+            "timeout",
+            "watchdog",
+            "exit-code",
+            "signal",
+            "core-dump",
+            "start-limit-hit",
+            "resources",
+        }:
+            return False, after
+        previous_invocation = str(
+            (before.get("job") or {}).get("invocation_id")
+            if isinstance(before.get("job"), Mapping)
+            else ""
+        )
+        if not invocation_id or invocation_id == previous_invocation:
+            return None, after
+        status = safe_extension_health(status_reader(name))
+        after.update(status)
+        return (
+            result == "success"
+            and status["installed"]
+            and status["repairable"]
+            and status["registered"]
+            and status["healthy"],
+            after,
+        )
+
+    return {
+        "extension.repair": ExecutionSpec(
+            operation="extension.repair",
+            version="1",
+            execute=execute,
+            verify=verify,
+            no_rollback_reason=(
+                "Restoring an earlier third-party extension revision is outside the "
+                "repair allowlist; disable the extension and escalate for review."
             ),
             max_verification_seconds=max_verification_seconds,
         )

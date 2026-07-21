@@ -15,9 +15,10 @@ capability contracts, deny-by-default action policy, a transactional action ledg
 expiring single-use approvals, a separate actuator socket and identities, verified
 `container.start`, `container.restart`, approval-only `stack.reconcile`, approval-only
 `packages.reconcile`, approval-only AI Agents `integration.repair`, authenticated action
-APIs, approval-only `job.retry` for the fixed failed package reconciliation job, and
-private local finding drafts. Shipped defaults keep the kill switch on and every repair
-operation disabled.
+APIs, approval-only `job.retry` for the fixed failed package reconciliation job,
+approval-only repair for installed GitHub extensions and Mattermost, and private local
+finding drafts. Shipped defaults keep the kill switch on and every repair operation
+disabled.
 
 AO-005 now has capability, policy, cancellation, approval, rejection, detail, history,
 and listing APIs. The AI Agents browser card now provides action review and approval,
@@ -26,11 +27,11 @@ allowlists, approvers, proposal expiry, authority modes, and the kill switch. Ma
 now renders exact proposals and uses restart-safe approve/reject reactions bound to the
 immutable reacting user and originating channel. AO-006 now covers container start and
 restart, existing-definition stack reconciliation, fixed-subset package reconciliation,
-AI Agents integration repair, and retry of a failed fixed package reconciliation job.
-The systemd-backed operations resume verification after the actuator and worker restart.
-Extension repair, Mattermost integration repair, scheduling, installation, configuration,
-optimisation, GitHub publication, and agent-authored pull requests remain later work
-packages.
+AI Agents and Mattermost integration repair, configured-source GitHub extension repair,
+and retry of a failed fixed package reconciliation job. The systemd-backed operations
+resume verification after the actuator and worker restart. AO-006 is complete. Scheduling,
+installation, configuration, optimisation, GitHub publication, and agent-authored pull
+requests remain later work packages.
 
 ## Goal
 

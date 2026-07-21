@@ -502,6 +502,38 @@ def test_status_reports_disconnected_service(tmp_path):
     assert result["services"]["limeos-mattermost"]["state"] == "exited"
 
 
+def test_repair_reconciles_only_the_owned_stack_and_requires_connected_health(tmp_path):
+    service, _lifecycle, _custody, _docker, api, _sent, compose_calls = (
+        make_lifecycle_service(tmp_path)
+    )
+    list(service.stream_install(SETUP))
+    service._container_status_provider = lambda _name: {
+        "state": "running",
+        "health": "healthy",
+    }
+    compose_calls.clear()
+
+    result = service.repair()
+
+    assert result == {"status": "repaired", "state": "connected"}
+    assert compose_calls == [["docker", "compose", "-f", "compose.yaml", "up", "-d"]]
+    assert api.calls[-1] == "ping"
+
+
+def test_repair_rejects_disabled_lifecycle_before_compose(tmp_path):
+    service, lifecycle, _custody, _docker, _api, _sent, compose_calls = (
+        make_lifecycle_service(tmp_path)
+    )
+    list(service.stream_install(SETUP))
+    lifecycle.write(_lifecycle_record())
+    before = list(compose_calls)
+
+    with pytest.raises(Exception, match="cleanup must finish"):
+        service.repair()
+
+    assert compose_calls == before
+
+
 def test_disable_is_blocked_until_agents_are_disabled(tmp_path):
     service, lifecycle, _custody, _docker, _api, _sent, compose_calls = (
         make_lifecycle_service(

@@ -24,6 +24,8 @@ LIMEOPS_UNIT_PATH = "/etc/systemd/system/limeopsd.service"
 ACTION_BROKER_UNIT_PATH = "/etc/systemd/system/limeops-actuatord.service"
 ACTION_WORKER_UNIT_PATH = "/etc/systemd/system/limeops-action-worker.service"
 AGENT_REPAIR_UNIT_PATH = "/etc/systemd/system/limeos-agent-repair.service"
+EXTENSION_REPAIR_UNIT_PATH = "/etc/systemd/system/limeos-extension-repair@.service"
+MATTERMOST_REPAIR_UNIT_PATH = "/etc/systemd/system/limeos-mattermost-repair.service"
 
 
 def render_agent_unit(repo_dir: str, python_bin: str) -> str:
@@ -197,7 +199,7 @@ def render_agent_repair_unit(repo_dir: str) -> str:
         "/usr/bin/python3 -c "
         "'import sys; from helper_client import helper_call; "
         'sys.exit(0 if (helper_call("agent_integration_repair", {}, timeout=1800) '
-        "or {}).get(\"success\") else 1)'"
+        'or {}).get("success") else 1)\''
     )
     return f"""[Unit]
 Description=LimeOS approved AI Agents integration repair
@@ -232,6 +234,87 @@ LockPersonality=true
 RestrictAddressFamilies=AF_UNIX
 ReadOnlyPaths={AGENT_LIB_DIR}
 InaccessiblePaths=/root {repo_dir} /var/run/docker.sock /etc/limeos/credentials.env
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+"""
+
+
+def render_extension_repair_unit(repo_dir: str, user: str) -> str:
+    """Render the instance job that repairs one policy-allowlisted extension."""
+    python_bin = f"{repo_dir}/.venv/bin/python"
+    return f"""[Unit]
+Description=LimeOS approved extension repair for %i
+After=network-online.target pihealth-helper.service
+Wants=network-online.target
+Requires=pihealth-helper.service
+
+[Service]
+Type=oneshot
+User={user}
+SupplementaryGroups=pihealth
+WorkingDirectory={repo_dir}
+Environment=PYTHONPATH={repo_dir}
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart={python_bin} -m agent_actions.repair_job extension-repair --name %i
+TimeoutStartSec=1800
+UMask=0007
+Nice=19
+IOSchedulingClass=idle
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX
+ReadOnlyPaths={repo_dir}
+ReadWritePaths={repo_dir}/plugins /etc/limeos
+InaccessiblePaths=/root /etc/limeos/credentials.env /run/limeos-actions /var/run/docker.sock
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+"""
+
+
+def render_mattermost_repair_unit(repo_dir: str, user: str) -> str:
+    """Render the fixed job that invokes the Mattermost integration service."""
+    python_bin = f"{repo_dir}/.venv/bin/python"
+    return f"""[Unit]
+Description=LimeOS approved Mattermost integration repair
+After=network-online.target docker.service pihealth-helper.service
+Wants=network-online.target
+Requires=docker.service pihealth-helper.service
+
+[Service]
+Type=oneshot
+User={user}
+SupplementaryGroups=docker pihealth
+WorkingDirectory={repo_dir}
+Environment=PYTHONPATH={repo_dir}
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart={python_bin} -m agent_actions.repair_job mattermost-repair
+TimeoutStartSec=1800
+UMask=0007
+Nice=19
+IOSchedulingClass=idle
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+PrivateDevices=false
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadOnlyPaths={repo_dir} /etc/limeos
+InaccessiblePaths=/root /etc/limeos/credentials.env /run/limeos-actions
 CapabilityBoundingSet=
 SystemCallArchitectures=native
 """

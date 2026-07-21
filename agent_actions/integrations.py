@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import subprocess
+import re
 from collections.abc import Callable, Mapping
 from typing import Any
 
 
 AGENT_REPAIR_UNIT = "limeos-agent-repair.service"
+MATTERMOST_REPAIR_UNIT = "limeos-mattermost-repair.service"
+EXTENSION_REPAIR_UNIT = "limeos-extension-repair@{name}.service"
+_EXTENSION_ID = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 AGENT_RUNTIME_UNITS = (
     "limeos-agent.service",
     "limeopsd.service",
@@ -87,6 +91,50 @@ def agent_repair_job_status(
     }
 
 
+def _repair_job_status(unit: str, runner: Callable[..., Any]) -> dict[str, str]:
+    values = _systemd_properties(
+        unit,
+        ("LoadState", "ActiveState", "Result", "InvocationID"),
+        runner,
+    )
+    if values.get("LoadState", "").lower() != "loaded":
+        return {
+            "active_state": "unavailable",
+            "result": "unknown",
+            "invocation_id": "",
+        }
+    return {
+        "active_state": values.get("ActiveState", "unknown").lower(),
+        "result": values.get("Result", "unknown").lower(),
+        "invocation_id": values.get("InvocationID", ""),
+    }
+
+
+def mattermost_repair_job_status(
+    runner: Callable[..., Any] = subprocess.run,
+) -> dict[str, str]:
+    """Read bounded systemd state for the fixed Mattermost repair job."""
+    return _repair_job_status(MATTERMOST_REPAIR_UNIT, runner)
+
+
+def extension_repair_job_status(
+    name: str,
+    runner: Callable[..., Any] = subprocess.run,
+) -> dict[str, str]:
+    """Read one validated extension repair instance."""
+    if (
+        not isinstance(name, str)
+        or len(name) > 64
+        or not _EXTENSION_ID.fullmatch(name)
+    ):
+        return {
+            "active_state": "unavailable",
+            "result": "unknown",
+            "invocation_id": "",
+        }
+    return _repair_job_status(EXTENSION_REPAIR_UNIT.format(name=name), runner)
+
+
 def safe_agent_runtime_health(status: Mapping[str, Any]) -> dict[str, Any]:
     """Drop configuration identifiers and credentials from helper status."""
     return {
@@ -104,4 +152,44 @@ def safe_agent_runtime_health(status: Mapping[str, Any]) -> dict[str, Any]:
         "claude_authenticated": status.get("claude_authenticated") is True,
         "configured": status.get("configured") is True,
         "enabled": status.get("enabled") is True,
+    }
+
+
+def safe_extension_health(status: Mapping[str, Any]) -> dict[str, Any]:
+    """Keep only the extension fields needed for authorisation and verification."""
+    return {
+        "name": str(status.get("name") or ""),
+        "type": str(status.get("type") or "unknown").lower(),
+        "enabled": status.get("enabled") is True,
+        "installed": status.get("installed") is True,
+        "source_configured": status.get("source_configured") is True,
+        "repairable": status.get("repairable") is True,
+        "registered": status.get("registered") is True,
+        "configured": status.get("configured") is True,
+        "status": str(status.get("status") or "unknown").lower(),
+        "healthy": status.get("healthy") is True,
+    }
+
+
+def safe_mattermost_health(status: Mapping[str, Any]) -> dict[str, Any]:
+    """Keep only bounded Mattermost lifecycle and container health."""
+    services = sorted(
+        (
+            {
+                "name": str(item.get("name") or ""),
+                "state": str(item.get("state") or "unknown").lower(),
+                "health": str(item.get("health") or "").lower(),
+            }
+            for item in status.get("services") or []
+            if isinstance(item, Mapping) and item.get("name")
+        ),
+        key=lambda item: item["name"],
+    )
+    return {
+        "name": "mattermost",
+        "state": str(status.get("state") or "unknown").lower(),
+        "installed": status.get("installed") is True,
+        "stack_name": str(status.get("stack_name") or ""),
+        "webhook_configured": status.get("webhook_configured") is True,
+        "services": services,
     }

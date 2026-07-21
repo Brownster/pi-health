@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import threading
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -17,6 +18,7 @@ from agent_actions.capability import (
 from agent_actions.ledger import ActionLedger
 from agent_actions.policy import ActionPolicy
 from agent_actions.service import AgentActionService
+from agent_actions.integrations import safe_extension_health, safe_mattermost_health
 from runtime_paths import CONFIG_DIR, STATE_DIR
 
 
@@ -32,7 +34,11 @@ def _container_params(params: Mapping[str, Any]) -> dict[str, Any]:
         not isinstance(name, str)
         or not name
         or len(name) > 128
-        or any(character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-" for character in name)
+        or any(
+            character
+            not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-"
+            for character in name
+        )
     ):
         raise CapabilityError("Container name is invalid")
     return {"name": name}
@@ -125,9 +131,28 @@ def _packages_params(params: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _integration_params(params: Mapping[str, Any]) -> dict[str, Any]:
-    if set(params) != {"name"} or params.get("name") != "agents":
-        raise CapabilityError("Integration repair accepts only the agents target")
-    return {"name": "agents"}
+    if set(params) != {"name"} or params.get("name") not in {
+        "agents",
+        "mattermost",
+    }:
+        raise CapabilityError(
+            "Integration repair accepts only the agents or mattermost target"
+        )
+    return {"name": str(params["name"])}
+
+
+def _extension_params(params: Mapping[str, Any]) -> dict[str, Any]:
+    if set(params) != {"name"}:
+        raise CapabilityError("Extension repair accepts only a name")
+    name = params.get("name")
+    if (
+        not isinstance(name, str)
+        or not name
+        or len(name) > 64
+        or re.fullmatch(r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*", name) is None
+    ):
+        raise CapabilityError("Extension repair target is invalid")
+    return {"name": name}
 
 
 def _job_retry_params(params: Mapping[str, Any]) -> dict[str, Any]:
@@ -177,6 +202,63 @@ def safe_integration_precondition(
     return {
         "name": "agents",
         "units": units,
+        "job": {
+            "active_state": active_state,
+            "result": str(job.get("result") or "unknown").lower(),
+            "invocation_id": str(job.get("invocation_id") or ""),
+        },
+    }
+
+
+def safe_mattermost_precondition(
+    status_reader: Callable[[], Mapping[str, Any]],
+    job_status_reader: Callable[[], Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Require an installed Mattermost integration outside lifecycle cleanup."""
+    status = safe_mattermost_health(status_reader())
+    job = job_status_reader()
+    if not isinstance(job, Mapping):
+        raise CapabilityError("Mattermost repair status is unavailable")
+    active_state = str(job.get("active_state") or "unknown").lower()
+    if active_state in {"activating", "active", "reloading", "deactivating"}:
+        raise CapabilityError("Mattermost repair is already running")
+    if active_state not in {"inactive", "failed"}:
+        raise CapabilityError("Mattermost repair job is unavailable")
+    if not status["installed"] or status["stack_name"] != "mattermost":
+        raise CapabilityError("Mattermost installation is unavailable")
+    if status["state"] in {"disabled", "retained_data", "cleanup_required"}:
+        raise CapabilityError("Mattermost lifecycle must be connected before repair")
+    if status["state"] not in {"connected", "disconnected", "degraded"}:
+        raise CapabilityError("Mattermost repair status is unavailable")
+    return {
+        **status,
+        "job": {
+            "active_state": active_state,
+            "result": str(job.get("result") or "unknown").lower(),
+            "invocation_id": str(job.get("invocation_id") or ""),
+        },
+    }
+
+
+def safe_extension_precondition(
+    status_reader: Callable[[str], Mapping[str, Any]],
+    job_status_reader: Callable[[str], Mapping[str, Any]],
+    name: str,
+) -> dict[str, Any]:
+    """Require an enabled configured-source extension and an idle repair job."""
+    status = safe_extension_health(status_reader(name))
+    job = job_status_reader(name)
+    if status["name"] != name or not isinstance(job, Mapping):
+        raise CapabilityError("Extension repair status is unavailable")
+    active_state = str(job.get("active_state") or "unknown").lower()
+    if active_state in {"activating", "active", "reloading", "deactivating"}:
+        raise CapabilityError("Extension repair is already running")
+    if active_state not in {"inactive", "failed"}:
+        raise CapabilityError("Extension repair job is unavailable")
+    if not status["repairable"] or status["type"] != "github":
+        raise CapabilityError("Extension is not eligible for repair")
+    return {
+        **status,
         "job": {
             "active_state": active_state,
             "result": str(job.get("result") or "unknown").lower(),
@@ -266,6 +348,10 @@ def build_repair_registry(
     package_job_status: Callable[[], Mapping[str, Any]],
     integration_status: Callable[[], Mapping[str, Any]],
     integration_job_status: Callable[[], Mapping[str, Any]],
+    mattermost_status: Callable[[], Mapping[str, Any]] | None = None,
+    mattermost_job_status: Callable[[], Mapping[str, Any]] | None = None,
+    extension_status: Callable[[str], Mapping[str, Any]] | None = None,
+    extension_job_status: Callable[[str], Mapping[str, Any]] | None = None,
 ) -> CapabilityRegistry:
     modes = (
         AuthorityMode.PROPOSE,
@@ -333,13 +419,41 @@ def build_repair_registry(
         eligible_modes=(AuthorityMode.PROPOSE, AuthorityMode.APPROVAL),
         normalize_params=_integration_params,
         select_target=lambda params: params["name"],
-        read_precondition=lambda _params: safe_integration_precondition(
-            integration_status, integration_job_status
+        read_precondition=lambda params: (
+            safe_integration_precondition(integration_status, integration_job_status)
+            if params["name"] == "agents"
+            else safe_mattermost_precondition(
+                mattermost_status or (lambda: {}),
+                mattermost_job_status or (lambda: {}),
+            )
         ),
-        render_impact=lambda _params: (
+        render_impact=lambda params: (
             "Repair the installed AI Agents integration using its fixed provider and "
             "runtime definition. Agent services will restart and may be briefly "
             "unavailable; configuration and credentials are preserved."
+            if params["name"] == "agents"
+            else "Reconcile the fixed installed Mattermost stack through its integration "
+            "service. Mattermost, Postgres, and alert delivery may be briefly unavailable; "
+            "configuration, credentials, and chat data are preserved."
+        ),
+    )
+
+    extension_capability = CapabilitySpec(
+        operation="extension.repair",
+        version="1",
+        risk=RiskClass.MUTATING,
+        eligible_modes=(AuthorityMode.PROPOSE, AuthorityMode.APPROVAL),
+        normalize_params=_extension_params,
+        select_target=lambda params: params["name"],
+        read_precondition=lambda params: safe_extension_precondition(
+            extension_status or (lambda _name: {}),
+            extension_job_status or (lambda _name: {}),
+            params["name"],
+        ),
+        render_impact=lambda params: (
+            f"Repair the allowlisted {params['name']} extension from its configured "
+            "GitHub source, refresh its manifest, and verify provider registration and "
+            "health. No source, path, module, class, or revision can be supplied."
         ),
     )
 
@@ -367,6 +481,7 @@ def build_repair_registry(
             stack_capability,
             package_capability,
             integration_capability,
+            extension_capability,
             job_retry_capability,
         ]
     )
@@ -380,6 +495,10 @@ def build_action_service(
     package_job_status: Callable[[], Mapping[str, Any]],
     integration_status: Callable[[], Mapping[str, Any]],
     integration_job_status: Callable[[], Mapping[str, Any]],
+    mattermost_status: Callable[[], Mapping[str, Any]] | None = None,
+    mattermost_job_status: Callable[[], Mapping[str, Any]] | None = None,
+    extension_status: Callable[[str], Mapping[str, Any]] | None = None,
+    extension_job_status: Callable[[str], Mapping[str, Any]] | None = None,
     policy_path: str | Path = DEFAULT_ACTION_POLICY_PATH,
     ledger_path: str | Path = DEFAULT_ACTION_LEDGER_PATH,
 ) -> AgentActionService:
@@ -391,6 +510,10 @@ def build_action_service(
             package_job_status=package_job_status,
             integration_status=integration_status,
             integration_job_status=integration_job_status,
+            mattermost_status=mattermost_status,
+            mattermost_job_status=mattermost_job_status,
+            extension_status=extension_status,
+            extension_job_status=extension_job_status,
         ),
         policy_provider=lambda: ActionPolicy.from_file(policy_path),
         ledger=ActionLedger(ledger_path),
