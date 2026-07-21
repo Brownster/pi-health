@@ -9,7 +9,8 @@ Status: Implemented with all mutations disabled by default
 The assistant can diagnose the host, create exact repair proposals, and draft private
 bug or feature findings. Only the isolated actuator can start mutations. The first write
 capabilities are `container.start`, `container.restart`, `stack.reconcile`, and
-`packages.reconcile`, plus `integration.repair` for the built-in AI Agents integration.
+`packages.reconcile`, plus `integration.repair` for the built-in AI Agents integration
+and `job.retry` for the fixed package reconciliation job.
 
 The release does not grant the model a shell, Docker socket, helper socket, arbitrary
 filesystem access, GitHub credential, or actuator-socket access. It does not publish
@@ -27,7 +28,7 @@ The `limeops-action-worker` forwards only an authorised action ID. The
 version, target, payload hash, approval, expiry, and live precondition before it calls
 `ContainerOperationsService.control` or the fixed existing-stack reconcile path in
 `StackOperationsService`, or a fixed helper-owned package or integration job. It then
-checks container, Compose service, package, or integration state. A container restart
+checks container, Compose service, package, integration, or job state. A container restart
 must also produce a new start timestamp. Stack reconciliation succeeds only when the
 Compose definition is unchanged, every declared service is running, and no resulting
 container is unhealthy. Package and integration jobs stay in `verifying` while they run;
@@ -103,6 +104,11 @@ mode:
       "targets": {}
     },
     "integration.repair": {
+      "enabled": false,
+      "approvers": [],
+      "targets": {}
+    },
+    "job.retry": {
       "enabled": false,
       "approvers": [],
       "targets": {}
@@ -194,6 +200,21 @@ helper logs. LimeOS does not downgrade the provider or restore old runtime files
 automatically. Disable the operation in action policy until an operator resolves the
 cause.
 
+`job.retry` is an R2 approval-only operation with one exact target:
+`package-reconcile`. Use it only after `limeos-package-reconcile-action.service` has
+failed and shipped-manifest drift remains. Ordinary convergence should use
+`packages.reconcile`; the retry operation exists to recover a failed invocation without
+granting a general systemd control surface.
+
+The operation accepts only `{"name": "package-reconcile"}`. The helper resets the
+failed state and starts the fixed unit without blocking. It cannot accept a unit,
+command, package, version, or extra argument. The action stays in `verifying` while the
+job runs and succeeds only when a different systemd invocation completes successfully
+and the manifest is compliant with no remaining drift. It fails after one hour or when
+the new invocation fails. Package downgrade and removal remain outside the rollback
+allowlist. Keep the operation disabled until a target-Pi canary demonstrates the failed
+job, retry, and verification sequence.
+
 When a Mattermost turn creates a proposal, the listener posts a separate bounded card in
 the originating thread with the operation, exact target, risk, reason, expected impact,
 expiry, and action ID. An eligible user reacts with :white_check_mark: to approve once or
@@ -251,8 +272,8 @@ agent audit logs for incident review.
 
 ## Current Limits
 
-This slice completes the action foundation and the first five repair adapters. It does
-not yet include extension repair, Mattermost integration repair, job retry, report-only
-schedules, maturity promotion, cooldowns, disruption budgets, installation,
+This slice completes the action foundation and the first six repair adapters. It does
+not yet include extension repair, Mattermost integration repair, report-only schedules,
+maturity promotion, cooldowns, disruption budgets, installation,
 configuration, review experiments, optimisation, or GitHub publication. Those features
 remain gated by the accepted implementation plan and target-Pi canary evidence.
