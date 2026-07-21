@@ -226,7 +226,7 @@ patterns.
 
 | ID | Work package | Depends on | Status | Deliverable |
 | --- | --- | --- | --- | --- |
-| IL-005 | Lifecycle APIs, authorization and operation streaming | IL-002, IL-004 | Planned | Six strict streamed mutation routes including converted agent disable, server-owned actions and dependency blocks, owner-bound SSE operations, stable public failures, redaction, and lifecycle audit events |
+| IL-005 | Lifecycle APIs, authorization and operation streaming | IL-002, IL-004 | Complete (`67d545c`) | Six strict streamed mutation routes including converted agent disable, server-owned actions and dependency blocks, owner-bound SSE operations, stable public failures, redaction, and lifecycle audit events |
 | IL-006 | Shared lifecycle UI foundation and invalidation | IL-000 | Planned | Existing `ActionMenu` and `ModalOverlay` reused with a shared lifecycle dialog; cross-card refresh callback/shared invalidation; strict action and route filtering; typed confirmation, acknowledgement, progress, warning completion, failure retention, retry, and focus restoration |
 
 Exit gate:
