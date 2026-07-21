@@ -2,11 +2,24 @@
 
 Date: 2026-07-20
 
-Status: Accepted design; implementation not started
+Status: Implementation underway; write-disabled foundation landed 2026-07-21
 
 Precondition: AA-009 read-only target signoff
 
 Supersedes the delivery detail in: `Docs/LIMEOS_ASSISTANT_CAPABILITY_ROADMAP.md`
+
+## Implementation Status
+
+The first deployable slice now includes immutable Mattermost actor IDs, code-owned
+capability contracts, deny-by-default action policy, a transactional action ledger,
+expiring single-use approvals, a separate actuator socket and identities, verified
+`container.start` and `container.restart`, authenticated action APIs, and private local
+finding drafts. Shipped defaults keep the kill switch on and both repair operations
+disabled.
+
+AO-005 still needs its browser and Mattermost approval controls. AO-006 currently covers
+only container start and restart. Scheduling, installation, configuration, optimisation,
+GitHub publication, and agent-authored pull requests remain later work packages.
 
 ## Goal
 
@@ -108,7 +121,7 @@ service identity, operation registry, and audit path. Suggested boundaries are:
 | Read policy | `/etc/limeos/agent-policy.json` |
 | Action policy | `/etc/limeos/agent-action-policy.json` |
 | Read socket | `/run/limeos/limeops.sock` |
-| Action socket | `/run/limeos/limeops-actions.sock` |
+| Action socket | `/run/limeos-actions/actions.sock` |
 | Read client group | `limeops-client` |
 | Action worker group | `limeops-action` |
 | Action state | `/var/lib/limeos/agent-actions/actions.sqlite3` |
