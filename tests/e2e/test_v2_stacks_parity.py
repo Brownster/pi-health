@@ -139,7 +139,7 @@ def test_v2_stacks_compose_env_editor(
     base_url = v2_server["base_url"]
     _open_v2_stacks(page, base_url, v2_login, install_v2_stacks_api_mocks)
 
-    _, menu = _open_stack_menu(page, "media")
+    trigger, menu = _open_stack_menu(page, "media")
     menu.locator("button[data-stack-action='edit']").click()
     editor = page.locator("#v2-stack-editor-modal")
     expect(editor).to_be_visible()
@@ -161,6 +161,7 @@ def test_v2_stacks_compose_env_editor(
 
     page.click("#v2-stack-editor-close")
     expect(page.locator("#v2-stack-editor-modal")).to_have_count(0)
+    expect(trigger).to_be_focused()
 
 
 def test_v2_stacks_backups_restore_with_confirm(

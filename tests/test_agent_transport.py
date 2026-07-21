@@ -213,6 +213,27 @@ def test_bot_client_resolves_team_and_channel_ids():
     assert api.channel_id("team-1", "limeos-alerts") == "channel-1"
 
 
+def test_bot_client_deletes_bot_idempotently_and_rejects_unsafe_ids():
+    opener = FakeOpener(
+        {
+            ("DELETE", "/api/v4/bots/bot-1"): (200, {}, {}),
+            ("DELETE", "/api/v4/bots/missing-bot"): (404, {}, {}),
+        }
+    )
+    api = MattermostBotApi("http://mm:8065", opener=opener)
+    api.use_token("admin-token")
+
+    api.delete_bot(user_id="bot-1")
+    api.delete_bot(user_id="missing-bot")
+
+    assert [request[:2] for request in opener.requests] == [
+        ("DELETE", "/api/v4/bots/bot-1"),
+        ("DELETE", "/api/v4/bots/missing-bot"),
+    ]
+    with pytest.raises(BotApiError):
+        api.delete_bot(user_id="../users/admin")
+
+
 # -- listener --------------------------------------------------------------------
 class FakeGateway:
     def __init__(self, result_text="All healthy.", raises=None):

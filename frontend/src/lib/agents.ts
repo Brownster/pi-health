@@ -5,6 +5,11 @@ import {
   type OperationCreated,
   type OperationEvent,
 } from "@/lib/operations";
+import {
+  lifecycleContractFields,
+  type IntegrationLifecycleStatus,
+} from "@/lib/integration-lifecycle-contract";
+import { runIntegrationLifecycleOperation } from "@/lib/integration-lifecycle";
 
 export type AgentState =
   | "not_installed"
@@ -13,9 +18,10 @@ export type AgentState =
   | "connected"
   | "degraded"
   | "disabled"
+  | "cleanup_required"
   | "disconnected";
 
-export interface AgentStatus {
+export interface AgentStatus extends IntegrationLifecycleStatus {
   state: AgentState;
   installed: boolean;
   enabled: boolean;
@@ -103,8 +109,9 @@ export interface AgentInstallValues {
   };
 }
 
-export function getAgentStatus(signal?: AbortSignal): Promise<AgentStatus> {
-  return requestApi<AgentStatus>("/api/integrations/agents", { method: "GET", signal });
+export async function getAgentStatus(signal?: AbortSignal): Promise<AgentStatus> {
+  const status = await requestApi<AgentStatus>("/api/integrations/agents", { method: "GET", signal });
+  return { ...status, ...lifecycleContractFields("agents", status) };
 }
 
 export function getAgentProviders(signal?: AbortSignal): Promise<{ providers: AgentProvider[] }> {
@@ -203,10 +210,47 @@ export function cancelClaudeAuth(operationId: string): Promise<{ cancelled: true
   });
 }
 
-export function disableAgents(): Promise<{ state: "disabled" }> {
-  return requestApi<{ state: "disabled" }>("/api/integrations/agents/disable", {
-    method: "POST",
-  });
+export function disableAgents(
+  onEvent: (event: OperationEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  return runIntegrationLifecycleOperation("agents", "disable", {}, onEvent, { signal });
+}
+
+export interface AgentUninstallValues {
+  confirmation: "AI Agents";
+  admin_username: string;
+  admin_password: string;
+  remove_claude_code: boolean;
+}
+
+export function uninstallAgents(
+  values: AgentUninstallValues,
+  onEvent: (event: OperationEvent) => void,
+  options: { onCreated?: () => void; signal?: AbortSignal } = {},
+): Promise<void> {
+  return runIntegrationLifecycleOperation(
+    "agents",
+    "uninstall",
+    values as unknown as Record<string, unknown>,
+    onEvent,
+    options,
+  );
+}
+
+export function retryAgentCleanup(
+  action: "disable" | "uninstall",
+  values: Record<string, unknown>,
+  onEvent: (event: OperationEvent) => void,
+  options: { onCreated?: () => void; signal?: AbortSignal } = {},
+): Promise<void> {
+  return runIntegrationLifecycleOperation(
+    "agents",
+    "retry_cleanup",
+    values,
+    onEvent,
+    { ...options, cleanupAction: action },
+  );
 }
 
 export function sendAgentTest(): Promise<{ status: "sent" }> {

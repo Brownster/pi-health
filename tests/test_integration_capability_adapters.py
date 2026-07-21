@@ -143,7 +143,7 @@ def test_uninstalled_integrations_remain_discoverable_and_link_to_setup():
         assert item["installed"] is True
         assert item["runtime_kind"] == "integration-adapter"
         assert status["lifecycle"]["configured"] is False
-        assert status["health"]["state"] == "unconfigured"
+        assert status["health"]["state"] == "unavailable"
         assert item["capabilities"][0]["surface"] == "integrations"
 
 
@@ -164,9 +164,49 @@ def test_degraded_and_disabled_runtime_health_remain_distinct():
     assert mattermost["health"]["issues"][0]["code"] == "mattermost_degraded"
     assert "hook denied" not in json.dumps(mattermost)
     agents = provider(snapshot, "ai-agents")["capabilities"][0]["status"]
-    assert agents["lifecycle"]["configured"] is True
+    assert agents["lifecycle"] == {
+        "installed": True,
+        "enabled": False,
+        "configured": False,
+        "compatibility": "compatible",
+        "availability": "available",
+    }
     assert agents["health"]["state"] == "disabled"
     assert agents["details"]["runtime_enabled"] is False
+
+
+def test_retained_and_cleanup_required_integrations_are_not_healthy_or_configured():
+    adapter = IntegrationCapabilityAdapter(
+        mattermost_status=lambda: mattermost_status(
+            state="retained_data",
+            installed=False,
+            retained_data=True,
+            webhook_configured=False,
+            services={},
+        ),
+        agent_status=lambda: agent_status(
+            state="cleanup_required",
+            cleanup_required=True,
+        ),
+        clock=lambda: NOW,
+    )
+
+    snapshot = registry(adapter).snapshot()
+
+    mattermost = provider(snapshot, "mattermost")["capabilities"][0]["status"]
+    assert mattermost["lifecycle"] == {
+        "installed": False,
+        "enabled": False,
+        "configured": False,
+        "compatibility": "compatible",
+        "availability": "unavailable",
+    }
+    assert mattermost["health"]["state"] == "unavailable"
+    agents = provider(snapshot, "ai-agents")["capabilities"][0]["status"]
+    assert agents["lifecycle"]["configured"] is False
+    assert agents["lifecycle"]["availability"] == "unavailable"
+    assert agents["health"]["state"] == "error"
+    assert agents["health"]["issues"][0]["code"] == "agent_cleanup_required"
 
 
 def test_provider_status_failure_is_isolated():

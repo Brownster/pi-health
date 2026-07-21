@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  Ban,
   BellRing,
   Bot,
   CheckCircle2,
   Clock3,
+  Database,
   ExternalLink,
   Loader2,
   MessageSquare,
   Plus,
+  Power,
   RefreshCw,
   Send,
   ServerCog,
@@ -17,18 +20,27 @@ import {
   X,
 } from "lucide-react";
 
+import { useAuth } from "@/components/auth/auth-provider";
 import { AgentsIntegrationCard } from "@/components/integrations/agents-integration-card";
+import { IntegrationLifecycleDialog } from "@/components/integrations/integration-lifecycle-dialog";
 import { PackageUpdatesCard } from "@/components/integrations/package-updates-card";
 import { StackNotificationsCard } from "@/components/integrations/stack-notifications-card";
+import { useIntegrationLifecycle } from "@/components/integrations/use-integration-lifecycle";
+import { ActionMenu, type ActionMenuItem } from "@/components/ui/action-menu";
 import { Badge, StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ModalOverlay } from "@/components/ui/modal-overlay";
 import { PageHeader } from "@/components/ui/page-header";
 import {
+  disableMattermost,
+  enableMattermost,
   getMattermostStatus,
   installMattermost,
+  purgeMattermost,
+  retryMattermostCleanup,
   sendMattermostTest,
+  uninstallMattermost,
   updateMattermostPolicy,
   type AlertKind,
   type AlertPolicy,
@@ -36,6 +48,11 @@ import {
   type MattermostSetup,
   type MattermostStatus,
 } from "@/lib/integrations";
+import {
+  lifecycleNavigationTarget,
+  type IntegrationBlockedAction,
+} from "@/lib/integration-lifecycle-contract";
+import { handleTabKeyDown } from "@/lib/tab-keyboard";
 import { cn } from "@/lib/utils";
 
 const FIELD_CLASS =
@@ -61,6 +78,15 @@ const KIND_LABELS: Record<AlertKind, { label: string; description: string }> = {
 
 type Tab = "overview" | "policy";
 type SilenceDraft = { resource: AlertResource; duration: "1h" | "24h" | "permanent"; reason: string };
+type MattermostLifecycleMode =
+  | "disable"
+  | "enable"
+  | "uninstall"
+  | "purge"
+  | "retry_disable"
+  | "retry_enable"
+  | "retry_uninstall"
+  | "retry_purge";
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "The request failed";
@@ -74,12 +100,17 @@ function formatTime(value?: string | number | null): string {
 
 function statusTone(state: MattermostStatus["state"]): "success" | "warning" | "danger" | "neutral" {
   if (state === "connected") return "success";
-  if (state === "degraded") return "warning";
-  if (state === "disconnected") return "danger";
+  if (state === "degraded" || state === "retained_data") return "warning";
+  if (state === "disconnected" || state === "cleanup_required") return "danger";
   return "neutral";
 }
 
+function displayState(value: string): string {
+  return value.replace(/_/g, " ");
+}
+
 export function IntegrationsPage() {
+  const { permissions: sessionPermissions } = useAuth();
   const [status, setStatus] = useState<MattermostStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -94,7 +125,14 @@ export function IntegrationsPage() {
   const [silenceDraft, setSilenceDraft] = useState<SilenceDraft | null>(null);
   const [testing, setTesting] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-  const [agentRefreshKey, setAgentRefreshKey] = useState(0);
+  const [integrationRefreshKey, setIntegrationRefreshKey] = useState(0);
+  const [lifecycleMode, setLifecycleMode] = useState<MattermostLifecycleMode | null>(null);
+  const [blockedAction, setBlockedAction] = useState<IntegrationBlockedAction | null>(null);
+
+  const invalidateIntegrations = useCallback(() => {
+    setIntegrationRefreshKey((current) => current + 1);
+  }, []);
+  const lifecycle = useIntegrationLifecycle(invalidateIntegrations);
 
   const load = useCallback(async () => {
     try {
@@ -106,13 +144,12 @@ export function IntegrationsPage() {
       setError(errorMessage(caught));
     } finally {
       setLoading(false);
-      setAgentRefreshKey((current) => current + 1);
     }
   }, []);
 
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [integrationRefreshKey, load]);
 
   const resourcesByKind = useMemo(() => {
     const grouped: Record<AlertKind, AlertResource[]> = {
@@ -137,7 +174,7 @@ export function IntegrationsPage() {
           setInstallLines((current) => [...current, event.error as string]);
         }
       });
-      await load();
+      invalidateIntegrations();
       setNotice("Mattermost and LimeOS alerts are connected.");
     } catch (caught) {
       setError(errorMessage(caught));
@@ -216,11 +253,126 @@ export function IntegrationsPage() {
     }
   }
 
+  function openLifecycle(mode: MattermostLifecycleMode) {
+    setLifecycleMode(mode);
+    lifecycle.open();
+  }
+
+  function closeLifecycle() {
+    if (lifecycle.state.phase === "running") return;
+    lifecycle.close();
+    setLifecycleMode(null);
+  }
+
+  async function runLifecycle(confirmation?: string, acknowledged = false) {
+    const mode = lifecycleMode;
+    if (!mode) return;
+    const action = mode.replace("retry_", "") as "disable" | "enable" | "uninstall" | "purge";
+    const retrying = mode.startsWith("retry_");
+    if ((action === "uninstall" || action === "purge") && confirmation !== "Mattermost") return;
+    if (action === "purge" && !acknowledged) return;
+
+    const values = action === "uninstall"
+      ? { confirmation: "Mattermost" }
+      : action === "purge"
+        ? { confirmation: "Mattermost", acknowledge_data_loss: true }
+        : {};
+    const completed = await lifecycle.run((onEvent) => {
+      if (retrying) return retryMattermostCleanup(action, values, onEvent);
+      if (action === "disable") return disableMattermost(onEvent);
+      if (action === "enable") return enableMattermost(onEvent);
+      if (action === "uninstall") return uninstallMattermost("Mattermost", onEvent);
+      return purgeMattermost("Mattermost", onEvent);
+    });
+    if (!completed) return;
+    setNotice(
+      action === "disable"
+        ? "Mattermost and alert delivery are disabled. Configuration and chat data are preserved."
+        : action === "enable"
+          ? "Mattermost and alert delivery are enabled."
+          : action === "uninstall"
+            ? "Mattermost was uninstalled. Chat data is retained for reinstall or deletion."
+            : "Mattermost and all retained chat data were deleted.",
+    );
+  }
+
+  function retryLifecycle() {
+    if (lifecycleMode === "uninstall" || lifecycleMode === "retry_uninstall") {
+      setLifecycleMode("retry_uninstall");
+      lifecycle.reconfirm();
+      return;
+    }
+    if (lifecycleMode === "purge" || lifecycleMode === "retry_purge") {
+      setLifecycleMode("retry_purge");
+      lifecycle.reconfirm();
+      return;
+    }
+    void lifecycle.retry();
+  }
+
+  function focusBlockedDependency(blocker: IntegrationBlockedAction) {
+    const target = lifecycleNavigationTarget(blocker);
+    if (!target) return;
+    setBlockedAction(null);
+    window.requestAnimationFrame(() => {
+      const card = document.getElementById(target.anchor);
+      card?.scrollIntoView({ behavior: "smooth", block: "center" });
+      card?.focus();
+    });
+  }
+
+  const canAdmin = sessionPermissions.includes("extensions.admin");
+  const allowedActions = new Set(status?.allowed_actions ?? []);
+  const cleanupAction = status?.cleanup_operation?.action;
+  const cleanupMode = status?.cleanup_operation?.retryable
+    ? cleanupAction === "disable"
+      ? "retry_disable"
+      : cleanupAction === "enable"
+        ? "retry_enable"
+        : cleanupAction === "uninstall"
+          ? "retry_uninstall"
+          : cleanupAction === "purge"
+            ? "retry_purge"
+            : null
+    : null;
+  const managementItems: ActionMenuItem[] = [];
+  if (allowedActions.has("enable")) {
+    managementItems.push({ id: "enable", label: "Enable", Icon: Power, onSelect: () => openLifecycle("enable"), tone: "info", data: { "data-mattermost-lifecycle-action": "enable" } });
+  }
+  if (allowedActions.has("disable")) {
+    managementItems.push({ id: "disable", label: "Disable", Icon: Ban, onSelect: () => openLifecycle("disable"), tone: "danger", data: { "data-mattermost-lifecycle-action": "disable" } });
+  }
+  status?.blocked_actions.forEach((blocker) => {
+    managementItems.push({
+      id: `blocked-${blocker.action}`,
+      label: `${blocker.action === "disable" ? "Disable" : "Uninstall"} (AI Agents first)`,
+      Icon: blocker.action === "disable" ? Ban : Trash2,
+      onSelect: () => setBlockedAction(blocker),
+      separatorBefore: managementItems.length > 0 && blocker.action === "uninstall",
+      tone: "danger",
+      data: { "data-mattermost-blocked-action": blocker.action },
+    });
+  });
+  if (allowedActions.has("uninstall")) {
+    managementItems.push({ id: "uninstall", label: "Uninstall", Icon: Trash2, onSelect: () => openLifecycle("uninstall"), separatorBefore: managementItems.length > 0, tone: "danger", data: { "data-mattermost-lifecycle-action": "uninstall" } });
+  }
+  if (allowedActions.has("purge")) {
+    managementItems.push({ id: "purge", label: "Delete retained data", Icon: Database, onSelect: () => openLifecycle("purge"), separatorBefore: managementItems.length > 0, tone: "danger", data: { "data-mattermost-lifecycle-action": "purge" } });
+  }
+  if (allowedActions.has("retry_cleanup") && cleanupMode) {
+    managementItems.push({ id: "retry_cleanup", label: "Retry cleanup", Icon: RefreshCw, onSelect: () => openLifecycle(cleanupMode), tone: "info", data: { "data-mattermost-lifecycle-action": "retry_cleanup" } });
+  }
+  const destructiveMode = lifecycleMode === "uninstall"
+    || lifecycleMode === "retry_uninstall"
+    || lifecycleMode === "purge"
+    || lifecycleMode === "retry_purge";
+  const purgeMode = lifecycleMode === "purge" || lifecycleMode === "retry_purge";
+
   return (
     <section className="space-y-4 sm:space-y-6">
       <PageHeader
         actions={
-          <Button className="gap-2" disabled={loading} onClick={() => void load()} variant="secondary">
+          <Button className="gap-2" disabled={loading} onClick={() => { setLoading(true); invalidateIntegrations(); }} variant="secondary">
             <RefreshCw aria-hidden="true" className={cn("h-4 w-4", loading && "animate-spin")} />
             Refresh
           </Button>
@@ -241,7 +393,7 @@ export function IntegrationsPage() {
         </div>
       ) : null}
 
-      <Card className="overflow-hidden">
+      <Card className="overflow-hidden" data-mattermost-integration id="mattermost-integration" tabIndex={-1}>
         <CardHeader className="border-b border-border/70 bg-muted/20">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-3">
@@ -253,30 +405,81 @@ export function IntegrationsPage() {
                 <CardDescription>Private chat for LimeOS incidents and agent investigations</CardDescription>
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              <StatusBadge label={(status?.state ?? "loading").replace("_", " ")} tone={status ? statusTone(status.state) : "neutral"} />
-              {!status?.installed ? <Button className="gap-2" data-mattermost-setup onClick={() => setSetupOpen(true)}><Plus className="h-4 w-4" />Set up</Button> : null}
+            <div className="flex flex-wrap items-center gap-2">
+              <StatusBadge label={displayState(status?.state ?? "loading")} tone={status ? statusTone(status.state) : "neutral"} />
+              {canAdmin && allowedActions.has("setup") && !status?.retained_data ? <Button className="gap-2" data-mattermost-setup onClick={() => setSetupOpen(true)}><Plus className="h-4 w-4" />Set up</Button> : null}
+              {canAdmin && managementItems.length ? (
+                <ActionMenu
+                  items={managementItems}
+                  label="Manage Mattermost"
+                  menuData={{ "data-mattermost-lifecycle-menu": "mattermost" }}
+                  triggerData={{ "data-mattermost-lifecycle-menu-trigger": "mattermost" }}
+                />
+              ) : null}
             </div>
           </div>
         </CardHeader>
 
-        {status?.installed ? (
+        {status?.cleanup_required ? (
+          <CardContent className="space-y-4 p-4 sm:p-6">
+            <div className="flex items-start gap-3 border-l-2 border-danger bg-danger/5 px-4 py-3">
+              <TriangleAlert aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-danger" />
+              <div>
+                <p className="text-sm font-medium text-danger">Cleanup needs attention</p>
+                <p className="mt-1 text-xs text-muted-foreground">Mattermost remains unavailable until LimeOS finishes the interrupted {cleanupAction ? displayState(cleanupAction) : "cleanup"} operation.</p>
+              </div>
+            </div>
+            <div className="grid gap-px overflow-hidden rounded-md border border-border bg-border sm:grid-cols-3">
+              <div className="bg-card p-3"><p className="font-mono text-[10px] uppercase text-dim">Operation</p><p className="mt-1 text-sm">{cleanupAction ? displayState(cleanupAction) : "unknown"}</p></div>
+              <div className="bg-card p-3"><p className="font-mono text-[10px] uppercase text-dim">Recovery</p><p className="mt-1 text-sm">{status.cleanup_operation?.state ?? "unavailable"}</p></div>
+              <div className="bg-card p-3"><p className="font-mono text-[10px] uppercase text-dim">Updated</p><p className="mt-1 text-sm">{formatTime(status.cleanup_operation?.updated_at)}</p></div>
+            </div>
+            {canAdmin && allowedActions.has("retry_cleanup") && cleanupMode ? (
+              <Button className="gap-2" data-mattermost-retry-cleanup onClick={() => openLifecycle(cleanupMode)} variant="warning"><RefreshCw className="h-4 w-4" />Retry cleanup</Button>
+            ) : <p className="text-sm text-muted-foreground">{canAdmin ? "Recovery details are unavailable. Refresh the page before retrying." : "An administrator must finish the cleanup."}</p>}
+          </CardContent>
+        ) : status?.retained_data ? (
+          <CardContent className="space-y-5 p-4 sm:p-6">
+            <div className="flex items-start gap-3 border-l-2 border-warning bg-warning/5 px-4 py-3">
+              <Database aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+              <div>
+                <p className="text-sm font-medium">Mattermost data is retained</p>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">The services and alert delivery are removed. Database records, messages, uploads, plugins, and retained logs remain available for a reinstall.</p>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {canAdmin && allowedActions.has("setup") ? <Button className="gap-2" data-mattermost-retained-setup onClick={() => setSetupOpen(true)}><Plus className="h-4 w-4" />Set up again</Button> : null}
+              {canAdmin && allowedActions.has("purge") ? <Button className="gap-2" data-mattermost-purge onClick={() => openLifecycle("purge")} variant="danger"><Trash2 className="h-4 w-4" />Delete data</Button> : null}
+            </div>
+            {!allowedActions.has("purge") ? <p className="text-xs text-muted-foreground">Permanent data deletion is not available in this release.</p> : null}
+          </CardContent>
+        ) : status?.installed ? (
           <>
-            <div className="flex overflow-x-auto border-b border-border px-4" role="tablist">
+            <div aria-label="Mattermost views" className="flex overflow-x-auto border-b border-border px-4" role="tablist">
               {(["overview", "policy"] as Tab[]).map((item) => (
                 <button
+                  aria-controls={`mattermost-panel-${item}`}
                   aria-selected={tab === item}
                   className={cn("min-h-11 border-b-2 px-4 font-mono text-xs capitalize", tab === item ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")}
+                  id={`mattermost-tab-${item}`}
                   key={item}
                   onClick={() => setTab(item)}
+                  onKeyDown={handleTabKeyDown}
                   role="tab"
+                  tabIndex={tab === item ? 0 : -1}
                   type="button"
                 >{item === "policy" ? "Alert policy" : item}</button>
               ))}
             </div>
-            <CardContent className="p-4 sm:p-6">
+            <CardContent aria-labelledby={`mattermost-tab-${tab}`} className="p-4 sm:p-6" id={`mattermost-panel-${tab}`} role="tabpanel">
               {tab === "overview" ? (
                 <div className="space-y-5">
+                  {status.state === "disabled" ? (
+                    <div className="flex items-start gap-3 border-l-2 border-warning bg-warning/5 px-4 py-3">
+                      <Ban className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+                      <div><p className="text-sm font-medium">Mattermost is disabled</p><p className="mt-1 text-xs text-muted-foreground">Chat, alert delivery, and the full managed stack are stopped. Configuration and chat data are preserved.</p></div>
+                    </div>
+                  ) : null}
                   <div className="grid gap-px overflow-hidden rounded-md border border-border bg-border sm:grid-cols-2 xl:grid-cols-5">
                     {[
                       ["Site", status.site_url ?? "Unknown"],
@@ -291,13 +494,13 @@ export function IntegrationsPage() {
                       </div>
                     ))}
                   </div>
-                  <div className="flex flex-wrap gap-2">
+                  {status.state !== "disabled" ? <div className="flex flex-wrap gap-2">
                     <Button className="gap-2" disabled={testing} onClick={() => void sendTest()} variant="info">
                       {testing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                       {testing ? "Sending" : "Send test alert"}
                     </Button>
                     {status.site_url ? <a className="inline-flex min-h-11 items-center gap-2 rounded-md border border-border px-4 font-mono text-sm hover:bg-muted" href={status.site_url} rel="noreferrer" target="_blank">Open Mattermost<ExternalLink className="h-4 w-4" /></a> : null}
-                  </div>
+                  </div> : null}
                   {status.incidents.length ? (
                     <div>
                       <h3 className="mb-2 font-mono text-sm font-semibold">Active incidents</h3>
@@ -348,13 +551,13 @@ export function IntegrationsPage() {
         )}
       </Card>
 
-      <AgentsIntegrationCard refreshKey={agentRefreshKey} />
+      <AgentsIntegrationCard onLifecycleChanged={invalidateIntegrations} refreshKey={integrationRefreshKey} />
 
-      <StackNotificationsCard refreshKey={agentRefreshKey} />
+      <StackNotificationsCard refreshKey={integrationRefreshKey} />
 
-      <PackageUpdatesCard refreshKey={agentRefreshKey} />
+      <PackageUpdatesCard refreshKey={integrationRefreshKey} />
 
-      {setupOpen ? <ModalOverlay onClose={installing ? () => undefined : () => setSetupOpen(false)}><Card aria-labelledby="mattermost-setup-title" aria-modal="true" className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden" role="dialog"><CardHeader className="flex flex-row items-start justify-between border-b border-border"><div><CardTitle id="mattermost-setup-title">Set up Mattermost</CardTitle><CardDescription>Install chat and connect LimeOS alerts in one workflow.</CardDescription></div><Button aria-label="Close setup" className="w-11 px-0" disabled={installing} onClick={() => setSetupOpen(false)} variant="ghost"><X className="h-4 w-4" /></Button></CardHeader><CardContent className="space-y-4 overflow-auto p-4 sm:p-6">
+      {setupOpen ? <ModalOverlay onClose={installing ? () => undefined : () => setSetupOpen(false)} restoreFocus={() => document.getElementById("mattermost-integration")?.focus()}><Card aria-labelledby="mattermost-setup-title" aria-modal="true" className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden" role="dialog"><CardHeader className="flex flex-row items-start justify-between border-b border-border"><div><CardTitle id="mattermost-setup-title">Set up Mattermost</CardTitle><CardDescription>Install chat and connect LimeOS alerts in one workflow.</CardDescription></div><Button aria-label="Close setup" className="w-11 px-0" disabled={installing} onClick={() => setSetupOpen(false)} variant="ghost"><X className="h-4 w-4" /></Button></CardHeader><CardContent className="space-y-4 overflow-auto p-4 sm:p-6">
         {installing || installLines.length ? <div className="space-y-3"><div className={cn("flex items-center gap-2 text-sm", error ? "text-danger" : "text-info")}>{installing ? <Loader2 className="h-4 w-4 animate-spin" /> : error ? <TriangleAlert className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}{installing ? "Installing Mattermost" : error ? "Setup failed" : "Setup finished"}</div><pre className="max-h-72 overflow-auto rounded-md border border-border bg-black/30 p-3 font-mono text-xs leading-5 text-muted-foreground" data-mattermost-install-log>{installLines.join("\n")}</pre>{!installing ? <Button onClick={() => setSetupOpen(false)}>Close</Button> : null}</div> : <>
           <div className="grid gap-3 sm:grid-cols-2"><label className="space-y-1 sm:col-span-2"><span className="text-xs text-muted-foreground">Mattermost URL</span><input className={FIELD_CLASS} onChange={(event) => setSetup({ ...setup, site_url: event.target.value })} value={setup.site_url} /></label><label className="space-y-1"><span className="text-xs text-muted-foreground">Admin username</span><input autoComplete="username" className={FIELD_CLASS} onChange={(event) => setSetup({ ...setup, admin_username: event.target.value })} value={setup.admin_username} /></label><label className="space-y-1"><span className="text-xs text-muted-foreground">Admin email</span><input autoComplete="email" className={FIELD_CLASS} onChange={(event) => setSetup({ ...setup, admin_email: event.target.value })} type="email" value={setup.admin_email} /></label><label className="space-y-1 sm:col-span-2"><span className="text-xs text-muted-foreground">Admin password</span><input autoComplete="new-password" className={FIELD_CLASS} minLength={10} onChange={(event) => setSetup({ ...setup, admin_password: event.target.value })} type="password" value={setup.admin_password} /></label></div>
           <button className="flex min-h-11 items-center gap-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setAdvanced((value) => !value)} type="button"><ServerCog className="h-4 w-4" />Advanced settings</button>
@@ -363,7 +566,48 @@ export function IntegrationsPage() {
         </>}
       </CardContent></Card></ModalOverlay> : null}
 
-      {silenceDraft ? <ModalOverlay onClose={() => setSilenceDraft(null)}><Card aria-modal="true" className="w-full max-w-md" role="dialog"><CardHeader><CardTitle>Silence {silenceDraft.resource.key}</CardTitle><CardDescription>Alerts remain visible in LimeOS while Mattermost delivery is paused.</CardDescription></CardHeader><CardContent className="space-y-3"><label className="block space-y-1"><span className="text-xs text-muted-foreground">Duration</span><select className={FIELD_CLASS} onChange={(event) => setSilenceDraft({ ...silenceDraft, duration: event.target.value as SilenceDraft["duration"] })} value={silenceDraft.duration}><option value="1h">1 hour</option><option value="24h">24 hours</option><option value="permanent">Until manually removed</option></select></label><label className="block space-y-1"><span className="text-xs text-muted-foreground">Reason (optional)</span><input className={FIELD_CLASS} maxLength={200} onChange={(event) => setSilenceDraft({ ...silenceDraft, reason: event.target.value })} value={silenceDraft.reason} /></label><div className="flex justify-end gap-2"><Button onClick={() => setSilenceDraft(null)} variant="ghost">Cancel</Button><Button className="gap-2" onClick={confirmSilence} variant="warning"><BellRing className="h-4 w-4" />Silence</Button></div></CardContent></Card></ModalOverlay> : null}
+      {blockedAction ? (
+        <ModalOverlay onClose={() => setBlockedAction(null)} restoreFocus={() => document.getElementById("mattermost-integration")?.focus()}>
+          <Card aria-labelledby="mattermost-blocked-title" aria-modal="true" className="w-full max-w-lg" role="dialog">
+            <CardHeader className="flex flex-row items-start justify-between border-b border-border">
+              <div><CardTitle id="mattermost-blocked-title">{blockedAction.action === "disable" ? "Disable" : "Uninstall"} AI Agents first</CardTitle><CardDescription>Mattermost is required by the installed assistant integration.</CardDescription></div>
+              <Button aria-label="Close dependency notice" className="h-11 w-11 shrink-0 px-0" onClick={() => setBlockedAction(null)} variant="ghost"><X className="h-4 w-4" /></Button>
+            </CardHeader>
+            <CardContent className="space-y-4 p-4 sm:p-5">
+              <div className="flex items-start gap-3 border-l-2 border-warning bg-warning/5 px-4 py-3"><Bot className="mt-0.5 h-4 w-4 shrink-0 text-warning" /><div><p className="text-sm font-medium">AI Agents blocks this action</p><p className="mt-1 text-sm text-muted-foreground">{blockedAction.message}</p></div></div>
+              <div className="flex flex-wrap justify-end gap-2"><Button onClick={() => setBlockedAction(null)} variant="outline">Cancel</Button><Button className="gap-2" data-mattermost-go-to-agents onClick={() => focusBlockedDependency(blockedAction)}><Bot className="h-4 w-4" />Go to AI Agents</Button></div>
+            </CardContent>
+          </Card>
+        </ModalOverlay>
+      ) : null}
+
+      {lifecycle.state.open && lifecycleMode ? (
+        <IntegrationLifecycleDialog
+          acknowledgement={purgeMode ? "I understand this permanently deletes all retained Mattermost data and cannot be undone." : undefined}
+          confirmLabel={lifecycleMode === "disable" ? "Disable Mattermost" : lifecycleMode === "enable" ? "Enable Mattermost" : lifecycleMode === "uninstall" ? "Uninstall Mattermost" : lifecycleMode === "purge" ? "Delete all data" : lifecycleMode === "retry_disable" ? "Retry disable" : lifecycleMode === "retry_enable" ? "Retry enable" : lifecycleMode === "retry_uninstall" ? "Retry uninstall" : "Retry data deletion"}
+          confirmation={destructiveMode ? { expected: "Mattermost" } : undefined}
+          description={purgeMode ? "Permanently delete retained Mattermost data after the services have been uninstalled." : lifecycleMode === "uninstall" || lifecycleMode === "retry_uninstall" ? "Remove the managed Mattermost stack and alert delivery while retaining chat data for reinstall." : lifecycleMode === "disable" || lifecycleMode === "retry_disable" ? "Stop the complete Mattermost stack and alert delivery while preserving configuration and data." : "Start the complete Mattermost stack and restore alert delivery."}
+          destructive={destructiveMode}
+          onClose={closeLifecycle}
+          onConfirm={(values) => void runLifecycle(values.confirmation, values.acknowledged)}
+          onRetry={retryLifecycle}
+          restoreFocus={() => document.getElementById("mattermost-integration")?.focus()}
+          state={lifecycle.state}
+          title={lifecycleMode === "disable" ? "Disable Mattermost?" : lifecycleMode === "enable" ? "Enable Mattermost?" : lifecycleMode === "uninstall" ? "Uninstall Mattermost?" : lifecycleMode === "purge" ? "Delete retained Mattermost data?" : lifecycleMode === "retry_disable" ? "Retry Mattermost disable" : lifecycleMode === "retry_enable" ? "Retry Mattermost enable" : lifecycleMode === "retry_uninstall" ? "Retry Mattermost uninstall" : "Retry Mattermost data deletion"}
+        >
+          {lifecycleMode === "uninstall" || lifecycleMode === "retry_uninstall" ? (
+            <div className="grid gap-3 text-sm sm:grid-cols-2">
+              <div className="border-l-2 border-danger/60 pl-3"><p className="font-medium text-danger">Removed</p><p className="mt-1 text-xs leading-5 text-muted-foreground">Mattermost, Postgres, and alert containers; alert delivery; and LimeOS connection configuration.</p></div>
+              <div className="border-l-2 border-success/60 pl-3"><p className="font-medium text-success">Preserved</p><p className="mt-1 text-xs leading-5 text-muted-foreground">Database records, messages, uploads, plugins, and retained logs for a future reinstall.</p></div>
+            </div>
+          ) : null}
+          {purgeMode ? (
+            <div className="border-l-2 border-danger bg-danger/5 px-3 py-2 text-sm text-muted-foreground">This permanently removes database records, messages, uploads, plugins, retained logs, and recovery metadata.</div>
+          ) : null}
+        </IntegrationLifecycleDialog>
+      ) : null}
+
+      {silenceDraft ? <ModalOverlay onClose={() => setSilenceDraft(null)}><Card aria-labelledby="mattermost-silence-title" aria-modal="true" className="w-full max-w-md" role="dialog"><CardHeader><CardTitle id="mattermost-silence-title">Silence {silenceDraft.resource.key}</CardTitle><CardDescription>Alerts remain visible in LimeOS while Mattermost delivery is paused.</CardDescription></CardHeader><CardContent className="space-y-3"><label className="block space-y-1"><span className="text-xs text-muted-foreground">Duration</span><select className={FIELD_CLASS} onChange={(event) => setSilenceDraft({ ...silenceDraft, duration: event.target.value as SilenceDraft["duration"] })} value={silenceDraft.duration}><option value="1h">1 hour</option><option value="24h">24 hours</option><option value="permanent">Until manually removed</option></select></label><label className="block space-y-1"><span className="text-xs text-muted-foreground">Reason (optional)</span><input className={FIELD_CLASS} maxLength={200} onChange={(event) => setSilenceDraft({ ...silenceDraft, reason: event.target.value })} value={silenceDraft.reason} /></label><div className="flex justify-end gap-2"><Button onClick={() => setSilenceDraft(null)} variant="ghost">Cancel</Button><Button className="gap-2" onClick={confirmSilence} variant="warning"><BellRing className="h-4 w-4" />Silence</Button></div></CardContent></Card></ModalOverlay> : null}
     </section>
   );
 }

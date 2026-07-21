@@ -5,9 +5,11 @@ from __future__ import annotations
 import json
 import re
 import secrets
+import shutil
 import subprocess
 import time
 from collections.abc import Callable, Iterator, Mapping
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib import error, request
@@ -15,13 +17,24 @@ from urllib.parse import urlparse
 
 from alert_evaluator import Notification
 from alert_notifier import MattermostWebhookNotifier
-from alert_policy import AlertPolicy, AlertPolicyError, default_alert_policy, normalize_alert_policy
-from compose_yaml import dump_compose_yaml
+from alert_policy import (
+    AlertPolicy,
+    AlertPolicyError,
+    default_alert_policy,
+    normalize_alert_policy,
+)
+from compose_yaml import ComposeYamlError, dump_compose_yaml, load_compose_yaml
+from integration_lifecycle_service import (
+    LifecycleStateError,
+    RecoveryCredentialError,
+)
 
 
 INTEGRATION_VERSION = 1
 MATTERMOST_VERSION = "11.8.3"
-MATTERMOST_ARM64_SHA256 = "c784ca5d34cfe3793a31a6a7d17d209e0d916bb744a50df776c78aa318d5b98f"
+MATTERMOST_ARM64_SHA256 = (
+    "c784ca5d34cfe3793a31a6a7d17d209e0d916bb744a50df776c78aa318d5b98f"
+)
 ALERTD_SOURCE_FILES = (
     "alert_daemon.py",
     "alert_history.py",
@@ -34,6 +47,15 @@ ALERTD_SOURCE_FILES = (
 )
 SLUG_PATTERN = re.compile(r"^[a-z][a-z0-9-]{1,62}$")
 USERNAME_PATTERN = re.compile(r"^[a-z0-9._-]{3,64}$")
+OPERATION_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+
+LIFECYCLE_FAILURE_MESSAGE = (
+    "Mattermost cleanup did not complete. Retry cleanup from Integrations."
+)
+UNKNOWN_STORAGE_MESSAGE = (
+    "Mattermost storage ownership could not be verified. Preserve the data and "
+    "review the generated stack manually."
+)
 
 #: A single dedicated channel receives normalized *arr (Radarr/Sonarr/…) webhooks.
 STACK_NOTIFICATIONS_CHANNEL = "stack-notifications"
@@ -59,7 +81,9 @@ class MattermostApiError(MattermostIntegrationError):
 class MattermostApiClient:
     """Small Mattermost v4 API client used only during bootstrap."""
 
-    def __init__(self, site_url: str, *, opener: Callable[..., Any] = request.urlopen) -> None:
+    def __init__(
+        self, site_url: str, *, opener: Callable[..., Any] = request.urlopen
+    ) -> None:
         self._site_url = site_url.rstrip("/")
         self._opener = opener
         self._token: str | None = None
@@ -129,9 +153,7 @@ class MattermostApiClient:
             if exc.status != 400:
                 raise
 
-    def ensure_channel(
-        self, *, team_id: str, name: str, display_name: str
-    ) -> str:
+    def ensure_channel(self, *, team_id: str, name: str, display_name: str) -> str:
         try:
             channel, _headers = self._request(
                 "GET", f"/api/v4/teams/{team_id}/channels/name/{name}"
@@ -227,9 +249,17 @@ class MattermostIntegrationService:
         notifier_factory: Callable[[str], Any] = MattermostWebhookNotifier,
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.time,
-        container_status_provider: Callable[[str], Mapping[str, Any] | None] | None = None,
+        container_status_provider: Callable[[str], Mapping[str, Any] | None]
+        | None = None,
         stack_notifications_config_path: Path | None = None,
         package_updates_config_path: Path | None = None,
+        lifecycle_resolver: Any | None = None,
+        lifecycle_repository: Any | None = None,
+        lifecycle_policy: Mapping[str, Any] | None = None,
+        recovery_custody: Any | None = None,
+        agent_lifecycle_snapshot: Callable[[], Mapping[str, Any]] | None = None,
+        docker_runner: Callable[..., Any] = subprocess.run,
+        directory_remover: Callable[..., None] = shutil.rmtree,
     ) -> None:
         self._config_path = Path(config_path)
         self._stack_notifications_config_path = (
@@ -253,6 +283,13 @@ class MattermostIntegrationService:
         self._sleep = sleep
         self._clock = clock
         self._container_status_provider = container_status_provider
+        self._lifecycle_resolver = lifecycle_resolver
+        self._lifecycle_repository = lifecycle_repository
+        self._lifecycle_policy = dict(lifecycle_policy or {})
+        self._recovery_custody = recovery_custody
+        self._agent_lifecycle_snapshot = agent_lifecycle_snapshot
+        self._docker_runner = docker_runner
+        self._directory_remover = directory_remover
 
     def status(self) -> dict[str, Any]:
         config = self._load_config()
@@ -261,20 +298,25 @@ class MattermostIntegrationService:
         state = "connected" if installed else "not_installed"
         delivery = daemon.get("delivery") or {}
         services = self._service_statuses() if installed else {}
-        if services and any(value.get("state") != "running" for value in services.values()):
+        if services and any(
+            value.get("state") != "running" for value in services.values()
+        ):
             state = "disconnected"
-        elif services and any(value.get("health") == "unhealthy" for value in services.values()):
+        elif services and any(
+            value.get("health") == "unhealthy" for value in services.values()
+        ):
             state = "degraded"
         if state == "connected" and delivery.get("ok") is False:
             state = "degraded"
-        return {
+        public = {
             "state": state,
             "installed": installed,
             "site_url": config.get("site_url"),
             "stack_name": config.get("stack_name", "mattermost"),
             "team": config.get("team_name", "limeos"),
             "channel": config.get("channel_name", "limeos-alerts"),
-            "webhook_configured": self._read_secret("LIMEOS_ALERT_MATTERMOST_WEBHOOK") is not None,
+            "webhook_configured": self._read_secret("LIMEOS_ALERT_MATTERMOST_WEBHOOK")
+            is not None,
             "updates_channel_configured": self._updates_channel_configured(),
             "policy": self._policy(config),
             "resources": daemon.get("resources", []),
@@ -283,11 +325,29 @@ class MattermostIntegrationService:
             "updated_at": daemon.get("updated_at"),
             "services": services,
         }
+        if self._lifecycle_resolver is not None:
+            public = self._lifecycle_resolver.status(public)
+            if self._agent_lifecycle_snapshot is not None:
+                try:
+                    snapshot = self._agent_lifecycle_snapshot()
+                except Exception:
+                    snapshot = {
+                        "state": "cleanup_required",
+                        "installed": True,
+                        "enabled": True,
+                    }
+                public = self._lifecycle_resolver.apply_mattermost_dependencies(
+                    public, snapshot
+                )
+        return public
 
     def _updates_channel_configured(self) -> bool:
         if self._package_updates_config_path is None:
             return False
-        config = self._repository.read_json(self._package_updates_config_path, default={}) or {}
+        config = (
+            self._repository.read_json(self._package_updates_config_path, default={})
+            or {}
+        )
         return bool(config.get("webhook_url"))
 
     def update_policy(self, raw: Mapping[str, Any]) -> dict[str, Any]:
@@ -359,13 +419,18 @@ class MattermostIntegrationService:
             "webhook_url": webhook_url,
             "channel_name": PACKAGE_UPDATES_CHANNEL,
         }
-        self._repository.write_json(self._package_updates_config_path, config, mode=0o600)
+        self._repository.write_json(
+            self._package_updates_config_path, config, mode=0o600
+        )
 
     def _write_stack_notifications_config(self, *, webhook_url: str) -> None:
         if self._stack_notifications_config_path is None:
             return
         existing = (
-            self._repository.read_json(self._stack_notifications_config_path, default={}) or {}
+            self._repository.read_json(
+                self._stack_notifications_config_path, default={}
+            )
+            or {}
         )
         config = {
             "version": INTEGRATION_VERSION,
@@ -399,9 +464,13 @@ class MattermostIntegrationService:
             site_url = config.get("site_url")
             team_name = config.get("team_name")
             admin_username = config.get("admin_username")
-            password = values.get("admin_password") if isinstance(values, Mapping) else None
+            password = (
+                values.get("admin_password") if isinstance(values, Mapping) else None
+            )
             if not (site_url and team_name and admin_username):
-                raise MattermostIntegrationError("Mattermost configuration is incomplete")
+                raise MattermostIntegrationError(
+                    "Mattermost configuration is incomplete"
+                )
             if not isinstance(password, str) or not password:
                 raise MattermostIntegrationError("Administrator password is required")
             yield {"step": "auth", "line": "Authenticating with Mattermost"}
@@ -409,7 +478,10 @@ class MattermostIntegrationService:
             client.login(admin_username, password)
             yield {"step": "team", "line": "Locating LimeOS team"}
             team_id = client.ensure_team(name=team_name, display_name="LimeOS")
-            yield {"step": "stack-notifications", "line": "Creating stack notifications channel"}
+            yield {
+                "step": "stack-notifications",
+                "line": "Creating stack notifications channel",
+            }
             self._provision_stack_notifications(client, team_id)
             yield {"step": "updates-channel", "line": "Creating updates channel"}
             self._provision_package_updates(client, team_id)
@@ -421,11 +493,244 @@ class MattermostIntegrationService:
         except (MattermostIntegrationError, OSError) as exc:
             yield {"step": "error", "error": str(exc)}
 
+    def stream_disable(self, operation_id: str) -> Iterator[dict[str, Any]]:
+        """Stop the complete stack while retaining all configuration and data."""
+        try:
+            self._require_agents_disabled()
+            current = self._lifecycle_record()
+            if self._is_completed_target(current, "disabled"):
+                yield self._completion_event("Mattermost is already disabled")
+                return
+            self._require_no_pending_lifecycle(current)
+            config = self._installed_config()
+            record = self._new_lifecycle_record(
+                operation_id=operation_id,
+                action="disable",
+                target_state="disabled",
+                retained_data=False,
+            )
+            steps = [
+                (
+                    "stop_services",
+                    "Stopping Mattermost, Postgres, and alerts",
+                    lambda: self._run_compose(
+                        self._stack_dir(config), "down", "--remove-orphans"
+                    ),
+                )
+            ]
+            yield from self._execute_lifecycle(
+                record,
+                steps,
+                completion="Mattermost is disabled; configuration and data were retained",
+            )
+        except Exception as exc:
+            yield self._public_lifecycle_error(exc)
+
+    def stream_enable(self, operation_id: str) -> Iterator[dict[str, Any]]:
+        """Start a disabled stack and remove its lifecycle tombstone once verified."""
+        try:
+            current = self._lifecycle_record()
+            if not self._is_completed_target(current, "disabled"):
+                raise MattermostIntegrationError("Mattermost is not disabled")
+            config = self._installed_config()
+            record = self._new_lifecycle_record(
+                operation_id=operation_id,
+                action="enable",
+                target_state="connected",
+                retained_data=False,
+            )
+            client = self._api_factory(str(config["site_url"]))
+            steps = [
+                (
+                    "start_services",
+                    "Starting Mattermost, Postgres, and alerts",
+                    lambda: self._run_compose(self._stack_dir(config), "up", "-d"),
+                ),
+                (
+                    "verify_services",
+                    "Waiting for Mattermost",
+                    lambda: self._wait_until_ready(client),
+                ),
+            ]
+            yield from self._execute_lifecycle(
+                record,
+                steps,
+                completion="Mattermost is enabled",
+                delete_tombstone=True,
+            )
+        except Exception as exc:
+            yield self._public_lifecycle_error(exc)
+
+    def stream_uninstall(self, operation_id: str) -> Iterator[dict[str, Any]]:
+        """Remove LimeOS runtime ownership while preserving Mattermost volumes."""
+        try:
+            self._require_agents_uninstalled()
+            current = self._lifecycle_record()
+            if self._is_completed_target(current, "retained_data"):
+                yield self._completion_event(
+                    "Mattermost is already uninstalled; data is retained"
+                )
+                return
+            if current is not None and not self._is_completed_target(
+                current, "disabled"
+            ):
+                self._require_no_pending_lifecycle(current)
+            config = self._installed_config()
+            self._require_fixed_compose_project(config)
+            record = self._new_lifecycle_record(
+                operation_id=operation_id,
+                action="uninstall",
+                target_state="retained_data",
+                retained_data=True,
+            )
+            yield from self._execute_lifecycle(
+                record,
+                self._uninstall_steps(config),
+                completion="Mattermost was uninstalled; chat data is retained",
+            )
+        except Exception as exc:
+            yield self._public_lifecycle_error(exc)
+
+    def stream_purge(self, operation_id: str) -> Iterator[dict[str, Any]]:
+        """Delete retained volumes only when the server release policy permits it."""
+        try:
+            if not self._lifecycle_policy.get("release_policy", {}).get(
+                "mattermost_purge_enabled"
+            ):
+                raise MattermostIntegrationError(
+                    "Mattermost data deletion is not enabled in this release"
+                )
+            current = self._lifecycle_record()
+            if not self._is_completed_target(current, "retained_data"):
+                raise MattermostIntegrationError(
+                    "Mattermost has no retained data to delete"
+                )
+            record = self._new_lifecycle_record(
+                operation_id=operation_id,
+                action="purge",
+                target_state="not_installed",
+                retained_data=False,
+            )
+            yield from self._execute_lifecycle(
+                record,
+                self._purge_steps(),
+                completion="Retained Mattermost data was deleted",
+                delete_tombstone=True,
+            )
+        except Exception as exc:
+            yield self._public_lifecycle_error(exc)
+
+    def stream_retry_cleanup(self, operation_id: str) -> Iterator[dict[str, Any]]:
+        """Resume the fixed remaining steps recorded by an interrupted operation."""
+        try:
+            record = self._lifecycle_record()
+            if record is None or record.get("phase") not in {
+                "running",
+                "cleanup_required",
+            }:
+                raise MattermostIntegrationError(
+                    "There is no Mattermost cleanup to retry"
+                )
+            action = str(record["action"])
+            if action == "disable":
+                self._require_agents_disabled()
+                config = self._installed_config()
+                steps = [
+                    (
+                        "stop_services",
+                        "Stopping Mattermost, Postgres, and alerts",
+                        lambda: self._run_compose(
+                            self._stack_dir(config), "down", "--remove-orphans"
+                        ),
+                    )
+                ]
+                completion = (
+                    "Mattermost is disabled; configuration and data were retained"
+                )
+                delete_tombstone = False
+            elif action == "enable":
+                config = self._installed_config()
+                client = self._api_factory(str(config["site_url"]))
+                steps = [
+                    (
+                        "start_services",
+                        "Starting Mattermost, Postgres, and alerts",
+                        lambda: self._run_compose(self._stack_dir(config), "up", "-d"),
+                    ),
+                    (
+                        "verify_services",
+                        "Waiting for Mattermost",
+                        lambda: self._wait_until_ready(client),
+                    ),
+                ]
+                completion = "Mattermost is enabled"
+                delete_tombstone = True
+            elif action == "uninstall":
+                self._require_agents_uninstalled()
+                config = self._load_config()
+                steps = self._uninstall_steps(config)
+                completion = "Mattermost was uninstalled; chat data is retained"
+                delete_tombstone = False
+            elif action == "purge":
+                if not self._lifecycle_policy.get("release_policy", {}).get(
+                    "mattermost_purge_enabled"
+                ):
+                    raise MattermostIntegrationError(
+                        "Mattermost data deletion is not enabled in this release"
+                    )
+                steps = self._purge_steps()
+                completion = "Retained Mattermost data was deleted"
+                delete_tombstone = True
+            else:
+                raise MattermostIntegrationError("Mattermost cleanup state is invalid")
+            now = self._lifecycle_timestamp()
+            record.update(
+                operation_id=self._validate_operation_id(operation_id),
+                phase="running",
+                started_at=now,
+                updated_at=now,
+                failure=None,
+            )
+            self._lifecycle_repository.write(record)
+            yield from self._execute_lifecycle(
+                record,
+                steps,
+                completion=completion,
+                delete_tombstone=delete_tombstone,
+            )
+        except Exception as exc:
+            yield self._public_lifecycle_error(exc)
+
     def stream_install(self, values: Mapping[str, Any]) -> Iterator[dict[str, Any]]:
         try:
             setup = self._validate_setup(values)
+            retained_reinstall = False
+            current = self._lifecycle_record(optional=True)
+            if current is not None:
+                if current.get("phase") != "complete":
+                    raise MattermostIntegrationError(
+                        "Retry Mattermost cleanup before running setup"
+                    )
+                if current.get("target_state") == "retained_data":
+                    self._require_recovery_custody()
+                    yield {
+                        "step": "credential",
+                        "line": "Restoring the retained database credential",
+                    }
+                    restored = self._recovery_custody.restore()
+                    if not restored.get("credential_restored"):
+                        raise MattermostIntegrationError(
+                            "The retained Mattermost database credential is unavailable"
+                        )
+                    retained_reinstall = True
+                elif current.get("target_state") != "connected":
+                    raise MattermostIntegrationError(
+                        "Mattermost setup is unavailable in its current lifecycle state"
+                    )
             yield {"step": "prepare", "line": "Preparing Mattermost stack"}
-            database_password = self._read_secret("POSTGRES_PASSWORD") or secrets.token_urlsafe(32)
+            database_password = self._read_secret(
+                "POSTGRES_PASSWORD"
+            ) or secrets.token_urlsafe(32)
             self._write_config(setup, installed=False)
             self._write_secrets(database_password=database_password, webhook_url="")
             stack_dir = Path(self._stack_path_provider(setup["stack_name"]))
@@ -479,9 +784,14 @@ class MattermostIntegrationService:
             webhook = client.ensure_incoming_webhook(
                 team_id=team_id, channel_id=channel_id
             )
-            self._write_secrets(database_password=database_password, webhook_url=webhook)
+            self._write_secrets(
+                database_password=database_password, webhook_url=webhook
+            )
 
-            yield {"step": "stack-notifications", "line": "Creating stack notifications channel"}
+            yield {
+                "step": "stack-notifications",
+                "line": "Creating stack notifications channel",
+            }
             self._provision_stack_notifications(client, team_id)
             yield {"step": "updates-channel", "line": "Creating updates channel"}
             self._provision_package_updates(client, team_id)
@@ -492,6 +802,8 @@ class MattermostIntegrationService:
             self._run_compose(stack_dir, "up", "-d", "--no-deps", "limeos-alertd")
             self.send_test()
             self._write_config(setup, installed=True)
+            if retained_reinstall:
+                self._lifecycle_repository.delete()
             yield {"step": "test", "line": "Test alert delivered"}
             yield {
                 "step": "complete",
@@ -501,13 +813,471 @@ class MattermostIntegrationService:
         except (MattermostIntegrationError, AlertPolicyError, OSError) as exc:
             yield {"step": "error", "error": str(exc)}
 
+    def _uninstall_steps(
+        self, config: Mapping[str, Any]
+    ) -> list[tuple[str, str, Callable[[], None]]]:
+        stack_dir = self._fixed_stack_dir()
+        images = self._mattermost_policy()["local_images"]
+        return [
+            (
+                "verify_storage_layout",
+                "Verifying LimeOS storage ownership",
+                lambda: self._validate_owned_stack_layout(stack_dir),
+            ),
+            (
+                "stop_services",
+                "Removing Mattermost, Postgres, and alert containers",
+                lambda: self._run_compose(stack_dir, "down", "--remove-orphans"),
+            ),
+            (
+                "retain_database_credential",
+                "Protecting the retained database credential",
+                self._retain_database_credential,
+            ),
+            (
+                "remove_stack_notification_hook",
+                "Disconnecting stack notifications",
+                lambda: self._remove_owned_file(self._stack_notifications_config_path),
+            ),
+            (
+                "remove_package_update_hook",
+                "Disconnecting package update notifications",
+                lambda: self._remove_owned_file(self._package_updates_config_path),
+            ),
+            (
+                "remove_runtime_status",
+                "Removing Mattermost runtime status",
+                lambda: self._remove_owned_file(self._status_path),
+            ),
+            (
+                "remove_alert_history",
+                "Removing local alert history",
+                lambda: self._remove_owned_file(
+                    self._status_path.parent / "alert-events.jsonl"
+                ),
+            ),
+            (
+                "remove_integration_config",
+                "Removing Mattermost integration configuration",
+                lambda: self._remove_owned_file(self._config_path),
+            ),
+            (
+                "remove_generated_stack",
+                "Removing generated Mattermost stack files",
+                lambda: self._remove_owned_directory(stack_dir),
+            ),
+            *[
+                (
+                    f"remove_image_{index}",
+                    "Removing a LimeOS-owned local image",
+                    lambda image=image: self._remove_local_image(str(image)),
+                )
+                for index, image in enumerate(images, start=1)
+            ],
+        ]
+
+    def _purge_steps(self) -> list[tuple[str, str, Callable[[], None]]]:
+        policy = self._mattermost_policy()
+        project = str(policy["compose_project"])
+        logical_volumes = [str(value) for value in policy["logical_volumes"]]
+        return [
+            (
+                "verify_volume_ownership",
+                "Verifying retained volume ownership",
+                lambda: self._verify_volume_ownership(project, logical_volumes),
+            ),
+            *[
+                (
+                    f"remove_volume_{index}",
+                    "Deleting a verified Mattermost data volume",
+                    lambda logical=logical: self._remove_volume(project, logical),
+                )
+                for index, logical in enumerate(logical_volumes, start=1)
+            ],
+            (
+                "discard_database_credential",
+                "Deleting the retained database credential",
+                self._discard_database_credential,
+            ),
+        ]
+
+    def _execute_lifecycle(
+        self,
+        record: dict[str, Any],
+        steps: list[tuple[str, str, Callable[[], None]]],
+        *,
+        completion: str,
+        delete_tombstone: bool = False,
+    ) -> Iterator[dict[str, Any]]:
+        completed = set(record.get("completed_steps") or [])
+        try:
+            for step, line, action in steps:
+                if step in completed:
+                    continue
+                yield {"step": step, "line": line}
+                action()
+                record["completed_steps"].append(step)
+                record["updated_at"] = self._lifecycle_timestamp()
+                self._lifecycle_repository.write(record)
+                completed.add(step)
+            if delete_tombstone:
+                self._lifecycle_repository.delete()
+            else:
+                record.update(
+                    phase="complete",
+                    updated_at=self._lifecycle_timestamp(),
+                    failure=None,
+                )
+                self._lifecycle_repository.write(record)
+        except Exception:
+            record.update(
+                phase="cleanup_required",
+                updated_at=self._lifecycle_timestamp(),
+                failure={
+                    "code": f"mattermost_{record['action']}_failed",
+                    "message": LIFECYCLE_FAILURE_MESSAGE,
+                },
+            )
+            self._lifecycle_repository.write(record)
+            yield {"step": "error", "error": LIFECYCLE_FAILURE_MESSAGE}
+            return
+        yield self._completion_event(completion)
+
+    def _new_lifecycle_record(
+        self,
+        *,
+        operation_id: str,
+        action: str,
+        target_state: str,
+        retained_data: bool,
+    ) -> dict[str, Any]:
+        self._require_lifecycle_repository()
+        timestamp = self._lifecycle_timestamp()
+        record = {
+            "schema_version": "1",
+            "integration": "mattermost",
+            "operation_id": self._validate_operation_id(operation_id),
+            "action": action,
+            "phase": "running",
+            "target_state": target_state,
+            "started_at": timestamp,
+            "updated_at": timestamp,
+            "completed_steps": [],
+            "retained_data": retained_data,
+            "remove_claude_code": None,
+            "failure": None,
+            "warning_codes": [],
+        }
+        self._lifecycle_repository.write(record)
+        return record
+
+    def _lifecycle_record(self, *, optional: bool = False) -> dict[str, Any] | None:
+        if self._lifecycle_repository is None:
+            if optional:
+                return None
+            raise MattermostIntegrationError(
+                "Mattermost lifecycle support is unavailable"
+            )
+        try:
+            return self._lifecycle_repository.read()
+        except LifecycleStateError as exc:
+            raise MattermostIntegrationError(
+                "Mattermost cleanup state is unavailable; review it manually"
+            ) from exc
+
+    def _require_lifecycle_repository(self) -> None:
+        if self._lifecycle_repository is None:
+            raise MattermostIntegrationError(
+                "Mattermost lifecycle support is unavailable"
+            )
+
+    def _require_recovery_custody(self) -> None:
+        if self._recovery_custody is None:
+            raise MattermostIntegrationError(
+                "Mattermost recovery credential support is unavailable"
+            )
+
+    @staticmethod
+    def _is_completed_target(
+        record: Mapping[str, Any] | None, target_state: str
+    ) -> bool:
+        return bool(
+            record
+            and record.get("phase") == "complete"
+            and record.get("target_state") == target_state
+        )
+
+    @staticmethod
+    def _require_no_pending_lifecycle(record: Mapping[str, Any] | None) -> None:
+        if record is not None:
+            raise MattermostIntegrationError(
+                "Mattermost has an unfinished lifecycle action; retry cleanup first"
+            )
+
+    def _require_agents_disabled(self) -> None:
+        snapshot = self._agent_snapshot()
+        if snapshot.get("installed") and snapshot.get("enabled"):
+            raise MattermostIntegrationError(
+                "Disable AI Agents before stopping Mattermost"
+            )
+
+    def _require_agents_uninstalled(self) -> None:
+        snapshot = self._agent_snapshot()
+        if snapshot.get("installed"):
+            raise MattermostIntegrationError(
+                "Uninstall AI Agents before removing Mattermost"
+            )
+
+    def _agent_snapshot(self) -> Mapping[str, Any]:
+        if self._agent_lifecycle_snapshot is None:
+            raise MattermostIntegrationError("AI Agents status is unavailable")
+        try:
+            snapshot = self._agent_lifecycle_snapshot()
+        except Exception as exc:
+            raise MattermostIntegrationError("AI Agents status is unavailable") from exc
+        if not isinstance(snapshot, Mapping) or not {
+            "installed",
+            "enabled",
+        }.issubset(snapshot):
+            raise MattermostIntegrationError("AI Agents status is unavailable")
+        return snapshot
+
+    def _installed_config(self) -> dict[str, Any]:
+        config = self._load_config()
+        if not config.get("installed"):
+            raise MattermostIntegrationError("Mattermost is not installed")
+        if not config.get("site_url") or not config.get("stack_name"):
+            raise MattermostIntegrationError("Mattermost configuration is incomplete")
+        return config
+
+    def _stack_dir(self, config: Mapping[str, Any]) -> Path:
+        stack_name = str(config.get("stack_name") or "")
+        if not SLUG_PATTERN.fullmatch(stack_name):
+            raise MattermostIntegrationError("Mattermost stack ownership is invalid")
+        return Path(self._stack_path_provider(stack_name))
+
+    def _fixed_stack_dir(self) -> Path:
+        project = str(self._mattermost_policy()["compose_project"])
+        return Path(self._stack_path_provider(project))
+
+    def _require_fixed_compose_project(self, config: Mapping[str, Any]) -> None:
+        if config.get("stack_name") != self._mattermost_policy()["compose_project"]:
+            raise MattermostIntegrationError(UNKNOWN_STORAGE_MESSAGE)
+
+    def _mattermost_policy(self) -> Mapping[str, Any]:
+        try:
+            policy = self._lifecycle_policy["integrations"]["mattermost"]
+            if not isinstance(policy, Mapping):
+                raise KeyError
+            return policy
+        except (KeyError, TypeError) as exc:
+            raise MattermostIntegrationError(
+                "Mattermost lifecycle policy is unavailable"
+            ) from exc
+
+    def _validate_owned_stack_layout(self, stack_dir: Path) -> None:
+        compose_path = stack_dir / "compose.yaml"
+        if compose_path.is_symlink() or not compose_path.is_file():
+            raise MattermostIntegrationError(UNKNOWN_STORAGE_MESSAGE)
+        try:
+            compose = load_compose_yaml(compose_path.read_text(encoding="utf-8"))
+        except (OSError, ComposeYamlError) as exc:
+            raise MattermostIntegrationError(UNKNOWN_STORAGE_MESSAGE) from exc
+        policy = self._mattermost_policy()
+        logical = {str(value) for value in policy["logical_volumes"]}
+        volumes = compose.get("volumes")
+        services = compose.get("services")
+        if (
+            compose.get("name") is not None
+            or not isinstance(volumes, Mapping)
+            or set(volumes) != logical
+            or any(value not in ({}, None) for value in volumes.values())
+            or not isinstance(services, Mapping)
+            or set(services) != {"postgres", "mattermost", "limeos-alertd"}
+        ):
+            raise MattermostIntegrationError(UNKNOWN_STORAGE_MESSAGE)
+        expected_mounts = {
+            "postgres": {"mattermost-postgres:/var/lib/postgresql/data"},
+            "mattermost": {
+                "mattermost-config:/mattermost/config",
+                "mattermost-data:/mattermost/data",
+                "mattermost-logs:/mattermost/logs",
+                "mattermost-plugins:/mattermost/plugins",
+            },
+        }
+        for service, expected in expected_mounts.items():
+            definition = services.get(service)
+            mounts = (
+                definition.get("volumes") if isinstance(definition, Mapping) else None
+            )
+            if not isinstance(mounts, list) or set(mounts) != expected:
+                raise MattermostIntegrationError(UNKNOWN_STORAGE_MESSAGE)
+
+    def _retain_database_credential(self) -> None:
+        self._require_recovery_custody()
+        result = self._recovery_custody.retain()
+        if not result.get("credential_retained"):
+            raise RecoveryCredentialError(
+                "Mattermost recovery credential operation failed"
+            )
+
+    def _discard_database_credential(self) -> None:
+        self._require_recovery_custody()
+        result = self._recovery_custody.discard()
+        if not result.get("credential_discarded"):
+            raise RecoveryCredentialError(
+                "Mattermost recovery credential operation failed"
+            )
+
+    @staticmethod
+    def _remove_owned_file(path: Path | None) -> None:
+        if path is None:
+            return
+        try:
+            if path.is_symlink():
+                raise MattermostIntegrationError(
+                    "Mattermost owned-file cleanup requires manual review"
+                )
+            path.unlink(missing_ok=True)
+        except MattermostIntegrationError:
+            raise
+        except OSError as exc:
+            raise MattermostIntegrationError(
+                "Mattermost owned-file cleanup failed"
+            ) from exc
+
+    def _remove_owned_directory(self, path: Path) -> None:
+        try:
+            if path.is_symlink():
+                raise MattermostIntegrationError(
+                    "Mattermost stack cleanup requires manual review"
+                )
+            if path.exists():
+                self._directory_remover(path)
+        except MattermostIntegrationError:
+            raise
+        except OSError as exc:
+            raise MattermostIntegrationError("Mattermost stack cleanup failed") from exc
+
+    def _remove_local_image(self, image: str) -> None:
+        if image not in self._mattermost_policy()["local_images"]:
+            raise MattermostIntegrationError("Mattermost image ownership is invalid")
+        images = set(
+            self._docker_names("image", "ls", "--format", "{{.Repository}}:{{.Tag}}")
+        )
+        if image in images:
+            self._run_docker("image", "rm", image)
+
+    def _verify_volume_ownership(
+        self, project: str, logical_volumes: list[str]
+    ) -> None:
+        expected = {f"{project}_{logical}" for logical in logical_volumes}
+        all_names = set(self._docker_names("volume", "ls", "--format", "{{.Name}}"))
+        owned_names = set(
+            self._docker_names(
+                "volume",
+                "ls",
+                "--filter",
+                f"label=com.docker.compose.project={project}",
+                "--format",
+                "{{.Name}}",
+            )
+        )
+        if expected - all_names or owned_names != expected:
+            raise MattermostIntegrationError(UNKNOWN_STORAGE_MESSAGE)
+        for logical in logical_volumes:
+            name = f"{project}_{logical}"
+            labels = self._volume_labels(name)
+            if (
+                labels.get("com.docker.compose.project") != project
+                or labels.get("com.docker.compose.volume") != logical
+            ):
+                raise MattermostIntegrationError(UNKNOWN_STORAGE_MESSAGE)
+
+    def _remove_volume(self, project: str, logical: str) -> None:
+        policy = self._mattermost_policy()
+        if (
+            project != policy["compose_project"]
+            or logical not in policy["logical_volumes"]
+        ):
+            raise MattermostIntegrationError("Mattermost volume ownership is invalid")
+        name = f"{project}_{logical}"
+        names = set(self._docker_names("volume", "ls", "--format", "{{.Name}}"))
+        if name in names:
+            labels = self._volume_labels(name)
+            if (
+                labels.get("com.docker.compose.project") != project
+                or labels.get("com.docker.compose.volume") != logical
+            ):
+                raise MattermostIntegrationError(UNKNOWN_STORAGE_MESSAGE)
+            self._run_docker("volume", "rm", name)
+
+    def _volume_labels(self, name: str) -> Mapping[str, Any]:
+        result = self._run_docker("volume", "inspect", name)
+        try:
+            payload = json.loads(result.stdout)
+            labels = payload[0]["Labels"]
+        except (KeyError, IndexError, TypeError, ValueError) as exc:
+            raise MattermostIntegrationError(UNKNOWN_STORAGE_MESSAGE) from exc
+        if not isinstance(labels, Mapping):
+            raise MattermostIntegrationError(UNKNOWN_STORAGE_MESSAGE)
+        return labels
+
+    def _docker_names(self, *args: str) -> list[str]:
+        result = self._run_docker(*args)
+        return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+    def _run_docker(self, *args: str) -> Any:
+        try:
+            result = self._docker_runner(
+                ["docker", *args],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            raise MattermostIntegrationError("Docker cleanup is unavailable") from exc
+        if result.returncode != 0:
+            raise MattermostIntegrationError("Docker cleanup did not complete")
+        return result
+
+    def _lifecycle_timestamp(self) -> str:
+        return datetime.fromtimestamp(self._clock(), timezone.utc).isoformat()
+
+    @staticmethod
+    def _validate_operation_id(operation_id: str) -> str:
+        if not isinstance(operation_id, str) or not OPERATION_ID_PATTERN.fullmatch(
+            operation_id
+        ):
+            raise MattermostIntegrationError(
+                "Lifecycle operation identifier is invalid"
+            )
+        return operation_id
+
+    @staticmethod
+    def _completion_event(line: str) -> dict[str, Any]:
+        return {"step": "complete", "line": line, "done": True}
+
+    @staticmethod
+    def _public_lifecycle_error(exc: Exception) -> dict[str, str]:
+        if isinstance(
+            exc,
+            (MattermostIntegrationError, LifecycleStateError, RecoveryCredentialError),
+        ):
+            message = str(exc)
+        else:
+            message = "Mattermost lifecycle operation failed"
+        return {"step": "error", "error": message}
+
     def _validate_setup(self, raw: Mapping[str, Any]) -> dict[str, Any]:
         site_url = str(raw.get("site_url", "")).strip().rstrip("/")
         parsed = urlparse(site_url)
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
             raise MattermostIntegrationError("Site URL must be an HTTP or HTTPS URL")
         if parsed.username or parsed.password or parsed.fragment or parsed.query:
-            raise MattermostIntegrationError("Site URL cannot contain credentials, a query, or a fragment")
+            raise MattermostIntegrationError(
+                "Site URL cannot contain credentials, a query, or a fragment"
+            )
         username = str(raw.get("admin_username", "")).strip().lower()
         email = str(raw.get("admin_email", "")).strip()
         password = str(raw.get("admin_password", ""))
@@ -519,16 +1289,24 @@ class MattermostIntegrationService:
         if "@" not in email or len(email) > 254:
             raise MattermostIntegrationError("Admin email is invalid")
         if len(password) < 10:
-            raise MattermostIntegrationError("Admin password must be at least 10 characters")
+            raise MattermostIntegrationError(
+                "Admin password must be at least 10 characters"
+            )
         if not SLUG_PATTERN.fullmatch(stack_name):
             raise MattermostIntegrationError("Stack name is invalid")
-        if not SLUG_PATTERN.fullmatch(team_name) or not SLUG_PATTERN.fullmatch(channel_name):
-            raise MattermostIntegrationError("Team and channel names must use lowercase letters, numbers, and hyphens")
+        if not SLUG_PATTERN.fullmatch(team_name) or not SLUG_PATTERN.fullmatch(
+            channel_name
+        ):
+            raise MattermostIntegrationError(
+                "Team and channel names must use lowercase letters, numbers, and hyphens"
+            )
         try:
             poll_seconds = max(15, int(raw.get("poll_seconds", 60)))
             fail_threshold = max(1, int(raw.get("fail_threshold", 2)))
         except (TypeError, ValueError) as exc:
-            raise MattermostIntegrationError("Alert timing values must be numbers") from exc
+            raise MattermostIntegrationError(
+                "Alert timing values must be numbers"
+            ) from exc
         return {
             "site_url": site_url,
             "admin_username": username,
@@ -631,7 +1409,9 @@ class MattermostIntegrationService:
                 timeout=1200,
             )
         except (subprocess.TimeoutExpired, OSError) as exc:
-            raise MattermostIntegrationError("Docker Compose could not start Mattermost") from exc
+            raise MattermostIntegrationError(
+                "Docker Compose could not start Mattermost"
+            ) from exc
         if result.returncode != 0:
             detail = (result.stderr or result.stdout or "Docker Compose failed").strip()
             raise MattermostIntegrationError(detail[:500])
@@ -643,7 +1423,9 @@ class MattermostIntegrationService:
                 return
             except MattermostApiError:
                 self._sleep(2)
-        raise MattermostIntegrationError("Mattermost did not become ready within two minutes")
+        raise MattermostIntegrationError(
+            "Mattermost did not become ready within two minutes"
+        )
 
     def _write_config(self, setup: Mapping[str, Any], *, installed: bool) -> None:
         previous = self._load_config()
@@ -682,7 +1464,7 @@ class MattermostIntegrationService:
         prefix = f"{key}="
         for line in lines:
             if line.startswith(prefix):
-                return line[len(prefix):] or None
+                return line[len(prefix) :] or None
         return None
 
     def _load_config(self) -> dict[str, Any]:

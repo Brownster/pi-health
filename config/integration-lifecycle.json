@@ -1,0 +1,199 @@
+{
+  "schema_version": "1",
+  "state_precedence": [
+    "cleanup_required",
+    "retained_data",
+    "not_installed",
+    "disabled",
+    "authenticating",
+    "setup_required",
+    "disconnected",
+    "degraded",
+    "connected"
+  ],
+  "action_order": [
+    "setup",
+    "enable",
+    "repair",
+    "authenticate",
+    "disable",
+    "uninstall",
+    "retry_cleanup",
+    "purge"
+  ],
+  "blocked_actions": {
+    "agents_must_be_disabled": {
+      "action": "disable",
+      "message": "Disable AI Agents before stopping Mattermost.",
+      "required_action": "disable",
+      "route": "/integrations#ai-agents"
+    },
+    "agents_must_be_uninstalled": {
+      "action": "uninstall",
+      "message": "Uninstall AI Agents before removing Mattermost.",
+      "required_action": "uninstall",
+      "route": "/integrations#ai-agents"
+    }
+  },
+  "warnings": {
+    "agent_bot_cleanup_failed": "AI Agents was removed locally, but the Mattermost bot could not be removed."
+  },
+  "tombstone": {
+    "directory": "/var/lib/limeos/integrations",
+    "paths": {
+      "mattermost": "/var/lib/limeos/integrations/mattermost-lifecycle.json",
+      "agents": "/var/lib/limeos/integrations/agents-lifecycle.json"
+    },
+    "owner_role": "application",
+    "group_role": "application",
+    "file_mode": "0640",
+    "directory_mode": "0750",
+    "write_strategy": "same-directory-fsync-replace",
+    "create_when": "operation_started",
+    "remove_after": [
+      "verified_enable",
+      "verified_mattermost_purge"
+    ],
+    "retain_after": [
+      "disable",
+      "agent_uninstall",
+      "mattermost_uninstall",
+      "required_cleanup_failure"
+    ]
+  },
+  "recovery_credential": {
+    "active_path": "/etc/limeos/integrations/mattermost.env",
+    "recovery_path": "/var/lib/limeos/integration-recovery/mattermost.env",
+    "directory_owner": "root",
+    "directory_group": "root",
+    "directory_mode": "0700",
+    "file_owner": "root",
+    "file_group": "root",
+    "file_mode": "0600",
+    "custody": "helper_only",
+    "transfer_strategy": "destination-temp-fsync-replace-then-source-unlink",
+    "commands": {
+      "retain": {
+        "name": "mattermost_recovery_credential_retain",
+        "parameters": []
+      },
+      "restore": {
+        "name": "mattermost_recovery_credential_restore",
+        "parameters": []
+      },
+      "discard": {
+        "name": "mattermost_recovery_credential_discard",
+        "parameters": []
+      }
+    },
+    "public_result_fields": [
+      "success",
+      "credential_retained",
+      "credential_restored",
+      "credential_discarded"
+    ]
+  },
+  "release_policy": {
+    "mattermost_purge_enabled": false
+  },
+  "integrations": {
+    "mattermost": {
+      "allowed_actions": [
+        "setup",
+        "enable",
+        "repair",
+        "disable",
+        "uninstall",
+        "retry_cleanup",
+        "purge"
+      ],
+      "compose_project": "mattermost",
+      "containers": [
+        "limeos-mattermost-db",
+        "limeos-mattermost",
+        "limeos-alertd"
+      ],
+      "local_images": [
+        "limeos/mattermost-team:11.8.3-arm64",
+        "limeos/alertd:local"
+      ],
+      "logical_volumes": [
+        "mattermost-postgres",
+        "mattermost-config",
+        "mattermost-data",
+        "mattermost-logs",
+        "mattermost-plugins"
+      ],
+      "owned_files": [
+        "/etc/limeos/integrations/mattermost.json",
+        "/etc/limeos/integrations/mattermost.env",
+        "/var/lib/limeos/integrations/mattermost-status.json",
+        "/var/lib/limeos/integrations/alert-events.jsonl"
+      ],
+      "owned_directories": [
+        "/opt/stacks/mattermost"
+      ],
+      "dependent_hooks": [
+        "/etc/limeos/integrations/stack-notifications.json",
+        "/etc/limeos/integrations/package-updates.json"
+      ],
+      "preserved_on_uninstall": [
+        "logical_volumes",
+        "recovery_credential"
+      ],
+      "never_owned": [
+        "docker.io/library/postgres:16-alpine",
+        "external_volumes",
+        "bind_mounts",
+        "mattermost_chat_history"
+      ]
+    },
+    "agents": {
+      "allowed_actions": [
+        "setup",
+        "enable",
+        "repair",
+        "authenticate",
+        "disable",
+        "uninstall",
+        "retry_cleanup"
+      ],
+      "units": [
+        "limeos-agent.service",
+        "limeopsd.service"
+      ],
+      "owned_files": [
+        "/etc/limeos/integrations/agents.json",
+        "/etc/limeos/integrations/agents.env",
+        "/etc/limeos/agent-policy.json"
+      ],
+      "owned_directories": [
+        "/usr/lib/limeos-agent",
+        "/var/lib/lime-agent/state",
+        "/var/lib/lime-agent/.claude",
+        "/var/lib/lime-agent/venv",
+        "/var/lib/limeops"
+      ],
+      "optional_package_cleanup": {
+        "package": "claude-code",
+        "source": "/etc/apt/sources.list.d/claude-code.list",
+        "signing_key": "/etc/apt/keyrings/claude-code.asc",
+        "default_remove": true
+      },
+      "preserved_on_uninstall": [
+        "/var/log/limeos/agent-audit.jsonl",
+        "lime-agent user",
+        "lime-agent group",
+        "limeops user",
+        "limeops group",
+        "limeops-client group"
+      ],
+      "never_owned": [
+        "mattermost_stack",
+        "mattermost_data",
+        "mattermost_alerts",
+        "unrelated_provider_configuration"
+      ]
+    }
+  }
+}

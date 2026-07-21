@@ -38,8 +38,21 @@ def test_v2_system_metrics_render(
     expect(page.get_by_role("heading", name="performance_history", exact=True)).to_be_visible()
     expect(page.get_by_role("heading", name="CPU and memory", exact=True)).to_be_visible()
     assert any("performance-history" in url for url in loaded_scripts)
-    expect(page.locator("[data-testid='history-chart-cpu_percent'] svg")).to_be_visible()
-    expect(page.locator("path.recharts-line-curve")).to_have_count(4)
+    cpu_chart = page.locator("[data-testid='history-chart-cpu_percent'] svg")
+    expect(cpu_chart).to_be_visible()
+    rendered_metrics = page.locator("[data-history-line]").evaluate_all(
+        "nodes => [...new Set(nodes.map(node => node.dataset.historyLine))].sort()"
+    )
+    assert rendered_metrics == [
+        "cpu_percent",
+        "disk_percent",
+        "memory_percent",
+        "temperature_celsius",
+    ]
+    cpu_chart.focus()
+    expect(page.locator("[data-testid='history-chart-cpu_percent'] [data-history-tooltip]")).to_be_visible()
+    cpu_chart.press("ArrowLeft")
+    expect(page.locator("[data-testid='history-chart-cpu_percent'] [data-history-cursor]")).to_have_attribute("x1", "750")
     summary = page.locator("[data-testid='history-summary-cpu_percent']")
     assert summary.evaluate("node => node.scrollWidth <= node.clientWidth")
     expect(page.get_by_role("button", name="24h")).to_have_attribute("aria-pressed", "true")

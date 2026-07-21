@@ -72,6 +72,25 @@ def test_v2_disks_smart_modal(
     expect(page.locator("#v2-disk-smart-modal")).to_have_count(0)
 
 
+def test_v2_disks_compact_actions_and_keyboard_menu(
+    page: Page,
+    v2_server,
+    v2_login,
+    install_v2_disks_api_mocks,
+):
+    base_url = v2_server["base_url"]
+    _open_v2_disks(page, base_url, v2_login, install_v2_disks_api_mocks)
+
+    trigger = page.locator("button[data-disk-menu='sda']:visible").first
+    trigger.click()
+    menu = page.get_by_role("menu", name="More actions for /dev/sda")
+    expect(menu.get_by_role("menuitem", name="Unmount /mnt/storage")).to_be_focused()
+
+    page.keyboard.press("Escape")
+    expect(menu).to_have_count(0)
+    expect(trigger).to_be_focused()
+
+
 def test_v2_disks_helper_unavailable_state(page: Page, v2_server, v2_login):
     base_url = v2_server["base_url"]
     v2_login(page, base_url)

@@ -8,9 +8,13 @@ in memory only; nothing here persists credentials.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable, Mapping
 from typing import Any
 from urllib import error, request
+
+
+_IDENTIFIER = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 
 
 class BotApiError(Exception):
@@ -119,6 +123,16 @@ class MattermostBotApi:
     def revoke_token(self, *, token_id: str) -> None:
         try:
             self._request("POST", "/api/v4/users/tokens/revoke", {"token_id": token_id})
+        except BotApiError as exc:
+            if exc.status != 404:
+                raise
+
+    def delete_bot(self, *, user_id: str) -> None:
+        """Delete one known bot account; an already-absent bot is successful."""
+        if not isinstance(user_id, str) or not _IDENTIFIER.fullmatch(user_id):
+            raise BotApiError("Mattermost bot identifier is invalid")
+        try:
+            self._request("DELETE", f"/api/v4/bots/{user_id}")
         except BotApiError as exc:
             if exc.status != 404:
                 raise

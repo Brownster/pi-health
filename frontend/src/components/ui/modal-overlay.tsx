@@ -10,14 +10,18 @@ const FOCUSABLE_SELECTOR =
  */
 export function ModalOverlay({
   onClose,
+  restoreFocus,
   children,
 }: {
   onClose: () => void;
+  restoreFocus?: () => void;
   children: ReactNode;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
+  const restoreFocusRef = useRef(restoreFocus);
   onCloseRef.current = onClose;
+  restoreFocusRef.current = restoreFocus;
 
   useEffect(() => {
     const node = containerRef.current;
@@ -65,7 +69,11 @@ export function ModalOverlay({
     return () => {
       document.removeEventListener("keydown", onKeyDown, true);
       document.body.style.overflow = previousBodyOverflow;
-      triggerEl?.focus?.();
+      if (triggerEl?.isConnected) {
+        triggerEl.focus();
+      } else {
+        restoreFocusRef.current?.();
+      }
     };
   }, []);
 

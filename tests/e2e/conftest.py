@@ -1738,15 +1738,38 @@ def install_v2_integrations_api_mocks():
         installed: bool = True,
         install_error: bool = False,
         agent_installed: bool = True,
+        agent_enabled: bool | None = None,
         agent_authenticated: bool = True,
         agent_configured: bool = True,
+        agent_disable_fails_once: bool = False,
+        agent_cleanup_action: str | None = None,
+        agent_uninstall_fails_once: bool = False,
+        agent_uninstall_warning: bool = False,
+        mattermost_disabled: bool = False,
+        mattermost_retained_data: bool = False,
+        mattermost_cleanup_action: str | None = None,
+        mattermost_disable_fails_once: bool = False,
+        mattermost_disable_stale_once: bool = False,
+        mattermost_uninstall_fails_once: bool = False,
+        mattermost_purge_enabled: bool = False,
     ) -> None:
+        mattermost_installed = installed and not mattermost_retained_data
+        resolved_agent_enabled = agent_installed if agent_enabled is None else agent_enabled
         state = {
-            "installed": installed,
-            "agent_installed": agent_installed and installed,
-            "agent_authenticated": agent_authenticated and agent_installed and installed,
-            "agent_configured": agent_configured and agent_installed and installed,
-            "agent_enabled": agent_installed and installed,
+            "installed": mattermost_installed,
+            "mattermost_disabled": mattermost_disabled and mattermost_installed,
+            "mattermost_retained_data": mattermost_retained_data,
+            "mattermost_cleanup_action": mattermost_cleanup_action,
+            "mattermost_disable_attempts": 0,
+            "mattermost_uninstall_attempts": 0,
+            "agent_installed": agent_installed and mattermost_installed,
+            "agent_authenticated": agent_authenticated and agent_installed and mattermost_installed,
+            "agent_configured": agent_configured and agent_installed and mattermost_installed,
+            "agent_enabled": resolved_agent_enabled and agent_installed and mattermost_installed,
+            "agent_cleanup_action": agent_cleanup_action,
+            "agent_disable_attempts": 0,
+            "agent_uninstall_attempts": 0,
+            "agent_warnings": [],
             "policy": {
                 "version": 1,
                 "categories": {
@@ -1761,9 +1784,71 @@ def install_v2_integrations_api_mocks():
         }
 
         def _payload():
+            if state["mattermost_cleanup_action"]:
+                mattermost_state = "cleanup_required"
+                mattermost_actions = ["retry_cleanup"]
+            elif state["mattermost_retained_data"]:
+                mattermost_state = "retained_data"
+                mattermost_actions = ["setup"]
+                if mattermost_purge_enabled:
+                    mattermost_actions.append("purge")
+            elif state["installed"] and state["mattermost_disabled"]:
+                mattermost_state = "disabled"
+                mattermost_actions = ["enable", "uninstall"]
+            elif state["installed"]:
+                mattermost_state = "connected"
+                mattermost_actions = ["disable", "uninstall"]
+            else:
+                mattermost_state = "not_installed"
+                mattermost_actions = ["setup"]
+            blocked_actions = []
+            if (
+                mattermost_state in {"connected", "disabled"}
+                and state["agent_installed"]
+            ):
+                if state["agent_enabled"]:
+                    if "disable" in mattermost_actions:
+                        mattermost_actions.remove("disable")
+                    blocked_actions.append(
+                        {
+                            "action": "disable",
+                            "dependency_code": "agents_must_be_disabled",
+                            "message": "Disable AI Agents before stopping Mattermost.",
+                            "required_action": "disable",
+                            "route": "/integrations#ai-agents",
+                        }
+                    )
+                if "uninstall" in mattermost_actions:
+                    mattermost_actions.remove("uninstall")
+                blocked_actions.append(
+                    {
+                        "action": "uninstall",
+                        "dependency_code": "agents_must_be_uninstalled",
+                        "message": "Uninstall AI Agents before removing Mattermost.",
+                        "required_action": "uninstall",
+                        "route": "/integrations#ai-agents",
+                    }
+                )
             return {
-                "state": "connected" if state["installed"] else "not_installed",
+                "state": mattermost_state,
                 "installed": state["installed"],
+                "retained_data": state["mattermost_retained_data"],
+                "cleanup_required": mattermost_state == "cleanup_required",
+                "allowed_actions": mattermost_actions,
+                "blocked_actions": blocked_actions,
+                "cleanup_operation": (
+                    {
+                        "id": "mock-mattermost-cleanup",
+                        "action": state["mattermost_cleanup_action"],
+                        "state": "failed",
+                        "started_at": "2026-07-21T10:00:00Z",
+                        "updated_at": "2026-07-21T10:01:00Z",
+                        "retryable": True,
+                    }
+                    if mattermost_state == "cleanup_required"
+                    else None
+                ),
+                "warnings": [],
                 "site_url": "http://mattermost.test:8065" if state["installed"] else None,
                 "stack_name": "mattermost",
                 "team": "limeos",
@@ -1789,22 +1874,39 @@ def install_v2_integrations_api_mocks():
                 "incidents": [],
                 "delivery": {"at": "2026-07-10T12:00:00Z", "ok": True},
                 "updated_at": 1783684800,
+                "services": {
+                    "postgres": {"state": "running", "health": "healthy"},
+                    "mattermost": {"state": "running", "health": "healthy"},
+                    "alerts": {"state": "running", "health": None},
+                } if mattermost_state == "connected" else {},
             }
 
         def _handler(route):
             path = urlparse(route.request.url).path
             method = route.request.method
             if path == "/api/integrations/agents" and method == "GET":
-                if not state["installed"]:
-                    agent_state = "setup_required"
+                if state["agent_cleanup_action"]:
+                    agent_state = "cleanup_required"
                 elif not state["agent_installed"]:
                     agent_state = "not_installed"
+                elif not state["installed"]:
+                    agent_state = "setup_required"
                 elif not state["agent_enabled"]:
                     agent_state = "disabled"
                 elif not state["agent_authenticated"] or not state["agent_configured"]:
                     agent_state = "setup_required"
                 else:
                     agent_state = "connected"
+                if agent_state == "cleanup_required":
+                    agent_actions = ["retry_cleanup"]
+                elif agent_state == "not_installed":
+                    agent_actions = ["setup"]
+                elif agent_state == "disabled":
+                    agent_actions = ["enable", "uninstall"]
+                elif agent_state == "setup_required":
+                    agent_actions = ["repair", "authenticate", "disable", "uninstall"]
+                else:
+                    agent_actions = ["disable", "uninstall"]
                 route.fulfill(
                     status=200,
                     content_type="application/json",
@@ -1814,8 +1916,35 @@ def install_v2_integrations_api_mocks():
                             "installed": state["agent_installed"],
                             "enabled": state["agent_enabled"],
                             "configured": state["agent_configured"],
+                            "retained_data": False,
+                            "cleanup_required": agent_state == "cleanup_required",
+                            "allowed_actions": agent_actions,
+                            "blocked_actions": [],
+                            "cleanup_operation": (
+                                {
+                                    "id": "mock-agent-cleanup",
+                                    "action": state["agent_cleanup_action"],
+                                    "state": "failed",
+                                    "started_at": "2026-07-21T10:00:00Z",
+                                    "updated_at": "2026-07-21T10:01:00Z",
+                                    "retryable": True,
+                                }
+                                if agent_state == "cleanup_required"
+                                else None
+                            ),
+                            "warnings": state["agent_warnings"],
                             "mattermost": {
-                                "state": "connected" if state["installed"] else "not_installed",
+                                "state": (
+                                    "cleanup_required"
+                                    if state["mattermost_cleanup_action"]
+                                    else "retained_data"
+                                    if state["mattermost_retained_data"]
+                                    else "disabled"
+                                    if state["mattermost_disabled"]
+                                    else "connected"
+                                    if state["installed"]
+                                    else "not_installed"
+                                ),
                                 "site_url": (
                                     "http://mattermost.test:8065" if state["installed"] else None
                                 ),
@@ -2034,11 +2163,84 @@ def install_v2_integrations_api_mocks():
                 )
                 return
             if path == "/api/integrations/agents/disable" and method == "POST":
+                state["agent_disable_attempts"] += 1
+                route.fulfill(
+                    status=202,
+                    content_type="application/json",
+                    body=json.dumps(
+                        {
+                            "operation_id": "mock-agent-disable",
+                            "stream_url": "/api/integrations/agents/operations/mock-agent-disable/stream",
+                        }
+                    ),
+                )
+                return
+            if path.endswith("/mock-agent-disable/stream") and method == "GET":
+                if agent_disable_fails_once and state["agent_disable_attempts"] == 1:
+                    state["agent_cleanup_action"] = "disable"
+                    route.fulfill(
+                        status=200,
+                        content_type="text/event-stream",
+                        body=(
+                            'id: 0\ndata: {"step":"disable","line":"Stopping AI Agents"}\n\n'
+                            'id: 1\ndata: {"step":"error","error":"AI Agents lifecycle operation failed"}\n\n'
+                        ),
+                    )
+                    return
+                state["agent_cleanup_action"] = None
                 state["agent_enabled"] = False
                 route.fulfill(
                     status=200,
+                    content_type="text/event-stream",
+                    body='id: 0\ndata: {"step":"complete","line":"AI Agents disabled","done":true}\n\n',
+                )
+                return
+            if path == "/api/integrations/agents/uninstall" and method == "POST":
+                state["agent_uninstall_attempts"] += 1
+                route.fulfill(
+                    status=202,
                     content_type="application/json",
-                    body=json.dumps({"state": "disabled"}),
+                    body=json.dumps(
+                        {
+                            "operation_id": "mock-agent-uninstall",
+                            "stream_url": "/api/integrations/agents/operations/mock-agent-uninstall/stream",
+                        }
+                    ),
+                )
+                return
+            if path.endswith("/mock-agent-uninstall/stream") and method == "GET":
+                if agent_uninstall_fails_once and state["agent_uninstall_attempts"] == 1:
+                    state["agent_cleanup_action"] = "uninstall"
+                    route.fulfill(
+                        status=200,
+                        content_type="text/event-stream",
+                        body=(
+                            'id: 0\ndata: {"step":"stop","line":"Stopping AI Agents"}\n\n'
+                            'id: 1\ndata: {"step":"error","error":"AI Agents lifecycle operation failed"}\n\n'
+                        ),
+                    )
+                    return
+                state["agent_cleanup_action"] = None
+                state["agent_installed"] = False
+                state["agent_enabled"] = False
+                state["agent_authenticated"] = False
+                state["agent_configured"] = False
+                warning = {
+                    "code": "agent_bot_cleanup_failed",
+                    "message": "AI Agents was removed locally, but the Mattermost bot could not be removed.",
+                }
+                state["agent_warnings"] = [warning] if agent_uninstall_warning else []
+                event = {
+                    "step": "complete",
+                    "line": "AI Agents was uninstalled",
+                    "done": True,
+                }
+                if agent_uninstall_warning:
+                    event["warnings"] = [warning]
+                route.fulfill(
+                    status=200,
+                    content_type="text/event-stream",
+                    body=f"id: 0\ndata: {json.dumps(event)}\n\n",
                 )
                 return
             if path == "/api/integrations/agents/test" and method == "POST":
@@ -2050,6 +2252,29 @@ def install_v2_integrations_api_mocks():
                 return
             if path == "/api/integrations/mattermost" and method == "GET":
                 route.fulfill(status=200, content_type="application/json", body=json.dumps(_payload()))
+                return
+            if path == "/api/integrations/stack-notifications" and method == "GET":
+                route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps(
+                        {
+                            "enabled": False,
+                            "configured": False,
+                            "mode": "quiet",
+                            "source_default": "stack",
+                            "channel_name": None,
+                            "token": None,
+                        }
+                    ),
+                )
+                return
+            if path == "/api/integrations/packages/pending" and method == "GET":
+                route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps({"pending": [], "approvals": []}),
+                )
                 return
             if path == "/api/integrations/mattermost/policy" and method == "PUT":
                 state["policy"] = route.request.post_data_json
@@ -2066,8 +2291,143 @@ def install_v2_integrations_api_mocks():
                     body=json.dumps({"status": "sent", "at": "2026-07-10T12:01:00Z"}),
                 )
                 return
+            if path == "/api/integrations/mattermost/disable" and method == "POST":
+                state["mattermost_disable_attempts"] += 1
+                if (
+                    mattermost_disable_stale_once
+                    and state["mattermost_disable_attempts"] == 1
+                ):
+                    state["mattermost_disabled"] = True
+                    route.fulfill(
+                        status=409,
+                        content_type="application/json",
+                        body=json.dumps(
+                            {
+                                "code": "integration_action_unavailable",
+                                "error": "Mattermost state changed. Review the current actions.",
+                            }
+                        ),
+                    )
+                    return
+                route.fulfill(
+                    status=202,
+                    content_type="application/json",
+                    body=json.dumps(
+                        {
+                            "operation_id": "mock-mattermost-disable",
+                            "stream_url": "/api/integrations/mattermost/operations/mock-mattermost-disable/stream",
+                        }
+                    ),
+                )
+                return
+            if path.endswith("/mock-mattermost-disable/stream") and method == "GET":
+                if (
+                    mattermost_disable_fails_once
+                    and state["mattermost_disable_attempts"] == 1
+                ):
+                    state["mattermost_cleanup_action"] = "disable"
+                    route.fulfill(
+                        status=200,
+                        content_type="text/event-stream",
+                        body=(
+                            'id: 0\ndata: {"step":"disable","line":"Stopping Mattermost services"}\n\n'
+                            'id: 1\ndata: {"step":"error","error":"Mattermost lifecycle operation failed"}\n\n'
+                        ),
+                    )
+                    return
+                state["mattermost_cleanup_action"] = None
+                state["mattermost_disabled"] = True
+                route.fulfill(
+                    status=200,
+                    content_type="text/event-stream",
+                    body='id: 0\ndata: {"step":"complete","line":"Mattermost disabled","done":true}\n\n',
+                )
+                return
+            if path == "/api/integrations/mattermost/enable" and method == "POST":
+                route.fulfill(
+                    status=202,
+                    content_type="application/json",
+                    body=json.dumps(
+                        {
+                            "operation_id": "mock-mattermost-enable",
+                            "stream_url": "/api/integrations/mattermost/operations/mock-mattermost-enable/stream",
+                        }
+                    ),
+                )
+                return
+            if path.endswith("/mock-mattermost-enable/stream") and method == "GET":
+                state["mattermost_cleanup_action"] = None
+                state["mattermost_disabled"] = False
+                route.fulfill(
+                    status=200,
+                    content_type="text/event-stream",
+                    body='id: 0\ndata: {"step":"complete","line":"Mattermost enabled","done":true}\n\n',
+                )
+                return
+            if path == "/api/integrations/mattermost/uninstall" and method == "POST":
+                state["mattermost_uninstall_attempts"] += 1
+                route.fulfill(
+                    status=202,
+                    content_type="application/json",
+                    body=json.dumps(
+                        {
+                            "operation_id": "mock-mattermost-uninstall",
+                            "stream_url": "/api/integrations/mattermost/operations/mock-mattermost-uninstall/stream",
+                        }
+                    ),
+                )
+                return
+            if path.endswith("/mock-mattermost-uninstall/stream") and method == "GET":
+                if (
+                    mattermost_uninstall_fails_once
+                    and state["mattermost_uninstall_attempts"] == 1
+                ):
+                    state["mattermost_cleanup_action"] = "uninstall"
+                    route.fulfill(
+                        status=200,
+                        content_type="text/event-stream",
+                        body=(
+                            'id: 0\ndata: {"step":"uninstall","line":"Removing Mattermost services"}\n\n'
+                            'id: 1\ndata: {"step":"error","error":"Mattermost lifecycle operation failed"}\n\n'
+                        ),
+                    )
+                    return
+                state["mattermost_cleanup_action"] = None
+                state["installed"] = False
+                state["mattermost_disabled"] = False
+                state["mattermost_retained_data"] = True
+                route.fulfill(
+                    status=200,
+                    content_type="text/event-stream",
+                    body='id: 0\ndata: {"step":"complete","line":"Mattermost uninstalled; data retained","done":true}\n\n',
+                )
+                return
+            if path == "/api/integrations/mattermost/purge" and method == "POST":
+                route.fulfill(
+                    status=202,
+                    content_type="application/json",
+                    body=json.dumps(
+                        {
+                            "operation_id": "mock-mattermost-purge",
+                            "stream_url": "/api/integrations/mattermost/operations/mock-mattermost-purge/stream",
+                        }
+                    ),
+                )
+                return
+            if path.endswith("/mock-mattermost-purge/stream") and method == "GET":
+                state["mattermost_cleanup_action"] = None
+                state["mattermost_retained_data"] = False
+                route.fulfill(
+                    status=200,
+                    content_type="text/event-stream",
+                    body='id: 0\ndata: {"step":"complete","line":"Mattermost data deleted","done":true}\n\n',
+                )
+                return
             if path == "/api/integrations/mattermost/install" and method == "POST":
                 state["installed"] = not install_error
+                state["mattermost_disabled"] = False
+                state["mattermost_retained_data"] = False
+                state["mattermost_cleanup_action"] = None
                 route.fulfill(
                     status=202,
                     content_type="application/json",

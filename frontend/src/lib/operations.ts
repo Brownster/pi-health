@@ -17,6 +17,7 @@ export interface OperationEvent {
   requires_auth?: boolean;
   requires_setup?: boolean;
   expired?: boolean;
+  warnings?: Array<{ code?: string; message?: string }>;
 }
 
 export interface OperationCreated {

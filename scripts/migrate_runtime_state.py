@@ -17,6 +17,7 @@ from runtime_paths import migrate_legacy_runtime_data
 
 HELPER_RESTART_DROPIN = "restart-with-pi-health.conf"
 HELPER_AGENT_DROPIN = "agent-provisioning.conf"
+HELPER_INTEGRATION_LIFECYCLE_DROPIN = "integration-lifecycle.conf"
 METRICS_SERVICE = "limeos-metrics-collector.service"
 METRICS_TIMER = "limeos-metrics-collector.timer"
 
@@ -35,6 +36,30 @@ def ensure_agent_runtime_roots() -> None:
             "-p",
             "/var/lib/lime-agent",
             "/var/lib/limeops",
+        ],
+        check=True,
+    )
+
+
+def ensure_integration_lifecycle_roots() -> None:
+    """Create the fixed root-only Mattermost recovery directory."""
+    subprocess.run(
+        [
+            "systemd-run",
+            "--quiet",
+            "--wait",
+            "--pipe",
+            "--collect",
+            "--service-type=exec",
+            "/usr/bin/install",
+            "-d",
+            "-o",
+            "root",
+            "-g",
+            "root",
+            "-m",
+            "0700",
+            "/var/lib/limeos/integration-recovery",
         ],
         check=True,
     )
@@ -170,6 +195,22 @@ def ensure_helper_agent_permissions(
     return _ensure_helper_dropin(systemd_dir, HELPER_AGENT_DROPIN, content)
 
 
+def ensure_helper_integration_lifecycle_permissions(
+    systemd_dir: Path,
+) -> tuple[Path | None, bool]:
+    """Grant only the fixed active and recovery credential paths."""
+    content = (
+        "[Service]\n"
+        "ReadWritePaths=-/etc/limeos/integrations/mattermost.env\n"
+        "ReadWritePaths=-/var/lib/limeos/integration-recovery\n"
+    )
+    return _ensure_helper_dropin(
+        systemd_dir,
+        HELPER_INTEGRATION_LIFECYCLE_DROPIN,
+        content,
+    )
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-root", type=Path, required=True)
@@ -197,6 +238,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     ensure_agent_runtime_roots()
+    ensure_integration_lifecycle_roots()
     copied = migrate_legacy_runtime_data(
         source_root=args.source_root,
         config_dir=args.config_dir,
@@ -212,6 +254,7 @@ def main() -> int:
     dropins = (
         ensure_helper_restart_coupling(args.systemd_dir),
         ensure_helper_agent_permissions(args.systemd_dir, args.source_root),
+        ensure_helper_integration_lifecycle_permissions(args.systemd_dir),
     )
     service_user = resolve_dashboard_user(args.systemd_dir, args.source_root)
     metric_units, metrics_changed = ensure_metrics_timer(

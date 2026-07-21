@@ -15,18 +15,27 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 MANAGERS = frozenset({"apt", "pip", "npm", "claude"})
 POLICIES = frozenset({"pinned", "present-min", "present", "absent"})
+FEATURES = frozenset({"ai_agents"})
 _VERSIONED_POLICIES = frozenset({"pinned", "present-min"})
 # Debian-ish package name; conservative enough for pip/npm too.
 _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9+._-]{0,127}$")
 _VERSION_RE = re.compile(r"^[0-9][0-9A-Za-z.:+~-]{0,63}$")
 _ALLOWED_FIELDS = frozenset(
-    {"name", "manager", "policy", "version", "critical", "disable_self_update"}
+    {
+        "name",
+        "manager",
+        "policy",
+        "version",
+        "critical",
+        "disable_self_update",
+        "feature",
+    }
 )
 
 DEFAULT_MANIFEST_PATH = Path(__file__).resolve().parent / "config" / "limeos-packages.json"
@@ -44,6 +53,7 @@ class PackageSpec:
     critical: bool = False
     version: str | None = None
     disable_self_update: bool = False
+    feature: str | None = None
 
 
 def _parse_package(raw: object) -> PackageSpec:
@@ -69,6 +79,9 @@ def _parse_package(raw: object) -> PackageSpec:
     disable_self_update = raw.get("disable_self_update", False)
     if not isinstance(disable_self_update, bool):
         raise PackageManifestError(f"disable_self_update must be a boolean for {name}")
+    feature = raw.get("feature")
+    if feature is not None and feature not in FEATURES:
+        raise PackageManifestError(f"invalid feature for {name}: {feature!r}")
 
     version = raw.get("version")
     if policy in _VERSIONED_POLICIES:
@@ -84,6 +97,7 @@ def _parse_package(raw: object) -> PackageSpec:
         critical=critical,
         version=version,
         disable_self_update=disable_self_update,
+        feature=feature,
     )
 
 
@@ -112,6 +126,23 @@ def load_manifest(path: Path | str = DEFAULT_MANIFEST_PATH) -> list[PackageSpec]
 
 def critical_packages(specs: list[PackageSpec]) -> list[PackageSpec]:
     return [spec for spec in specs if spec.critical]
+
+
+def managed_packages(
+    specs: list[PackageSpec], feature_states: Mapping[str, bool]
+) -> list[PackageSpec]:
+    """Return the host baseline plus packages owned by enabled feature managers.
+
+    Feature packages fail closed: an absent, false, or non-Boolean state excludes the
+    package. Callers must derive these states from server-owned lifecycle facts rather
+    than request parameters.
+    """
+    return [
+        spec
+        for spec in specs
+        if getattr(spec, "feature", None) is None
+        or feature_states.get(spec.feature) is True
+    ]
 
 
 # -- reconcile logic (pure) ------------------------------------------------------

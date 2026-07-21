@@ -32,7 +32,11 @@ def test_reconcile_rejects_unknown_params_and_modes():
 def test_reconcile_check_reports_drift_without_changing_anything():
     fake = FakeRun({"claude-code": "2.1.208", "python3-psutil": "5.9",
                     "unattended-upgrades": "2.9"})
-    with patch.object(helper, "run_command", side_effect=fake):
+    with patch.object(helper, "run_command", side_effect=fake), patch.object(
+        helper,
+        "_read_agent_lifecycle_feature_state",
+        return_value={"feature": "ai_agents", "state": "enabled", "reconcile_allowed": True},
+    ):
         result = helper.cmd_packages_reconcile({"mode": "check"})
     assert result["success"] is True and result["mode"] == "check"
     assert "claude-code" in result["drift"]  # 2.1.208 != pinned 2.1.207
@@ -43,7 +47,11 @@ def test_reconcile_check_reports_drift_without_changing_anything():
 def test_reconcile_apply_pins_the_cli_and_installs_missing():
     # claude drifted; psutil missing; unattended-upgrades present.
     fake = FakeRun({"claude-code": "2.1.208", "unattended-upgrades": "2.9"})
-    with patch.object(helper, "run_command", side_effect=fake):
+    with patch.object(helper, "run_command", side_effect=fake), patch.object(
+        helper,
+        "_read_agent_lifecycle_feature_state",
+        return_value={"feature": "ai_agents", "state": "enabled", "reconcile_allowed": True},
+    ):
         result = helper.cmd_packages_reconcile({"mode": "apply"})
     assert result["mode"] == "apply"
     assert ["apt-get", "update"] in fake.calls

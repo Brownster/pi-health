@@ -118,6 +118,7 @@ class ProviderCandidate:
     status_reader: Callable[[str], Mapping[str, Any]] | None = None
     source: str = "builtin"
     provider_id_hint: str | None = None
+    status_lifecycle_authoritative: bool = False
 
     def configured_for(self, capability_id: str) -> bool:
         if isinstance(self.configured, Mapping):
@@ -550,8 +551,9 @@ class CapabilityRegistryService:
             ), "provider_status_unavailable"
 
         lifecycle = raw_status["lifecycle"]
-        lifecycle["installed"] = bool(candidate.installed)
-        lifecycle["enabled"] = bool(candidate.enabled)
+        if not candidate.status_lifecycle_authoritative:
+            lifecycle["installed"] = bool(candidate.installed)
+            lifecycle["enabled"] = bool(candidate.enabled)
         lifecycle["compatibility"] = compatibility
         if candidate.configured is not None:
             lifecycle["configured"] = configured
@@ -733,6 +735,8 @@ def _unusable_provider(
 
 def _effective_health(status: Mapping[str, Any]) -> str:
     lifecycle = status["lifecycle"]
+    if status["health"]["state"] == "error":
+        return "error"
     if not lifecycle["installed"]:
         return "unavailable"
     if lifecycle["compatibility"] == "incompatible":

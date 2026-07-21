@@ -1,5 +1,10 @@
 import { requestApi } from "@/lib/api";
 import { createOperation, streamOperation, type OperationEvent } from "@/lib/operations";
+import { runIntegrationLifecycleOperation } from "@/lib/integration-lifecycle";
+import {
+  lifecycleContractFields,
+  type IntegrationLifecycleStatus,
+} from "@/lib/integration-lifecycle-contract";
 
 export type AlertKind = "container" | "smart" | "mount" | "snapraid";
 
@@ -32,8 +37,8 @@ export interface ActiveIncident extends Omit<AlertResource, "ok"> {
   delivered_at: string | null;
 }
 
-export interface MattermostStatus {
-  state: "not_installed" | "connected" | "degraded" | "disconnected";
+export interface MattermostStatus extends IntegrationLifecycleStatus {
+  state: "cleanup_required" | "retained_data" | "not_installed" | "connected" | "degraded" | "disabled" | "disconnected";
   installed: boolean;
   site_url: string | null;
   stack_name: string;
@@ -61,8 +66,9 @@ export interface MattermostSetup {
   fail_threshold: number;
 }
 
-export function getMattermostStatus(signal?: AbortSignal): Promise<MattermostStatus> {
-  return requestApi<MattermostStatus>("/api/integrations/mattermost", { method: "GET", signal });
+export async function getMattermostStatus(signal?: AbortSignal): Promise<MattermostStatus> {
+  const status = await requestApi<MattermostStatus>("/api/integrations/mattermost", { method: "GET", signal });
+  return { ...status, ...lifecycleContractFields("mattermost", status) };
 }
 
 export async function installMattermost(
@@ -84,6 +90,63 @@ export async function installMattermost(
       }
     },
     signal,
+  );
+}
+
+export function disableMattermost(
+  onEvent: (event: OperationEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  return runIntegrationLifecycleOperation("mattermost", "disable", {}, onEvent, { signal });
+}
+
+export function enableMattermost(
+  onEvent: (event: OperationEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  return runIntegrationLifecycleOperation("mattermost", "enable", {}, onEvent, { signal });
+}
+
+export function uninstallMattermost(
+  confirmation: "Mattermost",
+  onEvent: (event: OperationEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  return runIntegrationLifecycleOperation(
+    "mattermost",
+    "uninstall",
+    { confirmation },
+    onEvent,
+    { signal },
+  );
+}
+
+export function purgeMattermost(
+  confirmation: "Mattermost",
+  onEvent: (event: OperationEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  return runIntegrationLifecycleOperation(
+    "mattermost",
+    "purge",
+    { confirmation, acknowledge_data_loss: true },
+    onEvent,
+    { signal },
+  );
+}
+
+export function retryMattermostCleanup(
+  action: "disable" | "enable" | "uninstall" | "purge",
+  values: Record<string, unknown>,
+  onEvent: (event: OperationEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  return runIntegrationLifecycleOperation(
+    "mattermost",
+    "retry_cleanup",
+    values,
+    onEvent,
+    { cleanupAction: action, signal },
   );
 }
 

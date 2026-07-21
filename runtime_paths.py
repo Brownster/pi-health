@@ -12,6 +12,13 @@ SOURCE_ROOT = Path(__file__).resolve().parent
 STATIC_CONFIG_DIR = SOURCE_ROOT / "config"
 STATIC_SCHEMA_DIR = STATIC_CONFIG_DIR / "schemas"
 STATIC_CATALOG_DIR = SOURCE_ROOT / "catalog"
+INTEGRATION_LIFECYCLE_POLICY_PATH = STATIC_CONFIG_DIR / "integration-lifecycle.json"
+INTEGRATION_LIFECYCLE_STATUS_SCHEMA_PATH = (
+    STATIC_SCHEMA_DIR / "integration-lifecycle-status.schema.json"
+)
+INTEGRATION_LIFECYCLE_TOMBSTONE_SCHEMA_PATH = (
+    STATIC_SCHEMA_DIR / "integration-lifecycle-tombstone.schema.json"
+)
 
 CONFIG_DIR = Path(os.getenv("LIMEOS_CONFIG_DIR", "/etc/limeos"))
 STATE_DIR = Path(os.getenv("LIMEOS_STATE_DIR", "/var/lib/limeos"))
@@ -24,6 +31,10 @@ STORAGE_PLUGIN_CONFIG_DIR = CONFIG_DIR / "storage_plugins"
 STORAGE_PLUGIN_STATE_DIR = STATE_DIR / "storage_plugins"
 INTEGRATIONS_CONFIG_DIR = CONFIG_DIR / "integrations"
 INTEGRATIONS_STATE_DIR = STATE_DIR / "integrations"
+MATTERMOST_LIFECYCLE_PATH = INTEGRATIONS_STATE_DIR / "mattermost-lifecycle.json"
+AGENT_LIFECYCLE_PATH = INTEGRATIONS_STATE_DIR / "agents-lifecycle.json"
+MATTERMOST_RECOVERY_DIR = STATE_DIR / "integration-recovery"
+MATTERMOST_RECOVERY_CREDENTIAL_PATH = MATTERMOST_RECOVERY_DIR / "mattermost.env"
 SNAPRAID_LOG_DIR = LOG_DIR / "snapraid"
 RETIRED_ENV_KEYS = frozenset({"PIHEALTH_UI_MODE", "PIHEALTH_UI_V2_PAGES", "THEME"})
 
