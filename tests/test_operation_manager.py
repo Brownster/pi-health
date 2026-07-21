@@ -1,6 +1,10 @@
 import pytest
 
-from operation_manager import OperationCapacityError, OperationRegistry
+from operation_manager import (
+    OperationCapacityError,
+    OperationConflictError,
+    OperationRegistry,
+)
 
 
 class FakeClock:
@@ -194,3 +198,64 @@ def test_agent_operation_unexpected_exception_is_bounded_and_private():
         owner="owner",
     )
     assert batch.events[-1].payload == {"error": "AI Agents operation failed"}
+
+
+def test_registry_passes_generated_id_to_factory_before_immediate_execution():
+    observed = []
+    registry = immediate_registry()
+
+    operation = registry.create(
+        owner="owner",
+        username="admin",
+        kind="integration-lifecycle-agents",
+        target="agents",
+        producer_factory=lambda operation_id: iter(
+            [observed.append(operation_id) or {"done": True}]
+        ),
+    )
+
+    assert observed == [operation.operation_id]
+
+
+def test_registry_rejects_concurrent_exclusive_operation_until_terminal():
+    registry = OperationRegistry(thread_factory=DormantThread)
+    registry.create(
+        owner="owner",
+        username="admin",
+        kind="integration-lifecycle-agents",
+        target="agents",
+        conflict_key="integration:agents",
+        producer=lambda: iter([{"done": True}]),
+    )
+
+    with pytest.raises(OperationConflictError, match="already running"):
+        registry.create(
+            owner="owner",
+            username="admin",
+            kind="integration-lifecycle-agents",
+            target="agents",
+            conflict_key="integration:agents",
+            producer=lambda: iter([{"done": True}]),
+        )
+
+
+def test_integration_lifecycle_unexpected_exception_is_bounded_and_private():
+    registry = immediate_registry()
+    operation = registry.create(
+        owner="owner",
+        username="admin",
+        kind="integration-lifecycle-mattermost",
+        target="mattermost",
+        producer=lambda: (_ for _ in ()).throw(
+            RuntimeError("password=SECRET /private/compose.yaml")
+        ),
+    )
+    batch = registry.events_since(
+        operation.operation_id,
+        expected_kind="integration-lifecycle-mattermost",
+        owner="owner",
+    )
+
+    assert batch.events[-1].payload == {
+        "error": "Integration lifecycle operation failed"
+    }

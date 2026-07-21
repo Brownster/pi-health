@@ -16,11 +16,16 @@ OPERATION_LIMIT = 100
 OPERATION_EVENT_LIMIT = 5000
 
 OperationProducer = Callable[[], Iterable[dict]]
+OperationProducerFactory = Callable[[str], Iterable[dict]]
 ThreadFactory = Callable[..., threading.Thread]
 
 
 class OperationCapacityError(RuntimeError):
     """Raised when all retained operation slots are active."""
+
+
+class OperationConflictError(RuntimeError):
+    """Raised when an exclusive operation is already active."""
 
 
 @dataclass(frozen=True)
@@ -39,13 +44,23 @@ class OperationEventBatch:
 class BackgroundOperation:
     """In-memory output buffer for one exactly-once background operation."""
 
-    def __init__(self, operation_id, owner, username, kind, target, created_at):
+    def __init__(
+        self,
+        operation_id,
+        owner,
+        username,
+        kind,
+        target,
+        created_at,
+        conflict_key=None,
+    ):
         self.operation_id = operation_id
         self.owner = owner
         self.username = username
         self.kind = kind
         self.target = target
         self.created_at = created_at
+        self.conflict_key = conflict_key
         self.events = []
         self.first_event_id = 0
         self.complete = False
@@ -96,8 +111,21 @@ class OperationRegistry:
         self._operations = {}
         self._lock = threading.Lock()
 
-    def create(self, *, owner, username, kind, target, producer):
+    def create(
+        self,
+        *,
+        owner,
+        username,
+        kind,
+        target,
+        producer=None,
+        producer_factory=None,
+        conflict_key=None,
+        before_start=None,
+    ):
         """Register and start one operation, or raise when capacity or startup fails."""
+        if (producer is None) == (producer_factory is None):
+            raise ValueError("Provide exactly one operation producer")
         operation_id = uuid.uuid4().hex
         operation = BackgroundOperation(
             operation_id=operation_id,
@@ -106,9 +134,15 @@ class OperationRegistry:
             kind=kind,
             target=target,
             created_at=self._clock(),
+            conflict_key=conflict_key,
         )
         with self._lock:
             self._prune_locked()
+            if conflict_key is not None and any(
+                item.conflict_key == conflict_key and not item.complete
+                for item in self._operations.values()
+            ):
+                raise OperationConflictError("An integration operation is already running")
             if len(self._operations) >= self._operation_limit:
                 oldest_complete = min(
                     (item for item in self._operations.values() if item.complete),
@@ -120,15 +154,22 @@ class OperationRegistry:
                 self._operations.pop(oldest_complete.operation_id, None)
             self._operations[operation_id] = operation
 
-        thread = self._thread_factory(
-            target=self._run,
-            args=(operation, producer),
-            name=f"{kind}-operation-{operation_id[:8]}",
-            daemon=True,
-        )
         try:
+            resolved_producer = (
+                producer
+                if producer_factory is None
+                else lambda: producer_factory(operation_id)
+            )
+            if before_start is not None:
+                before_start(operation)
+            thread = self._thread_factory(
+                target=self._run,
+                args=(operation, resolved_producer),
+                name=f"{kind}-operation-{operation_id[:8]}",
+                daemon=True,
+            )
             thread.start()
-        except RuntimeError:
+        except Exception:
             with self._lock:
                 self._operations.pop(operation_id, None)
             raise
@@ -197,11 +238,12 @@ class OperationRegistry:
                     payload.get("done") or payload.get("error")
                 )
         except Exception as exc:
-            error = (
-                "AI Agents operation failed"
-                if operation.kind.startswith("agent-")
-                else str(exc)
-            )
+            if operation.kind.startswith("agent-"):
+                error = "AI Agents operation failed"
+            elif operation.kind.startswith("integration-lifecycle-"):
+                error = "Integration lifecycle operation failed"
+            else:
+                error = str(exc)
             operation.append({"error": error}, self._event_limit)
             terminal_event = True
         finally:

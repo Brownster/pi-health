@@ -346,7 +346,9 @@ export function AgentsIntegrationCard({ refreshKey = 0 }: { refreshKey?: number 
   async function disable() {
     setDisabling(true);
     try {
-      await disableAgents();
+      await disableAgents((event) => {
+        if (event.error) throw new Error(event.error);
+      });
       setDisableOpen(false);
       setNotice("AI Agents is disabled. Mattermost and alert delivery remain active.");
       await loadStatus();

@@ -203,10 +203,11 @@ export function cancelClaudeAuth(operationId: string): Promise<{ cancelled: true
   });
 }
 
-export function disableAgents(): Promise<{ state: "disabled" }> {
-  return requestApi<{ state: "disabled" }>("/api/integrations/agents/disable", {
-    method: "POST",
-  });
+export function disableAgents(
+  onEvent: (event: OperationEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  return runAgentOperation("/api/integrations/agents/disable", {}, onEvent, signal);
 }
 
 export function sendAgentTest(): Promise<{ status: "sent" }> {

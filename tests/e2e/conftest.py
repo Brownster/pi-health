@@ -2036,9 +2036,21 @@ def install_v2_integrations_api_mocks():
             if path == "/api/integrations/agents/disable" and method == "POST":
                 state["agent_enabled"] = False
                 route.fulfill(
-                    status=200,
+                    status=202,
                     content_type="application/json",
-                    body=json.dumps({"state": "disabled"}),
+                    body=json.dumps(
+                        {
+                            "operation_id": "mock-agent-disable",
+                            "stream_url": "/api/integrations/agents/operations/mock-agent-disable/stream",
+                        }
+                    ),
+                )
+                return
+            if path.endswith("/mock-agent-disable/stream") and method == "GET":
+                route.fulfill(
+                    status=200,
+                    content_type="text/event-stream",
+                    body='id: 0\ndata: {"step":"complete","line":"AI Agents disabled","done":true}\n\n',
                 )
                 return
             if path == "/api/integrations/agents/test" and method == "POST":

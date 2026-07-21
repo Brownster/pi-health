@@ -54,7 +54,7 @@ def _service():
     service.permissions.return_value = {"allowed_operations": []}
     service.usage.return_value = {"totals": {}, "records": []}
     service.audit.return_value = {"records": []}
-    service.disable.return_value = {"state": "disabled"}
+    service.stream_disable.return_value = iter([{"step": "complete", "done": True}])
     service.test_delivery.return_value = {"status": "sent"}
     service.submit_auth.return_value = {"accepted": True}
     service.cancel_auth.return_value = {"cancelled": True}
@@ -117,7 +117,13 @@ def test_auth_submit_cancel_disable_and_delivery_test_are_csrf_protected():
         "/api/integrations/agents/providers/claude/auth",
         json={"action": "cancel", "operation_id": "auth-1"},
     ).status_code == 200
-    assert client.post("/api/integrations/agents/disable").status_code == 200
+    service.status.return_value = {
+        "state": "connected",
+        "allowed_actions": ["disable"],
+    }
+    disable = client.post("/api/integrations/agents/disable", json={})
+    assert disable.status_code == 202
+    assert client.get(disable.get_json()["stream_url"]).status_code == 200
     assert client.post("/api/integrations/agents/test").status_code == 200
     client.environ_base.pop("HTTP_X_CSRF_TOKEN")
     assert client.post("/api/integrations/agents/disable").status_code == 403

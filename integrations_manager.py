@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import logging
+import re
+from collections.abc import Mapping
+
 from flask import Blueprint, current_app, jsonify, request, session
 
 from alert_policy import AlertPolicyError
@@ -9,10 +13,24 @@ from agent_integration_service import AgentIntegrationError
 from auth_utils import csrf_protect, login_required
 from helper_client import helper_call
 from mattermost_integration_service import MattermostIntegrationError
-from operation_manager import OperationCapacityError
+from operation_manager import OperationCapacityError, OperationConflictError
 
 
 integrations_manager = Blueprint("integrations_manager", __name__)
+logger = logging.getLogger(__name__)
+
+_LIFECYCLE_STEP = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$")
+_ADMIN_USERNAME = re.compile(r"^[a-z0-9._-]{3,64}$")
+_AGENT_UNINSTALL_FIELDS = frozenset(
+    {"confirmation", "admin_username", "admin_password", "remove_claude_code"}
+)
+_MATTERMOST_PURGE_FIELDS = frozenset(
+    {"confirmation", "acknowledge_data_loss"}
+)
+_BOT_WARNING = {
+    "code": "agent_bot_cleanup_failed",
+    "message": "AI Agents was removed locally, but the Mattermost bot could not be removed.",
+}
 
 
 def _service():
@@ -52,10 +70,451 @@ def _start_agent_operation(*, kind, target, producer):
     ), 202
 
 
+def _lifecycle_error(code, message, status_code):
+    response = jsonify({"code": code, "error": message})
+    response.headers["Cache-Control"] = "no-store"
+    return response, status_code
+
+
+def _record_lifecycle_audit(
+    *,
+    integration,
+    action,
+    decision,
+    outcome,
+    code,
+    operation_id=None,
+):
+    audit = current_app.extensions.get("audit")
+    _write_lifecycle_audit(
+        audit=audit,
+        actor=session.get("username", "unknown"),
+        integration=integration,
+        action=action,
+        decision=decision,
+        outcome=outcome,
+        code=code,
+        operation_id=operation_id,
+    )
+
+
+def _write_lifecycle_audit(
+    *,
+    audit,
+    actor,
+    integration,
+    action,
+    decision,
+    outcome,
+    code,
+    operation_id=None,
+):
+    if audit is None:
+        return
+    event = {
+        "domain": "integration",
+        "event": "integration_lifecycle",
+        "actor": actor,
+        "permission": "extensions.admin",
+        "integration": integration,
+        "action": action,
+        "decision": decision,
+        "outcome": outcome,
+        "code": code,
+    }
+    if operation_id is not None:
+        event["operation_id"] = operation_id
+    try:
+        audit.record(event)
+    except Exception:
+        logger.error("Integration lifecycle audit write failed")
+
+
+def _require_lifecycle_admin(*, integration, action):
+    authorizer = current_app.extensions.get("capability_authorizer")
+    if authorizer is None:
+        allowed = None
+    else:
+        try:
+            allowed = authorizer.allows(
+                session.get("username", "unknown"), "extensions.admin"
+            )
+        except Exception:
+            allowed = None
+    if allowed is True:
+        return None
+    if allowed is None:
+        code = "integration_authorization_unavailable"
+        decision = "unavailable"
+        status_code = 503
+        message = "Integration authorization policy is unavailable."
+    else:
+        code = "integration_lifecycle_forbidden"
+        decision = "denied"
+        status_code = 403
+        message = "Administrator permission is required."
+    _record_lifecycle_audit(
+        integration=integration,
+        action=action,
+        decision=decision,
+        outcome="rejected",
+        code=code,
+    )
+    return _lifecycle_error(code, message, status_code)
+
+
+def _reject_lifecycle(*, integration, action, code, message, status_code=400):
+    _record_lifecycle_audit(
+        integration=integration,
+        action=action,
+        decision="allowed",
+        outcome="rejected",
+        code=code,
+    )
+    return _lifecycle_error(code, message, status_code)
+
+
+def _strict_lifecycle_values(*, integration, action, fields):
+    values = request.get_json(silent=True)
+    if not isinstance(values, dict) or set(values) != fields:
+        return None, _reject_lifecycle(
+            integration=integration,
+            action=action,
+            code="invalid_lifecycle_parameters",
+            message="Lifecycle request values are invalid.",
+        )
+    return values, None
+
+
+def _valid_admin_credentials(values):
+    username = values.get("admin_username")
+    password = values.get("admin_password")
+    return bool(
+        isinstance(username, str)
+        and _ADMIN_USERNAME.fullmatch(username)
+        and isinstance(password, str)
+        and 10 <= len(password) <= 256
+        and not any(character in password for character in ("\x00", "\r", "\n"))
+    )
+
+
+def _lifecycle_dispatch_mode(*, integration, action, service):
+    try:
+        status = service.status()
+    except Exception:
+        return None, _reject_lifecycle(
+            integration=integration,
+            action=action,
+            code="integration_status_unavailable",
+            message="Integration status is unavailable.",
+            status_code=503,
+        )
+    if not isinstance(status, Mapping) or not isinstance(
+        status.get("allowed_actions"), list
+    ):
+        return None, _reject_lifecycle(
+            integration=integration,
+            action=action,
+            code="integration_status_unavailable",
+            message="Integration status is unavailable.",
+            status_code=503,
+        )
+    allowed_actions = status["allowed_actions"]
+    blocked_actions = status.get("blocked_actions", [])
+    if not all(isinstance(item, str) for item in allowed_actions) or not isinstance(
+        blocked_actions, list
+    ):
+        return None, _reject_lifecycle(
+            integration=integration,
+            action=action,
+            code="integration_status_unavailable",
+            message="Integration status is unavailable.",
+            status_code=503,
+        )
+    if action in allowed_actions:
+        return "action", None
+    cleanup = status.get("cleanup_operation")
+    if (
+        "retry_cleanup" in allowed_actions
+        and isinstance(cleanup, Mapping)
+        and cleanup.get("action") == action
+    ):
+        return "retry", None
+    blocked = next(
+        (
+            item
+            for item in blocked_actions
+            if isinstance(item, Mapping) and item.get("action") == action
+        ),
+        None,
+    )
+    message = (
+        blocked.get("message")
+        if blocked is not None
+        and isinstance(blocked.get("message"), str)
+        and 1 <= len(blocked["message"]) <= 240
+        and not any(ord(character) < 32 for character in blocked["message"])
+        and not _sensitive_lifecycle_text(blocked["message"])
+        else "Integration action is not available in the current state."
+    )
+    return None, _reject_lifecycle(
+        integration=integration,
+        action=action,
+        code="integration_action_unavailable",
+        message=message,
+        status_code=409,
+    )
+
+
+def _public_lifecycle_event(event):
+    if not isinstance(event, Mapping):
+        return None
+    public = {}
+    step = event.get("step")
+    if isinstance(step, str) and len(step) <= 64 and _LIFECYCLE_STEP.fullmatch(step):
+        public["step"] = step
+    for key in ("line", "error"):
+        value = event.get(key)
+        if (
+            isinstance(value, str)
+            and 1 <= len(value) <= 240
+            and not any(ord(character) < 32 for character in value)
+            and not _sensitive_lifecycle_text(value)
+        ):
+            public[key] = value
+        elif isinstance(value, str):
+            public[key] = (
+                "Integration lifecycle operation failed"
+                if key == "error"
+                else "Integration lifecycle step is running"
+            )
+    if event.get("done") is True:
+        public["done"] = True
+    warnings = event.get("warnings")
+    if isinstance(warnings, list) and any(
+        isinstance(item, Mapping) and item.get("code") == _BOT_WARNING["code"]
+        for item in warnings
+    ):
+        public["warnings"] = [dict(_BOT_WARNING)]
+    return public or None
+
+
+def _sensitive_lifecycle_text(value):
+    lowered = value.lower()
+    return bool(
+        "://" in value
+        or "/" in value
+        or "\\" in value
+        or re.search(
+            r"\b(?:password|passwd|token|secret|webhook|dsn|api[_ -]?key)\b",
+            lowered,
+        )
+        or re.search(r"\b[A-Z][A-Z0-9_]{2,}=", value)
+    )
+
+
+def _audited_lifecycle_events(
+    *, integration, action, operation_id, producer, audit, actor
+):
+    terminal = False
+    try:
+        for event in producer:
+            public = _public_lifecycle_event(event)
+            if public is None:
+                continue
+            if public.get("error"):
+                terminal = True
+                _write_lifecycle_audit(
+                    audit=audit,
+                    actor=actor,
+                    integration=integration,
+                    action=action,
+                    decision="allowed",
+                    outcome="failed",
+                    code=f"{integration}_{action}_failed",
+                    operation_id=operation_id,
+                )
+            elif public.get("done"):
+                terminal = True
+                warning = bool(public.get("warnings"))
+                _write_lifecycle_audit(
+                    audit=audit,
+                    actor=actor,
+                    integration=integration,
+                    action=action,
+                    decision="allowed",
+                    outcome="warning" if warning else "succeeded",
+                    code=_BOT_WARNING["code"] if warning else "ok",
+                    operation_id=operation_id,
+                )
+            yield public
+    except Exception:
+        if not terminal:
+            _write_lifecycle_audit(
+                audit=audit,
+                actor=actor,
+                integration=integration,
+                action=action,
+                decision="allowed",
+                outcome="failed",
+                code=f"{integration}_{action}_failed",
+                operation_id=operation_id,
+            )
+        raise
+    if not terminal:
+        _write_lifecycle_audit(
+            audit=audit,
+            actor=actor,
+            integration=integration,
+            action=action,
+            decision="allowed",
+            outcome="failed",
+            code="operation_ended_without_result",
+            operation_id=operation_id,
+        )
+
+
+def _start_lifecycle_operation(*, integration, action, producer_factory):
+    registry = current_app.extensions["operation_registry"]
+    kind = f"integration-lifecycle-{integration}"
+    audit = current_app.extensions.get("audit")
+    actor = session.get("username", "unknown")
+    try:
+        operation = registry.create(
+            owner=session["csrf_token"],
+            username=session.get("username", "unknown"),
+            kind=kind,
+            target=integration,
+            conflict_key=f"integration:{integration}",
+            before_start=lambda item: _record_lifecycle_audit(
+                integration=integration,
+                action=action,
+                decision="allowed",
+                outcome="accepted",
+                code="ok",
+                operation_id=item.operation_id,
+            ),
+            producer_factory=lambda operation_id: _audited_lifecycle_events(
+                integration=integration,
+                action=action,
+                operation_id=operation_id,
+                producer=producer_factory(operation_id),
+                audit=audit,
+                actor=actor,
+            ),
+        )
+    except OperationConflictError:
+        return _reject_lifecycle(
+            integration=integration,
+            action=action,
+            code="integration_operation_conflict",
+            message="An integration operation is already running.",
+            status_code=409,
+        )
+    except OperationCapacityError:
+        return _reject_lifecycle(
+            integration=integration,
+            action=action,
+            code="operation_capacity_reached",
+            message="No integration operation slot is available.",
+            status_code=429,
+        )
+    except Exception:
+        return _reject_lifecycle(
+            integration=integration,
+            action=action,
+            code="integration_operation_start_failed",
+            message="Integration lifecycle operation could not start.",
+            status_code=503,
+        )
+    return jsonify(
+        {
+            "operation_id": operation.operation_id,
+            "stream_url": (
+                f"/api/integrations/{integration}/operations/"
+                f"{operation.operation_id}/stream"
+            ),
+        }
+    ), 202
+
+
 @integrations_manager.route("/api/integrations/mattermost", methods=["GET"])
 @login_required
 def mattermost_status():
     return jsonify(_service().status())
+
+
+def _mattermost_lifecycle_request(action, fields, validate):
+    denied = _require_lifecycle_admin(integration="mattermost", action=action)
+    if denied is not None:
+        return denied
+    values, rejected = _strict_lifecycle_values(
+        integration="mattermost", action=action, fields=fields
+    )
+    if rejected is not None:
+        return rejected
+    if not validate(values):
+        return _reject_lifecycle(
+            integration="mattermost",
+            action=action,
+            code="invalid_lifecycle_confirmation",
+            message="Lifecycle confirmation is invalid.",
+        )
+    service = _service()
+    mode, rejected = _lifecycle_dispatch_mode(
+        integration="mattermost", action=action, service=service
+    )
+    if rejected is not None:
+        return rejected
+    method = (
+        service.stream_retry_cleanup
+        if mode == "retry"
+        else getattr(service, f"stream_{action}")
+    )
+    return _start_lifecycle_operation(
+        integration="mattermost",
+        action=action,
+        producer_factory=lambda operation_id: method(operation_id),
+    )
+
+
+@integrations_manager.route("/api/integrations/mattermost/disable", methods=["POST"])
+@login_required
+@csrf_protect
+def disable_mattermost():
+    return _mattermost_lifecycle_request("disable", frozenset(), lambda _values: True)
+
+
+@integrations_manager.route("/api/integrations/mattermost/enable", methods=["POST"])
+@login_required
+@csrf_protect
+def enable_mattermost():
+    return _mattermost_lifecycle_request("enable", frozenset(), lambda _values: True)
+
+
+@integrations_manager.route("/api/integrations/mattermost/uninstall", methods=["POST"])
+@login_required
+@csrf_protect
+def uninstall_mattermost():
+    return _mattermost_lifecycle_request(
+        "uninstall",
+        frozenset({"confirmation"}),
+        lambda values: values.get("confirmation") == "Mattermost",
+    )
+
+
+@integrations_manager.route("/api/integrations/mattermost/purge", methods=["POST"])
+@login_required
+@csrf_protect
+def purge_mattermost():
+    return _mattermost_lifecycle_request(
+        "purge",
+        _MATTERMOST_PURGE_FIELDS,
+        lambda values: (
+            values.get("confirmation") == "Mattermost"
+            and values.get("acknowledge_data_loss") is True
+        ),
+    )
 
 
 @integrations_manager.route("/api/integrations/mattermost/install", methods=["POST"])
@@ -104,7 +563,7 @@ def stream_mattermost_install(operation_id):
     return stream_operation_response(
         current_app.extensions["operation_registry"],
         operation_id,
-        expected_kind="mattermost-install",
+        expected_kind=("mattermost-install", "integration-lifecycle-mattermost"),
     )
 
 
@@ -187,7 +646,12 @@ def stream_agent_operation(operation_id):
     return stream_operation_response(
         current_app.extensions["operation_registry"],
         operation_id,
-        expected_kind=("agent-install", "agent-repair", "agent-auth"),
+        expected_kind=(
+            "agent-install",
+            "agent-repair",
+            "agent-auth",
+            "integration-lifecycle-agents",
+        ),
     )
 
 
@@ -195,10 +659,81 @@ def stream_agent_operation(operation_id):
 @login_required
 @csrf_protect
 def disable_agents():
-    try:
-        return jsonify(_agent_service().disable())
-    except AgentIntegrationError as exc:
-        return jsonify({"error": str(exc)}), 409
+    denied = _require_lifecycle_admin(integration="agents", action="disable")
+    if denied is not None:
+        return denied
+    _values, rejected = _strict_lifecycle_values(
+        integration="agents", action="disable", fields=frozenset()
+    )
+    if rejected is not None:
+        return rejected
+    service = _agent_service()
+    mode, rejected = _lifecycle_dispatch_mode(
+        integration="agents", action="disable", service=service
+    )
+    if rejected is not None:
+        return rejected
+    method = (
+        (lambda operation_id: service.stream_retry_cleanup(operation_id, {}))
+        if mode == "retry"
+        else service.stream_disable
+    )
+    return _start_lifecycle_operation(
+        integration="agents",
+        action="disable",
+        producer_factory=method,
+    )
+
+
+@integrations_manager.route("/api/integrations/agents/uninstall", methods=["POST"])
+@login_required
+@csrf_protect
+def uninstall_agents():
+    denied = _require_lifecycle_admin(integration="agents", action="uninstall")
+    if denied is not None:
+        return denied
+    values, rejected = _strict_lifecycle_values(
+        integration="agents", action="uninstall", fields=_AGENT_UNINSTALL_FIELDS
+    )
+    if rejected is not None:
+        return rejected
+    if (
+        values.get("confirmation") != "AI Agents"
+        or not _valid_admin_credentials(values)
+        or not isinstance(values.get("remove_claude_code"), bool)
+    ):
+        return _reject_lifecycle(
+            integration="agents",
+            action="uninstall",
+            code="invalid_lifecycle_confirmation",
+            message="Lifecycle confirmation is invalid.",
+        )
+    service = _agent_service()
+    mode, rejected = _lifecycle_dispatch_mode(
+        integration="agents", action="uninstall", service=service
+    )
+    if rejected is not None:
+        return rejected
+    credentials = {
+        "admin_username": values["admin_username"],
+        "admin_password": values["admin_password"],
+    }
+    if mode == "retry":
+        def producer_factory(operation_id):
+            return service.stream_retry_cleanup(operation_id, credentials)
+    else:
+        cleanup = {
+            **credentials,
+            "remove_claude_code": values["remove_claude_code"],
+        }
+
+        def producer_factory(operation_id):
+            return service.stream_uninstall(operation_id, cleanup)
+    return _start_lifecycle_operation(
+        integration="agents",
+        action="uninstall",
+        producer_factory=producer_factory,
+    )
 
 
 @integrations_manager.route("/api/integrations/agents/providers", methods=["GET"])
