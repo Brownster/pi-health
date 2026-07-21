@@ -398,6 +398,7 @@ def _default_agent_integration_service(mattermost_service, docker_port, stack_re
     from integration_lifecycle_service import (
         IntegrationLifecycleResolver,
         LifecycleStateRepository,
+        load_lifecycle_policy,
     )
 
     def resources():
@@ -418,16 +419,21 @@ def _default_agent_integration_service(mattermost_service, docker_port, stack_re
             pass
         return {"containers": containers, "stacks": stacks}
 
+    lifecycle_policy = load_lifecycle_policy()
+    lifecycle_repository = LifecycleStateRepository(
+        RUNTIME_INTEGRATIONS_STATE_DIR / "agents-lifecycle.json",
+        "agents",
+    )
     return AgentIntegrationService(
         helper_call=helper_call,
         mattermost_status=mattermost_service.status,
         resource_provider=resources,
         lifecycle_resolver=IntegrationLifecycleResolver(
-            LifecycleStateRepository(
-                RUNTIME_INTEGRATIONS_STATE_DIR / "agents-lifecycle.json",
-                "agents",
-            )
+            lifecycle_repository,
+            policy=lifecycle_policy,
         ),
+        lifecycle_repository=lifecycle_repository,
+        lifecycle_policy=lifecycle_policy,
     )
 
 

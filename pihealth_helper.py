@@ -3514,6 +3514,7 @@ def cmd_agent_runtime_status(params):
         'enabled': bool(parsed_settings.enabled) if parsed_settings else False,
         'team_id': parsed_settings.team_id if parsed_settings else None,
         'channel_id': parsed_settings.channel_id if parsed_settings else None,
+        'bot_user_id': parsed_settings.bot_user_id if parsed_settings else None,
         'bot_token_id': parsed_settings.bot_token_id if parsed_settings else None,
         'auth_state': _agent_auth_manager.current_state(),
     }

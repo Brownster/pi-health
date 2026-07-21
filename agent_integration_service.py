@@ -6,17 +6,28 @@ import json
 import re
 import time
 from collections.abc import Callable, Iterator, Mapping
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 
 from agent_transport.bot_client import MattermostBotApi
 from agent_transport.bot_setup import BotSetupRequest, run_bot_setup
+from integration_lifecycle_service import LifecycleStateError
 from runtime_paths import STATIC_CONFIG_DIR
 
 SETUP_TIMEOUT_SECONDS = 1200
 _USERNAME = re.compile(r"^[a-z0-9._-]{3,64}$")
 _RESOURCE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 _SETUP_FIELDS = frozenset({"admin_username", "admin_password", "limits"})
+_UNINSTALL_FIELDS = frozenset(
+    {"admin_username", "admin_password", "remove_claude_code"}
+)
+_RETRY_CREDENTIAL_FIELDS = frozenset({"admin_username", "admin_password"})
+_OPERATION_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+_BOT_CLEANUP_WARNING = "agent_bot_cleanup_failed"
+AGENT_LIFECYCLE_FAILURE_MESSAGE = (
+    "AI Agents cleanup did not complete. Retry cleanup from Integrations."
+)
 _SAFE_HELPER_ERRORS = frozenset(
     {
         "Failed to install Claude Code",
@@ -55,6 +66,9 @@ class AgentIntegrationService:
         sleep: Callable[[float], None] = time.sleep,
         policy_path: Path | str = STATIC_CONFIG_DIR / "agent-policy.default.json",
         lifecycle_resolver=None,
+        lifecycle_repository=None,
+        lifecycle_policy: Mapping | None = None,
+        lifecycle_timestamp: Callable[[], str] | None = None,
     ) -> None:
         self._helper_call = helper_call
         self._mattermost_status = mattermost_status
@@ -63,15 +77,27 @@ class AgentIntegrationService:
         self._sleep = sleep
         self._policy_path = Path(policy_path)
         self._lifecycle_resolver = lifecycle_resolver
+        self._lifecycle_repository = lifecycle_repository
+        self._lifecycle_policy = dict(lifecycle_policy or {})
+        self._lifecycle_timestamp = lifecycle_timestamp or self._utc_timestamp
 
     def status(self) -> dict:
-        mattermost = self._mattermost()
         if self._lifecycle_resolver is not None:
             authoritative = self._lifecycle_resolver.authoritative_status(
-                self._public_status("not_installed", mattermost, {})
+                self._public_status("not_installed", {}, {})
             )
             if authoritative is not None:
+                try:
+                    mattermost = self._mattermost()
+                except AgentIntegrationError:
+                    return authoritative
+                enriched = self._lifecycle_resolver.authoritative_status(
+                    self._public_status("not_installed", mattermost, {})
+                )
+                if enriched is not None:
+                    return enriched
                 return authoritative
+        mattermost = self._mattermost()
         if not mattermost.get("installed"):
             return self._lifecycle_status(
                 self._public_status("setup_required", mattermost, {})
@@ -142,6 +168,7 @@ class AgentIntegrationService:
 
     def _install(self, setup: dict) -> Iterator[dict]:
         try:
+            self._require_reentry(with_bot_credentials=True)
             mattermost = self._require_mattermost()
             yield {"step": "provider", "line": "Installing Claude Code"}
             self._call(
@@ -178,6 +205,7 @@ class AgentIntegrationService:
             else:
                 line = "AI Agents is installed and requires Claude authentication"
                 requires_auth = True
+            self._complete_reentry()
             yield {
                 "step": "complete",
                 "line": line,
@@ -197,6 +225,7 @@ class AgentIntegrationService:
 
         def repair():
             try:
+                self._require_reentry(with_bot_credentials=False)
                 self._require_mattermost()
                 yield {"step": "provider", "line": "Repairing Claude Code installation"}
                 self._call(
@@ -216,6 +245,7 @@ class AgentIntegrationService:
                 if not runtime.get("configured") or not runtime.get("claude_authenticated"):
                     raise AgentIntegrationError("Agent setup or Claude authentication is required")
                 self._call("agent_runtime_start", public_error="Agent service failed to start")
+                self._complete_reentry()
                 yield {"step": "complete", "line": "AI Agents repair completed", "done": True}
             except AgentIntegrationError as exc:
                 yield {"step": "error", "error": str(exc)}
@@ -313,6 +343,113 @@ class AgentIntegrationService:
         self._call("agent_runtime_disable", public_error="Agent disable failed")
         return {"state": "disabled"}
 
+    def stream_disable(self, operation_id: str) -> Iterator[dict]:
+        """Disable the local assistant and retain an authoritative tombstone."""
+        try:
+            current = self._lifecycle_record()
+            if self._is_completed_target(current, "disabled"):
+                yield self._completion_event("AI Agents is already disabled")
+                return
+            self._require_no_pending_lifecycle(current)
+            record = self._new_lifecycle_record(
+                operation_id=operation_id,
+                action="disable",
+                target_state="disabled",
+                remove_claude_code=None,
+            )
+            yield from self._execute_lifecycle(
+                record,
+                [
+                    (
+                        "disable_runtime",
+                        "Stopping the LimeOS assistant",
+                        lambda: self._call(
+                            "agent_runtime_disable",
+                            public_error="Agent disable failed",
+                        ),
+                        None,
+                    )
+                ],
+                completion="AI Agents is disabled; Mattermost and alerts remain active",
+            )
+        except Exception as exc:
+            yield self._public_lifecycle_error(exc)
+
+    def stream_uninstall(self, operation_id: str, values: Mapping) -> Iterator[dict]:
+        """Remove the fixed local agent footprint and best-effort remote bot."""
+        try:
+            cleanup = self._validate_uninstall(values)
+            current = self._lifecycle_record()
+            if self._is_completed_target(current, "not_installed"):
+                yield self._completion_event("AI Agents is already uninstalled")
+                return
+            if current is not None and not self._is_completed_target(
+                current, "disabled"
+            ):
+                self._require_no_pending_lifecycle(current)
+            record = self._new_lifecycle_record(
+                operation_id=operation_id,
+                action="uninstall",
+                target_state="not_installed",
+                remove_claude_code=cleanup["remove_claude_code"],
+            )
+            yield from self._execute_lifecycle(
+                record,
+                self._uninstall_steps(cleanup),
+                completion="AI Agents was uninstalled",
+            )
+        except Exception as exc:
+            yield self._public_lifecycle_error(exc)
+
+    def stream_retry_cleanup(
+        self, operation_id: str, values: Mapping | None = None
+    ) -> Iterator[dict]:
+        """Resume only unfinished steps from an interrupted agent lifecycle action."""
+        try:
+            record = self._lifecycle_record()
+            if record is None or record.get("phase") not in {
+                "running",
+                "cleanup_required",
+            }:
+                raise AgentIntegrationError("There is no AI Agents cleanup to retry")
+            action = str(record.get("action"))
+            if action == "disable":
+                if values not in (None, {}):
+                    raise AgentIntegrationError("Retry values are invalid")
+                steps = [
+                    (
+                        "disable_runtime",
+                        "Stopping the LimeOS assistant",
+                        lambda: self._call(
+                            "agent_runtime_disable",
+                            public_error="Agent disable failed",
+                        ),
+                        None,
+                    )
+                ]
+                completion = "AI Agents is disabled; Mattermost and alerts remain active"
+            elif action == "uninstall":
+                credentials = self._validate_retry_credentials(values)
+                credentials["remove_claude_code"] = bool(
+                    record["remove_claude_code"]
+                )
+                steps = self._uninstall_steps(credentials)
+                completion = "AI Agents was uninstalled"
+            else:
+                raise AgentIntegrationError("AI Agents cleanup state is invalid")
+            now = self._lifecycle_timestamp()
+            record.update(
+                operation_id=self._validate_operation_id(operation_id),
+                phase="running",
+                started_at=now,
+                updated_at=now,
+                failure=None,
+            )
+            self._lifecycle_repository.write(record)
+            yield from self._execute_lifecycle(record, steps, completion=completion)
+        except Exception as exc:
+            yield self._public_lifecycle_error(exc)
+
     def test_delivery(self) -> dict:
         self._call("agent_delivery_test", public_error="Assistant delivery test failed")
         return {"status": "sent"}
@@ -345,6 +482,197 @@ class AgentIntegrationService:
             },
             "denied_capabilities": list(_DENIED_CAPABILITIES),
         }
+
+    def _uninstall_steps(self, values: Mapping) -> list[tuple]:
+        return [
+            (
+                "remove_remote_bot",
+                "Removing the Mattermost assistant bot",
+                lambda: self._remove_remote_bot(values),
+                _BOT_CLEANUP_WARNING,
+            ),
+            (
+                "remove_local_runtime",
+                "Removing AI Agents services, credentials, runtime, and usage data",
+                lambda: self._call(
+                    "agent_runtime_uninstall",
+                    {"remove_claude_code": values["remove_claude_code"]},
+                    timeout=SETUP_TIMEOUT_SECONDS,
+                    public_error="Agent local cleanup failed",
+                ),
+                None,
+            ),
+        ]
+
+    def _remove_remote_bot(self, values: Mapping) -> None:
+        runtime = self._call(
+            "agent_runtime_status", public_error="Agent runtime status is unavailable"
+        )
+        bot_user_id = runtime.get("bot_user_id")
+        if bot_user_id is None:
+            return
+        if not isinstance(bot_user_id, str) or not bot_user_id:
+            raise AgentIntegrationError("Mattermost bot details are unavailable")
+        mattermost = self._mattermost()
+        site_url = mattermost.get("site_url")
+        if not isinstance(site_url, str) or not site_url:
+            raise AgentIntegrationError("Mattermost connection details are unavailable")
+        api = self._bot_api_factory(site_url)
+        api.login(values["admin_username"], values["admin_password"])
+        api.delete_bot(user_id=bot_user_id)
+
+    def _execute_lifecycle(
+        self,
+        record: dict,
+        steps: list[tuple],
+        *,
+        completion: str,
+    ) -> Iterator[dict]:
+        completed = set(record.get("completed_steps") or [])
+        try:
+            for step, line, action, warning_code in steps:
+                if step in completed:
+                    continue
+                yield {"step": step, "line": line}
+                try:
+                    action()
+                except Exception:
+                    if warning_code is None:
+                        raise
+                    if warning_code not in record["warning_codes"]:
+                        record["warning_codes"].append(warning_code)
+                record["completed_steps"].append(step)
+                record["updated_at"] = self._lifecycle_timestamp()
+                self._lifecycle_repository.write(record)
+                completed.add(step)
+            record.update(
+                phase="complete",
+                updated_at=self._lifecycle_timestamp(),
+                failure=None,
+            )
+            self._lifecycle_repository.write(record)
+        except Exception:
+            record.update(
+                phase="cleanup_required",
+                updated_at=self._lifecycle_timestamp(),
+                failure={
+                    "code": f"agent_{record['action']}_failed",
+                    "message": AGENT_LIFECYCLE_FAILURE_MESSAGE,
+                },
+            )
+            self._lifecycle_repository.write(record)
+            yield {"step": "error", "error": AGENT_LIFECYCLE_FAILURE_MESSAGE}
+            return
+        event = self._completion_event(completion)
+        if record["warning_codes"]:
+            event["warnings"] = self._lifecycle_warnings(record)
+        yield event
+
+    def _new_lifecycle_record(
+        self,
+        *,
+        operation_id: str,
+        action: str,
+        target_state: str,
+        remove_claude_code: bool | None,
+    ) -> dict:
+        self._require_lifecycle_repository()
+        timestamp = self._lifecycle_timestamp()
+        record = {
+            "schema_version": "1",
+            "integration": "agents",
+            "operation_id": self._validate_operation_id(operation_id),
+            "action": action,
+            "phase": "running",
+            "target_state": target_state,
+            "started_at": timestamp,
+            "updated_at": timestamp,
+            "completed_steps": [],
+            "retained_data": False,
+            "remove_claude_code": remove_claude_code,
+            "failure": None,
+            "warning_codes": [],
+        }
+        self._lifecycle_repository.write(record)
+        return record
+
+    def _lifecycle_record(self) -> dict | None:
+        self._require_lifecycle_repository()
+        try:
+            return self._lifecycle_repository.read()
+        except LifecycleStateError as exc:
+            raise AgentIntegrationError(
+                "AI Agents cleanup state is unavailable; review it manually"
+            ) from exc
+
+    def _require_lifecycle_repository(self) -> None:
+        if self._lifecycle_repository is None:
+            raise AgentIntegrationError("AI Agents lifecycle support is unavailable")
+
+    def _require_reentry(self, *, with_bot_credentials: bool) -> None:
+        if self._lifecycle_repository is None:
+            return
+        record = self._lifecycle_record()
+        if record is None:
+            return
+        if record.get("phase") != "complete":
+            raise AgentIntegrationError(
+                "AI Agents has unfinished cleanup; retry cleanup first"
+            )
+        if record.get("target_state") == "not_installed" and not with_bot_credentials:
+            raise AgentIntegrationError("AI Agents setup is required")
+
+    def _complete_reentry(self) -> None:
+        if self._lifecycle_repository is None:
+            return
+        record = self._lifecycle_record()
+        if record is not None and record.get("phase") == "complete":
+            self._lifecycle_repository.delete()
+
+    def _lifecycle_warnings(self, record: Mapping) -> list[dict[str, str]]:
+        catalog = self._lifecycle_policy.get("warnings", {})
+        return [
+            {"code": code, "message": str(catalog[code])}
+            for code in record.get("warning_codes", [])
+            if code in catalog
+        ]
+
+    @staticmethod
+    def _is_completed_target(record: Mapping | None, target_state: str) -> bool:
+        return bool(
+            record
+            and record.get("phase") == "complete"
+            and record.get("target_state") == target_state
+        )
+
+    @staticmethod
+    def _require_no_pending_lifecycle(record: Mapping | None) -> None:
+        if record is not None:
+            raise AgentIntegrationError(
+                "AI Agents has an unfinished lifecycle action; retry cleanup first"
+            )
+
+    @staticmethod
+    def _validate_operation_id(operation_id: str) -> str:
+        if not isinstance(operation_id, str) or not _OPERATION_ID.fullmatch(operation_id):
+            raise AgentIntegrationError("Lifecycle operation identifier is invalid")
+        return operation_id
+
+    @staticmethod
+    def _completion_event(line: str) -> dict:
+        return {"step": "complete", "line": line, "done": True}
+
+    @staticmethod
+    def _public_lifecycle_error(exc: Exception) -> dict[str, str]:
+        if isinstance(exc, (AgentIntegrationError, LifecycleStateError)):
+            message = str(exc)
+        else:
+            message = "AI Agents lifecycle operation failed"
+        return {"step": "error", "error": message}
+
+    @staticmethod
+    def _utc_timestamp() -> str:
+        return datetime.now(timezone.utc).isoformat()
 
     def _setup_bot(self, mattermost: dict, setup: dict):
         api = self._bot_api_factory(mattermost["site_url"])
@@ -473,6 +801,36 @@ class AgentIntegrationService:
         if not isinstance(daily, int) or isinstance(daily, bool) or not 1 <= daily <= 1000:
             raise AgentIntegrationError("Agent limits are invalid")
         return {"admin_username": username, "admin_password": password, "limits": normalized}
+
+    @classmethod
+    def _validate_uninstall(cls, values: Mapping) -> dict:
+        if not isinstance(values, Mapping) or set(values) != _UNINSTALL_FIELDS:
+            raise AgentIntegrationError("Uninstall values are invalid")
+        credentials = cls._validate_admin_credentials(values)
+        remove_claude_code = values.get("remove_claude_code")
+        if not isinstance(remove_claude_code, bool):
+            raise AgentIntegrationError("Claude Code removal choice is invalid")
+        return {**credentials, "remove_claude_code": remove_claude_code}
+
+    @classmethod
+    def _validate_retry_credentials(cls, values: Mapping | None) -> dict:
+        if not isinstance(values, Mapping) or set(values) != _RETRY_CREDENTIAL_FIELDS:
+            raise AgentIntegrationError("Retry values are invalid")
+        return cls._validate_admin_credentials(values)
+
+    @staticmethod
+    def _validate_admin_credentials(values: Mapping) -> dict:
+        username = values.get("admin_username")
+        password = values.get("admin_password")
+        if not isinstance(username, str) or not _USERNAME.fullmatch(username):
+            raise AgentIntegrationError("Mattermost administrator username is invalid")
+        if (
+            not isinstance(password, str)
+            or not 10 <= len(password) <= 256
+            or any(character in password for character in ("\x00", "\r", "\n"))
+        ):
+            raise AgentIntegrationError("Mattermost administrator password is invalid")
+        return {"admin_username": username, "admin_password": password}
 
     def _call(self, command, params=None, *, timeout=30, public_error="Agent operation failed") -> dict:
         try:
