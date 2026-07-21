@@ -1740,6 +1740,7 @@ def install_v2_integrations_api_mocks():
         agent_installed: bool = True,
         agent_authenticated: bool = True,
         agent_configured: bool = True,
+        agent_disable_fails_once: bool = False,
     ) -> None:
         state = {
             "installed": installed,
@@ -1747,6 +1748,7 @@ def install_v2_integrations_api_mocks():
             "agent_authenticated": agent_authenticated and agent_installed and installed,
             "agent_configured": agent_configured and agent_installed and installed,
             "agent_enabled": agent_installed and installed,
+            "agent_disable_attempts": 0,
             "policy": {
                 "version": 1,
                 "categories": {
@@ -1761,9 +1763,40 @@ def install_v2_integrations_api_mocks():
         }
 
         def _payload():
+            mattermost_state = "connected" if state["installed"] else "not_installed"
+            mattermost_actions = ["disable", "uninstall"] if state["installed"] else ["setup"]
+            blocked_actions = []
+            if state["installed"] and state["agent_installed"]:
+                if state["agent_enabled"]:
+                    mattermost_actions.remove("disable")
+                    blocked_actions.append(
+                        {
+                            "action": "disable",
+                            "dependency_code": "agents_must_be_disabled",
+                            "message": "Disable AI Agents before stopping Mattermost.",
+                            "required_action": "disable",
+                            "route": "/integrations#ai-agents",
+                        }
+                    )
+                mattermost_actions.remove("uninstall")
+                blocked_actions.append(
+                    {
+                        "action": "uninstall",
+                        "dependency_code": "agents_must_be_uninstalled",
+                        "message": "Uninstall AI Agents before removing Mattermost.",
+                        "required_action": "uninstall",
+                        "route": "/integrations#ai-agents",
+                    }
+                )
             return {
-                "state": "connected" if state["installed"] else "not_installed",
+                "state": mattermost_state,
                 "installed": state["installed"],
+                "retained_data": False,
+                "cleanup_required": False,
+                "allowed_actions": mattermost_actions,
+                "blocked_actions": blocked_actions,
+                "cleanup_operation": None,
+                "warnings": [],
                 "site_url": "http://mattermost.test:8065" if state["installed"] else None,
                 "stack_name": "mattermost",
                 "team": "limeos",
@@ -1805,6 +1838,14 @@ def install_v2_integrations_api_mocks():
                     agent_state = "setup_required"
                 else:
                     agent_state = "connected"
+                if agent_state == "not_installed":
+                    agent_actions = ["setup"]
+                elif agent_state == "disabled":
+                    agent_actions = ["enable", "uninstall"]
+                elif agent_state == "setup_required":
+                    agent_actions = ["repair", "authenticate", "disable", "uninstall"]
+                else:
+                    agent_actions = ["disable", "uninstall"]
                 route.fulfill(
                     status=200,
                     content_type="application/json",
@@ -1814,6 +1855,12 @@ def install_v2_integrations_api_mocks():
                             "installed": state["agent_installed"],
                             "enabled": state["agent_enabled"],
                             "configured": state["agent_configured"],
+                            "retained_data": False,
+                            "cleanup_required": False,
+                            "allowed_actions": agent_actions,
+                            "blocked_actions": [],
+                            "cleanup_operation": None,
+                            "warnings": [],
                             "mattermost": {
                                 "state": "connected" if state["installed"] else "not_installed",
                                 "site_url": (
@@ -2034,7 +2081,7 @@ def install_v2_integrations_api_mocks():
                 )
                 return
             if path == "/api/integrations/agents/disable" and method == "POST":
-                state["agent_enabled"] = False
+                state["agent_disable_attempts"] += 1
                 route.fulfill(
                     status=202,
                     content_type="application/json",
@@ -2047,6 +2094,17 @@ def install_v2_integrations_api_mocks():
                 )
                 return
             if path.endswith("/mock-agent-disable/stream") and method == "GET":
+                if agent_disable_fails_once and state["agent_disable_attempts"] == 1:
+                    route.fulfill(
+                        status=200,
+                        content_type="text/event-stream",
+                        body=(
+                            'id: 0\ndata: {"step":"disable","line":"Stopping AI Agents"}\n\n'
+                            'id: 1\ndata: {"step":"error","error":"AI Agents lifecycle operation failed"}\n\n'
+                        ),
+                    )
+                    return
+                state["agent_enabled"] = False
                 route.fulfill(
                     status=200,
                     content_type="text/event-stream",

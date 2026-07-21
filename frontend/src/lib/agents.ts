@@ -5,6 +5,11 @@ import {
   type OperationCreated,
   type OperationEvent,
 } from "@/lib/operations";
+import {
+  lifecycleContractFields,
+  type IntegrationLifecycleStatus,
+} from "@/lib/integration-lifecycle-contract";
+import { runIntegrationLifecycleOperation } from "@/lib/integration-lifecycle";
 
 export type AgentState =
   | "not_installed"
@@ -13,9 +18,10 @@ export type AgentState =
   | "connected"
   | "degraded"
   | "disabled"
+  | "cleanup_required"
   | "disconnected";
 
-export interface AgentStatus {
+export interface AgentStatus extends IntegrationLifecycleStatus {
   state: AgentState;
   installed: boolean;
   enabled: boolean;
@@ -103,8 +109,9 @@ export interface AgentInstallValues {
   };
 }
 
-export function getAgentStatus(signal?: AbortSignal): Promise<AgentStatus> {
-  return requestApi<AgentStatus>("/api/integrations/agents", { method: "GET", signal });
+export async function getAgentStatus(signal?: AbortSignal): Promise<AgentStatus> {
+  const status = await requestApi<AgentStatus>("/api/integrations/agents", { method: "GET", signal });
+  return { ...status, ...lifecycleContractFields("agents", status) };
 }
 
 export function getAgentProviders(signal?: AbortSignal): Promise<{ providers: AgentProvider[] }> {
@@ -207,7 +214,7 @@ export function disableAgents(
   onEvent: (event: OperationEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {
-  return runAgentOperation("/api/integrations/agents/disable", {}, onEvent, signal);
+  return runIntegrationLifecycleOperation("agents", "disable", {}, onEvent, { signal });
 }
 
 export function sendAgentTest(): Promise<{ status: "sent" }> {

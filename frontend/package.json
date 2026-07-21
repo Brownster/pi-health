@@ -10,6 +10,7 @@
     "check": "tsc --project tsconfig.app.json --noEmit && tsc --project tsconfig.node.json --noEmit",
     "test:capabilities": "node --experimental-strip-types --test tests/capability-renderer.test.ts tests/capability-renderer.ssr.test.mjs",
     "test:extensions": "node --experimental-strip-types tests/extensions.test.ts",
+    "test:integration-lifecycle": "node --experimental-strip-types --test tests/integration-lifecycle.test.ts",
     "test:pools": "node --experimental-strip-types --test tests/pools.test.ts",
     "test:protection": "node --experimental-strip-types --test tests/protection.test.ts",
     "test:routes": "node --experimental-strip-types tests/routes.test.ts",

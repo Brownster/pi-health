@@ -182,6 +182,7 @@ export function ActionMenu({
                     disabled={item.disabled}
                     onClick={() => {
                       setOpen(false);
+                      triggerRef.current?.focus();
                       item.onSelect();
                     }}
                     role="menuitem"

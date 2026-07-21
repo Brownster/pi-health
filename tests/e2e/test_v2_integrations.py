@@ -166,9 +166,68 @@ def test_disabling_agent_leaves_mattermost_connected(
 
     page.get_by_role("button", name="Disable", exact=True).click()
     page.get_by_role("button", name="Disable assistant").click()
+    expect(page.get_by_role("dialog", name="Disable AI Agents?")).to_contain_text(
+        "Operation completed"
+    )
+    page.get_by_role("dialog", name="Disable AI Agents?").get_by_role(
+        "button", name="Close", exact=True
+    ).click()
     expect(page.get_by_text("AI Agents is disabled. Mattermost and alert delivery remain active.")).to_be_visible()
     expect(page.locator("[data-agent-integration]").get_by_text("disabled", exact=True)).to_be_visible()
+    expect(page.locator("#ai-agents")).to_be_focused()
     expect(page.get_by_text("connected", exact=True).first).to_be_visible()
+
+
+def test_agent_lifecycle_failure_retains_progress_retries_and_refreshes_both_cards(
+    page: Page,
+    v2_server,
+    v2_login,
+    install_v2_integrations_api_mocks,
+):
+    requests = []
+    page.on("request", lambda request: requests.append(request))
+    v2_login(page, v2_server["base_url"])
+    install_v2_integrations_api_mocks(page, agent_disable_fails_once=True)
+    page.goto(f"{v2_server['base_url']}/v2/integrations")
+    expect(page.get_by_role("heading", name="integrations")).to_be_visible()
+    expect(page.get_by_text("connected", exact=True).first).to_be_visible()
+    expect(
+        page.locator("[data-agent-integration]").get_by_text(
+            "connected", exact=True
+        )
+    ).to_be_visible()
+    initial_agent_reads = len([
+        request for request in requests
+        if request.method == "GET" and request.url.endswith("/api/integrations/agents")
+    ])
+    initial_mattermost_reads = len([
+        request for request in requests
+        if request.method == "GET" and request.url.endswith("/api/integrations/mattermost")
+    ])
+
+    page.get_by_role("button", name="Disable", exact=True).click()
+    dialog = page.get_by_role("dialog", name="Disable AI Agents?")
+    dialog.get_by_role("button", name="Disable assistant").click()
+    expect(dialog.get_by_role("alert")).to_contain_text(
+        "AI Agents lifecycle operation failed"
+    )
+    expect(dialog.locator("[data-lifecycle-progress]")).to_contain_text(
+        "Stopping AI Agents"
+    )
+    expect(dialog.get_by_role("button", name="Retry")).to_be_visible()
+    expect(page.locator("[data-agent-integration]").get_by_text("connected", exact=True)).to_be_visible()
+
+    dialog.get_by_role("button", name="Retry").click()
+    expect(dialog.get_by_role("status")).to_contain_text("Operation completed")
+    expect(page.locator("[data-agent-integration]").get_by_text("disabled", exact=True)).to_be_visible()
+    assert len([
+        request for request in requests
+        if request.method == "GET" and request.url.endswith("/api/integrations/agents")
+    ]) >= initial_agent_reads + 2
+    assert len([
+        request for request in requests
+        if request.method == "GET" and request.url.endswith("/api/integrations/mattermost")
+    ]) >= initial_mattermost_reads + 2
     page.reload()
     expect(page.locator("[data-agent-integration]").get_by_text("disabled", exact=True)).to_be_visible()
     expect(page.get_by_text("connected", exact=True).first).to_be_visible()

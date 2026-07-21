@@ -19,6 +19,8 @@ import {
   X,
 } from "lucide-react";
 
+import { IntegrationLifecycleDialog } from "@/components/integrations/integration-lifecycle-dialog";
+import { useIntegrationLifecycle } from "@/components/integrations/use-integration-lifecycle";
 import { Badge, StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -103,7 +105,13 @@ function operationLabel(operation: string): string {
   return operation.replace(".", " / ");
 }
 
-export function AgentsIntegrationCard({ refreshKey = 0 }: { refreshKey?: number }) {
+export function AgentsIntegrationCard({
+  onLifecycleChanged = () => undefined,
+  refreshKey = 0,
+}: {
+  onLifecycleChanged?: () => void;
+  refreshKey?: number;
+}) {
   const [status, setStatus] = useState<AgentStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -135,8 +143,7 @@ export function AgentsIntegrationCard({ refreshKey = 0 }: { refreshKey?: number 
   const [authRequiresSetup, setAuthRequiresSetup] = useState(false);
   const [submittingAuth, setSubmittingAuth] = useState(false);
   const [testing, setTesting] = useState(false);
-  const [disabling, setDisabling] = useState(false);
-  const [disableOpen, setDisableOpen] = useState(false);
+  const disableLifecycle = useIntegrationLifecycle(onLifecycleChanged);
   const authAbortRef = useRef<AbortController | null>(null);
 
   const loadStatus = useCallback(async () => {
@@ -344,18 +351,9 @@ export function AgentsIntegrationCard({ refreshKey = 0 }: { refreshKey?: number 
   }
 
   async function disable() {
-    setDisabling(true);
-    try {
-      await disableAgents((event) => {
-        if (event.error) throw new Error(event.error);
-      });
-      setDisableOpen(false);
+    const completed = await disableLifecycle.run((onEvent) => disableAgents(onEvent));
+    if (completed) {
       setNotice("AI Agents is disabled. Mattermost and alert delivery remain active.");
-      await loadStatus();
-    } catch (caught) {
-      setError(errorMessage(caught));
-    } finally {
-      setDisabling(false);
     }
   }
 
@@ -377,7 +375,7 @@ export function AgentsIntegrationCard({ refreshKey = 0 }: { refreshKey?: number 
         </div>
       ) : null}
 
-      <Card className="overflow-hidden" data-agent-integration>
+      <Card className="overflow-hidden" data-agent-integration id="ai-agents" tabIndex={-1}>
         <CardHeader className="border-b border-border/70 bg-muted/20">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-3">
@@ -449,7 +447,7 @@ export function AgentsIntegrationCard({ refreshKey = 0 }: { refreshKey?: number 
                     {needsProviderAuth ? <Button className="gap-2" onClick={() => void beginAuth()} variant="info"><KeyRound className="h-4 w-4" />Authenticate Claude</Button> : null}
                     {status.state === "connected" ? <Button className="gap-2" disabled={testing} onClick={() => void testDelivery()} variant="info">{testing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}{testing ? "Sending" : "Test assistant"}</Button> : null}
                     <Button className="gap-2" onClick={() => openOperation("repair", needsConfiguration)} variant="secondary"><Wrench className="h-4 w-4" />{needsConfiguration ? "Finish setup" : status.state === "disabled" ? "Enable and repair" : "Repair"}</Button>
-                    {status.state !== "disabled" ? <Button className="gap-2" onClick={() => setDisableOpen(true)} variant="danger"><Ban className="h-4 w-4" />Disable</Button> : null}
+                    {status.state !== "disabled" ? <Button className="gap-2" onClick={disableLifecycle.open} variant="danger"><Ban className="h-4 w-4" />Disable</Button> : null}
                     {status.mattermost.site_url ? <a className="inline-flex min-h-11 items-center gap-2 rounded-md border border-border px-4 font-mono text-sm transition-colors hover:bg-muted" href={status.mattermost.site_url} rel="noreferrer" target="_blank">Open Mattermost<ExternalLink className="h-4 w-4" /></a> : null}
                   </div>
                 </div>
@@ -528,7 +526,19 @@ export function AgentsIntegrationCard({ refreshKey = 0 }: { refreshKey?: number 
         </ModalOverlay>
       ) : null}
 
-      {disableOpen ? <ModalOverlay onClose={disabling ? () => undefined : () => setDisableOpen(false)}><Card aria-labelledby="disable-agent-title" aria-modal="true" className="w-full max-w-md" role="dialog"><CardHeader><CardTitle id="disable-agent-title">Disable AI Agents?</CardTitle><CardDescription>The assistant stops immediately. Mattermost, alerts, conversations, usage, and audit history stay in place.</CardDescription></CardHeader><CardContent className="flex justify-end gap-2"><Button disabled={disabling} onClick={() => setDisableOpen(false)} variant="ghost">Cancel</Button><Button className="gap-2" disabled={disabling} onClick={() => void disable()} variant="danger">{disabling ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ban className="h-4 w-4" />}Disable assistant</Button></CardContent></Card></ModalOverlay> : null}
+      {disableLifecycle.state.open ? (
+        <IntegrationLifecycleDialog
+          confirmLabel="Disable assistant"
+          description="The assistant stops immediately. Mattermost, alerts, conversations, usage, and audit history stay in place."
+          destructive
+          onClose={disableLifecycle.close}
+          onConfirm={() => void disable()}
+          onRetry={() => void disableLifecycle.retry()}
+          restoreFocus={() => document.getElementById("ai-agents")?.focus()}
+          state={disableLifecycle.state}
+          title="Disable AI Agents?"
+        />
+      ) : null}
     </>
   );
 }

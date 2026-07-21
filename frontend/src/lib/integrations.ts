@@ -1,5 +1,9 @@
 import { requestApi } from "@/lib/api";
 import { createOperation, streamOperation, type OperationEvent } from "@/lib/operations";
+import {
+  lifecycleContractFields,
+  type IntegrationLifecycleStatus,
+} from "@/lib/integration-lifecycle-contract";
 
 export type AlertKind = "container" | "smart" | "mount" | "snapraid";
 
@@ -32,8 +36,8 @@ export interface ActiveIncident extends Omit<AlertResource, "ok"> {
   delivered_at: string | null;
 }
 
-export interface MattermostStatus {
-  state: "not_installed" | "connected" | "degraded" | "disconnected";
+export interface MattermostStatus extends IntegrationLifecycleStatus {
+  state: "cleanup_required" | "retained_data" | "not_installed" | "connected" | "degraded" | "disabled" | "disconnected";
   installed: boolean;
   site_url: string | null;
   stack_name: string;
@@ -61,8 +65,9 @@ export interface MattermostSetup {
   fail_threshold: number;
 }
 
-export function getMattermostStatus(signal?: AbortSignal): Promise<MattermostStatus> {
-  return requestApi<MattermostStatus>("/api/integrations/mattermost", { method: "GET", signal });
+export async function getMattermostStatus(signal?: AbortSignal): Promise<MattermostStatus> {
+  const status = await requestApi<MattermostStatus>("/api/integrations/mattermost", { method: "GET", signal });
+  return { ...status, ...lifecycleContractFields("mattermost", status) };
 }
 
 export async function installMattermost(
