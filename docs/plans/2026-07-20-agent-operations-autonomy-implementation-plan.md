@@ -21,9 +21,10 @@ AO-005 now has capability, policy, cancellation, approval, rejection, detail, hi
 and listing APIs. The AI Agents browser card now provides action review and approval,
 private finding review and editing, and an administrator policy editor for exact target
 allowlists, approvers, proposal expiry, authority modes, and the kill switch. Mattermost
-approval controls remain outstanding. AO-006 currently covers only container start and
-restart. Scheduling, installation, configuration, optimisation, GitHub publication, and
-agent-authored pull requests remain later work packages.
+now renders exact proposals and uses restart-safe approve/reject reactions bound to the
+immutable reacting user and originating channel. AO-006 currently covers only container
+start and restart. Scheduling, installation, configuration, optimisation, GitHub
+publication, and agent-authored pull requests remain later work packages.
 
 ## Goal
 

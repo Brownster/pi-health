@@ -131,6 +131,16 @@ Treat `succeeded` as the only successful terminal state. `execution_failed`,
 The initial container actions have no safe automatic rollback because container stop is
 outside the allowlist.
 
+When a Mattermost turn creates a proposal, the listener posts a separate bounded card in
+the originating thread with the operation, exact target, risk, reason, expected impact,
+expiry, and action ID. An eligible user reacts with :white_check_mark: to approve once or
+:x: to reject. Proposal-post bindings and reaction deduplication survive listener
+restarts. The listener forwards the immutable reacting user and channel IDs through
+typed `action.approve` or `action.reject` broker controls. Those controls are omitted
+from the provider context and gateway allowlist, so neither the model nor prompt content
+can invoke them. The action policy rechecks the actor allowlist and current proposal
+state before recording the decision.
+
 ## Private Findings
 
 The agent can call `finding.propose` for a bug, feature request, maintenance gap, or
@@ -179,7 +189,7 @@ agent audit logs for incident review.
 ## Current Limits
 
 This slice completes the action foundation and the first two repair adapters. It does
-not yet include Mattermost approval buttons, stack or integration repair, report-only
-schedules, maturity promotion, cooldowns, disruption budgets, installation,
-configuration, review experiments, optimisation, or GitHub publication. Those features
-remain gated by the accepted implementation plan and target-Pi canary evidence.
+not yet include stack or integration repair, report-only schedules, maturity promotion,
+cooldowns, disruption budgets, installation, configuration, review experiments,
+optimisation, or GitHub publication. Those features remain gated by the accepted
+implementation plan and target-Pi canary evidence.
