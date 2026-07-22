@@ -7,6 +7,24 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from runtime_paths import migrate_legacy_runtime_data
 
 
+def test_migration_secures_existing_integration_lifecycle_directory(tmp_path):
+    state_dir = tmp_path / "state"
+    integrations_dir = state_dir / "integrations"
+    integrations_dir.mkdir(parents=True, mode=0o755)
+    integrations_dir.chmod(0o755)
+
+    migrate_legacy_runtime_data(
+        source_root=tmp_path / "source",
+        config_dir=tmp_path / "config",
+        state_dir=state_dir,
+        log_dir=tmp_path / "log",
+        legacy_credentials=tmp_path / "missing.env",
+        credentials_file=tmp_path / "config" / "credentials.env",
+    )
+
+    assert integrations_dir.stat().st_mode & 0o777 == 0o750
+
+
 def test_migration_routes_config_state_logs_and_credentials(tmp_path):
     source_root = tmp_path / "source"
     legacy_config = source_root / "config"
