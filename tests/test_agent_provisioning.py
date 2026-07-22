@@ -163,6 +163,27 @@ def test_report_webhook_projection_excludes_other_mattermost_secrets(tmp_path):
     assert stat.S_IMODE(destination.stat().st_mode) == 0o640
 
 
+def test_shared_agent_databases_are_fixed_group_files(tmp_path):
+    action_state = tmp_path / "agent-actions"
+    action_state.mkdir()
+    actions = action_state / "actions.sqlite3"
+    automation = action_state / "automation.sqlite3"
+    actions.write_text("actions", encoding="utf-8")
+    automation.write_text("automation", encoding="utf-8")
+    user = SimpleNamespace(pw_uid=os.getuid())
+    group = SimpleNamespace(gr_gid=os.getgid())
+
+    with (
+        patch.object(helper, "ACTION_STATE_DIR", str(action_state)),
+        patch.object(helper.pwd, "getpwnam", return_value=user),
+        patch.object(grp, "getgrnam", return_value=group),
+    ):
+        assert helper._secure_shared_agent_databases("dashboard") is True
+
+    assert stat.S_IMODE(actions.stat().st_mode) == 0o660
+    assert stat.S_IMODE(automation.stat().st_mode) == 0o660
+
+
 def test_agent_repair_unit_is_fixed_unprivileged_and_helper_backed():
     unit = render_agent_repair_unit("/opt/pi-health")
 
@@ -480,6 +501,7 @@ def test_runtime_install_creates_fixed_identities_paths_and_units(tmp_path):
         patch.object(helper.os.path, "isdir", return_value=True),
         patch.object(helper.os.path, "isfile", return_value=True),
         patch.object(helper, "_secure_agent_stack_locks", return_value=True),
+        patch.object(helper, "_secure_shared_agent_databases", return_value=True),
         patch.object(helper, "_sync_report_webhook_credential", return_value=True),
     ):
         result = helper.cmd_agent_runtime_install({})
@@ -523,6 +545,7 @@ def test_runtime_install_creates_fixed_identities_paths_and_units(tmp_path):
     assert any(CLAUDE_CONFIG_DIR in command for command in install_dirs)
     assert any(LIMEOPS_STATE_DIR in command for command in install_dirs)
     assert any(ACTION_STATE_DIR in command for command in install_dirs)
+    assert any(ACTION_STATE_DIR in command and "2770" in command for command in install_dirs)
     assert any(REPORT_SCHEDULER_STATE_DIR in command for command in install_dirs)
     assert any(REPORT_DELIVERY_CONFIG_DIR in command for command in install_dirs)
     assert any(STACK_LOCK_DIR in command and "2770" in command for command in install_dirs)

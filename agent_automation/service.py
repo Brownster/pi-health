@@ -8,6 +8,7 @@ import os
 import re
 import sqlite3
 import stat
+import threading
 import uuid
 from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
@@ -960,6 +961,26 @@ class ScheduleAdminService:
         value["next_run"] = _next_run(schedule, self._clock())
         value["last_occurrence"] = self.store.latest_occurrence(schedule["id"])
         return value
+
+
+class LazyScheduleAdminService:
+    """Open the shared schedule store only when the API is first used."""
+
+    def __init__(self, path: str | Path) -> None:
+        self._path = path
+        self._service: ScheduleAdminService | None = None
+        self._lock = threading.Lock()
+
+    def _get(self) -> ScheduleAdminService:
+        with self._lock:
+            if self._service is None:
+                self._service = ScheduleAdminService(
+                    store=AutomationStore(self._path)
+                )
+            return self._service
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._get(), name)
 
 
 def _json(value: Any) -> str:

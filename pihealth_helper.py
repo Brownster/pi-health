@@ -3345,6 +3345,38 @@ def _secure_agent_stack_locks(dashboard_user):
     return True
 
 
+def _secure_shared_agent_databases(dashboard_user):
+    """Converge only the databases shared with isolated action/report services."""
+    import grp
+
+    try:
+        owner_uid = pwd.getpwnam(dashboard_user).pw_uid
+        group_gid = grp.getgrnam('pihealth').gr_gid
+    except KeyError:
+        return False
+    for name in ('actions.sqlite3', 'automation.sqlite3'):
+        path = os.path.join(ACTION_STATE_DIR, name)
+        if not os.path.lexists(path):
+            continue
+        try:
+            descriptor = os.open(
+                path,
+                os.O_RDWR | os.O_CLOEXEC | os.O_NOFOLLOW,
+            )
+        except OSError:
+            return False
+        try:
+            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                return False
+            os.fchown(descriptor, owner_uid, group_gid)
+            os.fchmod(descriptor, 0o660)
+        except OSError:
+            return False
+        finally:
+            os.close(descriptor)
+    return True
+
+
 def _sync_report_webhook_credential(dashboard_user):
     """Project only the alerts webhook into the report scheduler boundary."""
     import grp
@@ -3533,7 +3565,7 @@ def cmd_agent_runtime_install(params):
         ('/var/lib/lime-agent', 0o700, 'lime-agent', 'lime-agent'),
         (CLAUDE_CONFIG_DIR, 0o700, 'lime-agent', 'lime-agent'),
         (LIMEOPS_STATE_DIR, 0o750, 'limeops', 'limeops'),
-        (ACTION_STATE_DIR, 0o770, 'limeops-actuator', 'pihealth'),
+        (ACTION_STATE_DIR, 0o2770, 'limeops-actuator', 'pihealth'),
         (REPORT_SCHEDULER_STATE_DIR, 0o750, 'limeops-report', 'limeops-report'),
         (REPORT_DELIVERY_CONFIG_DIR, 0o2750, dashboard_user, 'limeops-report'),
         (STACK_LOCK_DIR, 0o2770, dashboard_user, 'pihealth'),
@@ -3542,6 +3574,8 @@ def cmd_agent_runtime_install(params):
         return {'success': False, 'error': 'Failed to create agent runtime directories'}
     if not _secure_agent_stack_locks(dashboard_user):
         return {'success': False, 'error': 'Failed to secure shared stack locks'}
+    if not _secure_shared_agent_databases(dashboard_user):
+        return {'success': False, 'error': 'Failed to secure shared agent state'}
     if not _sync_report_webhook_credential(dashboard_user):
         return {'success': False, 'error': 'Failed to secure report delivery credentials'}
 

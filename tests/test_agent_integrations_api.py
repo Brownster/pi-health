@@ -10,6 +10,7 @@ from werkzeug.security import generate_password_hash
 from app import AppDependencies, LoginRateLimiter, create_app
 from agent_actions.service import AgentActionError
 from agent_findings.service import FindingError
+from agent_automation.service import AutomationError
 from operation_manager import OperationRegistry
 
 
@@ -29,6 +30,7 @@ def _client(
     thread_factory=ImmediateThread,
     action_service=None,
     findings_service=None,
+    automation_service=None,
     helper=None,
     capability_roles=None,
 ):
@@ -40,6 +42,7 @@ def _client(
         agent_integration_service=service,
         agent_action_service=action_service,
         agent_findings_service=findings_service,
+        agent_automation_service=automation_service,
         helper=helper,
         capability_roles=capability_roles,
     )
@@ -101,6 +104,37 @@ def _findings_service():
     return service
 
 
+def _automation_service():
+    service = Mock()
+    service.list.return_value = {"schedules": [], "diagnostic_catalogue": []}
+    service.get.return_value = {"id": "schedule-1", "revision": 1}
+    service.create.return_value = {"id": "schedule-1", "revision": 1}
+    service.update.return_value = {"id": "schedule-1", "revision": 2}
+    return service
+
+
+def _schedule():
+    return {
+        "name": "Morning health report",
+        "enabled": True,
+        "checks": [{"operation": "system.status", "params": {}}],
+        "window": {
+            "cron": "0 7 * * *",
+            "timezone": "Europe/London",
+            "duration_minutes": 30,
+        },
+        "budgets": {
+            "max_checks": 1,
+            "max_reports": 1,
+            "max_actions": 0,
+            "max_downtime_seconds": 0,
+            "max_retries": 0,
+            "max_model_invocations": 0,
+        },
+        "delivery": {"channel": "mattermost-alerts", "mode": "immediate"},
+    }
+
+
 def test_all_agent_routes_require_authentication():
     client = _client(_service(), authenticated=False)
     for path in (
@@ -112,6 +146,7 @@ def test_all_agent_routes_require_authentication():
         "/api/integrations/agents/actions",
         "/api/integrations/agents/actions/capabilities",
         "/api/integrations/agents/automation/policy",
+        "/api/integrations/agents/automation/schedules",
         "/api/integrations/agents/findings",
     ):
         assert client.get(path).status_code == 401
@@ -305,6 +340,63 @@ def test_action_policy_api_fails_closed_when_helper_rejects_write():
     response = client.put("/api/integrations/agents/automation/policy", json={})
     assert response.status_code == 503
     assert "private detail" not in response.get_data(as_text=True)
+
+
+def test_automation_schedule_api_is_admin_only_owner_bound_and_no_store():
+    automation = _automation_service()
+    client = _client(_service(), automation_service=automation)
+
+    listed = client.get("/api/integrations/agents/automation/schedules")
+    assert listed.status_code == 200
+    assert listed.headers["Cache-Control"] == "no-store"
+    created = client.post(
+        "/api/integrations/agents/automation/schedules", json=_schedule()
+    )
+    assert created.status_code == 201
+    assert created.headers["Cache-Control"] == "no-store"
+    automation.create.assert_called_once_with(
+        _schedule(),
+        owner={"type": "local", "id": "admin", "username": "admin"},
+    )
+    assert client.get(
+        "/api/integrations/agents/automation/schedules/schedule-1"
+    ).status_code == 200
+    update = {**_schedule(), "revision": 1, "enabled": False}
+    updated = client.put(
+        "/api/integrations/agents/automation/schedules/schedule-1", json=update
+    )
+    assert updated.status_code == 200
+    automation.update.assert_called_once_with("schedule-1", update)
+
+    viewer = _client(
+        _service(),
+        automation_service=automation,
+        capability_roles={"admin": "viewer"},
+    )
+    assert viewer.get(
+        "/api/integrations/agents/automation/schedules"
+    ).status_code == 403
+    assert viewer.post(
+        "/api/integrations/agents/automation/schedules", json=_schedule()
+    ).status_code == 403
+
+
+def test_automation_schedule_api_requires_csrf_and_maps_bounded_errors():
+    automation = _automation_service()
+    automation.get.side_effect = AutomationError("not_found", "Schedule was not found")
+    client = _client(_service(), automation_service=automation)
+    missing = client.get(
+        "/api/integrations/agents/automation/schedules/missing"
+    )
+    assert missing.status_code == 404
+    assert missing.get_json()["code"] == "not_found"
+
+    client.environ_base.pop("HTTP_X_CSRF_TOKEN")
+    denied = client.post(
+        "/api/integrations/agents/automation/schedules", json=_schedule()
+    )
+    assert denied.status_code == 403
+    automation.create.assert_not_called()
 
 
 def test_finding_routes_are_private_editable_and_admin_bound():
