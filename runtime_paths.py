@@ -45,7 +45,7 @@ def ensure_runtime_directories(
     log_dir: Path = LOG_DIR,
 ) -> None:
     """Create runtime roots with service-private directory permissions."""
-    for path in (config_dir, state_dir, log_dir):
+    for path in (config_dir, state_dir, log_dir, state_dir / "integrations"):
         path.mkdir(parents=True, exist_ok=True, mode=0o750)
         path.chmod(0o750)
 
