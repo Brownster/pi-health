@@ -1770,6 +1770,7 @@ def install_v2_integrations_api_mocks():
             "agent_disable_attempts": 0,
             "agent_uninstall_attempts": 0,
             "agent_warnings": [],
+            "agent_schedules": [],
             "policy": {
                 "version": 1,
                 "categories": {
@@ -1884,6 +1885,82 @@ def install_v2_integrations_api_mocks():
         def _handler(route):
             path = urlparse(route.request.url).path
             method = route.request.method
+            schedules_path = "/api/integrations/agents/automation/schedules"
+            if path == schedules_path and method == "GET":
+                route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps(
+                        {
+                            "schedules": state["agent_schedules"],
+                            "diagnostic_catalogue": [
+                                {"operation": "system.status", "parameter": None},
+                                {"operation": "disk.health", "parameter": None},
+                                {"operation": "service.status", "parameter": "unit"},
+                            ],
+                        }
+                    ),
+                )
+                return
+            if path == schedules_path and method == "POST":
+                values = route.request.post_data_json
+                schedule = {
+                    **values,
+                    "id": "schedule-1",
+                    "owner": {"type": "local", "id": "admin", "username": "admin"},
+                    "created_at": "2026-07-22T07:00:00+00:00",
+                    "updated_at": "2026-07-22T07:00:00+00:00",
+                    "revision": 1,
+                    "next_run": "2026-07-23T07:00:00+01:00" if values["enabled"] else None,
+                    "last_occurrence": None,
+                }
+                state["agent_schedules"] = [schedule]
+                route.fulfill(
+                    status=201,
+                    content_type="application/json",
+                    body=json.dumps({"schedule": schedule}),
+                )
+                return
+            if path.startswith(schedules_path + "/") and method == "PUT":
+                values = route.request.post_data_json
+                current = state["agent_schedules"][0]
+                schedule = {
+                    **current,
+                    **{key: value for key, value in values.items() if key != "revision"},
+                    "revision": current["revision"] + 1,
+                    "updated_at": "2026-07-22T07:05:00+00:00",
+                    "next_run": "2026-07-23T07:00:00+01:00" if values["enabled"] else None,
+                }
+                state["agent_schedules"] = [schedule]
+                route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps({"schedule": schedule}),
+                )
+                return
+            if path == "/api/integrations/agents/automation/policy" and method == "GET":
+                route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps(
+                        {
+                            "policy": {
+                                "schema_version": "1",
+                                "kill_switch": True,
+                                "defaults": {"proposal_ttl_seconds": 900},
+                                "operations": {},
+                            }
+                        }
+                    ),
+                )
+                return
+            if path == "/api/integrations/agents/actions/capabilities" and method == "GET":
+                route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps({"capabilities": [], "kill_switch": True}),
+                )
+                return
             if path == "/api/integrations/agents" and method == "GET":
                 if state["agent_cleanup_action"]:
                     agent_state = "cleanup_required"

@@ -1,4 +1,66 @@
-import type { AgentAction, AgentFinding, AgentFindingContent } from "./agent-operations";
+import type {
+  AgentAction,
+  AgentFinding,
+  AgentFindingContent,
+  AgentSchedule,
+  AgentScheduleInput,
+  AgentScheduleUpdate,
+} from "./agent-operations";
+
+const REPORT_ONLY_BUDGETS = {
+  max_reports: 1,
+  max_actions: 0,
+  max_downtime_seconds: 0,
+  max_retries: 0,
+  max_model_invocations: 0,
+} as const;
+
+export function newAgentSchedule(): AgentScheduleInput {
+  return {
+    name: "",
+    enabled: true,
+    checks: [{ operation: "system.status", params: {} }],
+    window: {
+      cron: "0 7 * * *",
+      timezone: "Europe/London",
+      duration_minutes: 30,
+    },
+    budgets: { max_checks: 1, ...REPORT_ONLY_BUDGETS },
+    delivery: { channel: "mattermost-alerts", mode: "immediate" },
+  };
+}
+
+export function editableSchedule(schedule: AgentSchedule): AgentScheduleUpdate {
+  return {
+    name: schedule.name,
+    enabled: schedule.enabled,
+    checks: schedule.checks.map((check) => ({
+      operation: check.operation,
+      params: { ...check.params },
+    })),
+    window: { ...schedule.window },
+    budgets: { ...schedule.budgets },
+    delivery: { ...schedule.delivery },
+    revision: schedule.revision,
+  };
+}
+
+export function scheduleReady(schedule: AgentScheduleInput): boolean {
+  return Boolean(
+    schedule.name.trim()
+      && schedule.checks.length >= 1
+      && schedule.checks.length <= 12
+      && schedule.checks.every((check) => (
+        check.operation
+        && Object.values(check.params).every((value) => value.trim())
+      ))
+      && schedule.window.cron.trim()
+      && schedule.window.timezone.trim()
+      && Number.isInteger(schedule.window.duration_minutes)
+      && schedule.window.duration_minutes >= 1
+      && schedule.window.duration_minutes <= 1440,
+  );
+}
 
 export function editableFinding(finding: AgentFinding): AgentFindingContent {
   return {

@@ -525,6 +525,48 @@ def test_agent_integration_views_are_separate_and_operational(
     assert_no_horizontal_overflow(page, f"agent integrations ({viewport_profile_name})")
 
 
+def test_agent_report_schedule_can_be_created_then_disabled(
+    page: Page,
+    v2_server,
+    v2_login,
+    install_v2_integrations_api_mocks,
+):
+    requests = []
+    page.on("request", lambda request: requests.append(request))
+    _open(page, v2_server["base_url"], v2_login, install_v2_integrations_api_mocks)
+
+    agent = page.locator("[data-agent-integration]")
+    agent.get_by_role("tab", name="Automation").click()
+    expect(agent.get_by_role("heading", name="Scheduled reports")).to_be_visible()
+    expect(agent.get_by_text("Report-only authority boundary")).to_be_visible()
+    agent.get_by_role("button", name="New report").click()
+    agent.get_by_label("Schedule name *").fill("Morning health report")
+    agent.get_by_role("button", name="Save schedule").click()
+
+    expect(agent.get_by_role("heading", name="Morning health report")).to_be_visible()
+    expect(agent.get_by_text("report only", exact=True)).to_be_visible()
+    agent.get_by_role("button", name="Disable schedule").click()
+    expect(agent.get_by_text("disabled", exact=True)).to_be_visible()
+
+    create = next(
+        request for request in requests
+        if request.method == "POST"
+        and request.url.endswith("/api/integrations/agents/automation/schedules")
+    )
+    assert create.post_data_json["budgets"] == {
+        "max_checks": 1,
+        "max_reports": 1,
+        "max_actions": 0,
+        "max_downtime_seconds": 0,
+        "max_retries": 0,
+        "max_model_invocations": 0,
+    }
+    assert create.post_data_json["delivery"] == {
+        "channel": "mattermost-alerts",
+        "mode": "immediate",
+    }
+
+
 def test_agent_setup_streams_progress_then_requests_claude_authentication(
     page: Page,
     v2_server,

@@ -5,6 +5,9 @@ export {
   actionCanBeCancelled,
   actionCanBeRejected,
   editableFinding,
+  editableSchedule,
+  newAgentSchedule,
+  scheduleReady,
 } from "./agent-operations-contract";
 
 export type AgentActionState =
@@ -102,6 +105,59 @@ export interface AgentAutomationPolicy {
   operations: Record<string, AgentOperationPolicy>;
 }
 
+export interface AgentScheduleCheck {
+  operation: string;
+  params: Record<string, string>;
+}
+
+export interface AgentScheduleInput {
+  name: string;
+  enabled: boolean;
+  checks: AgentScheduleCheck[];
+  window: {
+    cron: string;
+    timezone: string;
+    duration_minutes: number;
+  };
+  budgets: {
+    max_checks: number;
+    max_reports: 1;
+    max_actions: 0;
+    max_downtime_seconds: 0;
+    max_retries: 0;
+    max_model_invocations: 0;
+  };
+  delivery: { channel: "mattermost-alerts"; mode: "immediate" };
+}
+
+export interface AgentScheduleOccurrence {
+  id: string;
+  schedule_id: string;
+  scheduled_for: string;
+  state: string;
+  terminal_code: string | null;
+  finished_at: string | null;
+}
+
+export interface AgentSchedule extends AgentScheduleInput {
+  id: string;
+  owner: AgentActor;
+  created_at: string;
+  updated_at: string;
+  revision: number;
+  next_run: string | null;
+  last_occurrence: AgentScheduleOccurrence | null;
+}
+
+export interface AgentDiagnosticCheck {
+  operation: string;
+  parameter: string | null;
+}
+
+export interface AgentScheduleUpdate extends AgentScheduleInput {
+  revision: number;
+}
+
 export type AgentFindingKind =
   | "bug"
   | "feature_request"
@@ -178,16 +234,58 @@ export function getAgentActionCapabilities(signal?: AbortSignal): Promise<{
   return requestApi("/api/integrations/agents/actions/capabilities", { method: "GET", signal });
 }
 
-export function getAgentAutomationPolicy(signal?: AbortSignal): Promise<AgentAutomationPolicy> {
-  return requestApi("/api/integrations/agents/automation/policy", { method: "GET", signal });
+export async function getAgentAutomationPolicy(signal?: AbortSignal): Promise<AgentAutomationPolicy> {
+  const response = await requestApi<{ policy: AgentAutomationPolicy }>(
+    "/api/integrations/agents/automation/policy",
+    { method: "GET", signal },
+  );
+  return response.policy;
 }
 
-export function updateAgentAutomationPolicy(policy: AgentAutomationPolicy): Promise<AgentAutomationPolicy> {
-  return requestApi("/api/integrations/agents/automation/policy", {
+export async function updateAgentAutomationPolicy(policy: AgentAutomationPolicy): Promise<AgentAutomationPolicy> {
+  const response = await requestApi<{ policy: AgentAutomationPolicy }>("/api/integrations/agents/automation/policy", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(policy),
   });
+  return response.policy;
+}
+
+export function getAgentSchedules(signal?: AbortSignal): Promise<{
+  schedules: AgentSchedule[];
+  diagnostic_catalogue: AgentDiagnosticCheck[];
+}> {
+  return requestApi("/api/integrations/agents/automation/schedules", {
+    method: "GET",
+    signal,
+  });
+}
+
+export async function createAgentSchedule(schedule: AgentScheduleInput): Promise<AgentSchedule> {
+  const response = await requestApi<{ schedule: AgentSchedule }>(
+    "/api/integrations/agents/automation/schedules",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(schedule),
+    },
+  );
+  return response.schedule;
+}
+
+export async function updateAgentSchedule(
+  id: string,
+  schedule: AgentScheduleUpdate,
+): Promise<AgentSchedule> {
+  const response = await requestApi<{ schedule: AgentSchedule }>(
+    `/api/integrations/agents/automation/schedules/${encodeURIComponent(id)}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(schedule),
+    },
+  );
+  return response.schedule;
 }
 
 export function getAgentFindings(limit = 50, signal?: AbortSignal): Promise<{ findings: AgentFinding[] }> {
