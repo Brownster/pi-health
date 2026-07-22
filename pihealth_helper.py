@@ -3630,7 +3630,10 @@ def cmd_agent_runtime_install(params):
 
 
 def _agent_repo_commit(repo_dir):
-    result = run_command(['git', '-C', repo_dir, 'rev-parse', 'HEAD'])
+    dashboard_user = _agent_dashboard_user(repo_dir)
+    if not dashboard_user:
+        return ''
+    result = _git_as(dashboard_user, repo_dir, 'rev-parse', 'HEAD')
     return (result.get('stdout') or '').strip() if result.get('returncode') == 0 else ''
 
 

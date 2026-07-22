@@ -510,6 +510,22 @@ def test_installed_runtime_can_import_action_broker_without_dashboard_source(tmp
     assert result.returncode == 0, result.stderr
 
 
+def test_agent_repo_commit_runs_git_as_dashboard_owner():
+    with (
+        patch.object(helper, "_agent_dashboard_user", return_value="holly"),
+        patch.object(
+            helper,
+            "_git_as",
+            return_value={"returncode": 0, "stdout": "abc123\n"},
+        ) as git_as,
+    ):
+        assert helper._agent_repo_commit("/home/holly/pi-health") == "abc123"
+
+    git_as.assert_called_once_with(
+        "holly", "/home/holly/pi-health", "rev-parse", "HEAD"
+    )
+
+
 def test_shared_stack_locks_reject_unexpected_entries(tmp_path):
     (tmp_path / "media.lock").touch()
     (tmp_path / "unexpected").touch()
