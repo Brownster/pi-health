@@ -46,7 +46,6 @@ from agent_provider.provisioning import (
     ACTION_BROKER_POLICY_PATH,
     ACTION_BROKER_UNIT_PATH,
     ACTION_POLICY_PATH,
-    ACTION_SOCKET_DIR,
     ACTION_SOCKET_PATH,
     ACTION_STATE_DIR,
     ACTION_WORKER_UNIT_PATH,
@@ -56,16 +55,18 @@ from agent_provider.provisioning import (
     AGENT_ENV_PATH,
     AGENT_LIB_DIR,
     AGENT_POLICY_PATH,
+    AGENT_RUNTIME_MODULES,
+    AGENT_RUNTIME_PACKAGES,
     AGENT_STATE_DIR,
     AGENT_UNIT_PATH,
     AGENT_VENV_DIR,
     CLAUDE_CONFIG_DIR,
     LIMEOPS_AUDIT_PATH,
-    LIMEOPS_SOCKET_DIR,
     LIMEOPS_SOCKET_PATH,
     LIMEOPS_STATE_DIR,
     LIMEOPS_UNIT_PATH,
     MATTERMOST_REPAIR_UNIT_PATH,
+    STACK_LOCK_DIR,
     render_agent_unit,
     render_action_broker_unit,
     render_action_worker_unit,
@@ -3300,6 +3301,41 @@ def _agent_install_directory(path, mode, owner, group):
     return result.get('returncode') == 0
 
 
+def _secure_agent_stack_locks(dashboard_user):
+    """Make only validated stack lock files writable by the shared pihealth group."""
+    import grp
+
+    try:
+        owner_uid = pwd.getpwnam(dashboard_user).pw_uid
+        group_gid = grp.getgrnam('pihealth').gr_gid
+        entries = list(os.scandir(STACK_LOCK_DIR))
+    except (KeyError, OSError):
+        return False
+    for entry in entries:
+        if (
+            not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}\.lock', entry.name)
+            or '..' in entry.name
+        ):
+            return False
+        try:
+            descriptor = os.open(
+                entry.path,
+                os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW,
+            )
+        except OSError:
+            return False
+        try:
+            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                return False
+            os.fchown(descriptor, owner_uid, group_gid)
+            os.fchmod(descriptor, 0o660)
+        except OSError:
+            return False
+        finally:
+            os.close(descriptor)
+    return True
+
+
 def _restore_mattermost_recovery_ownership():
     """Restore the fixed root-only recovery path after broad legacy migration."""
     try:
@@ -3427,27 +3463,20 @@ def cmd_agent_runtime_install(params):
         ('/var/lib/lime-agent', 0o700, 'lime-agent', 'lime-agent'),
         (CLAUDE_CONFIG_DIR, 0o700, 'lime-agent', 'lime-agent'),
         (LIMEOPS_STATE_DIR, 0o750, 'limeops', 'limeops'),
-        (LIMEOPS_SOCKET_DIR, 0o750, 'limeops', 'limeops-client'),
         (ACTION_STATE_DIR, 0o770, 'limeops-actuator', 'pihealth'),
-        (ACTION_SOCKET_DIR, 0o750, 'limeops-actuator', 'limeops-action'),
+        (STACK_LOCK_DIR, 0o2770, dashboard_user, 'pihealth'),
     )
     if not all(_agent_install_directory(*item) for item in directories):
         return {'success': False, 'error': 'Failed to create agent runtime directories'}
+    if not _secure_agent_stack_locks(dashboard_user):
+        return {'success': False, 'error': 'Failed to secure shared stack locks'}
 
     python_bin = os.path.join(repo_dir, '.venv', 'bin', 'python')
     if not os.path.isfile(python_bin):
         return {'success': False, 'error': 'LimeOS virtual environment is unavailable'}
     if not _agent_install_directory(AGENT_LIB_DIR, 0o755, 'root', 'root'):
         return {'success': False, 'error': 'Failed to create the agent runtime library'}
-    for package in (
-        'agent_actions',
-        'agent_findings',
-        'agent_gateway',
-        'agent_provider',
-        'agent_runtime',
-        'agent_transport',
-        'limeops',
-    ):
+    for package in AGENT_RUNTIME_PACKAGES:
         source = os.path.join(repo_dir, package)
         destination = os.path.join(AGENT_LIB_DIR, package)
         if not os.path.isdir(source):
@@ -3466,12 +3495,7 @@ def cmd_agent_runtime_install(params):
         manifest_source = os.path.join(repo_dir, 'config', 'limeos-packages.json')
         if os.path.isfile(manifest_source):
             shutil.copy2(manifest_source, os.path.join(manifest_dir, 'limeos-packages.json'))
-        for module_name in (
-            'container_operations_service.py',
-            'helper_client.py',
-            'ports.py',
-            'runtime_paths.py',
-        ):
+        for module_name in AGENT_RUNTIME_MODULES:
             module_source = os.path.join(repo_dir, module_name)
             if not os.path.isfile(module_source):
                 raise OSError('Action runtime module is unavailable')

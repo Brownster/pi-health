@@ -19,6 +19,7 @@ ACTION_STATE_DIR = "/var/lib/limeos/agent-actions"
 ACTION_SOCKET_DIR = "/run/limeos-actions"
 ACTION_SOCKET_PATH = "/run/limeos-actions/actions.sock"
 ACTION_AUDIT_PATH = "/var/log/limeos/agent-action-audit.jsonl"
+STACK_LOCK_DIR = "/opt/stacks/.locks"
 AGENT_UNIT_PATH = "/etc/systemd/system/limeos-agent.service"
 LIMEOPS_UNIT_PATH = "/etc/systemd/system/limeopsd.service"
 ACTION_BROKER_UNIT_PATH = "/etc/systemd/system/limeops-actuatord.service"
@@ -26,6 +27,24 @@ ACTION_WORKER_UNIT_PATH = "/etc/systemd/system/limeops-action-worker.service"
 AGENT_REPAIR_UNIT_PATH = "/etc/systemd/system/limeos-agent-repair.service"
 EXTENSION_REPAIR_UNIT_PATH = "/etc/systemd/system/limeos-extension-repair@.service"
 MATTERMOST_REPAIR_UNIT_PATH = "/etc/systemd/system/limeos-mattermost-repair.service"
+
+AGENT_RUNTIME_PACKAGES = (
+    "agent_actions",
+    "agent_findings",
+    "agent_gateway",
+    "agent_provider",
+    "agent_runtime",
+    "agent_transport",
+    "limeops",
+)
+AGENT_RUNTIME_MODULES = (
+    "container_operations_service.py",
+    "helper_client.py",
+    "ports.py",
+    "runtime_paths.py",
+    "stack_operations_service.py",
+    "stack_read_service.py",
+)
 
 
 def render_agent_unit(repo_dir: str, python_bin: str) -> str:
@@ -65,7 +84,7 @@ LockPersonality=true
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 ReadOnlyPaths={AGENT_LIB_DIR}
 ReadWritePaths={AGENT_STATE_DIR} {CLAUDE_CONFIG_DIR}
-InaccessiblePaths=/root {repo_dir} /run/pihealth {ACTION_SOCKET_DIR} /var/run/docker.sock /etc/limeos/credentials.env
+InaccessiblePaths=/root {repo_dir} /run/pihealth -{ACTION_SOCKET_DIR} /var/run/docker.sock /etc/limeos/credentials.env
 CapabilityBoundingSet=
 SystemCallArchitectures=native
 
@@ -145,7 +164,7 @@ RestrictRealtime=true
 LockPersonality=true
 RestrictAddressFamilies=AF_UNIX
 ReadOnlyPaths={AGENT_LIB_DIR} {ACTION_POLICY_PATH} {ACTION_BROKER_POLICY_PATH}
-ReadWritePaths={ACTION_SOCKET_DIR} {ACTION_STATE_DIR} /var/log/limeos
+ReadWritePaths={ACTION_SOCKET_DIR} {ACTION_STATE_DIR} /var/log/limeos {STACK_LOCK_DIR}
 InaccessiblePaths=/root {repo_dir} /run/pihealth /etc/limeos/credentials.env
 CapabilityBoundingSet=
 

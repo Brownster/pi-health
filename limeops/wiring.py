@@ -161,7 +161,7 @@ def _container_logs(name: str, lines: int) -> str:  # pragma: no cover - target 
 
 
 def _stack_reads():  # pragma: no cover - target integration
-    from stack_manager import default_stack_read_service
+    from agent_actions.stack_runtime import default_stack_read_service
 
     return default_stack_read_service()
 
@@ -181,14 +181,32 @@ def _stack_status(name: str) -> dict:  # pragma: no cover - target integration
 
 
 def _stack_inspect(name: str) -> dict:  # pragma: no cover - target integration
-    from compose_yaml import load_compose_yaml
     from limeops.operations import sanitize_stack_details
 
     details = _stack_reads().stack_details(name)
     try:
-        compose = load_compose_yaml(details.get("compose_content") or "") or {}
-    except Exception:
-        compose = {}
+        result = subprocess.run(
+            [
+                "docker",
+                "compose",
+                "-f",
+                details["compose_file"],
+                "config",
+                "--format",
+                "json",
+            ],
+            cwd=details["path"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+            shell=False,
+        )
+        if result.returncode != 0:
+            raise RuntimeError("Docker Compose configuration is unavailable")
+        compose = json.loads(result.stdout)
+    except (KeyError, json.JSONDecodeError) as exc:
+        raise RuntimeError("Docker Compose returned invalid configuration") from exc
     # sanitize_stack_details keeps structure and env KEYS only — raw compose_content
     # and env_content never leave this function.
     return sanitize_stack_details(details, compose)

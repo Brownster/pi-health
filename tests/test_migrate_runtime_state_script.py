@@ -29,6 +29,7 @@ def test_agent_runtime_roots_are_seeded_outside_helper_mount_sandbox(monkeypatch
 
     ensure_agent_runtime_roots()
 
+    assert len(calls) == 2
     argv, kwargs = calls[0]
     assert argv[:6] == [
         "systemd-run",
@@ -40,6 +41,18 @@ def test_agent_runtime_roots_are_seeded_outside_helper_mount_sandbox(monkeypatch
     ]
     assert argv[-3:] == ["-p", "/var/lib/lime-agent", "/var/lib/limeops"]
     assert kwargs == {"check": True}
+    lock_argv, lock_kwargs = calls[1]
+    assert lock_argv[-8:] == [
+        "-d",
+        "-o",
+        "root",
+        "-g",
+        "pihealth",
+        "-m",
+        "2770",
+        "/opt/stacks/.locks",
+    ]
+    assert lock_kwargs == {"check": True}
 
 
 def test_integration_recovery_root_is_seeded_with_root_only_permissions(monkeypatch):
@@ -110,7 +123,9 @@ def test_helper_agent_permissions_are_created_and_idempotent(tmp_path: Path):
     assert "ReadWritePaths=/etc/apt" in content
     assert "/etc/passwd" not in content
     assert "ReadWritePaths=/usr /var/lib/apt /var/lib/dpkg /var/cache/apt" in content
-    assert "ReadWritePaths=-/var/lib/lime-agent -/var/lib/limeops -/run/limeos" in content
+    assert "ReadWritePaths=-/var/lib/lime-agent -/var/lib/limeops" in content
+    assert "-/opt/stacks/.locks" in content
+    assert "/run/limeos" not in content
     assert "StateDirectory=" not in content
     assert "RuntimeDirectory=" not in content
     assert dropin.stat().st_mode & 0o777 == 0o644
