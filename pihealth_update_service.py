@@ -127,18 +127,18 @@ def stream_update(helper_call: HelperCall, config: Mapping[str, Any]):
     else:
         yield {"step": "build", "line": "Web UI rebuilt."}
 
-    # -- AI agent runtime (only when agent code/config/baseline changed) -----
+    # -- AI agent runtime ----------------------------------------------------
+    # The app and helper are still running the pre-pull Python modules here. Running
+    # convergence now can mix that old installer with the newly pulled package tree.
+    # Both services restart below; app startup then calls agent_converge_if_stale using
+    # one coherent release.
     if any(path.startswith(_AGENT_UPDATE_PREFIXES) for path in changed):
-        yield {"step": "agent", "line": "Refreshing the AI agent runtime…"}
-        agent = call("agent")
-        if not agent.get("success"):
-            yield {"step": "agent", "error": agent.get("error", "agent refresh failed")}
-            return
         yield {
             "step": "agent",
-            "line": "Agent not installed; skipped."
-            if agent.get("skipped")
-            else "Agent runtime refreshed and package baseline reconciled.",
+            "line": (
+                "Agent runtime changes detected; refresh will continue automatically "
+                "after service restart."
+            ),
         }
     else:
         yield {"step": "agent", "line": "No agent changes."}

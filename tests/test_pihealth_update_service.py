@@ -142,34 +142,40 @@ def test_helper_exception_becomes_step_error():
     assert events[-1]["error"] == "helper offline"
 
 
-def test_agent_step_runs_when_agent_files_change():
+def test_agent_changes_defer_convergence_until_services_restart():
     helper, events = _run(
         {
             "pull": {"success": True, "old_commit": OLD, "new_commit": NEW,
                      "changed_files": ["agent_gateway/gateway.py", "config/limeos-packages.json"]},
             "migrate": {"success": True},
             "build": {"success": True, "skipped": True, "reason": "web UI already up to date"},
-            "agent": {"success": True, "refreshed": True},
             "restart": {"success": True},
         }
     )
-    assert helper.calls == ["pull", "migrate", "build", "agent", "restart"]
-    assert any(e["step"] == "agent" and "refreshed" in e.get("line", "") for e in events)
+    assert helper.calls == ["pull", "migrate", "build", "restart"]
+    assert any(
+        event["step"] == "agent"
+        and "after service restart" in event.get("line", "").lower()
+        for event in events
+    )
 
 
-def test_agent_step_reports_skip_when_not_installed():
+def test_agent_changes_do_not_run_with_the_pre_pull_helper():
     helper, events = _run(
         {
             "pull": {"success": True, "old_commit": OLD, "new_commit": NEW,
                      "changed_files": ["limeos_packages.py"]},
             "migrate": {"success": True},
             "build": {"success": True, "skipped": True, "reason": "web UI already up to date"},
-            "agent": {"success": True, "skipped": True, "reason": "agent not installed"},
             "restart": {"success": True},
         }
     )
-    assert "agent" in helper.calls
-    assert any(e["step"] == "agent" and "skipped" in e.get("line", "").lower() for e in events)
+    assert "agent" not in helper.calls
+    assert helper.calls[-1] == "restart"
+    assert any(
+        event["step"] == "agent" and "automatically" in event.get("line", "")
+        for event in events
+    )
 
 
 def test_agent_step_not_called_without_agent_changes():
@@ -186,15 +192,17 @@ def test_agent_step_not_called_without_agent_changes():
     assert any(e["step"] == "agent" and "No agent changes" in e.get("line", "") for e in events)
 
 
-def test_agent_step_error_stops_before_restart():
+def test_agent_changes_cannot_block_the_release_restart():
     helper, events = _run(
         {
             "pull": {"success": True, "old_commit": OLD, "new_commit": NEW,
                      "changed_files": ["agent_transport/listener.py"]},
             "migrate": {"success": True},
             "build": {"success": True, "skipped": True, "reason": "web UI already up to date"},
-            "agent": {"success": False, "error": "agent refresh failed"},
+            "restart": {"success": True},
         }
     )
-    assert events[-1]["step"] == "agent" and events[-1]["error"] == "agent refresh failed"
-    assert "restart" not in helper.calls
+    assert "agent" not in helper.calls
+    assert helper.calls[-1] == "restart"
+    assert events[-1]["step"] == "restart"
+    assert events[-1]["done"] is True
