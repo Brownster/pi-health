@@ -453,6 +453,19 @@ def test_install_retry_reuses_database_password(tmp_path):
     assert first_password in second
 
 
+def test_install_projects_only_webhook_for_report_scheduler(tmp_path):
+    projection_dir = tmp_path / "config" / "agent-report"
+    projection_dir.mkdir(parents=True)
+    service, _api, _sent, _compose_calls = make_service(tmp_path)
+
+    events = list(service.stream_install(SETUP))
+
+    assert events[-1]["done"] is True
+    projection = (projection_dir / "mattermost-webhook.env").read_text()
+    assert projection.startswith("LIMEOS_ALERT_MATTERMOST_WEBHOOK=http")
+    assert "POSTGRES" not in projection
+
+
 def test_install_stays_uninstalled_when_test_delivery_fails(tmp_path):
     service, _api, _sent, _compose_calls = make_service(tmp_path)
 

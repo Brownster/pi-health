@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import grp
 import os
 import shutil
 import stat
@@ -31,6 +32,11 @@ from agent_provider.provisioning import (
     CLAUDE_CONFIG_DIR,
     LIMEOPS_STATE_DIR,
     MATTERMOST_REPAIR_UNIT_PATH,
+    REPORT_SCHEDULER_STATE_DIR,
+    REPORT_SCHEDULER_UNIT_PATH,
+    REPORT_SCHEDULER_VENV_DIR,
+    REPORT_DELIVERY_CONFIG_DIR,
+    REPORT_MATTERMOST_WEBHOOK_PATH,
     STACK_LOCK_DIR,
     render_agent_unit,
     render_action_broker_unit,
@@ -39,6 +45,7 @@ from agent_provider.provisioning import (
     render_extension_repair_unit,
     render_limeops_unit,
     render_mattermost_repair_unit,
+    render_report_scheduler_unit,
 )
 from agent_runtime.service import DEFAULT_STATE_DIR
 
@@ -108,6 +115,52 @@ def test_action_units_keep_worker_unprivileged_and_socket_separate():
     assert "SupplementaryGroups=docker" not in worker
     assert "limeops-client" not in broker
     assert "limeops-client" not in worker
+
+
+def test_report_scheduler_unit_has_read_broker_and_report_state_only():
+    unit = render_report_scheduler_unit("/opt/pi-health")
+
+    assert "User=limeops-report" in unit
+    assert "Group=limeops-report" in unit
+    assert "SupplementaryGroups=limeops-client pihealth" in unit
+    assert f"ExecStart={REPORT_SCHEDULER_VENV_DIR}/bin/python -m agent_automation.runner" in unit
+    assert f"WorkingDirectory={REPORT_SCHEDULER_STATE_DIR}" in unit
+    assert f"ReadWritePaths={ACTION_STATE_DIR}" in unit
+    assert REPORT_MATTERMOST_WEBHOOK_PATH in unit
+    assert "/etc/limeos/integrations/mattermost.env" not in unit
+    assert "/run/limeos-actions" in unit
+    assert "/var/run/docker.sock" in unit
+    assert "SupplementaryGroups=docker" not in unit
+    assert "NoNewPrivileges=true" in unit
+
+
+def test_report_webhook_projection_excludes_other_mattermost_secrets(tmp_path):
+    source = tmp_path / "mattermost.env"
+    source.write_text(
+        "POSTGRES_PASSWORD=private\n"
+        "LIMEOS_ALERT_MATTERMOST_WEBHOOK=https://mm.example/hooks/report\n",
+        encoding="utf-8",
+    )
+    source.chmod(0o600)
+    destination_dir = tmp_path / "agent-report"
+    destination_dir.mkdir()
+    destination = destination_dir / "mattermost-webhook.env"
+    user = SimpleNamespace(pw_uid=os.getuid())
+    group = SimpleNamespace(gr_gid=os.getgid())
+
+    with (
+        patch.object(helper, "MATTERMOST_ACTIVE_CREDENTIAL", str(source)),
+        patch.object(helper, "REPORT_DELIVERY_CONFIG_DIR", str(destination_dir)),
+        patch.object(helper, "REPORT_MATTERMOST_WEBHOOK_PATH", str(destination)),
+        patch.object(helper.pwd, "getpwnam", return_value=user),
+        patch.object(grp, "getgrnam", return_value=group),
+    ):
+        assert helper._sync_report_webhook_credential("dashboard") is True
+
+    assert destination.read_text(encoding="utf-8") == (
+        "LIMEOS_ALERT_MATTERMOST_WEBHOOK=https://mm.example/hooks/report\n"
+    )
+    assert stat.S_IMODE(destination.stat().st_mode) == 0o640
 
 
 def test_agent_repair_unit_is_fixed_unprivileged_and_helper_backed():
@@ -427,6 +480,7 @@ def test_runtime_install_creates_fixed_identities_paths_and_units(tmp_path):
         patch.object(helper.os.path, "isdir", return_value=True),
         patch.object(helper.os.path, "isfile", return_value=True),
         patch.object(helper, "_secure_agent_stack_locks", return_value=True),
+        patch.object(helper, "_sync_report_webhook_credential", return_value=True),
     ):
         result = helper.cmd_agent_runtime_install({})
 
@@ -438,6 +492,7 @@ def test_runtime_install_creates_fixed_identities_paths_and_units(tmp_path):
     flat = [item for command in commands for item in command]
     assert "lime-agent" in flat and "limeops" in flat and "limeops-client" in flat
     assert "limeops-actuator" in flat and "limeops-action-worker" in flat
+    assert "limeops-report" in flat
     assert "limeops-action" in flat
     account_commands = [
         command
@@ -450,6 +505,7 @@ def test_runtime_install_creates_fixed_identities_paths_and_units(tmp_path):
     assert "/etc/systemd/system/limeopsd.service" in written
     assert ACTION_BROKER_UNIT_PATH in written
     assert ACTION_WORKER_UNIT_PATH in written
+    assert REPORT_SCHEDULER_UNIT_PATH in written
     assert AGENT_REPAIR_UNIT_PATH in written
     assert EXTENSION_REPAIR_UNIT_PATH in written
     assert MATTERMOST_REPAIR_UNIT_PATH in written
@@ -467,12 +523,21 @@ def test_runtime_install_creates_fixed_identities_paths_and_units(tmp_path):
     assert any(CLAUDE_CONFIG_DIR in command for command in install_dirs)
     assert any(LIMEOPS_STATE_DIR in command for command in install_dirs)
     assert any(ACTION_STATE_DIR in command for command in install_dirs)
+    assert any(REPORT_SCHEDULER_STATE_DIR in command for command in install_dirs)
+    assert any(REPORT_DELIVERY_CONFIG_DIR in command for command in install_dirs)
     assert any(STACK_LOCK_DIR in command and "2770" in command for command in install_dirs)
     assert not any(ACTION_SOCKET_DIR in command for command in install_dirs)
     assert ["chmod", "-R", "u=rwX,go=rX", AGENT_LIB_DIR] in commands
     assert ["systemctl", "restart", "limeopsd.service"] in commands
     assert ["systemctl", "restart", "limeops-actuatord.service"] in commands
     assert ["systemctl", "restart", "limeops-action-worker.service"] in commands
+    assert ["systemctl", "restart", "limeops-report-scheduler.service"] in commands
+    assert [
+        f"{REPORT_SCHEDULER_VENV_DIR}/bin/pip",
+        "install",
+        "apscheduler>=3.10,<4",
+        "requests>=2.31,<3",
+    ] in commands
     # psutil is guaranteed for the broker so system.status cannot fail on a fresh install.
     assert [
         "apt-get", "install", "-y", "python3-psutil", "python3-docker"

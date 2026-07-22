@@ -650,6 +650,7 @@ class ReportSchedulerService:
         self._trigger_factory = trigger_factory
         self._clock = clock
         self._id_factory = id_factory or (lambda: str(uuid.uuid4()))
+        self._configured: dict[str, str] = {}
 
     def create(self, values: Any, *, owner: Any) -> dict[str, Any]:
         normalized = normalize_schedule(values)
@@ -698,11 +699,40 @@ class ReportSchedulerService:
         }
 
     def init_scheduler(self) -> None:
-        for schedule in self.store.list_schedules():
-            self._sync_job(schedule)
+        self.sync_scheduler()
+        self._scheduler.add_job(
+            self.sync_scheduler,
+            "interval",
+            id="agent-report:sync",
+            replace_existing=True,
+            seconds=15,
+            coalesce=True,
+            max_instances=1,
+        )
         if not self._scheduler.running:
             self._scheduler.start()
         self.recover()
+
+    def sync_scheduler(self) -> None:
+        schedules = self.store.list_schedules()
+        seen = set()
+        for schedule in schedules:
+            schedule_id = schedule["id"]
+            signature = _schedule_signature(schedule)
+            if schedule["enabled"]:
+                seen.add(schedule_id)
+            if self._configured.get(schedule_id) != signature:
+                self._sync_job(schedule)
+                if schedule["enabled"]:
+                    self._configured[schedule_id] = signature
+                else:
+                    self._configured.pop(schedule_id, None)
+        for schedule_id in set(self._configured) - seen:
+            try:
+                self._scheduler.remove_job(f"agent-report:{schedule_id}")
+            except Exception:
+                pass
+            self._configured.pop(schedule_id, None)
 
     def recover(self) -> None:
         for occurrence in self.store.incomplete_occurrences():
@@ -838,6 +868,7 @@ class ReportSchedulerService:
         except Exception:
             pass
         if not schedule["enabled"]:
+            self._configured.pop(schedule["id"], None)
             return
         window = schedule["window"]
         trigger = self._trigger_factory(window["cron"], window["timezone"])
@@ -851,6 +882,7 @@ class ReportSchedulerService:
             max_instances=1,
             misfire_grace_time=window["duration_minutes"] * 60,
         )
+        self._configured[schedule["id"]] = _schedule_signature(schedule)
 
     def _public_schedule(self, schedule: Mapping[str, Any]) -> dict[str, Any]:
         value = dict(schedule)
@@ -877,11 +909,97 @@ class LazyReportSchedulerService:
         return getattr(self._get(), name)
 
 
+class ScheduleAdminService:
+    """Edit durable schedules without access to the read broker or runner."""
+
+    def __init__(
+        self,
+        *,
+        store: AutomationStore,
+        clock: Callable[[], datetime] = _utcnow,
+        id_factory: Callable[[], str] | None = None,
+    ) -> None:
+        self.store = store
+        self._clock = clock
+        self._id_factory = id_factory or (lambda: str(uuid.uuid4()))
+
+    def create(self, values: Any, *, owner: Any) -> dict[str, Any]:
+        normalized = normalize_schedule(values)
+        created = self.store.create_schedule(
+            schedule_id=self._id_factory(),
+            values=normalized,
+            owner=_normalize_owner(owner),
+            at=_iso(self._clock()),
+        )
+        return self._public_schedule(created)
+
+    def update(self, schedule_id: str, values: Any) -> dict[str, Any]:
+        revision, normalized = _normalize_schedule_update(values)
+        updated = self.store.update_schedule(
+            schedule_id,
+            values=normalized,
+            expected_revision=revision,
+            at=_iso(self._clock()),
+        )
+        return self._public_schedule(updated)
+
+    def get(self, schedule_id: str) -> dict[str, Any]:
+        return self._public_schedule(self.store.get_schedule(schedule_id))
+
+    def list(self) -> dict[str, Any]:
+        return {
+            "schedules": [
+                self._public_schedule(schedule)
+                for schedule in self.store.list_schedules()
+            ],
+            "diagnostic_catalogue": [dict(item) for item in CHECK_CATALOGUE],
+        }
+
+    def _public_schedule(self, schedule: Mapping[str, Any]) -> dict[str, Any]:
+        value = dict(schedule)
+        value["next_run"] = _next_run(schedule, self._clock())
+        value["last_occurrence"] = self.store.latest_occurrence(schedule["id"])
+        return value
+
+
 def _json(value: Any) -> str:
     try:
         return json.dumps(value, separators=(",", ":"), sort_keys=True)
     except (TypeError, ValueError) as exc:
         raise AutomationError("invalid_schedule", "Automation data is invalid") from exc
+
+
+def _normalize_schedule_update(values: Any) -> tuple[int, dict[str, Any]]:
+    if not isinstance(values, Mapping):
+        raise AutomationError("invalid_schedule", "Schedule must be an object")
+    expected = SCHEDULE_FIELDS | {"revision"}
+    _reject_unknown(values, frozenset(expected), "schedule")
+    if set(values) != expected:
+        raise AutomationError("invalid_schedule", "Schedule fields are incomplete")
+    revision = values.get("revision")
+    if isinstance(revision, bool) or not isinstance(revision, int) or revision < 1:
+        raise AutomationError("invalid_schedule", "Schedule revision is invalid")
+    return revision, normalize_schedule({field: values[field] for field in SCHEDULE_FIELDS})
+
+
+def _schedule_signature(schedule: Mapping[str, Any]) -> str:
+    return _json(
+        {
+            field: schedule[field]
+            for field in ("enabled", "checks", "window", "budgets", "delivery")
+        }
+    )
+
+
+def _next_run(schedule: Mapping[str, Any], now: datetime) -> str | None:
+    if not schedule["enabled"]:
+        return None
+    window = schedule["window"]
+    trigger = CronTrigger.from_crontab(
+        window["cron"], timezone=ZoneInfo(window["timezone"])
+    )
+    next_fire = trigger.get_next_fire_time(None, now)
+    return next_fire.isoformat() if next_fire is not None else None
 
 
 def _bounded_summary(value: Any) -> str:

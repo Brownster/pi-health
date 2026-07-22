@@ -19,6 +19,11 @@ ACTION_STATE_DIR = "/var/lib/limeos/agent-actions"
 ACTION_SOCKET_DIR = "/run/limeos-actions"
 ACTION_SOCKET_PATH = "/run/limeos-actions/actions.sock"
 ACTION_AUDIT_PATH = "/var/log/limeos/agent-action-audit.jsonl"
+REPORT_SCHEDULER_STATE_DIR = "/var/lib/limeops-report"
+REPORT_SCHEDULER_VENV_DIR = f"{REPORT_SCHEDULER_STATE_DIR}/venv"
+REPORT_SCHEDULER_UNIT_PATH = "/etc/systemd/system/limeops-report-scheduler.service"
+REPORT_DELIVERY_CONFIG_DIR = "/etc/limeos/integrations/agent-report"
+REPORT_MATTERMOST_WEBHOOK_PATH = f"{REPORT_DELIVERY_CONFIG_DIR}/mattermost-webhook.env"
 STACK_LOCK_DIR = "/opt/stacks/.locks"
 AGENT_UNIT_PATH = "/etc/systemd/system/limeos-agent.service"
 LIMEOPS_UNIT_PATH = "/etc/systemd/system/limeopsd.service"
@@ -30,6 +35,7 @@ MATTERMOST_REPAIR_UNIT_PATH = "/etc/systemd/system/limeos-mattermost-repair.serv
 
 AGENT_RUNTIME_PACKAGES = (
     "agent_actions",
+    "agent_automation",
     "agent_findings",
     "agent_gateway",
     "agent_provider",
@@ -206,6 +212,48 @@ ReadOnlyPaths={AGENT_LIB_DIR}
 ReadWritePaths={ACTION_STATE_DIR}
 InaccessiblePaths=/root {repo_dir} /run/pihealth /var/run/docker.sock /etc/limeos/credentials.env
 CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+
+def render_report_scheduler_unit(repo_dir: str) -> str:
+    return f"""[Unit]
+Description=LimeOS report-only automation scheduler
+After=network-online.target limeopsd.service
+Wants=network-online.target
+Requires=limeopsd.service
+
+[Service]
+Type=simple
+User=limeops-report
+Group=limeops-report
+SupplementaryGroups=limeops-client pihealth
+WorkingDirectory={REPORT_SCHEDULER_STATE_DIR}
+Environment=PYTHONPATH={AGENT_LIB_DIR}
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart={REPORT_SCHEDULER_VENV_DIR}/bin/python -m agent_automation.runner
+Restart=on-failure
+RestartSec=5
+UMask=0007
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadOnlyPaths={AGENT_LIB_DIR} -{REPORT_MATTERMOST_WEBHOOK_PATH}
+ReadWritePaths={ACTION_STATE_DIR}
+InaccessiblePaths=/root {repo_dir} /run/pihealth {ACTION_SOCKET_DIR} /var/run/docker.sock /etc/limeos/credentials.env
+CapabilityBoundingSet=
+SystemCallArchitectures=native
 
 [Install]
 WantedBy=multi-user.target

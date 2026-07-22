@@ -203,6 +203,11 @@ def test_feature_state_allows_disabled_install_and_legacy_runtime(tmp_path):
         patch.object(helper, "AGENT_CONFIG_PATH", str(config)),
         patch.object(helper, "ACTION_BROKER_UNIT_PATH", str(tmp_path / "no-broker")),
         patch.object(helper, "ACTION_WORKER_UNIT_PATH", str(tmp_path / "no-worker")),
+        patch.object(
+            helper,
+            "REPORT_SCHEDULER_UNIT_PATH",
+            str(tmp_path / "no-report-scheduler"),
+        ),
         patch.object(helper, "ACTION_POLICY_PATH", str(tmp_path / "no-action-policy")),
         patch.object(
             helper,
@@ -241,6 +246,32 @@ def test_feature_state_rejects_partial_action_runtime(tmp_path):
         "state": "cleanup_required",
         "reconcile_allowed": False,
     }
+
+
+def test_feature_state_requires_report_scheduler_after_convergence(tmp_path):
+    paths = {
+        "AGENT_UNIT_PATH": tmp_path / "agent.service",
+        "LIMEOPS_UNIT_PATH": tmp_path / "broker.service",
+        "AGENT_CONFIG_PATH": tmp_path / "agents.json",
+        "ACTION_BROKER_UNIT_PATH": tmp_path / "action-broker.service",
+        "ACTION_WORKER_UNIT_PATH": tmp_path / "action-worker.service",
+        "ACTION_POLICY_PATH": tmp_path / "action-policy.json",
+        "ACTION_BROKER_POLICY_PATH": tmp_path / "actuator-policy.json",
+        "REPORT_SCHEDULER_UNIT_PATH": tmp_path / "report-scheduler.service",
+    }
+    for name, path in paths.items():
+        if name != "REPORT_SCHEDULER_UNIT_PATH":
+            path.write_text('{"enabled": true}' if name == "AGENT_CONFIG_PATH" else "fixed")
+    paths["REPORT_SCHEDULER_UNIT_PATH"].symlink_to(tmp_path / "missing-unit")
+    lifecycle = tmp_path / "no-lifecycle.json"
+    with ExitStack() as stack:
+        stack.enter_context(
+            patch.object(helper, "AGENT_LIFECYCLE_TOMBSTONE", str(lifecycle))
+        )
+        for name, path in paths.items():
+            stack.enter_context(patch.object(helper, name, str(path)))
+        state = helper._read_agent_lifecycle_feature_state()
+    assert state["state"] == "cleanup_required"
 
 
 def test_package_reconcile_never_queries_retained_or_removed_claude():

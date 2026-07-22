@@ -5,6 +5,7 @@ from agent_automation.service import (
     AutomationStore,
     LazyReportSchedulerService,
     ReportSchedulerService,
+    ScheduleAdminService,
 )
 
 __all__ = [
@@ -12,4 +13,5 @@ __all__ = [
     "AutomationStore",
     "LazyReportSchedulerService",
     "ReportSchedulerService",
+    "ScheduleAdminService",
 ]

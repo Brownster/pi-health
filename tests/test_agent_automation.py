@@ -11,6 +11,7 @@ from agent_automation.service import (
     AutomationError,
     AutomationStore,
     ReportSchedulerService,
+    ScheduleAdminService,
 )
 
 
@@ -289,3 +290,57 @@ def test_startup_recovers_reads_but_never_retries_ambiguous_delivery(tmp_path):
     assert store.get_occurrence(ready["id"])["state"] == "delivered"
     assert store.get_occurrence(ambiguous["id"])["state"] == "delivery_unknown"
     assert len(reports) == 2
+
+
+def test_admin_service_edits_store_without_read_broker_or_runtime_scheduler(tmp_path):
+    store = AutomationStore(tmp_path / "automation.sqlite3")
+    admin = ScheduleAdminService(
+        store=store,
+        clock=lambda: NOW,
+        id_factory=lambda: "schedule-1",
+    )
+
+    created = admin.create(schedule(), owner=owner())
+    listed = admin.list()
+
+    assert created["id"] == "schedule-1"
+    assert created["next_run"] is not None
+    assert listed["schedules"] == [created]
+    assert "action.propose" not in {
+        item["operation"] for item in listed["diagnostic_catalogue"]
+    }
+
+
+def test_runner_poll_reconciles_schedule_changes_written_by_admin(tmp_path):
+    store = AutomationStore(tmp_path / "automation.sqlite3")
+    admin = ScheduleAdminService(
+        store=store,
+        clock=lambda: NOW,
+        id_factory=lambda: "schedule-1",
+    )
+    runner_scheduler = FakeScheduler()
+    runner = ReportSchedulerService(
+        store=store,
+        scheduler=runner_scheduler,
+        diagnostic=lambda *_args: {
+            "ok": True,
+            "data": {},
+            "error": None,
+            "audit_id": "audit-1",
+        },
+        reporter=lambda _report: None,
+        trigger_factory=lambda cron, timezone: (cron, timezone),
+        clock=lambda: NOW,
+    )
+    created = admin.create(schedule(), owner=owner())
+
+    runner.init_scheduler()
+    assert "agent-report:schedule-1" in runner_scheduler.jobs
+    assert "agent-report:sync" in runner_scheduler.jobs
+
+    admin.update(
+        created["id"], {**schedule(enabled=False), "revision": created["revision"]}
+    )
+    runner.sync_scheduler()
+
+    assert "agent-report:schedule-1" not in runner_scheduler.jobs
