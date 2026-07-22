@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import stat
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
@@ -199,7 +200,15 @@ class ActionLedger:
                 connection.executescript(_SCHEMA)
             # The dashboard, proposal broker, and isolated actuator are separate
             # service identities in the trusted ``pihealth`` state group.
-            os.chmod(self._path, 0o660)
+            try:
+                os.chmod(self._path, 0o660)
+            except PermissionError:
+                metadata = self._path.stat(follow_symlinks=False)
+                if (
+                    not stat.S_ISREG(metadata.st_mode)
+                    or stat.S_IMODE(metadata.st_mode) != 0o660
+                ):
+                    raise
         except (OSError, sqlite3.Error) as exc:
             raise ActionLedgerError("store_unavailable", "Action ledger is unavailable") from exc
 

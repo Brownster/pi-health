@@ -220,6 +220,41 @@ def test_ledger_is_private_and_idempotent(tmp_path):
     assert os.stat(tmp_path / "state" / "actions.sqlite3").st_mode & 0o777 == 0o660
 
 
+def test_ledger_accepts_secure_group_file_owned_by_another_identity(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "actions.sqlite3"
+    ActionLedger(path)
+    real_chmod = os.chmod
+
+    def deny_database_chmod(target, mode, *args, **kwargs):
+        if os.fspath(target) == os.fspath(path):
+            raise PermissionError("owned by another service identity")
+        return real_chmod(target, mode, *args, **kwargs)
+
+    monkeypatch.setattr(os, "chmod", deny_database_chmod)
+
+    ActionLedger(path)
+
+
+def test_ledger_rejects_insecure_file_owned_by_another_identity(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "actions.sqlite3"
+    ActionLedger(path)
+    path.chmod(0o666)
+
+    def deny_chmod(*_args, **_kwargs):
+        raise PermissionError("owned by another service identity")
+
+    monkeypatch.setattr(os, "chmod", deny_chmod)
+
+    with pytest.raises(ActionLedgerError) as unavailable:
+        ActionLedger(path)
+
+    assert unavailable.value.code == "store_unavailable"
+
+
 def test_ledger_rejects_idempotency_payload_conflict(tmp_path):
     ledger = ActionLedger(tmp_path / "actions.sqlite3")
     ledger.create(_new_action())
