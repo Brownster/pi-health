@@ -64,7 +64,7 @@ def handle_compose_file_conflict(error):
 
 def _stack_lock_path(name):
     lock_dir = os.path.join(STACKS_PATH, '.locks')
-    os.makedirs(lock_dir, mode=0o700, exist_ok=True)
+    os.makedirs(lock_dir, mode=0o2770, exist_ok=True)
     return os.path.join(lock_dir, f'{name}.lock')
 
 
@@ -96,7 +96,7 @@ def stack_lock(name):
 
     lock_file = open(lock_path, 'a+')
     try:
-        os.chmod(lock_path, 0o600)
+        os.chmod(lock_path, 0o660)
         fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
         held_locks[lock_path] = {'file': lock_file, 'depth': 1}
         try:

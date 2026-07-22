@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import stat
+import subprocess
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pihealth_helper as helper
@@ -17,6 +22,8 @@ from agent_provider.provisioning import (
     ACTION_STATE_DIR,
     ACTION_WORKER_UNIT_PATH,
     AGENT_REPAIR_UNIT_PATH,
+    AGENT_RUNTIME_MODULES,
+    AGENT_RUNTIME_PACKAGES,
     EXTENSION_REPAIR_UNIT_PATH,
     AGENT_ENV_PATH,
     AGENT_LIB_DIR,
@@ -24,6 +31,7 @@ from agent_provider.provisioning import (
     CLAUDE_CONFIG_DIR,
     LIMEOPS_STATE_DIR,
     MATTERMOST_REPAIR_UNIT_PATH,
+    STACK_LOCK_DIR,
     render_agent_unit,
     render_action_broker_unit,
     render_action_worker_unit,
@@ -52,7 +60,7 @@ def test_agent_unit_has_no_privileged_sockets_or_source_access():
     assert f"ReadWritePaths={AGENT_STATE_DIR} {CLAUDE_CONFIG_DIR}" in unit
     assert f"ReadOnlyPaths={AGENT_LIB_DIR}" in unit
     assert (
-        "InaccessiblePaths=/root /opt/pi-health /run/pihealth /run/limeos-actions "
+        "InaccessiblePaths=/root /opt/pi-health /run/pihealth -/run/limeos-actions "
         "/var/run/docker.sock "
         "/etc/limeos/credentials.env"
     ) in unit
@@ -92,6 +100,7 @@ def test_action_units_keep_worker_unprivileged_and_socket_separate():
     assert "agent-action-policy.json" in broker
     assert "agent-actuator-policy.json" in broker
     assert ACTION_SOCKET_DIR in broker
+    assert f"ReadWritePaths={ACTION_SOCKET_DIR} {ACTION_STATE_DIR} /var/log/limeos {STACK_LOCK_DIR}" in broker
     assert "User=limeops-action-worker" in worker
     assert "SupplementaryGroups=pihealth limeops-action" in worker
     assert "python3 -m agent_actions.worker" in worker
@@ -417,6 +426,7 @@ def test_runtime_install_creates_fixed_identities_paths_and_units(tmp_path):
         patch.object(helper.os, "makedirs"),
         patch.object(helper.os.path, "isdir", return_value=True),
         patch.object(helper.os.path, "isfile", return_value=True),
+        patch.object(helper, "_secure_agent_stack_locks", return_value=True),
     ):
         result = helper.cmd_agent_runtime_install({})
 
@@ -457,7 +467,8 @@ def test_runtime_install_creates_fixed_identities_paths_and_units(tmp_path):
     assert any(CLAUDE_CONFIG_DIR in command for command in install_dirs)
     assert any(LIMEOPS_STATE_DIR in command for command in install_dirs)
     assert any(ACTION_STATE_DIR in command for command in install_dirs)
-    assert any(ACTION_SOCKET_DIR in command for command in install_dirs)
+    assert any(STACK_LOCK_DIR in command and "2770" in command for command in install_dirs)
+    assert not any(ACTION_SOCKET_DIR in command for command in install_dirs)
     assert ["chmod", "-R", "u=rwX,go=rX", AGENT_LIB_DIR] in commands
     assert ["systemctl", "restart", "limeopsd.service"] in commands
     assert ["systemctl", "restart", "limeops-actuatord.service"] in commands
@@ -466,6 +477,82 @@ def test_runtime_install_creates_fixed_identities_paths_and_units(tmp_path):
     assert [
         "apt-get", "install", "-y", "python3-psutil", "python3-docker"
     ] in commands
+
+
+def test_installed_runtime_can_import_action_broker_without_dashboard_source(tmp_path):
+    repo = Path(__file__).parents[1]
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    for package in AGENT_RUNTIME_PACKAGES:
+        shutil.copytree(repo / package, runtime / package)
+    for module in AGENT_RUNTIME_MODULES:
+        shutil.copy2(repo / module, runtime / module)
+    shutil.copy2(repo / "limeos_packages.py", runtime / "limeos_packages.py")
+
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(runtime)
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "from agent_actions.server import _build_actuator; "
+                "_build_actuator('policy.json', 'actions.sqlite3')"
+            ),
+        ],
+        cwd=runtime,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_agent_repo_commit_runs_git_as_dashboard_owner():
+    with (
+        patch.object(helper, "_agent_dashboard_user", return_value="holly"),
+        patch.object(
+            helper,
+            "_git_as",
+            return_value={"returncode": 0, "stdout": "abc123\n"},
+        ) as git_as,
+    ):
+        assert helper._agent_repo_commit("/home/holly/pi-health") == "abc123"
+
+    git_as.assert_called_once_with(
+        "holly", "/home/holly/pi-health", "rev-parse", "HEAD"
+    )
+
+
+def test_shared_stack_locks_reject_unexpected_entries(tmp_path):
+    (tmp_path / "media.lock").touch()
+    (tmp_path / "unexpected").touch()
+    with (
+        patch.object(helper, "STACK_LOCK_DIR", str(tmp_path)),
+        patch.object(helper.pwd, "getpwnam", return_value=SimpleNamespace(pw_uid=1000)),
+        patch("grp.getgrnam", return_value=SimpleNamespace(gr_gid=1001)),
+        patch.object(helper.os, "fchown") as fchown,
+    ):
+        assert helper._secure_agent_stack_locks("holly") is False
+    fchown.assert_not_called()
+
+
+def test_shared_stack_locks_are_group_writable(tmp_path):
+    lock = tmp_path / "media.lock"
+    lock.touch()
+    with (
+        patch.object(helper, "STACK_LOCK_DIR", str(tmp_path)),
+        patch.object(helper.pwd, "getpwnam", return_value=SimpleNamespace(pw_uid=1000)),
+        patch("grp.getgrnam", return_value=SimpleNamespace(gr_gid=1001)),
+        patch.object(helper.os, "fchown") as fchown,
+        patch.object(helper.os, "fchmod") as fchmod,
+    ):
+        assert helper._secure_agent_stack_locks("holly") is True
+    descriptor = fchown.call_args.args[0]
+    fchown.assert_called_once_with(descriptor, 1000, 1001)
+    fchmod.assert_called_once_with(descriptor, 0o660)
 
 
 def test_broker_state_requires_the_limeops_socket():

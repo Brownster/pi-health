@@ -13,6 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from runtime_paths import migrate_legacy_runtime_data
+from agent_provider.provisioning import STACK_LOCK_DIR
 
 
 HELPER_RESTART_DROPIN = "restart-with-pi-health.conf"
@@ -36,6 +37,26 @@ def ensure_agent_runtime_roots() -> None:
             "-p",
             "/var/lib/lime-agent",
             "/var/lib/limeops",
+        ],
+        check=True,
+    )
+    subprocess.run(
+        [
+            "systemd-run",
+            "--quiet",
+            "--wait",
+            "--pipe",
+            "--collect",
+            "--service-type=exec",
+            "/usr/bin/install",
+            "-d",
+            "-o",
+            "root",
+            "-g",
+            "pihealth",
+            "-m",
+            "2770",
+            STACK_LOCK_DIR,
         ],
         check=True,
     )
@@ -190,7 +211,8 @@ def ensure_helper_agent_permissions(
         f"Environment=PIHEALTH_REPO_DIR={repo_dir.resolve()}\n"
         "ReadWritePaths=/etc/apt\n"
         "ReadWritePaths=/usr /var/lib/apt /var/lib/dpkg /var/cache/apt\n"
-        "ReadWritePaths=-/var/lib/lime-agent -/var/lib/limeops -/run/limeos\n"
+        "ReadWritePaths=-/var/lib/lime-agent -/var/lib/limeops "
+        f"-{STACK_LOCK_DIR}\n"
     )
     return _ensure_helper_dropin(systemd_dir, HELPER_AGENT_DROPIN, content)
 

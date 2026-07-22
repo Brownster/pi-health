@@ -88,3 +88,67 @@ def test_action_container_status_adds_private_fingerprint_fields(monkeypatch):
     assert status["image_id"] == "sha256:image-id"
     assert status["started_at"] == "2026-07-21T10:00:00Z"
     assert "id" not in wiring._container_summary(inspect_data[0])
+
+
+def test_stack_inspect_uses_compose_json_and_never_returns_secret_values(monkeypatch):
+    calls = []
+    details = {
+        "name": "media",
+        "path": "/opt/stacks/media",
+        "compose_file": "compose.yaml",
+        "compose_content": "secret source",
+        "has_env": True,
+        "env_content": "TOKEN=secret",
+        "status": {"status": "running", "containers": []},
+    }
+    compose = {
+        "services": {
+            "jellyfin": {
+                "image": "jellyfin:latest",
+                "environment": {"TOKEN": "secret"},
+            }
+        }
+    }
+
+    class StackReads:
+        @staticmethod
+        def stack_details(name):
+            assert name == "media"
+            return details
+
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return _completed(json.dumps(compose))
+
+    monkeypatch.setattr(wiring, "_stack_reads", lambda: StackReads())
+    monkeypatch.setattr(wiring.subprocess, "run", run)
+
+    result = wiring._stack_inspect("media")
+
+    assert result == {
+        "name": "media",
+        "compose_file": "compose.yaml",
+        "has_env": True,
+        "status": {"status": "running", "containers": []},
+        "services": [
+            {
+                "name": "jellyfin",
+                "image": "jellyfin:latest",
+                "ports": [],
+                "restart": "",
+                "depends_on": [],
+                "environment_keys": ["TOKEN"],
+            }
+        ],
+    }
+    assert "secret" not in json.dumps(result)
+    assert calls[0][0] == [
+        "docker",
+        "compose",
+        "-f",
+        "compose.yaml",
+        "config",
+        "--format",
+        "json",
+    ]
+    assert calls[0][1]["cwd"] == "/opt/stacks/media"

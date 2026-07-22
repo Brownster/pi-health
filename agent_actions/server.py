@@ -28,6 +28,7 @@ from agent_actions.integrations import (
 from agent_actions.ledger import ActionLedger
 from agent_actions.packages import package_job_status, package_repair_status
 from agent_actions.policy import ActionPolicy, ActionPolicyError
+from agent_actions.stack_runtime import default_stack_operations_service
 from container_operations_service import ContainerOperationsService
 from helper_client import HelperError, helper_call
 from limeops.broker import JsonlAuditWriter, LimeOpsBroker
@@ -35,7 +36,6 @@ from limeops.policy import LimeOpsPolicy, PolicyError
 from limeops.server import LimeOpsUnixServer
 from limeops.wiring import _container_action_status, _stack_inspect
 from ports import DockerClientAdapter
-from stack_manager import default_stack_operations_service
 
 
 DEFAULT_SOCKET_PATH = "/run/limeos-actions/actions.sock"
