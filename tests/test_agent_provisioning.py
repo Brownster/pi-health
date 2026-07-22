@@ -615,10 +615,17 @@ def test_agent_repo_commit_runs_git_as_dashboard_owner():
 
 
 def test_shared_stack_locks_reject_unexpected_entries(tmp_path):
-    (tmp_path / "media.lock").touch()
-    (tmp_path / "unexpected").touch()
+    valid = tmp_path / "media.lock"
+    unexpected = tmp_path / "unexpected"
+    valid.touch()
+    unexpected.touch()
+    entries = [
+        SimpleNamespace(name=valid.name, path=str(valid)),
+        SimpleNamespace(name=unexpected.name, path=str(unexpected)),
+    ]
     with (
         patch.object(helper, "STACK_LOCK_DIR", str(tmp_path)),
+        patch.object(helper.os, "scandir", return_value=entries),
         patch.object(helper.pwd, "getpwnam", return_value=SimpleNamespace(pw_uid=1000)),
         patch("grp.getgrnam", return_value=SimpleNamespace(gr_gid=1001)),
         patch.object(helper.os, "fchown") as fchown,

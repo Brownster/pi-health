@@ -3314,6 +3314,7 @@ def _secure_agent_stack_locks(dashboard_user):
     """Make only validated stack lock files writable by the shared pihealth group."""
     import grp
 
+    descriptors = []
     try:
         owner_uid = pwd.getpwnam(dashboard_user).pw_uid
         group_gid = grp.getgrnam('pihealth').gr_gid
@@ -3326,21 +3327,22 @@ def _secure_agent_stack_locks(dashboard_user):
             or '..' in entry.name
         ):
             return False
-        try:
+    try:
+        for entry in entries:
             descriptor = os.open(
                 entry.path,
                 os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW,
             )
-        except OSError:
-            return False
-        try:
+            descriptors.append(descriptor)
             if not stat.S_ISREG(os.fstat(descriptor).st_mode):
                 return False
+        for descriptor in descriptors:
             os.fchown(descriptor, owner_uid, group_gid)
             os.fchmod(descriptor, 0o660)
-        except OSError:
-            return False
-        finally:
+    except OSError:
+        return False
+    finally:
+        for descriptor in descriptors:
             os.close(descriptor)
     return True
 
