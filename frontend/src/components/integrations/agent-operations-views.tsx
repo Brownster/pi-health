@@ -6,6 +6,7 @@ import {
   ChevronRight,
   CircleStop,
   FileWarning,
+  Fingerprint,
   History,
   Loader2,
   Pencil,
@@ -14,6 +15,7 @@ import {
   Save,
   ShieldAlert,
   ShieldCheck,
+  ShieldX,
   Trash2,
   TriangleAlert,
   X,
@@ -23,9 +25,11 @@ import { Badge, type BadgeProps } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   actionCanBeApproved,
+  actionCanBeAttested,
   actionCanBeCancelled,
   actionCanBeRejected,
   approveAgentAction,
+  attestAgentCanary,
   cancelAgentAction,
   createAgentSchedule,
   editableSchedule,
@@ -34,11 +38,13 @@ import {
   getAgentActionCapabilities,
   getAgentActions,
   getAgentAutomationPolicy,
+  getAgentCanaries,
   getAgentSchedules,
   getAgentFinding,
   getAgentFindings,
   rejectAgentAction,
   rejectAgentFinding,
+  revokeAgentCanary,
   newAgentSchedule,
   scheduleReady,
   updateAgentSchedule,
@@ -49,6 +55,8 @@ import {
   type AgentActionState,
   type AgentAuthorityMode,
   type AgentAutomationPolicy,
+  type AgentCanary,
+  type AgentCanarySnapshot,
   type AgentDiagnosticCheck,
   type AgentFinding,
   type AgentFindingContent,
@@ -60,7 +68,7 @@ import {
 
 const FIELD_CLASS =
   "min-h-11 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
-const AUTHORITY_OPTIONS: AgentAuthorityMode[] = ["observe", "propose", "approval"];
+const AUTHORITY_OPTIONS: AgentAuthorityMode[] = ["observe", "propose", "approval", "supervised"];
 const TRIGGERS = ["interactive", "scheduled", "event"] as const;
 
 function errorMessage(error: unknown): string {
@@ -151,6 +159,22 @@ export function AgentActionsView({ canAdmin }: { canAdmin: boolean }) {
     }
   }
 
+  async function attest() {
+    if (!selected) return;
+    setBusy("canary");
+    try {
+      await attestAgentCanary(selected.id);
+      const detail = await getAgentAction(selected.id);
+      setSelected(detail);
+      setActions((current) => current.map((item) => item.id === detail.id ? detail : item));
+      setError(null);
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setBusy(null);
+    }
+  }
+
   if (loading && !actions.length) return <LoadingState label="Loading action queue" />;
 
   return (
@@ -170,14 +194,17 @@ export function AgentActionsView({ canAdmin }: { canAdmin: boolean }) {
               </button>
             ))}
           </div>
-          {selected ? <ActionDetail action={selected} busy={busy !== null} canAdmin={canAdmin} onApprove={() => void mutate("approve")} onCancel={() => void mutate("cancel")} onClose={() => setSelected(null)} onReject={() => void mutate("reject")} /> : <div className="flex min-h-52 items-center justify-center rounded-md border border-dashed border-border px-6 text-center text-sm text-muted-foreground">Select an action to review its immutable proposal and event history.</div>}
+          {selected ? <ActionDetail action={selected} busy={busy !== null} canAdmin={canAdmin} onApprove={() => void mutate("approve")} onAttest={() => void attest()} onCancel={() => void mutate("cancel")} onClose={() => setSelected(null)} onReject={() => void mutate("reject")} /> : <div className="flex min-h-52 items-center justify-center rounded-md border border-dashed border-border px-6 text-center text-sm text-muted-foreground">Select an action to review its immutable proposal and event history.</div>}
         </div>
       )}
     </div>
   );
 }
 
-function ActionDetail({ action, busy, canAdmin, onApprove, onCancel, onClose, onReject }: { action: AgentAction; busy: boolean; canAdmin: boolean; onApprove: () => void; onCancel: () => void; onClose: () => void; onReject: () => void }) {
+function ActionDetail({ action, busy, canAdmin, onApprove, onAttest, onCancel, onClose, onReject }: { action: AgentAction; busy: boolean; canAdmin: boolean; onApprove: () => void; onAttest: () => void; onCancel: () => void; onClose: () => void; onReject: () => void }) {
+  const [confirmCanary, setConfirmCanary] = useState(false);
+  useEffect(() => setConfirmCanary(false), [action.id]);
+  const canAttest = canAdmin && actionCanBeAttested(action);
   return (
     <section className="space-y-4 rounded-md border border-border bg-muted/10 p-4" aria-label={`Action ${action.id}`}>
       <div className="flex items-start justify-between gap-3"><div><div className="flex flex-wrap gap-2"><Badge tone={actionTone(action.state)}>{humanize(action.state)}</Badge><Badge>{action.risk}</Badge><Badge tone="info">{humanize(action.authority_mode)}</Badge></div><h4 className="mt-2 font-mono text-sm font-semibold">{action.operation}</h4><p className="text-xs text-muted-foreground">{action.target} · expires {formatTime(action.expires_at)}</p></div><Button aria-label="Close action detail" onClick={onClose} size="icon" variant="ghost"><X className="h-4 w-4" /></Button></div>
@@ -185,7 +212,9 @@ function ActionDetail({ action, busy, canAdmin, onApprove, onCancel, onClose, on
       <div><p className="mb-2 font-mono text-[10px] uppercase text-dim">Evidence</p><div className="flex flex-wrap gap-2">{action.evidence_ids.length ? action.evidence_ids.map((id) => <Badge key={id}>{id}</Badge>) : <span className="text-xs text-muted-foreground">No evidence references attached</span>}</div></div>
       <details className="rounded-md border border-border"><summary className="min-h-11 cursor-pointer px-3 py-3 font-mono text-xs">Verified parameters</summary><pre className="overflow-auto border-t border-border bg-background/60 p-3 text-xs text-muted-foreground">{JSON.stringify(action.params, null, 2)}</pre></details>
       {action.events?.length ? <div><p className="mb-2 font-mono text-[10px] uppercase text-dim">Event history</p><ol className="space-y-2 border-l border-border pl-3">{action.events.map((event, index) => <li className="text-xs" key={`${event.created_at}-${index}`}><span className="font-medium">{humanize(event.phase)}</span><span className="ml-2 text-dim">{formatTime(event.created_at)}</span></li>)}</ol></div> : null}
+      {canAttest && confirmCanary ? <div className="space-y-3 border-l-2 border-warning bg-warning/5 px-4 py-3"><div className="flex items-start gap-2"><Fingerprint aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-warning" /><div><p className="text-sm font-medium">Record this verified repair as canary evidence?</p><p className="mt-1 text-xs text-muted-foreground">This unlocks only scheduled supervised authority for the exact operation, target, and capability version. It does not change policy or release the emergency stop.</p></div></div><div className="flex flex-wrap justify-end gap-2"><Button disabled={busy} onClick={() => setConfirmCanary(false)} size="sm" variant="outline">Cancel</Button><Button className="gap-2" disabled={busy} onClick={onAttest} size="sm" variant="warning">{busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5" />}Confirm canary</Button></div></div> : null}
       {canAdmin && (actionCanBeApproved(action) || actionCanBeRejected(action) || actionCanBeCancelled(action)) ? <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-4">{actionCanBeCancelled(action) ? <Button className="gap-2" disabled={busy} onClick={onCancel} size="sm" variant="outline"><CircleStop className="h-3.5 w-3.5" />Cancel</Button> : null}{actionCanBeRejected(action) ? <Button className="gap-2" disabled={busy} onClick={onReject} size="sm" variant="danger"><Ban className="h-3.5 w-3.5" />Reject</Button> : null}{actionCanBeApproved(action) ? <Button className="gap-2" disabled={busy} onClick={onApprove} size="sm" variant="success">{busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}Approve once</Button> : null}</div> : null}
+      {canAttest && !confirmCanary ? <div className="flex justify-end border-t border-border pt-4"><Button className="gap-2" disabled={busy} onClick={() => setConfirmCanary(true)} size="sm" variant="warning"><Fingerprint className="h-3.5 w-3.5" />Record repair canary</Button></div> : null}
     </section>
   );
 }
@@ -274,11 +303,90 @@ function TextField({ label, onChange, value }: { label: string; onChange: (value
   return <label className="space-y-1.5"><span className="text-xs">{label}</span><textarea className={`${FIELD_CLASS} min-h-24 resize-y`} onChange={(event) => onChange(event.target.value)} value={value} /></label>;
 }
 
+function canaryTone(status: AgentCanary["status"]): BadgeProps["tone"] {
+  if (status === "eligible") return "success";
+  if (status === "stale") return "warning";
+  return "neutral";
+}
+
+function CanaryGatePanel({ busy, confirmId, onCancel, onConfirm, onRevoke, snapshot }: {
+  busy: string | null;
+  confirmId: string | null;
+  onCancel: () => void;
+  onConfirm: (id: string) => void;
+  onRevoke: (id: string) => void;
+  snapshot: AgentCanarySnapshot;
+}) {
+  return (
+    <section className="rounded-md border border-border" data-agent-canary-gate>
+      <div className="flex flex-col gap-3 border-b border-border bg-muted/20 p-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex items-start gap-3">
+          <ShieldCheck aria-hidden="true" className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+          <div>
+            <h4 className="font-mono text-sm font-semibold">Repair canary gate</h4>
+            <p className="mt-1 text-xs text-muted-foreground">Verified interactive R1 repairs unlock only the matching scheduled supervised authority. Autonomous authority remains unavailable.</p>
+          </div>
+        </div>
+        <div className="flex shrink-0 flex-wrap gap-2">
+          <Badge tone={snapshot.gate.eligible_count ? "success" : "neutral"}>{snapshot.gate.eligible_count} eligible</Badge>
+          <Badge tone="neutral">autonomous locked</Badge>
+        </div>
+      </div>
+      {!snapshot.canaries.length ? (
+        <div className="flex min-h-28 items-center justify-center gap-2 p-4 text-center text-sm text-muted-foreground">
+          <ShieldX aria-hidden="true" className="h-4 w-4" />
+          No repair canary evidence has been recorded.
+        </div>
+      ) : (
+        <div className="divide-y divide-border">
+          {snapshot.canaries.map((canary) => (
+            <div className="space-y-3 p-4" key={canary.id}>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge tone={canaryTone(canary.status)}>{canary.status}</Badge>
+                    <span className="font-mono text-xs font-semibold">{canary.operation}</span>
+                    <Badge>{canary.risk}</Badge>
+                  </div>
+                  <p className="mt-2 break-all text-sm">{canary.target}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">capability v{canary.capability_version} · attested {formatTime(canary.attested_at)}</p>
+                  <p className="mt-1 break-all font-mono text-[10px] text-dim">source {canary.source_action_id} · release {canary.release_commit.slice(0, 12)}</p>
+                </div>
+                {canary.status !== "revoked" && confirmId !== canary.id ? (
+                  <Button className="gap-2 self-start" disabled={busy !== null} onClick={() => onConfirm(canary.id)} size="sm" variant="outline">
+                    <ShieldX aria-hidden="true" className="h-3.5 w-3.5" />
+                    Revoke
+                  </Button>
+                ) : null}
+              </div>
+              {confirmId === canary.id ? (
+                <div className="flex flex-col gap-3 border-l-2 border-warning bg-warning/5 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-xs text-muted-foreground">Revoking immediately blocks new supervised proposals and execution for this exact target.</p>
+                  <div className="flex shrink-0 flex-wrap gap-2">
+                    <Button disabled={busy !== null} onClick={onCancel} size="sm" variant="outline">Cancel</Button>
+                    <Button className="gap-2" disabled={busy !== null} onClick={() => onRevoke(canary.id)} size="sm" variant="warning">
+                      {busy === canary.id ? <Loader2 aria-hidden="true" className="h-3.5 w-3.5 animate-spin" /> : <ShieldX aria-hidden="true" className="h-3.5 w-3.5" />}
+                      Confirm revoke
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function AuthorityPolicyView() {
   const [policy, setPolicy] = useState<AgentAutomationPolicy | null>(null);
   const [capabilities, setCapabilities] = useState<AgentActionCapability[]>([]);
+  const [canarySnapshot, setCanarySnapshot] = useState<AgentCanarySnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [revoking, setRevoking] = useState<string | null>(null);
+  const [confirmRevoke, setConfirmRevoke] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [newTargets, setNewTargets] = useState<Record<string, string>>({});
@@ -286,9 +394,10 @@ function AuthorityPolicyView() {
   const load = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     try {
-      const [nextPolicy, catalogue] = await Promise.all([getAgentAutomationPolicy(signal), getAgentActionCapabilities(signal)]);
+      const [nextPolicy, catalogue, canaries] = await Promise.all([getAgentAutomationPolicy(signal), getAgentActionCapabilities(signal), getAgentCanaries(signal)]);
       setPolicy(nextPolicy);
       setCapabilities(catalogue.capabilities);
+      setCanarySnapshot(canaries);
       setError(null);
     } catch (caught) {
       if (!(caught instanceof DOMException && caught.name === "AbortError")) setError(errorMessage(caught));
@@ -320,13 +429,118 @@ function AuthorityPolicyView() {
     setSaving(true);
     try { setPolicy(await updateAgentAutomationPolicy(policy)); setSaved(true); setError(null); } catch (caught) { setError(errorMessage(caught)); } finally { setSaving(false); }
   }
+  async function revokeCanary(id: string) {
+    setRevoking(id);
+    try {
+      await revokeAgentCanary(id);
+      setCanarySnapshot(await getAgentCanaries());
+      setConfirmRevoke(null);
+      setSaved(false);
+      setError(null);
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setRevoking(null);
+    }
+  }
 
-  if (loading && !policy) return <LoadingState label="Loading automation policy" />;
-  if (!policy) return <div className="space-y-3">{error ? <InlineError message={error} /> : null}</div>;
+  if (loading && (!policy || !canarySnapshot)) return <LoadingState label="Loading automation policy" />;
+  if (!policy || !canarySnapshot) return <div className="space-y-3">{error ? <InlineError message={error} /> : null}</div>;
   const ttlValid = Number.isInteger(policy.defaults.proposal_ttl_seconds)
     && policy.defaults.proposal_ttl_seconds >= 60
     && policy.defaults.proposal_ttl_seconds <= 86400;
-  return <div className="space-y-5" data-agent-automation-view><div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><h3 className="font-mono text-sm font-semibold">Authority policy</h3><p className="text-xs text-muted-foreground">Targets are deny-by-default. Automatic supervised and autonomous modes remain locked until the repair canary gate passes.</p></div><Button className="gap-2 self-start" disabled={loading} onClick={() => void load()} size="sm" variant="outline"><RefreshCw className="h-3.5 w-3.5" />Reload</Button></div>{error ? <InlineError message={error} /> : null}<label className={`flex items-start gap-3 border-l-2 px-4 py-3 ${policy.kill_switch ? "border-success bg-success/5" : "border-danger bg-danger/5"}`}><input checked={policy.kill_switch} className="mt-0.5 h-5 w-5 accent-primary" onChange={(event) => { setSaved(false); setPolicy({ ...policy, kill_switch: event.target.checked }); }} type="checkbox" /><span><span className="flex items-center gap-2 text-sm font-medium"><ShieldAlert className="h-4 w-4" />Emergency stop {policy.kill_switch ? "engaged" : "released"}</span><span className="mt-1 block text-xs text-muted-foreground">When engaged, approvals and execution fail closed. Policy review and private findings remain available.</span></span></label><label className="block max-w-xs space-y-1.5"><span className="text-xs">Proposal expiry (seconds)</span><input className={FIELD_CLASS} max={86400} min={60} onChange={(event) => { setSaved(false); setPolicy({ ...policy, defaults: { proposal_ttl_seconds: Number(event.target.value) } }); }} type="number" value={policy.defaults.proposal_ttl_seconds} /></label><div className="space-y-4">{Object.entries(policy.operations).map(([operation, config]) => { const capability = capabilityByOperation.get(operation); return <section className="rounded-md border border-border" key={operation}><div className="flex flex-col gap-3 border-b border-border bg-muted/20 p-3 sm:flex-row sm:items-center sm:justify-between"><div><div className="flex flex-wrap items-center gap-2"><h4 className="font-mono text-xs font-semibold">{operation}</h4><Badge>{capability?.risk ?? "unknown risk"}</Badge></div><p className="mt-1 text-xs text-muted-foreground">{Object.keys(config.targets).length} allowlisted target{Object.keys(config.targets).length === 1 ? "" : "s"}</p></div><label className="flex min-h-11 items-center gap-2 text-sm"><input checked={config.enabled} className="h-5 w-5 accent-primary" onChange={(event) => operationChange(operation, { enabled: event.target.checked })} type="checkbox" />Capability enabled</label></div><div className="space-y-3 p-3"><Field label="Approvers (comma separated actor IDs)" value={config.approvers.join(", ")} onChange={(value) => operationChange(operation, { approvers: value.split(",").map((item) => item.trim()).filter(Boolean) })} />{Object.entries(config.targets).map(([target, modes]) => <div className="grid gap-2 rounded-md border border-border p-3 lg:grid-cols-[minmax(10rem,1fr)_repeat(3,minmax(8rem,0.7fr))_auto] lg:items-end" key={target}><div><p className="font-mono text-[10px] uppercase text-dim">Target</p><p className="mt-2 truncate text-sm" title={target}>{target}</p></div>{TRIGGERS.map((trigger) => <label className="space-y-1" key={trigger}><span className="font-mono text-[10px] uppercase text-dim">{trigger}</span><select className={FIELD_CLASS} onChange={(event) => targetChange(operation, target, { ...modes, [trigger]: event.target.value as AgentAuthorityMode })} value={modes[trigger]}>{AUTHORITY_OPTIONS.filter((mode) => mode === "observe" || capability?.eligible_modes.includes(mode)).map((mode) => <option key={mode} value={mode}>{humanize(mode)}</option>)}</select></label>)}<Button aria-label={`Remove ${target} target`} onClick={() => targetChange(operation, target, null)} size="icon" variant="ghost"><Trash2 className="h-4 w-4" /></Button></div>)}<div className="flex flex-col gap-2 sm:flex-row"><input className={FIELD_CLASS} onChange={(event) => setNewTargets((current) => ({ ...current, [operation]: event.target.value }))} placeholder="Exact target name" value={newTargets[operation] ?? ""} /><Button className="gap-2 shrink-0" disabled={!newTargets[operation]?.trim()} onClick={() => addTarget(operation)} variant="secondary"><Plus className="h-4 w-4" />Allow target</Button></div></div></section>; })}</div><div className="flex flex-col-reverse gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-end">{saved ? <span className="flex items-center gap-2 text-sm text-success" role="status"><Check className="h-4 w-4" />Policy saved</span> : null}<Button className="gap-2" disabled={saving || !ttlValid} onClick={() => void save()}>{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}Save policy</Button></div></div>;
+  return (
+    <div className="space-y-5" data-agent-automation-view>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h3 className="font-mono text-sm font-semibold">Authority policy</h3>
+          <p className="text-xs text-muted-foreground">Targets are deny-by-default. Supervised scheduling requires exact canary evidence; autonomous authority remains locked.</p>
+        </div>
+        <Button className="gap-2 self-start" disabled={loading} onClick={() => void load()} size="sm" variant="outline">
+          <RefreshCw className={loading ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} />
+          Reload
+        </Button>
+      </div>
+      {error ? <InlineError message={error} /> : null}
+      <CanaryGatePanel
+        busy={revoking}
+        confirmId={confirmRevoke}
+        onCancel={() => setConfirmRevoke(null)}
+        onConfirm={setConfirmRevoke}
+        onRevoke={(id) => void revokeCanary(id)}
+        snapshot={canarySnapshot}
+      />
+      <label className={`flex items-start gap-3 border-l-2 px-4 py-3 ${policy.kill_switch ? "border-success bg-success/5" : "border-danger bg-danger/5"}`}>
+        <input checked={policy.kill_switch} className="mt-0.5 h-5 w-5 accent-primary" onChange={(event) => { setSaved(false); setPolicy({ ...policy, kill_switch: event.target.checked }); }} type="checkbox" />
+        <span>
+          <span className="flex items-center gap-2 text-sm font-medium"><ShieldAlert className="h-4 w-4" />Emergency stop {policy.kill_switch ? "engaged" : "released"}</span>
+          <span className="mt-1 block text-xs text-muted-foreground">When engaged, approvals and execution fail closed. Policy review and private findings remain available.</span>
+        </span>
+      </label>
+      <label className="block max-w-xs space-y-1.5">
+        <span className="text-xs">Proposal expiry (seconds)</span>
+        <input className={FIELD_CLASS} max={86400} min={60} onChange={(event) => { setSaved(false); setPolicy({ ...policy, defaults: { proposal_ttl_seconds: Number(event.target.value) } }); }} type="number" value={policy.defaults.proposal_ttl_seconds} />
+      </label>
+      <div className="space-y-4">
+        {Object.entries(policy.operations).map(([operation, config]) => {
+          const capability = capabilityByOperation.get(operation);
+          return (
+            <section className="rounded-md border border-border" key={operation}>
+              <div className="flex flex-col gap-3 border-b border-border bg-muted/20 p-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2"><h4 className="font-mono text-xs font-semibold">{operation}</h4><Badge>{capability?.risk ?? "unknown risk"}</Badge></div>
+                  <p className="mt-1 text-xs text-muted-foreground">{Object.keys(config.targets).length} allowlisted target{Object.keys(config.targets).length === 1 ? "" : "s"}</p>
+                </div>
+                <label className="flex min-h-11 items-center gap-2 text-sm"><input checked={config.enabled} className="h-5 w-5 accent-primary" onChange={(event) => operationChange(operation, { enabled: event.target.checked })} type="checkbox" />Capability enabled</label>
+              </div>
+              <div className="space-y-3 p-3">
+                <Field label="Approvers (comma separated actor IDs)" value={config.approvers.join(", ")} onChange={(value) => operationChange(operation, { approvers: value.split(",").map((item) => item.trim()).filter(Boolean) })} />
+                {Object.entries(config.targets).map(([target, modes]) => (
+                  <div className="grid gap-2 rounded-md border border-border p-3 lg:grid-cols-[minmax(10rem,1fr)_repeat(3,minmax(8rem,0.7fr))_auto] lg:items-end" key={target}>
+                    <div><p className="font-mono text-[10px] uppercase text-dim">Target</p><p className="mt-2 truncate text-sm" title={target}>{target}</p></div>
+                    {TRIGGERS.map((trigger) => {
+                      const hasCanary = trigger === "scheduled"
+                        && capability?.risk === "R1"
+                        && capability.eligible_modes.includes("supervised")
+                        && canarySnapshot.canaries.some((canary) => canary.status === "eligible"
+                          && canary.operation === operation
+                          && canary.target === target
+                          && canary.capability_version === capability.version);
+                      const options = AUTHORITY_OPTIONS.filter((mode) => (
+                        mode === "observe"
+                        || (mode === "supervised" ? hasCanary : capability?.eligible_modes.includes(mode))
+                      ));
+                      if (!options.includes(modes[trigger])) options.push(modes[trigger]);
+                      return (
+                        <label className="space-y-1" key={trigger}>
+                          <span className="font-mono text-[10px] uppercase text-dim">{trigger}</span>
+                          <select className={FIELD_CLASS} onChange={(event) => targetChange(operation, target, { ...modes, [trigger]: event.target.value as AgentAuthorityMode })} value={modes[trigger]}>
+                            {options.map((mode) => {
+                              const locked = mode === "autonomous" || (mode === "supervised" && !hasCanary);
+                              return <option disabled={locked} key={mode} value={mode}>{humanize(mode)}{mode === "autonomous" ? " (unavailable)" : mode === "supervised" && !hasCanary ? " (canary required)" : ""}</option>;
+                            })}
+                          </select>
+                        </label>
+                      );
+                    })}
+                    <Button aria-label={`Remove ${target} target`} onClick={() => targetChange(operation, target, null)} size="icon" variant="ghost"><Trash2 className="h-4 w-4" /></Button>
+                  </div>
+                ))}
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <input className={FIELD_CLASS} onChange={(event) => setNewTargets((current) => ({ ...current, [operation]: event.target.value }))} placeholder="Exact target name" value={newTargets[operation] ?? ""} />
+                  <Button className="gap-2 shrink-0" disabled={!newTargets[operation]?.trim()} onClick={() => addTarget(operation)} variant="secondary"><Plus className="h-4 w-4" />Allow target</Button>
+                </div>
+              </div>
+            </section>
+          );
+        })}
+      </div>
+      <div className="flex flex-col-reverse gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-end">
+        {saved ? <span className="flex items-center gap-2 text-sm text-success" role="status"><Check className="h-4 w-4" />Policy saved</span> : null}
+        <Button className="gap-2" disabled={saving || !ttlValid} onClick={() => void save()}>{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}Save policy</Button>
+      </div>
+    </div>
+  );
 }
 
 type ScheduleDraft =

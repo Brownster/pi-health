@@ -1954,6 +1954,42 @@ def install_v2_integrations_api_mocks():
                     ),
                 )
                 return
+            if path == "/api/integrations/agents/canaries" and method == "GET":
+                route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps(
+                        {
+                            "canaries": [
+                                {
+                                    "id": "canary-1",
+                                    "operation": "container.restart",
+                                    "target": "get_iplayer",
+                                    "trigger": "scheduled",
+                                    "capability_version": "1",
+                                    "risk": "R1",
+                                    "source_action_id": "action-canary-source",
+                                    "release_commit": "a" * 40,
+                                    "attested_by": {
+                                        "type": "local",
+                                        "id": "admin",
+                                        "username": "admin",
+                                    },
+                                    "attested_at": "2026-07-23T10:00:00+00:00",
+                                    "revoked_by": None,
+                                    "revoked_at": None,
+                                    "status": "eligible",
+                                }
+                            ],
+                            "gate": {
+                                "supervised": "canary_required",
+                                "autonomous": "unavailable",
+                                "eligible_count": 1,
+                            },
+                        }
+                    ),
+                )
+                return
             if path == "/api/integrations/agents/actions/capabilities" and method == "GET":
                 route.fulfill(
                     status=200,

@@ -85,6 +85,15 @@ export function actionCanBeApproved(action: AgentAction): boolean {
   return action.state === "awaiting_approval" && action.authority_mode === "approval";
 }
 
+export function actionCanBeAttested(action: AgentAction): boolean {
+  return action.state === "succeeded"
+    && action.terminal_code === "verified"
+    && action.risk === "R1"
+    && action.trigger === "interactive"
+    && action.authority_mode === "approval"
+    && !action.events?.some((event) => event.phase === "canary_attested");
+}
+
 export function actionCanBeRejected(action: AgentAction): boolean {
   return action.state === "proposed" || action.state === "awaiting_approval";
 }

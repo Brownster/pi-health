@@ -2,6 +2,7 @@ import { requestApi } from "./api";
 
 export {
   actionCanBeApproved,
+  actionCanBeAttested,
   actionCanBeCancelled,
   actionCanBeRejected,
   editableFinding,
@@ -103,6 +104,31 @@ export interface AgentAutomationPolicy {
   kill_switch: boolean;
   defaults: { proposal_ttl_seconds: number };
   operations: Record<string, AgentOperationPolicy>;
+}
+
+export interface AgentCanary {
+  id: string;
+  operation: string;
+  target: string;
+  trigger: "scheduled";
+  capability_version: string;
+  risk: "R1";
+  source_action_id: string;
+  release_commit: string;
+  attested_by: AgentActor;
+  attested_at: string;
+  revoked_by: AgentActor | null;
+  revoked_at: string | null;
+  status: "eligible" | "stale" | "revoked";
+}
+
+export interface AgentCanarySnapshot {
+  canaries: AgentCanary[];
+  gate: {
+    supervised: "canary_required";
+    autonomous: "unavailable";
+    eligible_count: number;
+  };
 }
 
 export interface AgentScheduleCheck {
@@ -232,6 +258,37 @@ export function getAgentActionCapabilities(signal?: AbortSignal): Promise<{
   kill_switch: boolean;
 }> {
   return requestApi("/api/integrations/agents/actions/capabilities", { method: "GET", signal });
+}
+
+export function getAgentCanaries(signal?: AbortSignal): Promise<AgentCanarySnapshot> {
+  return requestApi("/api/integrations/agents/canaries", {
+    method: "GET",
+    signal,
+  });
+}
+
+export async function attestAgentCanary(actionId: string): Promise<AgentCanary> {
+  const response = await requestApi<{ canary: AgentCanary }>(
+    `/api/integrations/agents/actions/${encodeURIComponent(actionId)}/canary`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    },
+  );
+  return response.canary;
+}
+
+export async function revokeAgentCanary(attestationId: string): Promise<AgentCanary> {
+  const response = await requestApi<{ canary: AgentCanary }>(
+    `/api/integrations/agents/canaries/${encodeURIComponent(attestationId)}/revoke`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    },
+  );
+  return response.canary;
 }
 
 export async function getAgentAutomationPolicy(signal?: AbortSignal): Promise<AgentAutomationPolicy> {
