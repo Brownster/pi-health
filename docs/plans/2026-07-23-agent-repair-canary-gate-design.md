@@ -2,7 +2,7 @@
 
 Date: 2026-07-23
 
-Status: Accepted implementation detail for AO-008
+Status: Accepted and target-Pi signed off 2026-07-23
 
 Parent plan: `docs/plans/2026-07-20-agent-operations-autonomy-implementation-plan.md`
 
@@ -176,11 +176,45 @@ The target-Pi release check:
 8. restarts the dashboard, action broker, and worker, then confirms the attestation,
    source action, and execution count remain singular;
 9. restores the backed-up approval policy and engages the kill switch; and
-10. retains the active attestation as evidence while scheduled authority remains
-    configured as `observe` until AO-009.
+10. retains the active attestation as evidence while the restored baseline keeps every
+    operation and scheduled target disabled until AO-009.
 
 Any unexpected container state, duplicate action, missing event, failed verification,
 or policy-restore failure stops the canary and leaves supervised scheduling locked.
+
+### Target-Pi Signoff
+
+Holly passed the release check on 2026-07-23 at merge commit
+`37cddac1d7839deb68e61140620e775863406832`:
+
+- The deployed checkout and root-owned release marker matched the merge commit.
+  `pi-health.service`, `limeops-actuatord.service`, and
+  `limeops-action-worker.service` were active.
+- The baseline ledger contained no actions, events, or attestations. The root-owned
+  action policy had SHA-256
+  `afce77a417daffe6b6910ac9dfd14031b8fdbdec49a6c612b77389bc339444d8`,
+  its kill switch engaged, and every operation disabled.
+- The temporary policy enabled only interactive approval for
+  `container.restart:get_iplayer` by `local:holly`. Action
+  `0d63228954a5466a9edbab5dbf9b852b` completed as `succeeded` with terminal code
+  `verified`.
+- `get_iplayer` retained its container and image identities, remained running without
+  an unhealthy state, and moved from start time
+  `2026-07-19T02:06:35.264753154Z` to
+  `2026-07-23T18:43:57.528159094Z`.
+- The single execution-start and success events shared action audit ID
+  `41c774394a4d42d3a5287865e5d7eab0`.
+- Attestation `4298e005-912f-46dd-8253-6bbbb7eda63d` was recorded against the source
+  action, capability version 1, risk R1, the scheduled trigger, and the deployed release.
+  Its status remained `eligible`; autonomous authority remained unavailable.
+- Both application validation and the independent root helper accepted supervised
+  scheduling for the exact attested target. Both rejected supervised scheduling for an
+  unrelated target.
+- Restarting the dashboard, actuator, and worker retained exactly one action, one
+  execution-start, one success, one canary event, and one active attestation.
+- The original policy was restored byte-for-byte, the kill switch was engaged, no
+  operation or target remained enabled, and the temporary rollback copy was removed.
+  The active attestation remains durable evidence for AO-009.
 
 ## Delivery Slices
 
