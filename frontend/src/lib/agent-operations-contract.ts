@@ -5,6 +5,9 @@ import type {
   AgentSchedule,
   AgentScheduleInput,
   AgentScheduleUpdate,
+  AgentRepairSchedule,
+  AgentRepairScheduleInput,
+  AgentRepairScheduleUpdate,
 } from "./agent-operations";
 
 const REPORT_ONLY_BUDGETS = {
@@ -54,6 +57,52 @@ export function scheduleReady(schedule: AgentScheduleInput): boolean {
         check.operation
         && Object.values(check.params).every((value) => value.trim())
       ))
+      && schedule.window.cron.trim()
+      && schedule.window.timezone.trim()
+      && Number.isInteger(schedule.window.duration_minutes)
+      && schedule.window.duration_minutes >= 1
+      && schedule.window.duration_minutes <= 1440,
+  );
+}
+
+export function newAgentRepairSchedule(): AgentRepairScheduleInput {
+  return {
+    name: "Recover get_iplayer",
+    enabled: false,
+    operation: "container.restart",
+    params: { name: "get_iplayer" },
+    service_priority: "normal",
+    window: {
+      cron: "0 2 * * *",
+      timezone: "Europe/London",
+      duration_minutes: 60,
+    },
+    delivery: { channel: "mattermost-alerts", mode: "threaded" },
+  };
+}
+
+export function editableRepairSchedule(
+  schedule: AgentRepairSchedule,
+): AgentRepairScheduleUpdate {
+  return {
+    name: schedule.name,
+    enabled: schedule.enabled,
+    operation: schedule.operation,
+    params: { ...schedule.params },
+    service_priority: schedule.service_priority,
+    window: { ...schedule.window },
+    delivery: { ...schedule.delivery },
+    revision: schedule.revision,
+  };
+}
+
+export function repairScheduleReady(
+  schedule: AgentRepairScheduleInput,
+): boolean {
+  return Boolean(
+    schedule.name.trim()
+      && schedule.operation === "container.restart"
+      && schedule.params.name === "get_iplayer"
       && schedule.window.cron.trim()
       && schedule.window.timezone.trim()
       && Number.isInteger(schedule.window.duration_minutes)

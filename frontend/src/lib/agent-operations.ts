@@ -6,8 +6,11 @@ export {
   actionCanBeCancelled,
   actionCanBeRejected,
   editableFinding,
+  editableRepairSchedule,
   editableSchedule,
   newAgentSchedule,
+  newAgentRepairSchedule,
+  repairScheduleReady,
   scheduleReady,
 } from "./agent-operations-contract";
 
@@ -184,6 +187,136 @@ export interface AgentScheduleUpdate extends AgentScheduleInput {
   revision: number;
 }
 
+export type AgentServicePriority = "critical" | "high" | "normal" | "low";
+
+export interface AgentRepairScheduleInput {
+  name: string;
+  enabled: boolean;
+  operation: "container.restart";
+  params: { name: "get_iplayer" };
+  service_priority: AgentServicePriority;
+  window: {
+    cron: string;
+    timezone: string;
+    duration_minutes: number;
+  };
+  delivery: { channel: "mattermost-alerts"; mode: "threaded" };
+}
+
+export interface AgentSupervisionAssessment {
+  id: string;
+  schedule_id: string;
+  assessed_for: string;
+  outcome: "healthy" | "failed" | "unknown";
+  code: string;
+  observed_status: string | null;
+  observed_health: string | null;
+  audit_id: string | null;
+  recorded_at: string;
+}
+
+export interface AgentIncidentTransition {
+  id: string;
+  incident_id: string;
+  type: string;
+  assessment_id: string | null;
+  details: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface AgentSupervisionIncident {
+  id: string;
+  schedule_id: string;
+  operation: string;
+  target: string;
+  state: string;
+  consecutive_failures: number;
+  last_assessment_id: string;
+  last_action_id: string | null;
+  thread_id: string | null;
+  opened_at: string;
+  updated_at: string;
+  resolved_at: string | null;
+  terminal_code: string | null;
+  revision: number;
+  transitions?: AgentIncidentTransition[];
+}
+
+export interface AgentDemotion {
+  id: string;
+  operation: string;
+  target: string;
+  cause: string;
+  source_action_id: string;
+  release_commit: string;
+  demoted_at: string;
+  cleared_by: AgentActor | null;
+  cleared_at: string | null;
+  recovery_action_id: string | null;
+  revision: number;
+  active: boolean;
+}
+
+export interface AgentRepairScheduleStatus {
+  assessments: AgentSupervisionAssessment[];
+  incident: AgentSupervisionIncident | null;
+  last_action: AgentAction | null;
+  canary:
+    | (Omit<AgentCanary, "status"> & {
+        status: "eligible" | "stale" | "unavailable";
+      })
+    | null;
+  demotion: AgentDemotion | null;
+  configured_authority: AgentAuthorityMode;
+  effective_authority: AgentAuthorityMode;
+  maintenance_window: {
+    key: string;
+    start: string;
+    deadline: string;
+  } | null;
+  budget: {
+    rolling_24h: { used: number; limit: 1 };
+    window: { used: number; limit: 1 };
+    last_charge: {
+      id: string;
+      action_id: string;
+      charged_at: string;
+    } | null;
+    cooldown_until: string | null;
+  };
+}
+
+export interface AgentRepairSchedule extends AgentRepairScheduleInput {
+  id: string;
+  target: string;
+  risk: "R1";
+  capability_version: string;
+  assessment_operation: "container.status";
+  assessment_interval_seconds: 600;
+  failure_threshold: 2;
+  owner: AgentActor;
+  created_at: string;
+  updated_at: string;
+  revision: number;
+  status: AgentRepairScheduleStatus;
+}
+
+export interface AgentRepairCatalogueItem {
+  operation: "container.restart";
+  params: { name: "get_iplayer" };
+  target: "get_iplayer";
+  risk: "R1";
+  capability_version: string;
+  assessment_operation: "container.status";
+  assessment_interval_seconds: 600;
+  failure_threshold: 2;
+  budgets: Record<string, number>;
+}
+
+export interface AgentRepairScheduleUpdate extends AgentRepairScheduleInput {
+  revision: number;
+}
+
 export type AgentFindingKind =
   | "bug"
   | "feature_request"
@@ -343,6 +476,107 @@ export async function updateAgentSchedule(
     },
   );
   return response.schedule;
+}
+
+export function getAgentRepairSchedules(signal?: AbortSignal): Promise<{
+  schedules: AgentRepairSchedule[];
+  catalogue: AgentRepairCatalogueItem[];
+  service_priorities: AgentServicePriority[];
+  limits: {
+    max_actions_per_target_24h: 1;
+    max_actions_per_window: 1;
+  };
+}> {
+  return requestApi("/api/integrations/agents/automation/repairs", {
+    method: "GET",
+    signal,
+  });
+}
+
+export async function createAgentRepairSchedule(
+  schedule: AgentRepairScheduleInput,
+): Promise<AgentRepairSchedule> {
+  const response = await requestApi<{ schedule: AgentRepairSchedule }>(
+    "/api/integrations/agents/automation/repairs",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(schedule),
+    },
+  );
+  return response.schedule;
+}
+
+export async function updateAgentRepairSchedule(
+  id: string,
+  schedule: AgentRepairScheduleUpdate,
+): Promise<AgentRepairSchedule> {
+  const response = await requestApi<{ schedule: AgentRepairSchedule }>(
+    `/api/integrations/agents/automation/repairs/${encodeURIComponent(id)}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(schedule),
+    },
+  );
+  return response.schedule;
+}
+
+export async function enableAgentRepairSchedule(
+  id: string,
+  revision: number,
+): Promise<AgentRepairSchedule> {
+  const response = await requestApi<{ schedule: AgentRepairSchedule }>(
+    `/api/integrations/agents/automation/repairs/${encodeURIComponent(id)}/enable`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        revision,
+        confirmation: "ENABLE SUPERVISION",
+      }),
+    },
+  );
+  return response.schedule;
+}
+
+export function getAgentSupervisionIncidents(
+  limit = 50,
+  signal?: AbortSignal,
+): Promise<{ incidents: AgentSupervisionIncident[] }> {
+  return requestApi(
+    `/api/integrations/agents/automation/incidents?limit=${limit}`,
+    { method: "GET", signal },
+  );
+}
+
+export function getAgentDemotions(
+  limit = 50,
+  signal?: AbortSignal,
+): Promise<{ demotions: AgentDemotion[] }> {
+  return requestApi(
+    `/api/integrations/agents/automation/demotions?limit=${limit}`,
+    { method: "GET", signal },
+  );
+}
+
+export async function clearAgentDemotion(
+  id: string,
+  values: {
+    revision: number;
+    recovery_action_id: string;
+    confirmation: "CLEAR DEMOTION";
+  },
+): Promise<AgentDemotion> {
+  const response = await requestApi<{ demotion: AgentDemotion }>(
+    `/api/integrations/agents/automation/demotions/${encodeURIComponent(id)}/clear`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(values),
+    },
+  );
+  return response.demotion;
 }
 
 export function getAgentFindings(limit = 50, signal?: AbortSignal): Promise<{ findings: AgentFinding[] }> {

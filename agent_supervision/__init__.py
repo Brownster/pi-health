@@ -1,5 +1,10 @@
 """Supervised repair schedules, assessments, incidents, and safety budgets."""
 
+from agent_supervision.admin import (
+    LazySupervisionAdminService,
+    SupervisionAdminError,
+    SupervisionAdminService,
+)
 from agent_supervision.authorization import (
     SupervisionAuthorizationError,
     SupervisionAuthorizer,
@@ -40,10 +45,13 @@ __all__ = [
     "SERVICE_PRIORITIES",
     "SUPERVISED_CATALOGUE",
     "SupervisionError",
+    "SupervisionAdminError",
+    "SupervisionAdminService",
     "SupervisionAuthorizationError",
     "SupervisionAuthorizer",
     "SupervisionService",
     "SupervisionStore",
+    "LazySupervisionAdminService",
     "SupervisedRepairRuntime",
     "SUPERVISOR_POLL_SECONDS",
     "assessment_bucket",

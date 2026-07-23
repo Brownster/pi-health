@@ -12,6 +12,7 @@ from agent_actions.canary import CanaryGateError
 from agent_actions.service import AgentActionError
 from agent_findings.service import FindingError
 from agent_automation.service import AutomationError
+from agent_supervision.admin import SupervisionAdminError
 from operation_manager import OperationRegistry
 
 
@@ -33,6 +34,7 @@ def _client(
     canary_service=None,
     findings_service=None,
     automation_service=None,
+    supervision_service=None,
     helper=None,
     capability_roles=None,
 ):
@@ -46,6 +48,7 @@ def _client(
         agent_canary_service=canary_service,
         agent_findings_service=findings_service,
         agent_automation_service=automation_service,
+        agent_supervision_service=supervision_service,
         helper=helper,
         capability_roles=capability_roles,
     )
@@ -138,6 +141,33 @@ def _automation_service():
     return service
 
 
+def _supervision_service():
+    service = Mock()
+    service.list.return_value = {
+        "schedules": [],
+        "catalogue": [],
+        "service_priorities": ["critical", "high", "normal", "low"],
+        "limits": {},
+    }
+    service.get.return_value = {"id": "repair-1", "revision": 1}
+    service.create.return_value = {"id": "repair-1", "revision": 1}
+    service.update.return_value = {"id": "repair-1", "revision": 2}
+    service.enable.return_value = {
+        "id": "repair-1",
+        "enabled": True,
+        "revision": 2,
+    }
+    service.incidents.return_value = {"incidents": []}
+    service.incident.return_value = {"incident": {"id": "incident-1"}}
+    service.demotions.return_value = {"demotions": []}
+    service.clear_demotion.return_value = {
+        "id": "demotion-1",
+        "revision": 2,
+        "cleared_at": "2026-07-23T10:00:00+00:00",
+    }
+    return service
+
+
 def _schedule():
     return {
         "name": "Morning health report",
@@ -160,6 +190,25 @@ def _schedule():
     }
 
 
+def _repair_schedule():
+    return {
+        "name": "Recover get_iplayer",
+        "enabled": False,
+        "operation": "container.restart",
+        "params": {"name": "get_iplayer"},
+        "service_priority": "normal",
+        "window": {
+            "cron": "0 2 * * *",
+            "timezone": "Europe/London",
+            "duration_minutes": 60,
+        },
+        "delivery": {
+            "channel": "mattermost-alerts",
+            "mode": "threaded",
+        },
+    }
+
+
 def test_all_agent_routes_require_authentication():
     client = _client(_service(), authenticated=False)
     for path in (
@@ -173,6 +222,9 @@ def test_all_agent_routes_require_authentication():
         "/api/integrations/agents/canaries",
         "/api/integrations/agents/automation/policy",
         "/api/integrations/agents/automation/schedules",
+        "/api/integrations/agents/automation/repairs",
+        "/api/integrations/agents/automation/incidents",
+        "/api/integrations/agents/automation/demotions",
         "/api/integrations/agents/findings",
     ):
         assert client.get(path).status_code == 401
@@ -536,6 +588,127 @@ def test_automation_schedule_api_requires_csrf_and_maps_bounded_errors():
     )
     assert denied.status_code == 403
     automation.create.assert_not_called()
+
+
+def test_supervised_repair_api_is_admin_only_strict_and_no_store():
+    supervision = _supervision_service()
+    client = _client(_service(), supervision_service=supervision)
+
+    listed = client.get("/api/integrations/agents/automation/repairs")
+    assert listed.status_code == 200
+    assert listed.headers["Cache-Control"] == "no-store"
+    created = client.post(
+        "/api/integrations/agents/automation/repairs",
+        json=_repair_schedule(),
+    )
+    assert created.status_code == 201
+    supervision.create.assert_called_once_with(
+        _repair_schedule(),
+        owner={"type": "local", "id": "admin", "username": "admin"},
+    )
+    assert client.get(
+        "/api/integrations/agents/automation/repairs/repair-1"
+    ).status_code == 200
+    update = {**_repair_schedule(), "revision": 1}
+    assert client.put(
+        "/api/integrations/agents/automation/repairs/repair-1",
+        json=update,
+    ).status_code == 200
+    supervision.update.assert_called_once_with("repair-1", update)
+    enablement = {
+        "revision": 2,
+        "confirmation": "ENABLE SUPERVISION",
+    }
+    enabled = client.post(
+        "/api/integrations/agents/automation/repairs/repair-1/enable",
+        json=enablement,
+    )
+    assert enabled.status_code == 200
+    supervision.enable.assert_called_once_with("repair-1", enablement)
+
+    incidents = client.get(
+        "/api/integrations/agents/automation/incidents?limit=10"
+    )
+    assert incidents.status_code == 200
+    supervision.incidents.assert_called_once_with(limit=10)
+    assert client.get(
+        "/api/integrations/agents/automation/incidents/incident-1"
+    ).status_code == 200
+    assert client.get(
+        "/api/integrations/agents/automation/demotions?limit=10"
+    ).status_code == 200
+
+    clearance = {
+        "revision": 1,
+        "recovery_action_id": "action-recovery",
+        "confirmation": "CLEAR DEMOTION",
+    }
+    cleared = client.post(
+        "/api/integrations/agents/automation/demotions/demotion-1/clear",
+        json=clearance,
+    )
+    assert cleared.status_code == 200
+    supervision.clear_demotion.assert_called_once_with(
+        "demotion-1",
+        clearance,
+        actor={"type": "local", "id": "admin", "username": "admin"},
+    )
+    for response in (incidents, cleared):
+        assert response.headers["Cache-Control"] == "no-store"
+
+    viewer = _client(
+        _service(),
+        supervision_service=supervision,
+        capability_roles={"admin": "viewer"},
+    )
+    assert viewer.get(
+        "/api/integrations/agents/automation/repairs"
+    ).status_code == 403
+    assert viewer.post(
+        "/api/integrations/agents/automation/repairs",
+        json=_repair_schedule(),
+    ).status_code == 403
+    assert viewer.post(
+        "/api/integrations/agents/automation/repairs/repair-1/enable",
+        json={
+            "revision": 1,
+            "confirmation": "ENABLE SUPERVISION",
+        },
+    ).status_code == 403
+
+
+def test_supervised_repair_api_maps_errors_and_requires_csrf():
+    supervision = _supervision_service()
+    supervision.get.side_effect = SupervisionAdminError(
+        "not_found", "Schedule was not found"
+    )
+    supervision.clear_demotion.side_effect = SupervisionAdminError(
+        "recovery_required", "A verified recovery is required"
+    )
+    client = _client(_service(), supervision_service=supervision)
+
+    missing = client.get(
+        "/api/integrations/agents/automation/repairs/missing"
+    )
+    assert missing.status_code == 404
+    blocked = client.post(
+        "/api/integrations/agents/automation/demotions/demotion-1/clear",
+        json={
+            "revision": 1,
+            "recovery_action_id": "action-1",
+            "confirmation": "CLEAR DEMOTION",
+        },
+    )
+    assert blocked.status_code == 409
+    assert blocked.get_json()["code"] == "recovery_required"
+
+    client.environ_base.pop("HTTP_X_CSRF_TOKEN")
+    denied = client.post(
+        "/api/integrations/agents/automation/repairs",
+        json=_repair_schedule(),
+    )
+    assert denied.status_code == 403
+    supervision.create.assert_not_called()
 
 
 def test_finding_routes_are_private_editable_and_admin_bound():

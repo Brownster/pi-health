@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Ban,
+  Activity,
   CalendarClock,
   Check,
   ChevronRight,
@@ -18,6 +19,7 @@ import {
   ShieldX,
   Trash2,
   TriangleAlert,
+  Wrench,
   X,
 } from "lucide-react";
 
@@ -31,8 +33,12 @@ import {
   approveAgentAction,
   attestAgentCanary,
   cancelAgentAction,
+  clearAgentDemotion,
+  createAgentRepairSchedule,
+  enableAgentRepairSchedule,
   createAgentSchedule,
   editableSchedule,
+  editableRepairSchedule,
   editableFinding,
   getAgentAction,
   getAgentActionCapabilities,
@@ -40,14 +46,20 @@ import {
   getAgentAutomationPolicy,
   getAgentCanaries,
   getAgentSchedules,
+  getAgentDemotions,
+  getAgentRepairSchedules,
+  getAgentSupervisionIncidents,
   getAgentFinding,
   getAgentFindings,
   rejectAgentAction,
   rejectAgentFinding,
   revokeAgentCanary,
   newAgentSchedule,
+  newAgentRepairSchedule,
+  repairScheduleReady,
   scheduleReady,
   updateAgentSchedule,
+  updateAgentRepairSchedule,
   updateAgentAutomationPolicy,
   updateAgentFinding,
   type AgentAction,
@@ -58,11 +70,18 @@ import {
   type AgentCanary,
   type AgentCanarySnapshot,
   type AgentDiagnosticCheck,
+  type AgentDemotion,
   type AgentFinding,
   type AgentFindingContent,
   type AgentSchedule,
   type AgentScheduleInput,
   type AgentScheduleUpdate,
+  type AgentRepairCatalogueItem,
+  type AgentRepairSchedule,
+  type AgentRepairScheduleInput,
+  type AgentRepairScheduleUpdate,
+  type AgentServicePriority,
+  type AgentSupervisionIncident,
   type AgentTargetPolicy,
 } from "@/lib/agent-operations";
 
@@ -840,10 +859,352 @@ function ScheduleEditor({
   );
 }
 
+type RepairDraft =
+  | { id: null; value: AgentRepairScheduleInput }
+  | { id: string; value: AgentRepairScheduleUpdate };
+
+function incidentTone(state?: string): BadgeProps["tone"] {
+  if (state === "recovered") return "success";
+  if (["action_authorized", "executing", "verifying"].includes(state ?? "")) return "info";
+  if (["escalated", "demoted"].includes(state ?? "")) return "danger";
+  if (state) return "warning";
+  return "neutral";
+}
+
+function assessmentTone(outcome: "healthy" | "failed" | "unknown"): BadgeProps["tone"] {
+  if (outcome === "healthy") return "success";
+  if (outcome === "failed") return "danger";
+  return "warning";
+}
+
+function RepairScheduleEditor({
+  busy,
+  draft,
+  priorities,
+  onCancel,
+  onChange,
+  onSave,
+}: {
+  busy: boolean;
+  draft: RepairDraft;
+  priorities: AgentServicePriority[];
+  onCancel: () => void;
+  onChange: (draft: RepairDraft) => void;
+  onSave: () => void;
+}) {
+  const value = draft.value;
+  const change = (next: AgentRepairScheduleInput | AgentRepairScheduleUpdate) => {
+    onChange({ ...draft, value: next } as RepairDraft);
+  };
+  return (
+    <section className="space-y-4 rounded-md border border-warning/40 bg-warning/5 p-4" aria-label={draft.id ? "Edit supervised repair schedule" : "Create supervised repair schedule"}>
+      <div>
+        <h4 className="font-mono text-sm font-semibold">{draft.id ? "Edit supervised repair" : "Create supervised repair"}</h4>
+        <p className="mt-1 text-xs text-muted-foreground">
+          The repair contract and safety limits are code-owned. New schedules start disabled so they can be reviewed before activation.
+        </p>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="Schedule name *" value={value.name} onChange={(name) => change({ ...value, name })} />
+        <label className="space-y-1.5">
+          <span className="text-xs">Service priority</span>
+          <select className={FIELD_CLASS} onChange={(event) => change({ ...value, service_priority: event.target.value as AgentServicePriority })} value={value.service_priority}>
+            {priorities.map((priority) => <option key={priority} value={priority}>{humanize(priority)}</option>)}
+          </select>
+        </label>
+        <Field label="Cron expression *" value={value.window.cron} onChange={(cron) => change({ ...value, window: { ...value.window, cron } })} />
+        <Field label="IANA timezone *" value={value.window.timezone} onChange={(timezone) => change({ ...value, window: { ...value.window, timezone } })} />
+        <label className="space-y-1.5">
+          <span className="text-xs">Maintenance window (minutes)</span>
+          <input className={FIELD_CLASS} max={1440} min={1} onChange={(event) => change({ ...value, window: { ...value.window, duration_minutes: Number(event.target.value) } })} type="number" value={value.window.duration_minutes} />
+        </label>
+        <div className="rounded-md border border-border bg-background/70 px-3 py-2 text-xs">
+          <p className="font-mono text-[10px] uppercase text-dim">Fixed repair contract</p>
+          <p className="mt-1 font-mono">container.restart:get_iplayer</p>
+          <p className="mt-1 text-muted-foreground">2 failed checks · 1 action / 24h · 0 retries · 120s deadline</p>
+        </div>
+      </div>
+      <div className="flex flex-col-reverse gap-2 border-t border-border pt-4 sm:flex-row sm:justify-end">
+        <Button disabled={busy} onClick={onCancel} size="sm" variant="outline">Cancel</Button>
+        <Button className="gap-2" disabled={busy || !repairScheduleReady(value)} onClick={onSave} size="sm">
+          {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+          Save disabled schedule
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+function DemotionClearance({
+  busy,
+  onCancel,
+  onClear,
+}: {
+  busy: boolean;
+  onCancel: () => void;
+  onClear: (recoveryActionId: string) => void;
+}) {
+  const [recoveryActionId, setRecoveryActionId] = useState("");
+  const [confirmation, setConfirmation] = useState("");
+  return (
+    <div className="mt-3 space-y-3 border-l-2 border-danger bg-danger/5 px-4 py-3">
+      <div>
+        <p className="text-sm font-medium">Clear this demotion?</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Supply the current-release, approval-bound verified recovery action, then type <span className="font-mono">CLEAR DEMOTION</span>. The server independently verifies both.
+        </p>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="Verified recovery action ID" value={recoveryActionId} onChange={setRecoveryActionId} />
+        <Field label="Confirmation phrase" value={confirmation} onChange={setConfirmation} />
+      </div>
+      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+        <Button disabled={busy} onClick={onCancel} size="sm" variant="outline">Cancel</Button>
+        <Button className="gap-2" disabled={busy || !recoveryActionId.trim() || confirmation !== "CLEAR DEMOTION"} onClick={() => onClear(recoveryActionId.trim())} size="sm" variant="danger">
+          {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5" />}
+          Clear demotion
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function SupervisedRepairsView() {
+  const [schedules, setSchedules] = useState<AgentRepairSchedule[]>([]);
+  const [catalogue, setCatalogue] = useState<AgentRepairCatalogueItem[]>([]);
+  const [priorities, setPriorities] = useState<AgentServicePriority[]>(["critical", "high", "normal", "low"]);
+  const [incidents, setIncidents] = useState<AgentSupervisionIncident[]>([]);
+  const [demotions, setDemotions] = useState<AgentDemotion[]>([]);
+  const [editor, setEditor] = useState<RepairDraft | null>(null);
+  const [confirmEnable, setConfirmEnable] = useState<string | null>(null);
+  const [clearDemotionId, setClearDemotionId] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async (signal?: AbortSignal) => {
+    setLoading(true);
+    try {
+      const [repairResult, incidentResult, demotionResult] = await Promise.all([
+        getAgentRepairSchedules(signal),
+        getAgentSupervisionIncidents(50, signal),
+        getAgentDemotions(50, signal),
+      ]);
+      setSchedules(repairResult.schedules);
+      setCatalogue(repairResult.catalogue);
+      setPriorities(repairResult.service_priorities);
+      setIncidents(incidentResult.incidents);
+      setDemotions(demotionResult.demotions);
+      setError(null);
+    } catch (caught) {
+      if (!(caught instanceof DOMException && caught.name === "AbortError")) setError(errorMessage(caught));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void load(controller.signal);
+    return () => controller.abort();
+  }, [load]);
+
+  async function saveSchedule() {
+    if (!editor || !repairScheduleReady(editor.value)) return;
+    setBusy(editor.id ?? "new-repair");
+    try {
+      const payload = { ...editor.value, enabled: editor.id ? editor.value.enabled : false };
+      const saved = editor.id
+        ? await updateAgentRepairSchedule(editor.id, payload as AgentRepairScheduleUpdate)
+        : await createAgentRepairSchedule(payload as AgentRepairScheduleInput);
+      setSchedules((current) => [saved, ...current.filter((item) => item.id !== saved.id)]);
+      setEditor(null);
+      setError(null);
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function toggleSchedule(schedule: AgentRepairSchedule) {
+    if (!schedule.enabled && confirmEnable !== schedule.id) {
+      setConfirmEnable(schedule.id);
+      return;
+    }
+    setBusy(schedule.id);
+    try {
+      const updated = schedule.enabled
+        ? await updateAgentRepairSchedule(schedule.id, {
+            ...editableRepairSchedule(schedule),
+            enabled: false,
+          })
+        : await enableAgentRepairSchedule(schedule.id, schedule.revision);
+      setSchedules((current) => current.map((item) => item.id === updated.id ? updated : item));
+      setConfirmEnable(null);
+      setError(null);
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function clearDemotion(demotion: AgentDemotion, recoveryActionId: string) {
+    setBusy(demotion.id);
+    try {
+      const cleared = await clearAgentDemotion(demotion.id, {
+        revision: demotion.revision,
+        recovery_action_id: recoveryActionId,
+        confirmation: "CLEAR DEMOTION",
+      });
+      setDemotions((current) => current.map((item) => item.id === cleared.id ? cleared : item));
+      setClearDemotionId(null);
+      await load();
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <section className="space-y-4" data-agent-supervision-view>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <div className="flex items-center gap-2">
+            <Wrench aria-hidden="true" className="h-4 w-4 text-warning" />
+            <h3 className="font-mono text-sm font-semibold">Supervised repairs</h3>
+          </div>
+          <p className="mt-1 max-w-3xl text-xs text-muted-foreground">
+            Assess code-owned health every ten minutes and authorise only canaried R1 repairs inside a maintenance window. No model chooses or executes the action.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button className="gap-2" disabled={loading || busy !== null} onClick={() => void load()} size="sm" variant="outline">
+            <RefreshCw className={loading ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} />Refresh
+          </Button>
+          <Button className="gap-2" disabled={busy !== null || catalogue.length === 0 || schedules.length >= catalogue.length} onClick={() => setEditor({ id: null, value: newAgentRepairSchedule() })} size="sm" variant="warning">
+            <Plus className="h-3.5 w-3.5" />New repair
+          </Button>
+        </div>
+      </div>
+
+      <div className="grid gap-3 border-l-2 border-warning bg-warning/5 px-4 py-3 sm:grid-cols-[auto_1fr]">
+        <ShieldAlert aria-hidden="true" className="h-5 w-5 text-warning" />
+        <div>
+          <p className="text-sm font-medium">Fixed safety envelope</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Two adjacent failures are required. One action is allowed per target in 24 hours and per window, with zero retries, one global mutation, and a 120-second deadline.
+          </p>
+        </div>
+      </div>
+
+      {error ? <InlineError message={error} /> : null}
+      {editor ? <RepairScheduleEditor busy={busy !== null} draft={editor} priorities={priorities} onCancel={() => setEditor(null)} onChange={setEditor} onSave={() => void saveSchedule()} /> : null}
+      {loading && !schedules.length ? <LoadingState label="Loading supervised repairs" /> : null}
+      {!loading && !schedules.length && !editor ? (
+        <div className="flex min-h-36 flex-col items-center justify-center gap-2 rounded-md border border-dashed border-border px-6 text-center text-muted-foreground">
+          <Wrench className="h-5 w-5" />
+          <p className="text-sm">No supervised repair schedules have been created.</p>
+          <p className="text-xs">Create a disabled schedule, review its canary and window, then enable it explicitly.</p>
+        </div>
+      ) : null}
+
+      {schedules.map((schedule) => {
+        const status = schedule.status;
+        const activeDemotion = status.demotion?.active ? status.demotion : null;
+        return (
+          <article className="rounded-md border border-border bg-muted/10 p-4" key={schedule.id}>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h4 className="truncate text-sm font-semibold">{schedule.name}</h4>
+                  <Badge tone={schedule.enabled ? "success" : "neutral"}>{schedule.enabled ? "enabled" : "disabled"}</Badge>
+                  <Badge tone="warning">supervised R1</Badge>
+                  <Badge>{schedule.service_priority}</Badge>
+                </div>
+                <p className="mt-2 break-all font-mono text-xs text-muted-foreground">{schedule.operation}:{schedule.target}</p>
+              </div>
+              <Button aria-label={`Edit ${schedule.name}`} disabled={busy !== null} onClick={() => setEditor({ id: schedule.id, value: editableRepairSchedule(schedule) })} size="icon" variant="ghost">
+                <Pencil className="h-4 w-4" />
+              </Button>
+            </div>
+            <dl className="mt-4 grid gap-3 text-xs sm:grid-cols-2 lg:grid-cols-4">
+              <div><dt className="font-mono text-[10px] uppercase text-dim">Effective authority</dt><dd className="mt-1"><Badge tone={status.effective_authority === "supervised" ? "warning" : "neutral"}>{humanize(status.effective_authority)}</Badge></dd></div>
+              <div><dt className="font-mono text-[10px] uppercase text-dim">Canary</dt><dd className="mt-1"><Badge tone={status.canary?.status === "eligible" ? "success" : "warning"}>{status.canary?.status ?? "required"}</Badge>{status.canary ? <span className="ml-2 font-mono text-[10px] text-dim">{status.canary.release_commit.slice(0, 12)}</span> : null}</dd></div>
+              <div><dt className="font-mono text-[10px] uppercase text-dim">Incident</dt><dd className="mt-1"><Badge tone={incidentTone(status.incident?.state)}>{humanize(status.incident?.state ?? "none")}</Badge></dd></div>
+              <div><dt className="font-mono text-[10px] uppercase text-dim">Cooldown</dt><dd className="mt-1">{status.budget.cooldown_until ? formatTime(status.budget.cooldown_until) : "Available"}</dd></div>
+              <div><dt className="font-mono text-[10px] uppercase text-dim">Assessment</dt><dd className="mt-1">Every {schedule.assessment_interval_seconds / 60} minutes · {schedule.failure_threshold} failures</dd></div>
+              <div><dt className="font-mono text-[10px] uppercase text-dim">Window</dt><dd className="mt-1">{schedule.window.cron} · {schedule.window.timezone} · {schedule.window.duration_minutes}m</dd></div>
+              <div><dt className="font-mono text-[10px] uppercase text-dim">24h budget</dt><dd className="mt-1">{status.budget.rolling_24h.used} / {status.budget.rolling_24h.limit} used</dd></div>
+              <div><dt className="font-mono text-[10px] uppercase text-dim">Last action</dt><dd className="mt-1">{status.last_action ? <Badge tone={actionTone(status.last_action.state)}>{humanize(status.last_action.state)}</Badge> : "None"}</dd></div>
+            </dl>
+            {status.assessments.length ? (
+              <div className="mt-4 border-t border-border pt-3">
+                <p className="font-mono text-[10px] uppercase text-dim">Recent assessments</p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {status.assessments.slice(0, 5).map((assessment) => <span className="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs" key={assessment.id}><Badge tone={assessmentTone(assessment.outcome)}>{assessment.outcome}</Badge><span>{formatTime(assessment.assessed_for)}</span></span>)}
+                </div>
+              </div>
+            ) : null}
+            {activeDemotion ? (
+              <div className="mt-4 rounded-md border border-danger/30 p-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div><p className="flex items-center gap-2 text-sm font-medium text-danger"><ShieldX className="h-4 w-4" />Authority demoted</p><p className="mt-1 text-xs text-muted-foreground">{humanize(activeDemotion.cause)} · source {activeDemotion.source_action_id}</p></div>
+                  <Button disabled={busy !== null} onClick={() => setClearDemotionId(activeDemotion.id)} size="sm" variant="danger">Review clearance</Button>
+                </div>
+                {clearDemotionId === activeDemotion.id ? <DemotionClearance busy={busy === activeDemotion.id} onCancel={() => setClearDemotionId(null)} onClear={(recoveryActionId) => void clearDemotion(activeDemotion, recoveryActionId)} /> : null}
+              </div>
+            ) : null}
+            {confirmEnable === schedule.id ? (
+              <div className="mt-4 border-l-2 border-warning bg-warning/5 px-4 py-3">
+                <p className="text-sm font-medium">Enable supervised assessment and repair?</p>
+                <p className="mt-1 text-xs text-muted-foreground">The next ten-minute assessment may open an incident. Mutation still requires a current canary, two failures, an open window, available budgets, and every execution gate.</p>
+                <div className="mt-3 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"><Button disabled={busy !== null} onClick={() => setConfirmEnable(null)} size="sm" variant="outline">Cancel</Button><Button className="gap-2" disabled={busy !== null} onClick={() => void toggleSchedule(schedule)} size="sm" variant="warning"><ShieldCheck className="h-3.5 w-3.5" />Confirm enable</Button></div>
+              </div>
+            ) : null}
+            {confirmEnable !== schedule.id ? (
+              <div className="mt-4 flex justify-end border-t border-border pt-3">
+                <Button disabled={busy !== null} onClick={() => void toggleSchedule(schedule)} size="sm" variant={schedule.enabled ? "warning" : "success"}>
+                  {busy === schedule.id ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : null}
+                  {schedule.enabled ? "Disable schedule" : "Enable schedule"}
+                </Button>
+              </div>
+            ) : null}
+          </article>
+        );
+      })}
+
+      {incidents.length ? (
+        <section className="rounded-md border border-border" aria-label="Supervised repair incident history">
+          <div className="flex items-center gap-2 border-b border-border bg-muted/20 p-3"><Activity className="h-4 w-4 text-primary" /><h4 className="font-mono text-sm font-semibold">Incident history</h4></div>
+          <div className="divide-y divide-border">
+            {incidents.map((incident) => (
+              <div className="p-4" key={incident.id}>
+                <div className="flex flex-wrap items-center gap-2"><Badge tone={incidentTone(incident.state)}>{humanize(incident.state)}</Badge><span className="font-mono text-xs">{incident.operation}:{incident.target}</span><span className="text-xs text-muted-foreground">{formatTime(incident.opened_at)}</span></div>
+                <ol className="mt-3 space-y-2 border-l border-border pl-4">
+                  {(incident.transitions ?? []).map((transition) => <li className="relative text-xs" key={transition.id}><span className="absolute -left-[1.2rem] top-1 h-2 w-2 rounded-full bg-primary" /><span className="font-medium">{humanize(transition.type)}</span><span className="ml-2 text-muted-foreground">{formatTime(transition.created_at)}</span></li>)}
+                </ol>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
+      {demotions.some((demotion) => demotion.active) && !schedules.length ? (
+        <div className="border-l-2 border-danger bg-danger/5 px-4 py-3 text-sm text-danger">An active demotion exists without a visible repair schedule. Review retained supervision state before enabling automation.</div>
+      ) : null}
+    </section>
+  );
+}
+
 export function AgentAutomationView() {
   return (
     <div className="space-y-8" data-agent-automation-view>
-      <ScheduledReportsView />
+      <SupervisedRepairsView />
+      <div className="border-t border-border pt-6">
+        <ScheduledReportsView />
+      </div>
       <div className="border-t border-border pt-6">
         <AuthorityPolicyView />
       </div>

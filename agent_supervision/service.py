@@ -1907,6 +1907,34 @@ class SupervisionStore:
             ),
         }
 
+    def list_budget_charges(
+        self, schedule_id: str, *, limit: int = 20
+    ) -> list[dict[str, Any]]:
+        _identifier(schedule_id, "Schedule ID")
+        if (
+            isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or not 1 <= limit <= 100
+        ):
+            raise SupervisionError(
+                "invalid_limit", "Budget charge limit must be between 1 and 100"
+            )
+        try:
+            with self._connect() as connection:
+                rows = connection.execute(
+                    """
+                    SELECT * FROM supervision_budget_charges
+                    WHERE schedule_id = ?
+                    ORDER BY charged_at DESC, charge_id DESC LIMIT ?
+                    """,
+                    (schedule_id, limit),
+                ).fetchall()
+        except sqlite3.Error as exc:
+            raise SupervisionError(
+                "store_failure", "Budget charges could not be read"
+            ) from exc
+        return [self._budget_charge(row) for row in rows]
+
     def _apply_assessment(
         self,
         connection: sqlite3.Connection,
