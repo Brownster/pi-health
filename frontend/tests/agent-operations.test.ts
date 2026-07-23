@@ -6,8 +6,11 @@ import {
   actionCanBeCancelled,
   actionCanBeRejected,
   editableFinding,
+  editableSchedule,
+  newAgentSchedule,
+  scheduleReady,
 } from "../src/lib/agent-operations-contract.ts";
-import type { AgentAction, AgentFinding } from "../src/lib/agent-operations.ts";
+import type { AgentAction, AgentFinding, AgentSchedule } from "../src/lib/agent-operations.ts";
 
 function action(state: AgentAction["state"], authority_mode: AgentAction["authority_mode"] = "approval"): AgentAction {
   return { state, authority_mode } as AgentAction;
@@ -57,4 +60,31 @@ test("finding editor receives only mutable content and independent lists", () =>
   assert.equal("evidence_ids" in editable, false);
   assert.deepEqual(finding.reproduction_steps, ["Run repair."]);
   assert.equal(editable.title, finding.title);
+});
+
+test("schedule editor is report-only and copies mutable nested values", () => {
+  const created = newAgentSchedule();
+  assert.equal(created.budgets.max_actions, 0);
+  assert.equal(created.budgets.max_model_invocations, 0);
+  assert.equal(created.delivery.channel, "mattermost-alerts");
+  assert.equal(scheduleReady(created), false);
+  created.name = "Morning report";
+  assert.equal(scheduleReady(created), true);
+
+  const schedule = {
+    ...created,
+    id: "schedule-1",
+    owner: { type: "local", id: "admin", username: "admin" },
+    created_at: "2026-07-22T07:00:00Z",
+    updated_at: "2026-07-22T07:00:00Z",
+    revision: 3,
+    next_run: "2026-07-23T07:00:00Z",
+    last_occurrence: null,
+  } satisfies AgentSchedule;
+  const editable = editableSchedule(schedule);
+  editable.checks[0].operation = "disk.health";
+
+  assert.equal(schedule.checks[0].operation, "system.status");
+  assert.equal(editable.revision, 3);
+  assert.equal("owner" in editable, false);
 });

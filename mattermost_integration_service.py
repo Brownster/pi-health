@@ -273,6 +273,9 @@ class MattermostIntegrationService:
             else None
         )
         self._secrets_path = Path(secrets_path)
+        self._report_webhook_path = (
+            self._secrets_path.parent / "agent-report" / "mattermost-webhook.env"
+        )
         self._status_path = Path(status_path)
         self._stack_path_provider = stack_path_provider
         self._repository = config_repository
@@ -1490,6 +1493,17 @@ class MattermostIntegrationService:
             f"LIMEOS_ALERT_MATTERMOST_WEBHOOK={webhook_url}",
         ]
         self._atomic_writer(self._secrets_path, "\n".join(lines) + "\n", mode=0o600)
+        projection_dir = self._report_webhook_path.parent
+        if projection_dir.is_dir() and not projection_dir.is_symlink():
+            if self._report_webhook_path.is_symlink():
+                raise MattermostIntegrationError(
+                    "Mattermost report delivery credential is invalid"
+                )
+            self._atomic_writer(
+                self._report_webhook_path,
+                f"LIMEOS_ALERT_MATTERMOST_WEBHOOK={webhook_url}\n",
+                mode=0o640,
+            )
 
     def _read_secret(self, key: str) -> str | None:
         try:

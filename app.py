@@ -60,6 +60,7 @@ from agent_actions.integrations import (
     mattermost_repair_job_status,
 )
 from agent_findings.service import LazyFindingsService
+from agent_automation.service import LazyScheduleAdminService
 from alert_history import AlertEventLedger
 from media_profile_service import MediaProfileService
 from media_quickstart_service import MediaQuickstartService
@@ -246,6 +247,7 @@ class AppDependencies:
     agent_integration_service: AgentIntegrationService | None = None
     agent_action_service: object | None = None
     agent_findings_service: object | None = None
+    agent_automation_service: object | None = None
     overview_service: OverviewService | None = None
     metric_history_service: MetricHistoryStore | None = None
     capability_registry_service: CapabilityRegistryService | None = None
@@ -512,6 +514,12 @@ def _default_agent_action_service(container_inventory_service, stack_read_servic
 
 def _default_agent_findings_service():
     return LazyFindingsService(RUNTIME_STATE_DIR / "agent-actions" / "findings.sqlite3")
+
+
+def _default_agent_automation_service():
+    return LazyScheduleAdminService(
+        RUNTIME_STATE_DIR / "agent-actions" / "automation.sqlite3"
+    )
 
 
 def _write_container_update(container_id, update_available):
@@ -1602,6 +1610,9 @@ def create_app(config=None, dependencies=None):
     )
     application.extensions["agent_findings_service"] = (
         resolved.agent_findings_service or _default_agent_findings_service()
+    )
+    application.extensions["agent_automation_service"] = (
+        resolved.agent_automation_service or _default_agent_automation_service()
     )
     application.extensions["overview_service"] = (
         resolved.overview_service

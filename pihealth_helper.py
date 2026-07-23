@@ -66,6 +66,11 @@ from agent_provider.provisioning import (
     LIMEOPS_STATE_DIR,
     LIMEOPS_UNIT_PATH,
     MATTERMOST_REPAIR_UNIT_PATH,
+    REPORT_SCHEDULER_STATE_DIR,
+    REPORT_SCHEDULER_UNIT_PATH,
+    REPORT_SCHEDULER_VENV_DIR,
+    REPORT_DELIVERY_CONFIG_DIR,
+    REPORT_MATTERMOST_WEBHOOK_PATH,
     STACK_LOCK_DIR,
     render_agent_unit,
     render_action_broker_unit,
@@ -74,6 +79,7 @@ from agent_provider.provisioning import (
     render_extension_repair_unit,
     render_limeops_unit,
     render_mattermost_repair_unit,
+    render_report_scheduler_unit,
 )
 from agent_provider.auth import (
     AuthBusyError,
@@ -176,6 +182,7 @@ AGENT_CLEANUP_UNITS = (
     ('limeopsd.service', LIMEOPS_UNIT_PATH),
     ('limeops-action-worker.service', ACTION_WORKER_UNIT_PATH),
     ('limeops-actuatord.service', ACTION_BROKER_UNIT_PATH),
+    ('limeops-report-scheduler.service', REPORT_SCHEDULER_UNIT_PATH),
 )
 AGENT_CLEANUP_FILES = (
     AGENT_CONFIG_PATH,
@@ -190,6 +197,8 @@ AGENT_CLEANUP_DIRECTORIES = (
     CLAUDE_CONFIG_DIR,
     AGENT_VENV_DIR,
     LIMEOPS_STATE_DIR,
+    REPORT_SCHEDULER_STATE_DIR,
+    REPORT_DELIVERY_CONFIG_DIR,
 )
 AGENT_LIFECYCLE_FIELDS = frozenset({
     'schema_version', 'integration', 'operation_id', 'action', 'phase',
@@ -3305,6 +3314,7 @@ def _secure_agent_stack_locks(dashboard_user):
     """Make only validated stack lock files writable by the shared pihealth group."""
     import grp
 
+    descriptors = []
     try:
         owner_uid = pwd.getpwnam(dashboard_user).pw_uid
         group_gid = grp.getgrnam('pihealth').gr_gid
@@ -3317,10 +3327,43 @@ def _secure_agent_stack_locks(dashboard_user):
             or '..' in entry.name
         ):
             return False
-        try:
+    try:
+        for entry in entries:
             descriptor = os.open(
                 entry.path,
                 os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW,
+            )
+            descriptors.append(descriptor)
+            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                return False
+        for descriptor in descriptors:
+            os.fchown(descriptor, owner_uid, group_gid)
+            os.fchmod(descriptor, 0o660)
+    except OSError:
+        return False
+    finally:
+        for descriptor in descriptors:
+            os.close(descriptor)
+    return True
+
+
+def _secure_shared_agent_databases(dashboard_user):
+    """Converge only the databases shared with isolated action/report services."""
+    import grp
+
+    try:
+        owner_uid = pwd.getpwnam(dashboard_user).pw_uid
+        group_gid = grp.getgrnam('pihealth').gr_gid
+    except KeyError:
+        return False
+    for name in ('actions.sqlite3', 'automation.sqlite3'):
+        path = os.path.join(ACTION_STATE_DIR, name)
+        if not os.path.lexists(path):
+            continue
+        try:
+            descriptor = os.open(
+                path,
+                os.O_RDWR | os.O_CLOEXEC | os.O_NOFOLLOW,
             )
         except OSError:
             return False
@@ -3333,6 +3376,61 @@ def _secure_agent_stack_locks(dashboard_user):
             return False
         finally:
             os.close(descriptor)
+    return True
+
+
+def _sync_report_webhook_credential(dashboard_user):
+    """Project only the alerts webhook into the report scheduler boundary."""
+    import grp
+
+    webhook = ""
+    if os.path.lexists(MATTERMOST_ACTIVE_CREDENTIAL):
+        try:
+            raw = _read_fixed_credential(MATTERMOST_ACTIVE_CREDENTIAL).decode("utf-8")
+        except (OSError, UnicodeDecodeError):
+            return False
+        prefix = "LIMEOS_ALERT_MATTERMOST_WEBHOOK="
+        for line in raw.splitlines():
+            if line.startswith(prefix):
+                webhook = line[len(prefix) :].strip()
+                break
+        if webhook and (
+            len(webhook) > 2048 or not webhook.startswith(("https://", "http://"))
+        ):
+            return False
+    try:
+        owner_uid = pwd.getpwnam(dashboard_user).pw_uid
+        group_gid = grp.getgrnam("limeops-report").gr_gid
+        if os.path.lexists(REPORT_MATTERMOST_WEBHOOK_PATH):
+            metadata = os.lstat(REPORT_MATTERMOST_WEBHOOK_PATH)
+            if not stat.S_ISREG(metadata.st_mode):
+                return False
+        descriptor, temporary = tempfile.mkstemp(
+            dir=REPORT_DELIVERY_CONFIG_DIR,
+            prefix=".mattermost-webhook.",
+            suffix=".tmp",
+        )
+        try:
+            os.fchmod(descriptor, 0o640)
+            os.fchown(descriptor, owner_uid, group_gid)
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                handle.write(f"LIMEOS_ALERT_MATTERMOST_WEBHOOK={webhook}\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, REPORT_MATTERMOST_WEBHOOK_PATH)
+            _sync_directory(REPORT_DELIVERY_CONFIG_DIR)
+        except BaseException:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+            try:
+                os.unlink(temporary)
+            except OSError:
+                pass
+            raise
+    except (KeyError, OSError):
+        return False
     return True
 
 
@@ -3413,6 +3511,7 @@ def cmd_agent_runtime_install(params):
         'limeops-actuator',
         'limeops-action-worker',
         'limeops-action',
+        'limeops-report',
     ):
         if not _ensure_system_group(group):
             return {'success': False, 'error': 'Failed to create agent identities'}
@@ -3428,6 +3527,10 @@ def cmd_agent_runtime_install(params):
         'limeops-action-worker', 'limeops-action-worker', ACTION_STATE_DIR
     ):
         return {'success': False, 'error': 'Failed to create action identities'}
+    if not _ensure_system_user(
+        'limeops-report', 'limeops-report', REPORT_SCHEDULER_STATE_DIR
+    ):
+        return {'success': False, 'error': 'Failed to create report scheduler identity'}
 
     if _run_account_command([
         '/usr/sbin/usermod', '-a', '-G', 'limeops-client', 'lime-agent'
@@ -3447,6 +3550,7 @@ def cmd_agent_runtime_install(params):
     for user, groups in (
         ('limeops-actuator', 'docker,pihealth,limeops-action'),
         ('limeops-action-worker', 'pihealth,limeops-action'),
+        ('limeops-report', 'limeops-client,pihealth'),
     ):
         result = _run_account_command([
             '/usr/sbin/usermod', '-a', '-G', groups, user
@@ -3463,13 +3567,19 @@ def cmd_agent_runtime_install(params):
         ('/var/lib/lime-agent', 0o700, 'lime-agent', 'lime-agent'),
         (CLAUDE_CONFIG_DIR, 0o700, 'lime-agent', 'lime-agent'),
         (LIMEOPS_STATE_DIR, 0o750, 'limeops', 'limeops'),
-        (ACTION_STATE_DIR, 0o770, 'limeops-actuator', 'pihealth'),
+        (ACTION_STATE_DIR, 0o2770, 'limeops-actuator', 'pihealth'),
+        (REPORT_SCHEDULER_STATE_DIR, 0o750, 'limeops-report', 'limeops-report'),
+        (REPORT_DELIVERY_CONFIG_DIR, 0o2750, dashboard_user, 'limeops-report'),
         (STACK_LOCK_DIR, 0o2770, dashboard_user, 'pihealth'),
     )
     if not all(_agent_install_directory(*item) for item in directories):
         return {'success': False, 'error': 'Failed to create agent runtime directories'}
     if not _secure_agent_stack_locks(dashboard_user):
         return {'success': False, 'error': 'Failed to secure shared stack locks'}
+    if not _secure_shared_agent_databases(dashboard_user):
+        return {'success': False, 'error': 'Failed to secure shared agent state'}
+    if not _sync_report_webhook_credential(dashboard_user):
+        return {'success': False, 'error': 'Failed to secure report delivery credentials'}
 
     python_bin = os.path.join(repo_dir, '.venv', 'bin', 'python')
     if not os.path.isfile(python_bin):
@@ -3504,13 +3614,17 @@ def cmd_agent_runtime_install(params):
         return {'success': False, 'error': 'Failed to install the package manifest'}
     for argv, timeout in (
         (['python3', '-m', 'venv', AGENT_VENV_DIR], 120),
+        (['python3', '-m', 'venv', REPORT_SCHEDULER_VENV_DIR], 120),
         ([os.path.join(AGENT_VENV_DIR, 'bin', 'pip'), 'install', 'websocket-client>=1.8,<2'], 300),
+        ([os.path.join(REPORT_SCHEDULER_VENV_DIR, 'bin', 'pip'), 'install',
+          'apscheduler>=3.10,<4', 'requests>=2.31,<3'], 300),
         # The broker reads system status via psutil; guarantee it for the system
         # interpreter path so system.status cannot fail with upstream_failure.
         (['apt-get', 'install', '-y', 'python3-psutil', 'python3-docker'], 300),
         (['chmod', '-R', 'u=rwX,go=rX', AGENT_LIB_DIR], 60),
         (['chown', '-R', 'root:root', AGENT_LIB_DIR], 60),
         (['chown', '-R', 'lime-agent:lime-agent', AGENT_VENV_DIR], 60),
+        (['chown', '-R', 'limeops-report:limeops-report', REPORT_SCHEDULER_VENV_DIR], 60),
     ):
         if run_command(argv, timeout=timeout).get('returncode') != 0:
             return {'success': False, 'error': 'Failed to prepare the isolated agent runtime'}
@@ -3589,6 +3703,12 @@ def cmd_agent_runtime_install(params):
             0o644,
             'root:root',
         ),
+        (
+            REPORT_SCHEDULER_UNIT_PATH,
+            render_report_scheduler_unit(repo_dir),
+            0o644,
+            'root:root',
+        ),
         (AGENT_UNIT_PATH, render_agent_unit(repo_dir, python_bin), 0o644, 'root:root'),
     )
     for path, content, mode, ownership in managed_files:
@@ -3621,6 +3741,8 @@ def cmd_agent_runtime_install(params):
         ['systemctl', 'restart', 'limeops-actuatord.service'],
         ['systemctl', 'enable', 'limeops-action-worker.service'],
         ['systemctl', 'restart', 'limeops-action-worker.service'],
+        ['systemctl', 'enable', 'limeops-report-scheduler.service'],
+        ['systemctl', 'restart', 'limeops-report-scheduler.service'],
         ['systemctl', 'enable', 'limeos-agent.service'],
     ):
         if run_command(argv, timeout=60).get('returncode') != 0:
@@ -3754,12 +3876,16 @@ def cmd_agent_runtime_status(params):
             LIMEOPS_UNIT_PATH,
             ACTION_BROKER_UNIT_PATH,
             ACTION_WORKER_UNIT_PATH,
+            REPORT_SCHEDULER_UNIT_PATH,
         )),
         'agent_active': _unit_state('limeos-agent.service', 'is-active'),
         'broker_active': _agent_broker_state(),
         'action_broker_active': _agent_action_broker_state(),
         'action_worker_active': _unit_state(
             'limeops-action-worker.service', 'is-active'
+        ),
+        'report_scheduler_active': _unit_state(
+            'limeops-report-scheduler.service', 'is-active'
         ),
         'claude_installed': version_result.get('returncode') == 0,
         'claude_version': version_match.group(0) if version_match else None,
@@ -4556,6 +4682,7 @@ def _read_agent_lifecycle_feature_state():
         ACTION_POLICY_PATH,
         ACTION_BROKER_POLICY_PATH,
     )
+    automation_runtime = (REPORT_SCHEDULER_UNIT_PATH,)
     # Hosts installed before the action foundation remain valid until convergence.
     # Once any action artifact exists, require the complete action boundary so a
     # partial upgrade fails closed as cleanup_required.
@@ -4564,6 +4691,10 @@ def _read_agent_lifecycle_feature_state():
         if any(os.path.lexists(path) for path in action_runtime)
         else legacy_runtime
     )
+    # Report-only automation was added after the action foundation. Preserve
+    # legacy installations, but fail closed if convergence leaves it partial.
+    if any(os.path.lexists(path) for path in automation_runtime):
+        fixed_runtime += automation_runtime
     try:
         if not all(stat.S_ISREG(os.lstat(path).st_mode) for path in fixed_runtime):
             raise OSError('incomplete agent runtime')

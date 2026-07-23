@@ -279,10 +279,12 @@ The AI Agents card exposes the same bounded controls in the browser. Its **Actio
 shows the immutable proposal, exact target, reason, expected impact, evidence references,
 expiry, verified parameters, and lifecycle history before offering a valid approve,
 reject, or cancel transition. **Findings** keeps redacted drafts private while allowing
-administrators to edit or reject them. **Automation** edits only registered operations,
-exact target allowlists, approver actor IDs, proposal expiry, and the emergency kill
-switch. It offers observe, propose, and approval modes; later authority levels remain
-server-rejected until the repair canary gate is complete.
+administrators to edit or reject them. **Automation** edits registered operations, exact
+target allowlists, approver actor IDs, proposal expiry, and the emergency kill switch. A
+separate scheduled reports section offers only code-owned read diagnostics, one-report
+delivery, and fixed zero action, retry, downtime, and model budgets. Interactive policy
+offers observe, propose, and approval modes; later authority levels remain server-rejected
+until the repair canary gate is complete.
 
 This release has no publication endpoint. Every finding returns `publication: null`.
 GitHub issue publication will use a separate repository allowlist, credential, preview,
@@ -304,10 +306,14 @@ If needed, stop `limeops-actuatord.service` and remove access to
 `/run/limeos-actions/actions.sock`. Preserve `/var/lib/limeos/agent-actions` and both
 agent audit logs for incident review.
 
+To stop report-only automation without affecting interactive diagnosis, stop
+`limeops-report-scheduler.service`. Preserve `automation.sqlite3` so occurrence and
+ambiguous-delivery evidence remains available.
+
 ## Current Limits
 
-This slice completes the action foundation and the AO-006 repair adapter catalogue. It
-does not yet include report-only schedules, maturity promotion, cooldowns, disruption
-budgets, installation, configuration, review experiments, optimisation, or GitHub
-publication. Those features remain gated by the accepted implementation plan and
-target-Pi canary evidence.
+This slice completes the action foundation, the AO-006 repair adapter catalogue, and the
+AO-007 report-only scheduler implementation. It does not yet include maturity promotion,
+scheduled mutation, cooldowns, disruption budgets, installation, configuration, review
+experiments, optimisation, or GitHub publication. Those features remain gated by the
+accepted implementation plan and target-Pi canary evidence.

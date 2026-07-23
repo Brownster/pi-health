@@ -594,7 +594,7 @@ def build_integration_executors(
         ]
         health = safe_agent_runtime_health(runtime_status_reader())
         after.update({"units": units, "health": health})
-        healthy_units = len(units) == 4 and all(
+        healthy_units = len(units) == 5 and all(
             item["load_state"] == "loaded" and item["active_state"] == "active"
             for item in units
         )
@@ -615,6 +615,7 @@ def build_integration_executors(
                 "broker_active",
                 "action_broker_active",
                 "action_worker_active",
+                "report_scheduler_active",
             )
         )
         return result == "success" and healthy_units and healthy_runtime, after

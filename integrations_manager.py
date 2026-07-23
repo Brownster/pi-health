@@ -11,6 +11,7 @@ from flask import Blueprint, current_app, jsonify, request, session
 from alert_policy import AlertPolicyError
 from agent_actions.service import AgentActionError
 from agent_findings.service import FindingError
+from agent_automation.service import AutomationError
 from agent_integration_service import AgentIntegrationError
 from auth_utils import csrf_protect, login_required
 from helper_client import helper_call
@@ -49,6 +50,10 @@ def _agent_action_service():
 
 def _agent_findings_service():
     return current_app.extensions["agent_findings_service"]
+
+
+def _agent_automation_service():
+    return current_app.extensions["agent_automation_service"]
 
 
 def _stack_notifications_service():
@@ -101,6 +106,17 @@ def _finding_error(exc):
         "not_found": 404,
         "invalid_state": 409,
         "conflict": 409,
+        "store_unavailable": 503,
+        "store_failure": 503,
+    }.get(exc.code, 400)
+    return _lifecycle_error(exc.code, str(exc), status)
+
+
+def _automation_error(exc):
+    status = {
+        "not_found": 404,
+        "conflict": 409,
+        "unsafe_store": 503,
         "store_unavailable": 503,
         "store_failure": 503,
     }.get(exc.code, 400)
@@ -1039,6 +1055,63 @@ def agent_automation_policy():
             "policy_write_failed", "Action policy could not be saved.", 503
         )
     response = jsonify({"policy": policy})
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@integrations_manager.route(
+    "/api/integrations/agents/automation/schedules", methods=["GET", "POST"]
+)
+@login_required
+def agent_automation_schedules():
+    denied = _require_action_permission("extensions.admin")
+    if denied is not None:
+        return denied
+    try:
+        if request.method == "GET":
+            result = _agent_automation_service().list()
+            response = jsonify(result)
+        else:
+            values = request.get_json(silent=True)
+            if not isinstance(values, dict):
+                return _lifecycle_error(
+                    "invalid_schedule", "Schedule must be an object.", 400
+                )
+            username = session.get("username", "unknown")
+            schedule = _agent_automation_service().create(
+                values,
+                owner={"type": "local", "id": username, "username": username},
+            )
+            response = jsonify({"schedule": schedule})
+            response.status_code = 201
+    except AutomationError as exc:
+        return _automation_error(exc)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@integrations_manager.route(
+    "/api/integrations/agents/automation/schedules/<schedule_id>",
+    methods=["GET", "PUT"],
+)
+@login_required
+def agent_automation_schedule_details(schedule_id):
+    denied = _require_action_permission("extensions.admin")
+    if denied is not None:
+        return denied
+    try:
+        if request.method == "GET":
+            schedule = _agent_automation_service().get(schedule_id)
+        else:
+            values = request.get_json(silent=True)
+            if not isinstance(values, dict):
+                return _lifecycle_error(
+                    "invalid_schedule", "Schedule must be an object.", 400
+                )
+            schedule = _agent_automation_service().update(schedule_id, values)
+    except AutomationError as exc:
+        return _automation_error(exc)
+    response = jsonify({"schedule": schedule})
     response.headers["Cache-Control"] = "no-store"
     return response
 

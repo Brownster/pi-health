@@ -2,7 +2,7 @@
 
 Date: 2026-07-20
 
-Status: Implementation underway; write-disabled foundation landed 2026-07-21
+Status: Implementation underway; AO-007 report-only scheduler implemented 2026-07-22
 
 Precondition: AA-009 read-only target signoff
 
@@ -29,8 +29,16 @@ immutable reacting user and originating channel. AO-006 now covers container sta
 restart, existing-definition stack reconciliation, fixed-subset package reconciliation,
 AI Agents and Mattermost integration repair, configured-source GitHub extension repair,
 and retry of a failed fixed package reconciliation job. The systemd-backed operations
-resume verification after the actuator and worker restart. AO-006 is complete. Scheduling,
-installation, configuration, optimisation, GitHub publication, and agent-authored pull
+resume verification after the actuator and worker restart. AO-006 is complete.
+
+AO-007 now adds durable report-only schedules with strict diagnostic catalogues, five-field
+cron and IANA timezone validation, fixed zero-write budgets, occurrence deduplication,
+restart recovery, and one-attempt Mattermost delivery. A dedicated `limeops-report` service
+can reach only the read broker, shared schedule database, and a webhook-only credential
+projection. The administrator API and Automation screen create, edit, enable, and disable
+schedules without giving the dashboard access to the broker. Local implementation and
+browser acceptance are complete; target-Pi deployment evidence remains the release signoff.
+Installation, configuration, optimisation, GitHub publication, and agent-authored pull
 requests remain later work packages.
 
 ## Goal
