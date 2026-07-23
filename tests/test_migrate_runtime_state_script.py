@@ -124,6 +124,7 @@ def test_helper_agent_permissions_are_created_and_idempotent(tmp_path: Path):
     assert "/etc/passwd" not in content
     assert "ReadWritePaths=/usr /var/lib/apt /var/lib/dpkg /var/cache/apt" in content
     assert "ReadWritePaths=-/var/lib/lime-agent -/var/lib/limeops" in content
+    assert "-/var/lib/limeops-report" in content
     assert "-/opt/stacks/.locks" in content
     assert "/run/limeos" not in content
     assert "StateDirectory=" not in content
