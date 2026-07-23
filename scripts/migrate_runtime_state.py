@@ -13,7 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from runtime_paths import migrate_legacy_runtime_data
-from agent_provider.provisioning import STACK_LOCK_DIR
+from agent_provider.provisioning import REPORT_SCHEDULER_STATE_DIR, STACK_LOCK_DIR
 
 
 HELPER_RESTART_DROPIN = "restart-with-pi-health.conf"
@@ -212,7 +212,7 @@ def ensure_helper_agent_permissions(
         "ReadWritePaths=/etc/apt\n"
         "ReadWritePaths=/usr /var/lib/apt /var/lib/dpkg /var/cache/apt\n"
         "ReadWritePaths=-/var/lib/lime-agent -/var/lib/limeops "
-        f"-{STACK_LOCK_DIR}\n"
+        f"-{REPORT_SCHEDULER_STATE_DIR} -{STACK_LOCK_DIR}\n"
     )
     return _ensure_helper_dropin(systemd_dir, HELPER_AGENT_DROPIN, content)
 
