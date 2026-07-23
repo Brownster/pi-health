@@ -51,7 +51,12 @@ from integrations_manager import integrations_manager
 from mattermost_integration_service import MattermostIntegrationService
 from stack_notifications_service import StackNotificationsService
 from agent_integration_service import AgentIntegrationService
-from agent_actions.defaults import LazyAgentActionService, build_action_service
+from agent_actions.defaults import (
+    LazyAgentActionService,
+    LazyCanaryGateService,
+    build_action_service,
+    build_canary_service,
+)
 from agent_actions.packages import package_job_status, package_repair_status
 from agent_actions.integrations import (
     agent_integration_status,
@@ -246,6 +251,7 @@ class AppDependencies:
     stack_notifications_service: StackNotificationsService | None = None
     agent_integration_service: AgentIntegrationService | None = None
     agent_action_service: object | None = None
+    agent_canary_service: object | None = None
     agent_findings_service: object | None = None
     agent_automation_service: object | None = None
     overview_service: OverviewService | None = None
@@ -474,7 +480,10 @@ def _default_metric_history_service():
     return MetricHistoryStore(RUNTIME_STATE_DIR / "metrics.sqlite3")
 
 
-def _default_agent_action_service(container_inventory_service, stack_read_service):
+def _default_agent_action_dependencies(
+    container_inventory_service,
+    stack_read_service,
+):
     def stack_status(name):
         from compose_yaml import load_compose_yaml
         from limeops.operations import sanitize_stack_details
@@ -490,25 +499,41 @@ def _default_agent_action_service(container_inventory_service, stack_read_servic
             return {}
         return result if isinstance(result, dict) and result.get("success") else {}
 
+    return {
+        "container_status": lambda name: container_inventory_service.inspect(
+            name, include_env_values=False
+        ),
+        "stack_status": stack_status,
+        "package_status": package_repair_status,
+        "package_job_status": package_job_status,
+        "integration_status": agent_integration_status,
+        "integration_job_status": agent_repair_job_status,
+        "mattermost_status": lambda: repair_status("agent_mattermost_status", {}),
+        "mattermost_job_status": mattermost_repair_job_status,
+        "extension_status": lambda name: repair_status(
+            "agent_extension_status", {"name": name}
+        ),
+        "extension_job_status": extension_repair_job_status,
+    }
+
+
+def _default_agent_action_service(container_inventory_service, stack_read_service):
+    dependencies = _default_agent_action_dependencies(
+        container_inventory_service,
+        stack_read_service,
+    )
     return LazyAgentActionService(
-        lambda: build_action_service(
-            container_status=lambda name: container_inventory_service.inspect(
-                name, include_env_values=False
-            ),
-            stack_status=stack_status,
-            package_status=package_repair_status,
-            package_job_status=package_job_status,
-            integration_status=agent_integration_status,
-            integration_job_status=agent_repair_job_status,
-            mattermost_status=lambda: repair_status(
-                "agent_mattermost_status", {}
-            ),
-            mattermost_job_status=mattermost_repair_job_status,
-            extension_status=lambda name: repair_status(
-                "agent_extension_status", {"name": name}
-            ),
-            extension_job_status=extension_repair_job_status,
-        )
+        lambda: build_action_service(**dependencies)
+    )
+
+
+def _default_agent_canary_service(container_inventory_service, stack_read_service):
+    dependencies = _default_agent_action_dependencies(
+        container_inventory_service,
+        stack_read_service,
+    )
+    return LazyCanaryGateService(
+        lambda: build_canary_service(**dependencies)
     )
 
 
@@ -1604,6 +1629,13 @@ def create_app(config=None, dependencies=None):
     application.extensions["agent_action_service"] = (
         resolved.agent_action_service
         or _default_agent_action_service(
+            application.extensions["container_inventory_service"],
+            application.extensions["stack_read_service"],
+        )
+    )
+    application.extensions["agent_canary_service"] = (
+        resolved.agent_canary_service
+        or _default_agent_canary_service(
             application.extensions["container_inventory_service"],
             application.extensions["stack_read_service"],
         )

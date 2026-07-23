@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import os
 import re
+import stat
 import threading
+import uuid
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
+from agent_actions.canary import CanaryGateService
 from agent_actions.capability import (
     AuthorityMode,
     CapabilityError,
@@ -15,7 +19,7 @@ from agent_actions.capability import (
     CapabilitySpec,
     RiskClass,
 )
-from agent_actions.ledger import ActionLedger
+from agent_actions.ledger import ActionLedger, utc_now
 from agent_actions.policy import ActionPolicy
 from agent_actions.service import AgentActionService
 from agent_actions.integrations import safe_extension_health, safe_mattermost_health
@@ -24,6 +28,7 @@ from runtime_paths import CONFIG_DIR, STATE_DIR
 
 DEFAULT_ACTION_POLICY_PATH = CONFIG_DIR / "agent-action-policy.json"
 DEFAULT_ACTION_LEDGER_PATH = STATE_DIR / "agent-actions" / "actions.sqlite3"
+DEFAULT_AGENT_RELEASE_PATH = Path("/usr/lib/limeos-agent/.release")
 
 
 def _container_params(params: Mapping[str, Any]) -> dict[str, Any]:
@@ -520,6 +525,83 @@ def build_action_service(
     )
 
 
+def read_agent_release_commit(
+    path: str | Path = DEFAULT_AGENT_RELEASE_PATH,
+    *,
+    allowed_owner_ids: frozenset[int] = frozenset({0}),
+) -> str:
+    release_path = Path(path)
+    if release_path.is_symlink():
+        raise RuntimeError("Agent release marker is unavailable")
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_NONBLOCK", 0)
+    )
+    try:
+        descriptor = os.open(release_path, flags)
+        try:
+            metadata = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or stat.S_IMODE(metadata.st_mode) & 0o022
+                or metadata.st_uid not in allowed_owner_ids
+            ):
+                raise RuntimeError("Agent release marker is unavailable")
+            payload = os.read(descriptor, 66)
+        finally:
+            os.close(descriptor)
+    except OSError as exc:
+        raise RuntimeError("Agent release marker is unavailable") from exc
+    if len(payload) > 65:
+        raise RuntimeError("Agent release marker is unavailable")
+    try:
+        value = payload.decode("ascii")
+    except UnicodeDecodeError as exc:
+        raise RuntimeError("Agent release marker is unavailable") from exc
+    if value.endswith("\n"):
+        value = value[:-1]
+    if "\n" in value or "\r" in value:
+        raise RuntimeError("Agent release marker is unavailable")
+    return value
+
+
+def build_canary_service(
+    *,
+    container_status: Callable[[str], Mapping[str, Any]],
+    stack_status: Callable[[str], Mapping[str, Any]],
+    package_status: Callable[[], Mapping[str, Any]],
+    package_job_status: Callable[[], Mapping[str, Any]],
+    integration_status: Callable[[], Mapping[str, Any]],
+    integration_job_status: Callable[[], Mapping[str, Any]],
+    mattermost_status: Callable[[], Mapping[str, Any]] | None = None,
+    mattermost_job_status: Callable[[], Mapping[str, Any]] | None = None,
+    extension_status: Callable[[str], Mapping[str, Any]] | None = None,
+    extension_job_status: Callable[[str], Mapping[str, Any]] | None = None,
+    ledger_path: str | Path = DEFAULT_ACTION_LEDGER_PATH,
+    release_commit_provider: Callable[[], str] = read_agent_release_commit,
+) -> CanaryGateService:
+    return CanaryGateService(
+        registry=build_repair_registry(
+            container_status=container_status,
+            stack_status=stack_status,
+            package_status=package_status,
+            package_job_status=package_job_status,
+            integration_status=integration_status,
+            integration_job_status=integration_job_status,
+            mattermost_status=mattermost_status,
+            mattermost_job_status=mattermost_job_status,
+            extension_status=extension_status,
+            extension_job_status=extension_job_status,
+        ),
+        ledger=ActionLedger(ledger_path),
+        release_commit_provider=release_commit_provider,
+        clock=utc_now,
+        id_factory=lambda: str(uuid.uuid4()),
+    )
+
+
 class LazyAgentActionService:
     """Delay filesystem access until an action endpoint or proposal is used."""
 
@@ -560,3 +642,30 @@ class LazyAgentActionService:
 
     def validate_policy(self, value):
         return self._get().validate_policy(value)
+
+
+class LazyCanaryGateService:
+    """Delay canary ledger access until an administrator uses the gate."""
+
+    def __init__(self, factory: Callable[[], CanaryGateService]) -> None:
+        self._factory = factory
+        self._service: CanaryGateService | None = None
+        self._lock = threading.Lock()
+
+    def _get(self) -> CanaryGateService:
+        with self._lock:
+            if self._service is None:
+                self._service = self._factory()
+            return self._service
+
+    def attest(self, *args, **kwargs):
+        return self._get().attest(*args, **kwargs)
+
+    def revoke(self, *args, **kwargs):
+        return self._get().revoke(*args, **kwargs)
+
+    def snapshot(self, **kwargs):
+        return self._get().snapshot(**kwargs)
+
+    def require_supervised(self, **kwargs):
+        return self._get().require_supervised(**kwargs)

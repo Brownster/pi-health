@@ -179,6 +179,34 @@ class CanaryGateService:
                 "gate_unavailable", "Canary gate is unavailable"
             ) from exc
 
+    def snapshot(self, *, limit: int = 200) -> dict[str, Any]:
+        canaries = self.list(limit=limit)
+        eligible_count = 0
+        for canary in canaries:
+            status = "revoked"
+            if canary["revoked_at"] is None:
+                status = "stale"
+                try:
+                    capability = self._registry.require(canary["operation"])
+                    if (
+                        capability.version == canary["capability_version"]
+                        and capability.risk.value == canary["risk"]
+                        and AuthorityMode.SUPERVISED in capability.eligible_modes
+                    ):
+                        status = "eligible"
+                        eligible_count += 1
+                except CapabilityError:
+                    pass
+            canary["status"] = status
+        return {
+            "canaries": canaries,
+            "gate": {
+                "supervised": "canary_required",
+                "autonomous": "unavailable",
+                "eligible_count": eligible_count,
+            },
+        }
+
     def require_supervised(
         self,
         *,

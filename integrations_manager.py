@@ -9,6 +9,7 @@ from collections.abc import Mapping
 from flask import Blueprint, current_app, jsonify, request, session
 
 from alert_policy import AlertPolicyError
+from agent_actions.canary import CanaryGateError
 from agent_actions.service import AgentActionError
 from agent_findings.service import FindingError
 from agent_automation.service import AutomationError
@@ -46,6 +47,10 @@ def _agent_service():
 
 def _agent_action_service():
     return current_app.extensions["agent_action_service"]
+
+
+def _agent_canary_service():
+    return current_app.extensions["agent_canary_service"]
 
 
 def _agent_findings_service():
@@ -97,6 +102,23 @@ def _action_error(exc):
         "invalid_state": 409,
         "conflict": 409,
         "idempotency_conflict": 409,
+    }.get(exc.code, 400)
+    return _lifecycle_error(exc.code, str(exc), status)
+
+
+def _canary_error(exc):
+    status = {
+        "not_found": 404,
+        "denied_actor": 403,
+        "active_conflict": 409,
+        "already_revoked": 409,
+        "ineligible_source": 409,
+        "unverified_source": 409,
+        "stale_capability": 409,
+        "ineligible_capability": 409,
+        "store_failure": 503,
+        "gate_unavailable": 503,
+        "release_unavailable": 503,
     }.get(exc.code, 400)
     return _lifecycle_error(exc.code, str(exc), status)
 
@@ -867,6 +889,13 @@ def _query_limit():
         raise AgentIntegrationError("Limit must be between 1 and 200") from exc
 
 
+def _canary_query_limit():
+    limit = _query_limit()
+    if not 1 <= limit <= 200:
+        raise AgentIntegrationError("Limit must be between 1 and 200")
+    return limit
+
+
 @integrations_manager.route("/api/integrations/agents/usage", methods=["GET"])
 @login_required
 def agent_usage():
@@ -1017,6 +1046,97 @@ def cancel_agent_action(action_id):
     except AgentActionError as exc:
         return _action_error(exc)
     response = jsonify({"action": action})
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@integrations_manager.route("/api/integrations/agents/canaries", methods=["GET"])
+@login_required
+def agent_canaries():
+    denied = _require_action_permission("extensions.admin")
+    if denied is not None:
+        return denied
+    try:
+        result = _agent_canary_service().snapshot(limit=_canary_query_limit())
+    except CanaryGateError as exc:
+        return _canary_error(exc)
+    except AgentIntegrationError as exc:
+        return _lifecycle_error("invalid_limit", str(exc), 400)
+    except Exception:
+        logger.error("Canary evidence read failed")
+        return _lifecycle_error(
+            "gate_unavailable", "Canary gate is unavailable", 503
+        )
+    response = jsonify(result)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@integrations_manager.route(
+    "/api/integrations/agents/actions/<action_id>/canary",
+    methods=["POST"],
+)
+@login_required
+@csrf_protect
+def attest_agent_canary(action_id):
+    denied = _require_action_permission("extensions.admin")
+    if denied is not None:
+        return denied
+    if request.get_json(silent=True) != {}:
+        return _lifecycle_error(
+            "invalid_canary_attestation",
+            "Canary attestation accepts an empty object.",
+            400,
+        )
+    username = session.get("username", "unknown")
+    try:
+        canary, created = _agent_canary_service().attest(
+            action_id,
+            actor={"type": "local", "id": username, "username": username},
+        )
+    except CanaryGateError as exc:
+        return _canary_error(exc)
+    except Exception:
+        logger.error("Canary attestation failed")
+        return _lifecycle_error(
+            "gate_unavailable", "Canary gate is unavailable", 503
+        )
+    response = jsonify({"canary": canary})
+    response.status_code = 201 if created else 200
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@integrations_manager.route(
+    "/api/integrations/agents/canaries/<attestation_id>/revoke",
+    methods=["POST"],
+)
+@login_required
+@csrf_protect
+def revoke_agent_canary(attestation_id):
+    denied = _require_action_permission("extensions.admin")
+    if denied is not None:
+        return denied
+    if request.get_json(silent=True) != {}:
+        return _lifecycle_error(
+            "invalid_canary_revocation",
+            "Canary revocation accepts an empty object.",
+            400,
+        )
+    username = session.get("username", "unknown")
+    try:
+        canary = _agent_canary_service().revoke(
+            attestation_id,
+            actor={"type": "local", "id": username, "username": username},
+        )
+    except CanaryGateError as exc:
+        return _canary_error(exc)
+    except Exception:
+        logger.error("Canary revocation failed")
+        return _lifecycle_error(
+            "gate_unavailable", "Canary gate is unavailable", 503
+        )
+    response = jsonify({"canary": canary})
     response.headers["Cache-Control"] = "no-store"
     return response
 

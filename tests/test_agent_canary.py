@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
@@ -18,6 +19,7 @@ from agent_actions.capability import (
     TriggerType,
 )
 from agent_actions.ledger import ActionLedger, ActionState, NewAction
+from agent_actions.defaults import read_agent_release_commit
 
 
 NOW = datetime(2026, 7, 23, 10, 0, tzinfo=timezone.utc)
@@ -426,6 +428,73 @@ def test_capability_change_invalidates_existing_evidence(tmp_path):
         )
 
     assert stale.value.code == "canary_required"
+    snapshot = changed.snapshot()
+    assert snapshot["canaries"][0]["status"] == "stale"
+    assert snapshot["gate"] == {
+        "supervised": "canary_required",
+        "autonomous": "unavailable",
+        "eligible_count": 0,
+    }
+
+
+def test_snapshot_distinguishes_eligible_and_revoked_evidence(tmp_path):
+    service, ledger = _service(tmp_path)
+    _successful_action(ledger)
+    service.attest("action-1", actor=_local_admin())
+
+    assert service.snapshot()["canaries"][0]["status"] == "eligible"
+    assert service.snapshot()["gate"]["eligible_count"] == 1
+
+    service.revoke("canary-1", actor=_local_admin())
+
+    assert service.snapshot()["canaries"][0]["status"] == "revoked"
+    assert service.snapshot()["gate"]["eligible_count"] == 0
+
+
+def test_release_commit_reader_accepts_only_secure_owned_regular_file(tmp_path):
+    release = tmp_path / ".release"
+    release.write_text(f"{RELEASE_COMMIT}\n")
+    release.chmod(0o644)
+    owner_ids = frozenset({os.geteuid()})
+
+    assert (
+        read_agent_release_commit(release, allowed_owner_ids=owner_ids)
+        == RELEASE_COMMIT
+    )
+
+    release.chmod(0o664)
+    with pytest.raises(RuntimeError):
+        read_agent_release_commit(release, allowed_owner_ids=owner_ids)
+
+
+def test_release_commit_reader_rejects_links_wrong_owner_and_oversized_data(tmp_path):
+    release = tmp_path / ".release"
+    release.write_text(f"{RELEASE_COMMIT}\n")
+    link = tmp_path / "release-link"
+    link.symlink_to(release)
+
+    with pytest.raises(RuntimeError):
+        read_agent_release_commit(
+            link,
+            allowed_owner_ids=frozenset({os.geteuid()}),
+        )
+    with pytest.raises(RuntimeError):
+        read_agent_release_commit(release, allowed_owner_ids=frozenset())
+
+    release.write_text("a" * 66)
+    with pytest.raises(RuntimeError):
+        read_agent_release_commit(
+            release,
+            allowed_owner_ids=frozenset({os.geteuid()}),
+        )
+
+    fifo = tmp_path / "release-fifo"
+    os.mkfifo(fifo)
+    with pytest.raises(RuntimeError):
+        read_agent_release_commit(
+            fifo,
+            allowed_owner_ids=frozenset({os.geteuid()}),
+        )
 
 
 def test_attestation_and_audit_event_are_atomic(tmp_path):
