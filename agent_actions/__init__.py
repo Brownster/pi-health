@@ -8,7 +8,13 @@ from agent_actions.capability import (
     RiskClass,
     TriggerType,
 )
-from agent_actions.ledger import ActionLedger, ActionRecord, ActionState
+from agent_actions.canary import CanaryGateError, CanaryGateService
+from agent_actions.ledger import (
+    ActionLedger,
+    ActionRecord,
+    ActionState,
+    CanaryAttestationRecord,
+)
 from agent_actions.policy import ActionPolicy
 from agent_actions.service import AgentActionService
 
@@ -22,6 +28,9 @@ __all__ = [
     "AuthorityMode",
     "CapabilityRegistry",
     "CapabilitySpec",
+    "CanaryAttestationRecord",
+    "CanaryGateError",
+    "CanaryGateService",
     "RiskClass",
     "TriggerType",
 ]

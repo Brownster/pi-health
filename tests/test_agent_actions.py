@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from datetime import datetime, timedelta, timezone
+from unittest.mock import Mock
 
 import pytest
 
@@ -13,6 +14,7 @@ from agent_actions.actuator import (
     ExecutionSpec,
     build_container_executors,
 )
+from agent_actions.canary import CanaryGateError
 from agent_actions.capability import (
     ActionActor,
     AuthorityMode,
@@ -20,6 +22,7 @@ from agent_actions.capability import (
     CapabilityRegistry,
     CapabilitySpec,
     RiskClass,
+    TriggerType,
 )
 from agent_actions.ledger import ActionLedger, ActionLedgerError, ActionState, NewAction
 from agent_actions.policy import ActionPolicy, ActionPolicyError
@@ -57,7 +60,14 @@ def _capability(state, *, risk=RiskClass.REVERSIBLE, modes=None):
     )
 
 
-def _policy(*, kill_switch=False, interactive="approval", enabled=True):
+def _policy(
+    *,
+    kill_switch=False,
+    interactive="approval",
+    scheduled="observe",
+    event="observe",
+    enabled=True,
+):
     return ActionPolicy.from_mapping(
         {
             "schema_version": "1",
@@ -70,8 +80,8 @@ def _policy(*, kill_switch=False, interactive="approval", enabled=True):
                     "targets": {
                         "jellyfin": {
                             "interactive": interactive,
-                            "scheduled": "observe",
-                            "event": "observe",
+                            "scheduled": scheduled,
+                            "event": event,
                         }
                     },
                 }
@@ -441,6 +451,51 @@ def test_automatic_mode_still_obeys_kill_switch(tmp_path):
     assert disabled.value.code == "kill_switch"
 
 
+def test_supervised_proposal_rechecks_exact_canary_gate(tmp_path):
+    state = {"generation": 1}
+    gate = Mock()
+    service = AgentActionService(
+        registry=CapabilityRegistry([_capability(state)]),
+        policy_provider=lambda: _policy(scheduled="supervised"),
+        ledger=ActionLedger(tmp_path / "actions.sqlite3"),
+        canary_gate=gate,
+        clock=lambda: NOW,
+        id_factory=lambda: "action-1",
+    )
+
+    action, created = _propose(service, trigger="scheduled")
+
+    assert created is True
+    assert action["state"] == "authorised"
+    gate.require_supervised.assert_called_once_with(
+        operation="container.restart",
+        target="jellyfin",
+        trigger=TriggerType.SCHEDULED,
+        mode=AuthorityMode.SUPERVISED,
+    )
+
+
+def test_supervised_proposal_fails_closed_after_canary_revocation(tmp_path):
+    gate = Mock()
+    gate.require_supervised.side_effect = CanaryGateError(
+        "canary_required",
+        "A current repair canary is required for supervised authority",
+    )
+    service = AgentActionService(
+        registry=CapabilityRegistry([_capability({"generation": 1})]),
+        policy_provider=lambda: _policy(scheduled="supervised"),
+        ledger=ActionLedger(tmp_path / "actions.sqlite3"),
+        canary_gate=gate,
+        clock=lambda: NOW,
+        id_factory=lambda: "action-1",
+    )
+
+    with pytest.raises(AgentActionError) as denied:
+        _propose(service, trigger="scheduled")
+
+    assert denied.value.code == "canary_required"
+
+
 def test_service_exposes_server_owned_capabilities_and_policy(tmp_path):
     service = _service(tmp_path, {"generation": 1})
     catalogue = service.capabilities()
@@ -524,12 +579,21 @@ def _authorised_action(tmp_path, state, *, policy=None):
     return ledger, registry, active_policy
 
 
-def _actuator(ledger, registry, policy, executor, *, clock=None):
+def _actuator(
+    ledger,
+    registry,
+    policy,
+    executor,
+    *,
+    canary_gate=None,
+    clock=None,
+):
     return ActionActuator(
         registry=registry,
         executors={"container.restart": executor},
         policy_provider=lambda: policy,
         ledger=ledger,
+        canary_gate=canary_gate,
         clock=clock or (lambda: NOW),
     )
 
@@ -605,6 +669,49 @@ def test_actuator_kill_switch_is_checked_immediately_before_mutation(tmp_path):
             "action-1", audit_id="action-audit-1"
         )
     assert disabled.value.code == "kill_switch"
+    assert calls == []
+    assert ledger.get("action-1").state == ActionState.AUTHORISED
+
+
+def test_actuator_rechecks_canary_immediately_before_supervised_mutation(tmp_path):
+    state = {"generation": 1}
+    policy = _policy(scheduled="supervised")
+    ledger = ActionLedger(tmp_path / "actions.sqlite3")
+    registry = CapabilityRegistry([_capability(state)])
+    gate = Mock()
+    service = AgentActionService(
+        registry=registry,
+        policy_provider=lambda: policy,
+        ledger=ledger,
+        canary_gate=gate,
+        clock=lambda: NOW,
+        id_factory=lambda: "action-1",
+    )
+    _propose(service, trigger="scheduled")
+    gate.require_supervised.reset_mock()
+    gate.require_supervised.side_effect = CanaryGateError(
+        "canary_required",
+        "A current repair canary is required for supervised authority",
+    )
+    calls = []
+    executor = ExecutionSpec(
+        operation="container.restart",
+        version="1",
+        execute=lambda params: calls.append(params) or {"status": "restarted"},
+        verify=lambda params, before: (True, {}),
+        no_rollback_reason="No safe rollback",
+    )
+
+    with pytest.raises(ActionActuatorError) as denied:
+        _actuator(
+            ledger,
+            registry,
+            policy,
+            executor,
+            canary_gate=gate,
+        ).execute("action-1", audit_id="action-audit-1")
+
+    assert denied.value.code == "canary_required"
     assert calls == []
     assert ledger.get("action-1").state == ActionState.AUTHORISED
 

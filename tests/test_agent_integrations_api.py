@@ -8,6 +8,7 @@ from unittest.mock import Mock
 from werkzeug.security import generate_password_hash
 
 from app import AppDependencies, LoginRateLimiter, create_app
+from agent_actions.canary import CanaryGateError
 from agent_actions.service import AgentActionError
 from agent_findings.service import FindingError
 from agent_automation.service import AutomationError
@@ -29,6 +30,7 @@ def _client(
     authenticated=True,
     thread_factory=ImmediateThread,
     action_service=None,
+    canary_service=None,
     findings_service=None,
     automation_service=None,
     helper=None,
@@ -41,6 +43,7 @@ def _client(
         operation_registry=OperationRegistry(thread_factory=thread_factory),
         agent_integration_service=service,
         agent_action_service=action_service,
+        agent_canary_service=canary_service,
         agent_findings_service=findings_service,
         agent_automation_service=automation_service,
         helper=helper,
@@ -95,6 +98,28 @@ def _action_service():
     return service
 
 
+def _canary_service():
+    service = Mock()
+    service.snapshot.return_value = {
+        "canaries": [],
+        "gate": {
+            "supervised": "canary_required",
+            "autonomous": "unavailable",
+            "eligible_count": 0,
+        },
+    }
+    service.attest.return_value = (
+        {"id": "canary-1", "source_action_id": "action-1", "status": "eligible"},
+        True,
+    )
+    service.revoke.return_value = {
+        "id": "canary-1",
+        "source_action_id": "action-1",
+        "status": "revoked",
+    }
+    return service
+
+
 def _findings_service():
     service = Mock()
     service.list.return_value = {"findings": []}
@@ -145,6 +170,7 @@ def test_all_agent_routes_require_authentication():
         "/api/integrations/agents/audit",
         "/api/integrations/agents/actions",
         "/api/integrations/agents/actions/capabilities",
+        "/api/integrations/agents/canaries",
         "/api/integrations/agents/automation/policy",
         "/api/integrations/agents/automation/schedules",
         "/api/integrations/agents/findings",
@@ -153,6 +179,9 @@ def test_all_agent_routes_require_authentication():
     assert client.post("/api/integrations/agents/install", json={}).status_code == 401
     assert client.post(
         "/api/integrations/agents/actions/action-1/approve", json={}
+    ).status_code == 401
+    assert client.post(
+        "/api/integrations/agents/actions/action-1/canary", json={}
     ).status_code == 401
 
 
@@ -302,6 +331,116 @@ def test_action_api_maps_bounded_domain_errors():
     )
     assert changed.status_code == 409
     assert changed.get_json()["code"] == "precondition_changed"
+
+
+def test_canary_routes_are_admin_only_strict_and_actor_bound():
+    canaries = _canary_service()
+    client = _client(_service(), canary_service=canaries)
+
+    listed = client.get("/api/integrations/agents/canaries?limit=25")
+    assert listed.status_code == 200
+    assert listed.headers["Cache-Control"] == "no-store"
+    canaries.snapshot.assert_called_once_with(limit=25)
+
+    attested = client.post(
+        "/api/integrations/agents/actions/action-1/canary", json={}
+    )
+    assert attested.status_code == 201
+    assert attested.headers["Cache-Control"] == "no-store"
+    canaries.attest.assert_called_once_with(
+        "action-1",
+        actor={"type": "local", "id": "admin", "username": "admin"},
+    )
+
+    revoked = client.post(
+        "/api/integrations/agents/canaries/canary-1/revoke", json={}
+    )
+    assert revoked.status_code == 200
+    assert revoked.headers["Cache-Control"] == "no-store"
+    canaries.revoke.assert_called_once_with(
+        "canary-1",
+        actor={"type": "local", "id": "admin", "username": "admin"},
+    )
+
+    viewer = _client(
+        _service(),
+        canary_service=canaries,
+        capability_roles={"admin": "viewer"},
+    )
+    assert viewer.get("/api/integrations/agents/canaries").status_code == 403
+    assert viewer.post(
+        "/api/integrations/agents/actions/action-2/canary", json={}
+    ).status_code == 403
+
+    strict = _client(_service(), canary_service=canaries)
+    assert strict.post(
+        "/api/integrations/agents/actions/action-2/canary",
+        json={"risk": "R1"},
+    ).status_code == 400
+    assert strict.post(
+        "/api/integrations/agents/canaries/canary-2/revoke",
+    ).status_code == 400
+    canaries.attest.assert_called_once()
+    canaries.revoke.assert_called_once()
+
+
+def test_canary_routes_require_csrf_and_map_only_bounded_errors():
+    canaries = _canary_service()
+    canaries.attest.side_effect = CanaryGateError(
+        "unverified_source",
+        "Source action has no verification evidence",
+    )
+    canaries.revoke.side_effect = CanaryGateError(
+        "store_failure",
+        "Canary evidence could not be persisted",
+    )
+    client = _client(_service(), canary_service=canaries)
+
+    unverified = client.post(
+        "/api/integrations/agents/actions/action-1/canary", json={}
+    )
+    assert unverified.status_code == 409
+    assert unverified.get_json()["code"] == "unverified_source"
+    unavailable = client.post(
+        "/api/integrations/agents/canaries/canary-1/revoke", json={}
+    )
+    assert unavailable.status_code == 503
+    assert unavailable.get_json() == {
+        "code": "store_failure",
+        "error": "Canary evidence could not be persisted",
+    }
+
+    client.environ_base.pop("HTTP_X_CSRF_TOKEN")
+    assert client.post(
+        "/api/integrations/agents/actions/action-2/canary", json={}
+    ).status_code == 403
+
+
+def test_canary_routes_redact_unexpected_service_failures():
+    canaries = _canary_service()
+    canaries.snapshot.side_effect = RuntimeError("private database path")
+    canaries.attest.side_effect = RuntimeError("private release marker detail")
+    client = _client(_service(), canary_service=canaries)
+
+    listed = client.get("/api/integrations/agents/canaries")
+    attested = client.post(
+        "/api/integrations/agents/actions/action-1/canary", json={}
+    )
+
+    assert listed.status_code == 503
+    assert attested.status_code == 503
+    assert "private" not in listed.get_data(as_text=True)
+    assert "private" not in attested.get_data(as_text=True)
+    assert listed.get_json()["code"] == "gate_unavailable"
+
+
+def test_canary_list_rejects_unbounded_limits_without_dispatch():
+    canaries = _canary_service()
+    client = _client(_service(), canary_service=canaries)
+
+    assert client.get("/api/integrations/agents/canaries?limit=201").status_code == 400
+    assert client.get("/api/integrations/agents/canaries?limit=bad").status_code == 400
+    canaries.snapshot.assert_not_called()
 
 
 def test_action_policy_api_is_admin_only_validated_and_helper_owned():

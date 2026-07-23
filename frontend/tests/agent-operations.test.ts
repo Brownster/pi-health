@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   actionCanBeApproved,
+  actionCanBeAttested,
   actionCanBeCancelled,
   actionCanBeRejected,
   editableFinding,
@@ -24,6 +25,24 @@ test("action controls expose only valid pre-execution transitions", () => {
   assert.equal(actionCanBeCancelled(action("authorised")), true);
   assert.equal(actionCanBeCancelled(action("executing")), false);
   assert.equal(actionCanBeCancelled(action("succeeded")), false);
+});
+
+test("repair canary requires one verified interactive approval action", () => {
+  const eligible = {
+    ...action("succeeded"),
+    terminal_code: "verified",
+    risk: "R1",
+    trigger: "interactive",
+    events: [{ phase: "succeeded" }],
+  } as AgentAction;
+
+  assert.equal(actionCanBeAttested(eligible), true);
+  assert.equal(actionCanBeAttested({ ...eligible, risk: "R2" }), false);
+  assert.equal(actionCanBeAttested({ ...eligible, trigger: "scheduled" }), false);
+  assert.equal(actionCanBeAttested({
+    ...eligible,
+    events: [...(eligible.events ?? []), { phase: "canary_attested" }],
+  } as AgentAction), false);
 });
 
 test("finding editor receives only mutable content and independent lists", () => {

@@ -7,6 +7,7 @@ import grp
 import signal
 import subprocess
 import sys
+import uuid
 
 from agent_actions.actuator import (
     ActionActuator,
@@ -18,14 +19,15 @@ from agent_actions.actuator import (
     build_stack_executors,
 )
 from agent_actions.broker import build_actuator_operations
-from agent_actions.defaults import build_repair_registry
+from agent_actions.canary import CanaryGateService
+from agent_actions.defaults import build_repair_registry, read_agent_release_commit
 from agent_actions.integrations import (
     agent_integration_status,
     agent_repair_job_status,
     extension_repair_job_status,
     mattermost_repair_job_status,
 )
-from agent_actions.ledger import ActionLedger
+from agent_actions.ledger import ActionLedger, utc_now
 from agent_actions.packages import package_job_status, package_repair_status
 from agent_actions.policy import ActionPolicy, ActionPolicyError
 from agent_actions.stack_runtime import default_stack_operations_service
@@ -202,11 +204,20 @@ def _build_actuator(action_policy_path: str, ledger_path: str) -> ActionActuator
             job_status_reader=package_job_status,
         )
     )
+    ledger = ActionLedger(ledger_path)
+    canary_gate = CanaryGateService(
+        registry=registry,
+        ledger=ledger,
+        release_commit_provider=read_agent_release_commit,
+        clock=utc_now,
+        id_factory=lambda: str(uuid.uuid4()),
+    )
     return ActionActuator(
         registry=registry,
         executors=executors,
         policy_provider=lambda: ActionPolicy.from_file(action_policy_path),
-        ledger=ActionLedger(ledger_path),
+        ledger=ledger,
+        canary_gate=canary_gate,
     )
 
 
