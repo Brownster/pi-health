@@ -555,6 +555,70 @@ def test_actuator_independently_accepts_bound_authorization(tmp_path):
     assert ledger.has_supervised_execution_slot(result["action"]["id"]) is False
 
 
+def test_disablement_atomically_cancels_queued_supervised_action(tmp_path):
+    authorizer, _schedules, ledger, incident_id, _registry, _gate = _setup(
+        tmp_path
+    )
+    result, _ = authorizer.authorize("schedule-1", incident_id)
+    action_id = result["action"]["id"]
+
+    cancelled = ledger.cancel_pending_supervised_actions(
+        cancelled_at=(NOW + timedelta(seconds=30)).isoformat()
+    )
+
+    assert [record.action_id for record in cancelled] == [action_id]
+    assert ledger.get(action_id).state == ActionState.CANCELLED
+    assert ledger.get(action_id).terminal_code == "integration_disabled"
+    authorization = ledger.supervision_authorization(action_id)
+    assert authorization.invalidated_at == (
+        NOW + timedelta(seconds=30)
+    ).isoformat()
+    assert authorization.invalidation_code == "integration_disabled"
+    assert ledger.active_target_lease(
+        operation="container.restart", target="get_iplayer"
+    ) is None
+    assert ledger.active_demotion(
+        operation="container.restart", target="get_iplayer"
+    ) is None
+    assert ledger.cancel_pending_supervised_actions(
+        cancelled_at=(NOW + timedelta(seconds=31)).isoformat()
+    ) == []
+
+
+def test_actuator_rechecks_agent_lifecycle_before_supervised_claim(tmp_path):
+    authorizer, _schedules, ledger, incident_id, registry, gate = _setup(
+        tmp_path
+    )
+    result, _ = authorizer.authorize("schedule-1", incident_id)
+    calls = []
+    actuator = ActionActuator(
+        registry=registry,
+        executors={
+            "container.restart": ExecutionSpec(
+                operation="container.restart",
+                version="1",
+                execute=lambda params: calls.append(dict(params)),
+                verify=lambda _params, _before: (True, {}),
+                no_rollback_reason="No safe rollback",
+            )
+        },
+        policy_provider=_policy,
+        ledger=ledger,
+        canary_gate=gate,
+        supervision_enabled=lambda: False,
+        clock=lambda: NOW + timedelta(seconds=30),
+    )
+
+    with pytest.raises(ActionActuatorError) as disabled:
+        actuator.execute(
+            result["action"]["id"], audit_id="audit-supervised-disabled"
+        )
+
+    assert disabled.value.code == "supervision_disabled"
+    assert calls == []
+    assert ledger.get(result["action"]["id"]).state == ActionState.CANCELLED
+
+
 @pytest.mark.parametrize(
     ("failure", "expected_state", "expected_cause"),
     [

@@ -163,21 +163,29 @@
         "limeos-agent.service",
         "limeopsd.service",
         "limeops-actuatord.service",
-        "limeops-action-worker.service"
+        "limeops-action-worker.service",
+        "limeops-report-scheduler.service",
+        "limeops-supervised-repair.service"
       ],
       "owned_files": [
         "/etc/limeos/integrations/agents.json",
         "/etc/limeos/integrations/agents.env",
         "/etc/limeos/agent-policy.json",
         "/etc/limeos/agent-action-policy.json",
-        "/etc/limeos/agent-actuator-policy.json"
+        "/etc/limeos/agent-actuator-policy.json",
+        "/etc/limeos/integrations/agent-supervisor/delivery.json",
+        "/etc/limeos/integrations/agent-supervisor/mattermost.env"
       ],
       "owned_directories": [
         "/usr/lib/limeos-agent",
         "/var/lib/lime-agent/state",
         "/var/lib/lime-agent/.claude",
         "/var/lib/lime-agent/venv",
-        "/var/lib/limeops"
+        "/var/lib/limeops",
+        "/var/lib/limeops-report",
+        "/var/lib/limeos/agent-supervisor",
+        "/etc/limeos/integrations/agent-report",
+        "/etc/limeos/integrations/agent-supervisor"
       ],
       "optional_package_cleanup": {
         "package": "claude-code",
@@ -198,7 +206,11 @@
         "limeops-actuator group",
         "limeops-action-worker user",
         "limeops-action-worker group",
-        "limeops-action group"
+        "limeops-action group",
+        "limeops-report user",
+        "limeops-report group",
+        "limeops-supervisor user",
+        "limeops-supervisor group"
       ],
       "never_owned": [
         "mattermost_stack",

@@ -21,6 +21,7 @@ from agent_actions.ledger import ActionLedger, ActionLedgerError, ActionState
 from agent_actions.policy import ActionPolicy, ActionPolicyError
 from agent_actions.defaults import safe_stack_precondition
 from agent_actions.integrations import (
+    AGENT_RUNTIME_UNITS,
     safe_agent_runtime_health,
     safe_extension_health,
     safe_mattermost_health,
@@ -59,6 +60,7 @@ class ActionActuator:
         policy_provider: Callable[[], ActionPolicy],
         ledger: ActionLedger,
         canary_gate: CanaryGateService | None = None,
+        supervision_enabled: Callable[[], bool] | None = None,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         self._registry = registry
@@ -66,6 +68,7 @@ class ActionActuator:
         self._policy_provider = policy_provider
         self._ledger = ledger
         self._canary_gate = canary_gate
+        self._supervision_enabled = supervision_enabled or (lambda: True)
         self._clock = clock or (lambda: datetime.now(timezone.utc))
 
     def execute(self, action_id: str, *, audit_id: str) -> dict[str, Any]:
@@ -253,6 +256,17 @@ class ActionActuator:
                         "precondition_changed", "Target changed before execution"
                     )
 
+                if (
+                    mode == AuthorityMode.SUPERVISED
+                    and self._supervision_enabled() is not True
+                ):
+                    self._ledger.cancel_pending_supervised_actions(
+                        cancelled_at=now.isoformat()
+                    )
+                    raise ActionActuatorError(
+                        "supervision_disabled",
+                        "Supervised repair is disabled",
+                    )
                 claimed_at = now.isoformat()
                 claimed = self._ledger.claim_execution(
                     action_id,
@@ -546,6 +560,7 @@ class ActionActuator:
             ),
             "authorization_expired": "Supervised action authorization has expired",
             "supervised_busy": "Another supervised mutation is executing",
+            "supervision_disabled": "Supervised repair is disabled",
             "audit_failure": "Action audit could not be persisted",
         }.get(code, "Action execution was denied")
         return ActionActuatorError(code, message)
@@ -830,7 +845,7 @@ def build_integration_executors(
         ]
         health = safe_agent_runtime_health(runtime_status_reader())
         after.update({"units": units, "health": health})
-        healthy_units = len(units) == 5 and all(
+        healthy_units = len(units) == len(AGENT_RUNTIME_UNITS) and all(
             item["load_state"] == "loaded" and item["active_state"] == "active"
             for item in units
         )
@@ -852,6 +867,7 @@ def build_integration_executors(
                 "action_broker_active",
                 "action_worker_active",
                 "report_scheduler_active",
+                "supervisor_active",
             )
         )
         return result == "success" and healthy_units and healthy_runtime, after

@@ -33,6 +33,12 @@ export interface AgentStatus extends IntegrationLifecycleStatus {
     channel: string | null;
   };
   gateway: { state: string; broker_state: string };
+  automation?: {
+    action_broker_state: string;
+    action_worker_state: string;
+    report_scheduler_state: string;
+    supervisor_state: string;
+  };
   provider: {
     id: "claude";
     installed: boolean;

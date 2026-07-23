@@ -1474,6 +1474,69 @@ class ActionLedger:
             values={"terminal_code": f"cancelled:{cancelled_at}"},
         )
 
+    def cancel_pending_supervised_actions(
+        self, *, cancelled_at: str
+    ) -> list[ActionRecord]:
+        """Invalidate every queued supervised mutation during integration disable."""
+        if not self._valid_time(cancelled_at):
+            raise ActionLedgerError(
+                "invalid_input", "Supervision cancellation time is invalid"
+            )
+        try:
+            with self._connect() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                rows = connection.execute(
+                    """
+                    SELECT * FROM actions
+                    WHERE authority_mode = 'supervised'
+                      AND state = 'authorised'
+                    ORDER BY created_at, action_id
+                    """
+                ).fetchall()
+                cancelled: list[ActionRecord] = []
+                for row in rows:
+                    action = self._record(row)
+                    cursor = connection.execute(
+                        """
+                        UPDATE actions SET
+                            state = 'cancelled',
+                            terminal_code = 'integration_disabled',
+                            revision = revision + 1
+                        WHERE action_id = ? AND revision = ?
+                          AND state = 'authorised'
+                        """,
+                        (action.action_id, action.revision),
+                    )
+                    if cursor.rowcount != 1:
+                        raise ActionLedgerError(
+                            "conflict", "Action changed concurrently"
+                        )
+                    self._release_target_lease(
+                        connection,
+                        action_id=action.action_id,
+                        released_at=cancelled_at,
+                        terminal_code="integration_disabled",
+                    )
+                    self._close_supervision_authorization(
+                        connection,
+                        action_id=action.action_id,
+                        invalidated_at=cancelled_at,
+                        invalidation_code="integration_disabled",
+                    )
+                    updated = connection.execute(
+                        "SELECT * FROM actions WHERE action_id = ?",
+                        (action.action_id,),
+                    ).fetchone()
+                    cancelled.append(self._record(updated))
+                return cancelled
+        except ActionLedgerError:
+            raise
+        except sqlite3.Error as exc:
+            raise ActionLedgerError(
+                "store_failure",
+                "Pending supervision actions could not be cancelled",
+            ) from exc
+
     def invalidate_precondition(self, action_id: str) -> ActionRecord:
         return self._transition(
             action_id,

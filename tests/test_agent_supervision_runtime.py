@@ -232,6 +232,30 @@ def test_reconcile_reports_execution_verification_and_recovery_once(tmp_path):
     assert len(deliveries) == 5
 
 
+def test_disable_cancellation_is_blocked_without_creating_a_demotion(tmp_path):
+    runtime, store, ledger, _authorizer, current, _diagnostics, _deliveries = (
+        _runtime(tmp_path)
+    )
+    runtime.run_cycle(at=current[0])
+    current[0] += timedelta(minutes=10)
+    runtime.run_cycle(at=current[0])
+
+    ledger.cancel_pending_supervised_actions(
+        cancelled_at=current[0].isoformat()
+    )
+    runtime.run_cycle(at=current[0])
+
+    incident = store.list_incidents()[0]
+    assert incident["state"] == "supervision_blocked"
+    assert incident["terminal_code"] == "integration_disabled"
+    assert store.list_transitions(incident["id"])[-1]["type"] == (
+        "supervision_blocked"
+    )
+    assert ledger.active_demotion(
+        operation="container.restart", target="get_iplayer"
+    ) is None
+
+
 def test_restart_marks_uncertain_delivery_without_reposting(tmp_path):
     runtime, store, _ledger, _authorizer, current, _diagnostics, deliveries = (
         _runtime(tmp_path)
@@ -317,6 +341,7 @@ def test_incident_delivery_uses_root_then_thread_and_redacts(tmp_path):
     )
     secrets = tmp_path / "mattermost.env"
     secrets.write_text("MATTERMOST_BOT_TOKEN=secret-token\n")
+    secrets.chmod(0o640)
     calls = []
 
     class Api:
@@ -367,6 +392,15 @@ def test_delivery_config_and_secret_fail_closed(tmp_path, payload):
 
     with pytest.raises(IncidentDeliveryError):
         load_delivery_config(config)
+    with pytest.raises(IncidentDeliveryError):
+        load_delivery_token(secrets)
+
+
+def test_delivery_secret_rejects_world_readable_projection(tmp_path):
+    secrets = tmp_path / "mattermost.env"
+    secrets.write_text("MATTERMOST_BOT_TOKEN=secret-token\n")
+    secrets.chmod(0o644)
+
     with pytest.raises(IncidentDeliveryError):
         load_delivery_token(secrets)
 

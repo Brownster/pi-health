@@ -310,6 +310,24 @@ class SupervisedRepairRuntime:
                     at=now.isoformat(),
                 )
                 continue
+            if (
+                action.state == ActionState.CANCELLED
+                and action.terminal_code == "integration_disabled"
+            ):
+                self.store.record_incident_event(
+                    incident["id"],
+                    transition_key=f"action:{action_id}:integration-disabled",
+                    transition_type="supervision_blocked",
+                    details={
+                        "action_id": action_id,
+                        "code": "integration_disabled",
+                    },
+                    state="supervision_blocked",
+                    terminal_code="integration_disabled",
+                    resolved=False,
+                    at=now.isoformat(),
+                )
+                continue
             if action.state in _FAILED_ACTION_STATES:
                 self.store.record_incident_event(
                     incident["id"],

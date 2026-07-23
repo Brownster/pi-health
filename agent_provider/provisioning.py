@@ -24,6 +24,14 @@ REPORT_SCHEDULER_VENV_DIR = f"{REPORT_SCHEDULER_STATE_DIR}/venv"
 REPORT_SCHEDULER_UNIT_PATH = "/etc/systemd/system/limeops-report-scheduler.service"
 REPORT_DELIVERY_CONFIG_DIR = "/etc/limeos/integrations/agent-report"
 REPORT_MATTERMOST_WEBHOOK_PATH = f"{REPORT_DELIVERY_CONFIG_DIR}/mattermost-webhook.env"
+SUPERVISOR_STATE_DIR = "/var/lib/limeos/agent-supervisor"
+SUPERVISOR_VENV_DIR = f"{SUPERVISOR_STATE_DIR}/venv"
+SUPERVISOR_CONFIG_DIR = "/etc/limeos/integrations/agent-supervisor"
+SUPERVISOR_DELIVERY_CONFIG_PATH = f"{SUPERVISOR_CONFIG_DIR}/delivery.json"
+SUPERVISOR_MATTERMOST_ENV_PATH = f"{SUPERVISOR_CONFIG_DIR}/mattermost.env"
+SUPERVISOR_UNIT_PATH = (
+    "/etc/systemd/system/limeops-supervised-repair.service"
+)
 STACK_LOCK_DIR = "/opt/stacks/.locks"
 AGENT_UNIT_PATH = "/etc/systemd/system/limeos-agent.service"
 LIMEOPS_UNIT_PATH = "/etc/systemd/system/limeopsd.service"
@@ -40,6 +48,7 @@ AGENT_RUNTIME_PACKAGES = (
     "agent_gateway",
     "agent_provider",
     "agent_runtime",
+    "agent_supervision",
     "agent_transport",
     "limeops",
 )
@@ -252,6 +261,49 @@ RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 ReadOnlyPaths={AGENT_LIB_DIR} -{REPORT_MATTERMOST_WEBHOOK_PATH}
 ReadWritePaths={ACTION_STATE_DIR}
 InaccessiblePaths=/root {repo_dir} /run/pihealth {ACTION_SOCKET_DIR} /var/run/docker.sock /etc/limeos/credentials.env
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+
+def render_supervisor_unit(repo_dir: str) -> str:
+    """Render the model-free supervised repair boundary."""
+    return f"""[Unit]
+Description=LimeOS model-free supervised repair scheduler
+After=network-online.target limeopsd.service limeops-action-worker.service
+Wants=network-online.target
+Requires=limeopsd.service limeops-action-worker.service
+
+[Service]
+Type=simple
+User=limeops-supervisor
+Group=limeops-supervisor
+SupplementaryGroups=limeops-client pihealth
+WorkingDirectory={SUPERVISOR_STATE_DIR}
+Environment=PYTHONPATH={AGENT_LIB_DIR}
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart={SUPERVISOR_VENV_DIR}/bin/python -m agent_supervision.runner
+Restart=on-failure
+RestartSec=5
+UMask=0007
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadOnlyPaths={AGENT_LIB_DIR} {ACTION_POLICY_PATH} {SUPERVISOR_DELIVERY_CONFIG_PATH} {SUPERVISOR_MATTERMOST_ENV_PATH}
+ReadWritePaths={ACTION_STATE_DIR}
+InaccessiblePaths=/root {repo_dir} /run/pihealth {ACTION_SOCKET_DIR} /var/run/docker.sock /etc/limeos/credentials.env {AGENT_ENV_PATH}
 CapabilityBoundingSet=
 SystemCallArchitectures=native
 

@@ -71,6 +71,12 @@ from agent_provider.provisioning import (
     REPORT_SCHEDULER_VENV_DIR,
     REPORT_DELIVERY_CONFIG_DIR,
     REPORT_MATTERMOST_WEBHOOK_PATH,
+    SUPERVISOR_CONFIG_DIR,
+    SUPERVISOR_DELIVERY_CONFIG_PATH,
+    SUPERVISOR_MATTERMOST_ENV_PATH,
+    SUPERVISOR_STATE_DIR,
+    SUPERVISOR_UNIT_PATH,
+    SUPERVISOR_VENV_DIR,
     STACK_LOCK_DIR,
     render_agent_unit,
     render_action_broker_unit,
@@ -80,6 +86,7 @@ from agent_provider.provisioning import (
     render_limeops_unit,
     render_mattermost_repair_unit,
     render_report_scheduler_unit,
+    render_supervisor_unit,
 )
 from agent_provider.auth import (
     AuthBusyError,
@@ -183,6 +190,7 @@ AGENT_CLEANUP_UNITS = (
     ('limeops-action-worker.service', ACTION_WORKER_UNIT_PATH),
     ('limeops-actuatord.service', ACTION_BROKER_UNIT_PATH),
     ('limeops-report-scheduler.service', REPORT_SCHEDULER_UNIT_PATH),
+    ('limeops-supervised-repair.service', SUPERVISOR_UNIT_PATH),
 )
 AGENT_CLEANUP_FILES = (
     AGENT_CONFIG_PATH,
@@ -199,6 +207,8 @@ AGENT_CLEANUP_DIRECTORIES = (
     LIMEOPS_STATE_DIR,
     REPORT_SCHEDULER_STATE_DIR,
     REPORT_DELIVERY_CONFIG_DIR,
+    SUPERVISOR_STATE_DIR,
+    SUPERVISOR_CONFIG_DIR,
 )
 AGENT_LIFECYCLE_FIELDS = frozenset({
     'schema_version', 'integration', 'operation_id', 'action', 'phase',
@@ -3008,10 +3018,14 @@ def _pihealth_update_agent(ctx):
             'failed': reconcile.get('failed', []),
             'drift': reconcile.get('drift', []),
         }
-    if run_command(['systemctl', 'restart', 'limeos-agent.service'], timeout=30).get(
-        'returncode'
-    ) != 0:
-        return {'success': False, 'error': 'Failed to restart the agent runtime'}
+    if feature.get('state') == 'enabled':
+        if run_command(
+            ['systemctl', 'restart', 'limeos-agent.service'], timeout=30
+        ).get('returncode') != 0:
+            return {
+                'success': False,
+                'error': 'Failed to restart the agent runtime',
+            }
     return {
         'success': True,
         'refreshed': True,
@@ -3356,7 +3370,11 @@ def _secure_shared_agent_databases(dashboard_user):
         group_gid = grp.getgrnam('pihealth').gr_gid
     except KeyError:
         return False
-    for name in ('actions.sqlite3', 'automation.sqlite3'):
+    for name in (
+        'actions.sqlite3',
+        'automation.sqlite3',
+        'supervision.sqlite3',
+    ):
         path = os.path.join(ACTION_STATE_DIR, name)
         if not os.path.lexists(path):
             continue
@@ -3434,6 +3452,158 @@ def _sync_report_webhook_credential(dashboard_user):
     return True
 
 
+def _write_supervisor_projection(path, content, mode):
+    """Atomically write one root-owned file readable only by the supervisor."""
+    import grp
+
+    try:
+        if os.path.lexists(path) and (
+            os.path.islink(path) or not os.path.isfile(path)
+        ):
+            return False
+        supervisor_gid = grp.getgrnam('limeops-supervisor').gr_gid
+        descriptor, temporary = tempfile.mkstemp(
+            dir=SUPERVISOR_CONFIG_DIR,
+            prefix=f'.{os.path.basename(path)}.',
+            suffix='.tmp',
+        )
+        try:
+            os.fchmod(descriptor, mode)
+            os.fchown(descriptor, 0, supervisor_gid)
+            with os.fdopen(descriptor, 'w', encoding='utf-8') as handle:
+                handle.write(content)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, path)
+            _sync_directory(SUPERVISOR_CONFIG_DIR)
+        except BaseException:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+            try:
+                os.unlink(temporary)
+            except OSError:
+                pass
+            raise
+    except (KeyError, OSError):
+        return False
+    return True
+
+
+def _sync_supervisor_delivery_projection(*, required=False):
+    """Project only the configured channel and bot posting token."""
+    try:
+        descriptor = os.open(
+            AGENT_CONFIG_PATH,
+            os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW,
+        )
+        try:
+            metadata = os.fstat(descriptor)
+            if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > 64 * 1024:
+                raise OSError('invalid agent settings')
+            settings = json.loads(
+                os.read(descriptor, 64 * 1024 + 1).decode('utf-8')
+            )
+        finally:
+            os.close(descriptor)
+        from agent_runtime.service import parse_config
+
+        parsed = parse_config(settings)
+        if parsed.channel_id is None:
+            if required:
+                return {
+                    'success': False,
+                    'configured': False,
+                    'enabled': parsed.enabled,
+                }
+            return {
+                'success': True,
+                'configured': False,
+                'enabled': parsed.enabled,
+            }
+
+        descriptor = os.open(
+            AGENT_ENV_PATH,
+            os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW,
+        )
+        try:
+            metadata = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_size > 64 * 1024
+            ):
+                raise OSError('invalid agent credential')
+            raw = os.read(descriptor, 64 * 1024 + 1).decode('utf-8')
+        finally:
+            os.close(descriptor)
+        prefix = 'MATTERMOST_BOT_TOKEN='
+        tokens = [
+            line[len(prefix):]
+            for line in raw.splitlines()
+            if line.startswith(prefix)
+        ]
+        if (
+            len(tokens) != 1
+            or not tokens[0]
+            or len(tokens[0]) > 4096
+            or any(character in tokens[0] for character in '\x00\r\n')
+        ):
+            raise OSError('invalid agent credential')
+        delivery = json.dumps(
+            {
+                'schema_version': '1',
+                'site_url': parsed.site_url,
+                'channel_id': parsed.channel_id,
+            },
+            indent=2,
+            sort_keys=True,
+        ) + '\n'
+        if not _write_supervisor_projection(
+            SUPERVISOR_DELIVERY_CONFIG_PATH, delivery, 0o640
+        ) or not _write_supervisor_projection(
+            SUPERVISOR_MATTERMOST_ENV_PATH,
+            f'MATTERMOST_BOT_TOKEN={tokens[0]}\n',
+            0o640,
+        ):
+            raise OSError('failed to write supervisor projection')
+    except (OSError, UnicodeDecodeError, ValueError):
+        return {'success': False, 'configured': False, 'enabled': False}
+    return {
+        'success': True,
+        'configured': True,
+        'enabled': parsed.enabled,
+    }
+
+
+def _check_supervisor_runtime():
+    result = run_command(
+        [
+            'runuser', '-u', 'limeops-supervisor', '--',
+            os.path.join(SUPERVISOR_VENV_DIR, 'bin', 'python'),
+            '-m', 'agent_supervision.runner', '--check',
+        ],
+        timeout=60,
+        cwd=SUPERVISOR_STATE_DIR,
+    )
+    return result.get('returncode') == 0
+
+
+def _cancel_pending_supervised_actions():
+    if not os.path.exists(SUPERVISOR_UNIT_PATH):
+        return True
+    result = run_command(
+        [
+            'runuser', '-u', 'limeops-supervisor', '--',
+            os.path.join(SUPERVISOR_VENV_DIR, 'bin', 'python'),
+            '-m', 'agent_supervision.lifecycle', 'disable',
+        ],
+        timeout=60,
+        cwd=SUPERVISOR_STATE_DIR,
+    )
+    return result.get('returncode') == 0
+
+
 def _restore_mattermost_recovery_ownership():
     """Restore the fixed root-only recovery path after broad legacy migration."""
     try:
@@ -3503,6 +3673,9 @@ def cmd_agent_runtime_install(params):
     dashboard_user = _agent_dashboard_user(repo_dir)
     if not dashboard_user:
         return {'success': False, 'error': 'LimeOS repository owner is invalid'}
+    preserve_disabled = (
+        _read_agent_lifecycle_feature_state().get('state') == 'disabled'
+    )
 
     for group in (
         'limeops',
@@ -3512,6 +3685,7 @@ def cmd_agent_runtime_install(params):
         'limeops-action-worker',
         'limeops-action',
         'limeops-report',
+        'limeops-supervisor',
     ):
         if not _ensure_system_group(group):
             return {'success': False, 'error': 'Failed to create agent identities'}
@@ -3531,6 +3705,10 @@ def cmd_agent_runtime_install(params):
         'limeops-report', 'limeops-report', REPORT_SCHEDULER_STATE_DIR
     ):
         return {'success': False, 'error': 'Failed to create report scheduler identity'}
+    if not _ensure_system_user(
+        'limeops-supervisor', 'limeops-supervisor', SUPERVISOR_STATE_DIR
+    ):
+        return {'success': False, 'error': 'Failed to create supervisor identity'}
 
     if _run_account_command([
         '/usr/sbin/usermod', '-a', '-G', 'limeops-client', 'lime-agent'
@@ -3551,6 +3729,7 @@ def cmd_agent_runtime_install(params):
         ('limeops-actuator', 'docker,pihealth,limeops-action'),
         ('limeops-action-worker', 'pihealth,limeops-action'),
         ('limeops-report', 'limeops-client,pihealth'),
+        ('limeops-supervisor', 'limeops-client,pihealth'),
     ):
         result = _run_account_command([
             '/usr/sbin/usermod', '-a', '-G', groups, user
@@ -3570,6 +3749,18 @@ def cmd_agent_runtime_install(params):
         (ACTION_STATE_DIR, 0o2770, 'limeops-actuator', 'pihealth'),
         (REPORT_SCHEDULER_STATE_DIR, 0o750, 'limeops-report', 'limeops-report'),
         (REPORT_DELIVERY_CONFIG_DIR, 0o2750, dashboard_user, 'limeops-report'),
+        (
+            SUPERVISOR_STATE_DIR,
+            0o750,
+            'limeops-supervisor',
+            'limeops-supervisor',
+        ),
+        (
+            SUPERVISOR_CONFIG_DIR,
+            0o750,
+            'root',
+            'limeops-supervisor',
+        ),
         (STACK_LOCK_DIR, 0o2770, dashboard_user, 'pihealth'),
     )
     if not all(_agent_install_directory(*item) for item in directories):
@@ -3615,8 +3806,11 @@ def cmd_agent_runtime_install(params):
     for argv, timeout in (
         (['python3', '-m', 'venv', AGENT_VENV_DIR], 120),
         (['python3', '-m', 'venv', REPORT_SCHEDULER_VENV_DIR], 120),
+        (['python3', '-m', 'venv', SUPERVISOR_VENV_DIR], 120),
         ([os.path.join(AGENT_VENV_DIR, 'bin', 'pip'), 'install', 'websocket-client>=1.8,<2'], 300),
         ([os.path.join(REPORT_SCHEDULER_VENV_DIR, 'bin', 'pip'), 'install',
+          'apscheduler>=3.10,<4', 'requests>=2.31,<3'], 300),
+        ([os.path.join(SUPERVISOR_VENV_DIR, 'bin', 'pip'), 'install',
           'apscheduler>=3.10,<4', 'requests>=2.31,<3'], 300),
         # The broker reads system status via psutil; guarantee it for the system
         # interpreter path so system.status cannot fail with upstream_failure.
@@ -3625,6 +3819,8 @@ def cmd_agent_runtime_install(params):
         (['chown', '-R', 'root:root', AGENT_LIB_DIR], 60),
         (['chown', '-R', 'lime-agent:lime-agent', AGENT_VENV_DIR], 60),
         (['chown', '-R', 'limeops-report:limeops-report', REPORT_SCHEDULER_VENV_DIR], 60),
+        (['chown', '-R', 'limeops-supervisor:limeops-supervisor',
+          SUPERVISOR_VENV_DIR], 60),
     ):
         if run_command(argv, timeout=timeout).get('returncode') != 0:
             return {'success': False, 'error': 'Failed to prepare the isolated agent runtime'}
@@ -3670,6 +3866,12 @@ def cmd_agent_runtime_install(params):
                 'error', 'Action policy migration failed'
             ),
         }
+    supervisor_projection = _sync_supervisor_delivery_projection()
+    if not supervisor_projection.get('success'):
+        return {
+            'success': False,
+            'error': 'Failed to secure supervisor delivery credentials',
+        }
 
     managed_files = (
         (
@@ -3709,6 +3911,12 @@ def cmd_agent_runtime_install(params):
             0o644,
             'root:root',
         ),
+        (
+            SUPERVISOR_UNIT_PATH,
+            render_supervisor_unit(repo_dir),
+            0o644,
+            'root:root',
+        ),
         (AGENT_UNIT_PATH, render_agent_unit(repo_dir, python_bin), 0o644, 'root:root'),
     )
     for path, content, mode, ownership in managed_files:
@@ -3733,7 +3941,13 @@ def cmd_agent_runtime_install(params):
             if run_command(argv).get('returncode') != 0:
                 return {'success': False, 'error': 'Failed to secure an agent audit log'}
 
-    for argv in (
+    if not _write_agent_release_marker(repo_dir):
+        return {
+            'success': False,
+            'error': 'Failed to record the deployed agent release',
+        }
+
+    activation_commands = [
         ['systemctl', 'daemon-reload'],
         ['systemctl', 'enable', 'limeopsd.service'],
         ['systemctl', 'restart', 'limeopsd.service'],
@@ -3743,11 +3957,28 @@ def cmd_agent_runtime_install(params):
         ['systemctl', 'restart', 'limeops-action-worker.service'],
         ['systemctl', 'enable', 'limeops-report-scheduler.service'],
         ['systemctl', 'restart', 'limeops-report-scheduler.service'],
-        ['systemctl', 'enable', 'limeos-agent.service'],
+    ]
+    if not preserve_disabled:
+        activation_commands.extend([
+            ['systemctl', 'enable', 'limeos-agent.service'],
+            ['systemctl', 'enable', 'limeops-supervised-repair.service'],
+        ])
+    if (
+        not preserve_disabled
+        and supervisor_projection.get('configured')
+        and supervisor_projection.get('enabled')
     ):
+        if not _check_supervisor_runtime():
+            return {
+                'success': False,
+                'error': 'Supervised repair state migration failed',
+            }
+        activation_commands.append(
+            ['systemctl', 'restart', 'limeops-supervised-repair.service']
+        )
+    for argv in activation_commands:
         if run_command(argv, timeout=60).get('returncode') != 0:
             return {'success': False, 'error': 'Failed to activate agent runtime units'}
-    _write_agent_release_marker(repo_dir)
     return {'success': True, 'runtime_installed': True}
 
 
@@ -3763,12 +3994,14 @@ def _write_agent_release_marker(repo_dir):
     """Record the deployed agent-runtime commit so startup can detect a stale deploy."""
     commit = _agent_repo_commit(repo_dir)
     if not commit:
-        return
-    try:
-        with open(os.path.join(AGENT_LIB_DIR, '.release'), 'w') as handle:
-            handle.write(commit + '\n')
-    except OSError:
-        pass
+        return False
+    path = os.path.join(AGENT_LIB_DIR, '.release')
+    written = _write_managed_file(path, commit + '\n', 0o640)
+    if not written.get('success'):
+        return False
+    return run_command(
+        ['chown', 'root:pihealth', path], timeout=30
+    ).get('returncode') == 0
 
 
 def cmd_agent_converge_if_stale(params):
@@ -3800,7 +4033,16 @@ def cmd_agent_converge_if_stale(params):
             deployed = handle.read().strip()
     except OSError:
         deployed = ''
-    if head and deployed == head:
+    supervisor_complete = all(
+        os.path.isfile(path)
+        for path in (
+            SUPERVISOR_UNIT_PATH,
+            os.path.join(
+                AGENT_LIB_DIR, 'agent_supervision', 'runner.py'
+            ),
+        )
+    )
+    if head and deployed == head and supervisor_complete:
         return {'success': True, 'skipped': True, 'reason': 'agent runtime is current'}
     return _pihealth_update_agent(ctx={})
 
@@ -3877,6 +4119,7 @@ def cmd_agent_runtime_status(params):
             ACTION_BROKER_UNIT_PATH,
             ACTION_WORKER_UNIT_PATH,
             REPORT_SCHEDULER_UNIT_PATH,
+            SUPERVISOR_UNIT_PATH,
         )),
         'agent_active': _unit_state('limeos-agent.service', 'is-active'),
         'broker_active': _agent_broker_state(),
@@ -3886,6 +4129,9 @@ def cmd_agent_runtime_status(params):
         ),
         'report_scheduler_active': _unit_state(
             'limeops-report-scheduler.service', 'is-active'
+        ),
+        'supervisor_active': _unit_state(
+            'limeops-supervised-repair.service', 'is-active'
         ),
         'claude_installed': version_result.get('returncode') == 0,
         'claude_version': version_match.group(0) if version_match else None,
@@ -3927,8 +4173,25 @@ def cmd_agent_runtime_disable(params):
                 return {'success': False, 'error': 'Failed to disable the agent runtime'}
     except (OSError, ValueError):
         pass
-    result = run_command(['systemctl', 'disable', '--now', 'limeos-agent.service'], timeout=60)
+    failed = False
+    if os.path.exists(SUPERVISOR_UNIT_PATH):
+        result = run_command(
+            [
+                'systemctl', 'disable', '--now',
+                'limeops-supervised-repair.service',
+            ],
+            timeout=60,
+        )
+        failed = result.get('returncode') != 0
+    if not _cancel_pending_supervised_actions():
+        failed = True
+    result = run_command(
+        ['systemctl', 'disable', '--now', 'limeos-agent.service'],
+        timeout=60,
+    )
     if result.get('returncode') != 0:
+        failed = True
+    if failed:
         return {'success': False, 'error': 'Failed to disable the agent runtime'}
     return {'success': True, 'disabled': True}
 
@@ -4289,6 +4552,12 @@ def cmd_agent_configure(params):
             return {'success': False, 'error': 'Failed to write agent configuration'}
         if run_command(['chown', ownership, path]).get('returncode') != 0:
             return {'success': False, 'error': 'Failed to secure agent configuration'}
+    projection = _sync_supervisor_delivery_projection(required=True)
+    if not projection.get('success') or not projection.get('configured'):
+        return {
+            'success': False,
+            'error': 'Failed to configure supervised repair delivery',
+        }
     return {'success': True, 'configured': True}
 
 
@@ -4379,6 +4648,17 @@ def cmd_agent_runtime_start(params):
         return {'success': False, 'error': 'Agent setup or Claude authentication is required'}
     if status.get('broker_active') != 'active':
         return {'success': False, 'error': 'LimeOps broker is unavailable'}
+    projection = _sync_supervisor_delivery_projection(required=True)
+    if not projection.get('success') or not projection.get('configured'):
+        return {
+            'success': False,
+            'error': 'Supervised repair delivery is unavailable',
+        }
+    if not _check_supervisor_runtime():
+        return {
+            'success': False,
+            'error': 'Supervised repair state migration failed',
+        }
     try:
         with open(AGENT_CONFIG_PATH) as handle:
             settings = json.load(handle)
@@ -4392,10 +4672,28 @@ def cmd_agent_runtime_start(params):
             return {'success': False, 'error': 'Failed to enable the agent runtime'}
     except (OSError, TypeError, ValueError):
         return {'success': False, 'error': 'Failed to enable the agent runtime'}
-    result = run_command(['systemctl', 'enable', '--now', 'limeos-agent.service'], timeout=60)
-    if result.get('returncode') != 0:
-        return {'success': False, 'error': 'Failed to start the agent runtime'}
+    for unit in (
+        'limeos-agent.service',
+        'limeops-supervised-repair.service',
+    ):
+        result = run_command(
+            ['systemctl', 'enable', '--now', unit], timeout=60
+        )
+        if result.get('returncode') != 0:
+            return {'success': False, 'error': 'Failed to start the agent runtime'}
     return {'success': True, 'started': True}
+
+
+def cmd_agent_supervision_enabled(params):
+    """Return only the authoritative lifecycle gate used by the actuator."""
+    rejected = _agent_reject_params(params)
+    if rejected:
+        return rejected
+    state = _read_agent_lifecycle_feature_state()
+    return {
+        'success': True,
+        'enabled': state.get('state') == 'enabled',
+    }
 
 
 def cmd_agent_integration_repair(params):
@@ -4419,6 +4717,8 @@ def cmd_agent_integration_repair(params):
             'success': False,
             'error': 'Agent setup or Claude authentication is required',
         }
+    if feature.get('state') == 'disabled':
+        return {'success': True, 'repaired': True, 'disabled': True}
     started = cmd_agent_runtime_start({})
     if started.get('success') is not True:
         return {'success': False, 'error': 'Agent service failed to start'}
@@ -4717,6 +5017,7 @@ def _read_agent_lifecycle_feature_state():
         ACTION_BROKER_POLICY_PATH,
     )
     automation_runtime = (REPORT_SCHEDULER_UNIT_PATH,)
+    supervision_runtime = (SUPERVISOR_UNIT_PATH,)
     # Hosts installed before the action foundation remain valid until convergence.
     # Once any action artifact exists, require the complete action boundary so a
     # partial upgrade fails closed as cleanup_required.
@@ -4729,6 +5030,10 @@ def _read_agent_lifecycle_feature_state():
     # legacy installations, but fail closed if convergence leaves it partial.
     if any(os.path.lexists(path) for path in automation_runtime):
         fixed_runtime += automation_runtime
+    # Supervised repair is also a later, opt-in runtime boundary. Once its
+    # unit appears, a partial migration must fail closed.
+    if any(os.path.lexists(path) for path in supervision_runtime):
+        fixed_runtime += supervision_runtime
     try:
         if not all(stat.S_ISREG(os.lstat(path).st_mode) for path in fixed_runtime):
             raise OSError('incomplete agent runtime')
@@ -5250,6 +5555,7 @@ COMMANDS = {
     'agent_configure': cmd_agent_configure,
     'agent_action_policy_write': cmd_agent_action_policy_write,
     'agent_runtime_start': cmd_agent_runtime_start,
+    'agent_supervision_enabled': cmd_agent_supervision_enabled,
     'agent_integration_repair': cmd_agent_integration_repair,
     'agent_integration_repair_start': cmd_agent_integration_repair_start,
     'agent_extension_status': cmd_agent_extension_status,

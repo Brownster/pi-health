@@ -39,6 +39,12 @@ from agent_provider.provisioning import (
     REPORT_SCHEDULER_VENV_DIR,
     REPORT_DELIVERY_CONFIG_DIR,
     REPORT_MATTERMOST_WEBHOOK_PATH,
+    SUPERVISOR_CONFIG_DIR,
+    SUPERVISOR_DELIVERY_CONFIG_PATH,
+    SUPERVISOR_MATTERMOST_ENV_PATH,
+    SUPERVISOR_STATE_DIR,
+    SUPERVISOR_UNIT_PATH,
+    SUPERVISOR_VENV_DIR,
     STACK_LOCK_DIR,
     render_agent_unit,
     render_action_broker_unit,
@@ -48,6 +54,7 @@ from agent_provider.provisioning import (
     render_limeops_unit,
     render_mattermost_repair_unit,
     render_report_scheduler_unit,
+    render_supervisor_unit,
 )
 from agent_runtime.service import DEFAULT_STATE_DIR
 
@@ -136,6 +143,27 @@ def test_report_scheduler_unit_has_read_broker_and_report_state_only():
     assert "NoNewPrivileges=true" in unit
 
 
+def test_supervisor_unit_has_only_read_broker_and_shared_action_state():
+    unit = render_supervisor_unit("/opt/pi-health")
+
+    assert "User=limeops-supervisor" in unit
+    assert "Group=limeops-supervisor" in unit
+    assert "SupplementaryGroups=limeops-client pihealth" in unit
+    assert (
+        f"ExecStart={SUPERVISOR_VENV_DIR}/bin/python "
+        "-m agent_supervision.runner"
+    ) in unit
+    assert f"WorkingDirectory={SUPERVISOR_STATE_DIR}" in unit
+    assert f"ReadWritePaths={ACTION_STATE_DIR}" in unit
+    assert SUPERVISOR_DELIVERY_CONFIG_PATH in unit
+    assert SUPERVISOR_MATTERMOST_ENV_PATH in unit
+    assert AGENT_ENV_PATH in unit
+    assert ACTION_SOCKET_DIR in unit
+    assert "/var/run/docker.sock" in unit
+    assert "SupplementaryGroups=docker" not in unit
+    assert "NoNewPrivileges=true" in unit
+
+
 def test_report_webhook_projection_excludes_other_mattermost_secrets(tmp_path):
     source = tmp_path / "mattermost.env"
     source.write_text(
@@ -165,6 +193,72 @@ def test_report_webhook_projection_excludes_other_mattermost_secrets(tmp_path):
     assert stat.S_IMODE(destination.stat().st_mode) == 0o640
 
 
+def test_supervisor_projection_contains_only_delivery_identity_and_token(
+    tmp_path,
+):
+    settings = tmp_path / "agents.json"
+    settings.write_text(
+        json.dumps(
+            {
+                "schema_version": "1",
+                "enabled": True,
+                "mattermost": {
+                    "site_url": "https://mattermost.example",
+                    "bot_username": "limeos",
+                    "bot_user_id": "bot-1",
+                    "allowed_channels": ["channel-1"],
+                    "team_id": "team-1",
+                    "channel_id": "channel-1",
+                    "bot_token_id": "token-1",
+                },
+                "limits": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    source = tmp_path / "agents.env"
+    source.write_text(
+        "MATTERMOST_BOT_TOKEN=bot-secret\nUNRELATED_SECRET=private\n",
+        encoding="utf-8",
+    )
+    destination = tmp_path / "agent-supervisor"
+    destination.mkdir()
+    config = destination / "delivery.json"
+    secret = destination / "mattermost.env"
+
+    with (
+        patch.object(helper, "AGENT_CONFIG_PATH", str(settings)),
+        patch.object(helper, "AGENT_ENV_PATH", str(source)),
+        patch.object(helper, "SUPERVISOR_CONFIG_DIR", str(destination)),
+        patch.object(
+            helper, "SUPERVISOR_DELIVERY_CONFIG_PATH", str(config)
+        ),
+        patch.object(
+            helper, "SUPERVISOR_MATTERMOST_ENV_PATH", str(secret)
+        ),
+        patch("grp.getgrnam", return_value=SimpleNamespace(gr_gid=os.getgid())),
+        patch.object(helper.os, "fchown"),
+    ):
+        result = helper._sync_supervisor_delivery_projection(required=True)
+
+    assert result == {
+        "success": True,
+        "configured": True,
+        "enabled": True,
+    }
+    assert json.loads(config.read_text(encoding="utf-8")) == {
+        "schema_version": "1",
+        "site_url": "https://mattermost.example",
+        "channel_id": "channel-1",
+    }
+    assert secret.read_text(encoding="utf-8") == (
+        "MATTERMOST_BOT_TOKEN=bot-secret\n"
+    )
+    assert "UNRELATED_SECRET" not in secret.read_text(encoding="utf-8")
+    assert stat.S_IMODE(config.stat().st_mode) == 0o640
+    assert stat.S_IMODE(secret.stat().st_mode) == 0o640
+
+
 def test_shared_agent_databases_are_fixed_group_files(tmp_path):
     action_state = tmp_path / "agent-actions"
     action_state.mkdir()
@@ -172,6 +266,8 @@ def test_shared_agent_databases_are_fixed_group_files(tmp_path):
     automation = action_state / "automation.sqlite3"
     actions.write_text("actions", encoding="utf-8")
     automation.write_text("automation", encoding="utf-8")
+    supervision = action_state / "supervision.sqlite3"
+    supervision.write_text("supervision", encoding="utf-8")
     user = SimpleNamespace(pw_uid=os.getuid())
     group = SimpleNamespace(gr_gid=os.getgid())
 
@@ -184,6 +280,7 @@ def test_shared_agent_databases_are_fixed_group_files(tmp_path):
 
     assert stat.S_IMODE(actions.stat().st_mode) == 0o660
     assert stat.S_IMODE(automation.stat().st_mode) == 0o660
+    assert stat.S_IMODE(supervision.stat().st_mode) == 0o660
 
 
 def test_agent_repair_unit_is_fixed_unprivileged_and_helper_backed():
@@ -229,6 +326,7 @@ def test_helper_agent_commands_reject_all_caller_controlled_parameters():
         helper.cmd_agent_runtime_uninstall,
         helper.cmd_agent_provider_install,
         helper.cmd_agent_action_policy_write,
+        helper.cmd_agent_supervision_enabled,
         helper.cmd_agent_integration_repair,
         helper.cmd_agent_integration_repair_start,
         helper.cmd_agent_mattermost_status,
@@ -254,6 +352,7 @@ def test_helper_exposes_only_fixed_agent_operations():
         "agent_bot_secret_write",
         "agent_configure",
         "agent_action_policy_write",
+        "agent_supervision_enabled",
         "agent_runtime_start",
         "agent_integration_repair",
         "agent_integration_repair_start",
@@ -284,7 +383,7 @@ def test_helper_agent_repair_runs_only_the_fixed_convergence_sequence():
         patch.object(
             helper,
             "_read_agent_lifecycle_feature_state",
-            return_value={"reconcile_allowed": True},
+            return_value={"state": "enabled", "reconcile_allowed": True},
         ),
         patch.object(
             helper,
@@ -502,9 +601,25 @@ def test_runtime_install_creates_fixed_identities_paths_and_units(tmp_path):
         patch.object(helper.os, "makedirs"),
         patch.object(helper.os.path, "isdir", return_value=True),
         patch.object(helper.os.path, "isfile", return_value=True),
+        patch.object(
+            helper,
+            "_read_agent_lifecycle_feature_state",
+            return_value={"state": "enabled", "reconcile_allowed": True},
+        ),
         patch.object(helper, "_secure_agent_stack_locks", return_value=True),
         patch.object(helper, "_secure_shared_agent_databases", return_value=True),
         patch.object(helper, "_sync_report_webhook_credential", return_value=True),
+        patch.object(
+            helper,
+            "_sync_supervisor_delivery_projection",
+            return_value={
+                "success": True,
+                "configured": True,
+                "enabled": True,
+            },
+        ),
+        patch.object(helper, "_check_supervisor_runtime", return_value=True),
+        patch.object(helper, "_write_agent_release_marker", return_value=True),
     ):
         result = helper.cmd_agent_runtime_install({})
 
@@ -517,6 +632,7 @@ def test_runtime_install_creates_fixed_identities_paths_and_units(tmp_path):
     assert "lime-agent" in flat and "limeops" in flat and "limeops-client" in flat
     assert "limeops-actuator" in flat and "limeops-action-worker" in flat
     assert "limeops-report" in flat
+    assert "limeops-supervisor" in flat
     assert "limeops-action" in flat
     account_commands = [
         command
@@ -530,6 +646,7 @@ def test_runtime_install_creates_fixed_identities_paths_and_units(tmp_path):
     assert ACTION_BROKER_UNIT_PATH in written
     assert ACTION_WORKER_UNIT_PATH in written
     assert REPORT_SCHEDULER_UNIT_PATH in written
+    assert SUPERVISOR_UNIT_PATH in written
     assert AGENT_REPAIR_UNIT_PATH in written
     assert EXTENSION_REPAIR_UNIT_PATH in written
     assert MATTERMOST_REPAIR_UNIT_PATH in written
@@ -543,13 +660,18 @@ def test_runtime_install_creates_fixed_identities_paths_and_units(tmp_path):
     }
     install_dirs = [command for command in commands if command[:2] == ["install", "-d"]]
     assert any(AGENT_STATE_DIR in command for command in install_dirs)
-    assert not any("/etc/limeos/integrations" in command for command in install_dirs)
+    assert not any(
+        command[-1] == "/etc/limeos/integrations"
+        for command in install_dirs
+    )
     assert any(CLAUDE_CONFIG_DIR in command for command in install_dirs)
     assert any(LIMEOPS_STATE_DIR in command for command in install_dirs)
     assert any(ACTION_STATE_DIR in command for command in install_dirs)
     assert any(ACTION_STATE_DIR in command and "2770" in command for command in install_dirs)
     assert any(REPORT_SCHEDULER_STATE_DIR in command for command in install_dirs)
     assert any(REPORT_DELIVERY_CONFIG_DIR in command for command in install_dirs)
+    assert any(SUPERVISOR_STATE_DIR in command for command in install_dirs)
+    assert any(SUPERVISOR_CONFIG_DIR in command for command in install_dirs)
     assert any(STACK_LOCK_DIR in command and "2770" in command for command in install_dirs)
     assert not any(ACTION_SOCKET_DIR in command for command in install_dirs)
     assert ["chmod", "-R", "u=rwX,go=rX", AGENT_LIB_DIR] in commands
@@ -558,7 +680,16 @@ def test_runtime_install_creates_fixed_identities_paths_and_units(tmp_path):
     assert ["systemctl", "restart", "limeops-action-worker.service"] in commands
     assert ["systemctl", "restart", "limeops-report-scheduler.service"] in commands
     assert [
+        "systemctl", "restart", "limeops-supervised-repair.service"
+    ] in commands
+    assert [
         f"{REPORT_SCHEDULER_VENV_DIR}/bin/pip",
+        "install",
+        "apscheduler>=3.10,<4",
+        "requests>=2.31,<3",
+    ] in commands
+    assert [
+        f"{SUPERVISOR_VENV_DIR}/bin/pip",
         "install",
         "apscheduler>=3.10,<4",
         "requests>=2.31,<3",
@@ -613,6 +744,26 @@ def test_agent_repo_commit_runs_git_as_dashboard_owner():
 
     git_as.assert_called_once_with(
         "holly", "/home/holly/pi-health", "rev-parse", "HEAD"
+    )
+
+
+def test_agent_release_marker_is_group_readable_for_isolated_services(
+    tmp_path,
+):
+    with (
+        patch.object(helper, "AGENT_LIB_DIR", str(tmp_path)),
+        patch.object(helper, "_agent_repo_commit", return_value="a" * 40),
+        patch.object(
+            helper, "run_command", return_value={"returncode": 0}
+        ) as run,
+    ):
+        assert helper._write_agent_release_marker("/repo") is True
+
+    marker = tmp_path / ".release"
+    assert marker.read_text(encoding="utf-8") == f'{"a" * 40}\n'
+    assert stat.S_IMODE(marker.stat().st_mode) == 0o640
+    run.assert_called_once_with(
+        ["chown", "root:pihealth", str(marker)], timeout=30
     )
 
 
@@ -680,6 +831,115 @@ def test_runtime_start_rejects_an_active_broker_without_its_socket():
         result = helper.cmd_agent_runtime_start({})
 
     assert result == {"success": False, "error": "LimeOps broker is unavailable"}
+
+
+def test_runtime_start_checks_and_starts_agent_with_supervisor():
+    commands = []
+
+    def run(argv, **_kwargs):
+        commands.append(argv)
+        return {"returncode": 0}
+
+    with (
+        patch.object(
+            helper,
+            "cmd_agent_runtime_status",
+            return_value={
+                "configured": True,
+                "claude_authenticated": True,
+                "broker_active": "active",
+            },
+        ),
+        patch.object(
+            helper,
+            "_sync_supervisor_delivery_projection",
+            return_value={
+                "success": True,
+                "configured": True,
+                "enabled": False,
+            },
+        ),
+        patch.object(helper, "_check_supervisor_runtime", return_value=True),
+        patch.object(helper, "_write_managed_file", return_value={"success": True}),
+        patch.object(helper, "AGENT_CONFIG_PATH", "/fixed/agents.json"),
+        patch.object(
+            helper,
+            "open",
+            create=True,
+        ) as opened,
+        patch.object(helper, "run_command", side_effect=run),
+    ):
+        opened.return_value.__enter__.return_value.read.return_value = (
+            '{"enabled": false}'
+        )
+        result = helper.cmd_agent_runtime_start({})
+
+    assert result == {"success": True, "started": True}
+    assert [
+        "systemctl", "enable", "--now", "limeos-agent.service"
+    ] in commands
+    assert [
+        "systemctl",
+        "enable",
+        "--now",
+        "limeops-supervised-repair.service",
+    ] in commands
+
+
+def test_runtime_disable_stops_supervisor_and_cancels_queued_repairs():
+    commands = []
+
+    def run(argv, **_kwargs):
+        commands.append(argv)
+        return {"returncode": 0}
+
+    with (
+        patch.object(helper.os.path, "exists", return_value=True),
+        patch.object(helper, "_write_managed_file", return_value={"success": True}),
+        patch.object(helper, "AGENT_CONFIG_PATH", "/fixed/agents.json"),
+        patch.object(helper, "open", create=True) as opened,
+        patch.object(
+            helper, "_cancel_pending_supervised_actions", return_value=True
+        ) as cancel,
+        patch.object(helper, "run_command", side_effect=run),
+    ):
+        opened.return_value.__enter__.return_value.read.return_value = (
+            '{"enabled": true}'
+        )
+        result = helper.cmd_agent_runtime_disable({})
+
+    assert result == {"success": True, "disabled": True}
+    assert commands[-2:] == [
+        [
+            "systemctl",
+            "disable",
+            "--now",
+            "limeops-supervised-repair.service",
+        ],
+        ["systemctl", "disable", "--now", "limeos-agent.service"],
+    ]
+    cancel.assert_called_once_with()
+
+
+def test_supervision_gate_uses_authoritative_agent_lifecycle_state():
+    with patch.object(
+        helper,
+        "_read_agent_lifecycle_feature_state",
+        return_value={"state": "enabled"},
+    ):
+        assert helper.cmd_agent_supervision_enabled({}) == {
+            "success": True,
+            "enabled": True,
+        }
+    with patch.object(
+        helper,
+        "_read_agent_lifecycle_feature_state",
+        return_value={"state": "disabled"},
+    ):
+        assert helper.cmd_agent_supervision_enabled({}) == {
+            "success": True,
+            "enabled": False,
+        }
 
 
 def test_agent_repo_dir_resolves_helper_symlink(tmp_path):
@@ -916,6 +1176,15 @@ def test_agent_configure_validates_both_settings_and_fixed_policy(tmp_path):
             or {"success": True},
         ),
         patch.object(helper, "run_command", return_value={"returncode": 0}),
+        patch.object(
+            helper,
+            "_sync_supervisor_delivery_projection",
+            return_value={
+                "success": True,
+                "configured": True,
+                "enabled": True,
+            },
+        ),
     ):
         result = helper.cmd_agent_configure({"settings": settings, "policy": policy})
     assert result == {"success": True, "configured": True}
@@ -1183,12 +1452,39 @@ def test_converge_if_stale_skips_when_up_to_date(tmp_path):
     (tmp_path / ".release").write_text("abc123\n")
     with (
         patch.object(helper.os.path, "exists", return_value=True),
+        patch.object(helper.os.path, "isfile", return_value=True),
         patch.object(helper, "AGENT_LIB_DIR", str(tmp_path)),
         patch.object(helper, "_agent_repo_dir", return_value="/repo"),
         patch.object(helper, "_agent_repo_commit", return_value="abc123"),
     ):
         result = helper.cmd_agent_converge_if_stale({})
     assert result["skipped"] is True and "current" in result["reason"]
+
+
+def test_converge_if_stale_repairs_current_release_without_supervisor(
+    tmp_path,
+):
+    (tmp_path / ".release").write_text("abc123\n")
+
+    def installed(path):
+        return path != helper.SUPERVISOR_UNIT_PATH
+
+    with (
+        patch.object(helper.os.path, "exists", return_value=True),
+        patch.object(helper.os.path, "isfile", side_effect=installed),
+        patch.object(helper, "AGENT_LIB_DIR", str(tmp_path)),
+        patch.object(helper, "_agent_repo_dir", return_value="/repo"),
+        patch.object(helper, "_agent_repo_commit", return_value="abc123"),
+        patch.object(
+            helper,
+            "_pihealth_update_agent",
+            return_value={"success": True, "refreshed": True},
+        ) as step,
+    ):
+        result = helper.cmd_agent_converge_if_stale({})
+
+    assert result["refreshed"] is True
+    step.assert_called_once_with(ctx={})
 
 
 def test_converge_if_stale_runs_agent_step_when_behind(tmp_path):

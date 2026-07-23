@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import stat
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
@@ -47,7 +48,13 @@ class IncidentDeliveryError(RuntimeError):
 def load_delivery_config(path: str | Path) -> dict[str, str]:
     config_path = Path(path)
     try:
-        if config_path.is_symlink() or config_path.stat().st_size > 8192:
+        metadata = config_path.stat()
+        if (
+            config_path.is_symlink()
+            or not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_mode & 0o022
+            or metadata.st_size > 8192
+        ):
             raise IncidentDeliveryError(
                 "Supervisor delivery configuration is unavailable"
             )
@@ -87,7 +94,13 @@ def load_delivery_config(path: str | Path) -> dict[str, str]:
 def load_delivery_token(path: str | Path) -> str:
     secret_path = Path(path)
     try:
-        if secret_path.is_symlink() or secret_path.stat().st_size > 8192:
+        metadata = secret_path.stat()
+        if (
+            secret_path.is_symlink()
+            or not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_mode & 0o027
+            or metadata.st_size > 8192
+        ):
             raise IncidentDeliveryError(
                 "Supervisor delivery credential is unavailable"
             )
