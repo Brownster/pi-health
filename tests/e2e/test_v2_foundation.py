@@ -199,16 +199,19 @@ def test_legacy_container_url_redirects_to_v2(
     assert_no_horizontal_overflow,
     v2_server,
     v2_login,
+    install_v2_containers_api_mocks,
 ):
     page = profiled_page
     base_url = v2_server["base_url"]
     v2_login(page, base_url)
+    install_v2_containers_api_mocks(page)
     page.goto(f"{base_url}/containers.html")
 
     expect(page).to_have_url(f"{base_url}/v2/containers")
     expect(page.get_by_role("heading", name="docker_containers")).to_be_visible()
-    expect(page.locator("button[data-action='start']:visible").first).to_be_visible()
-    expect(page.locator("button[data-action='restart']:visible")).to_have_count(0)
+    expect(page.locator("button[data-action='stop']:visible").first).to_be_visible()
+    expect(page.locator("button[data-action='restart']:visible").first).to_be_visible()
+    expect(page.locator("button[data-action='start']:visible")).to_have_count(0)
     if viewport_profile_name in ("phone", "tablet"):
         assert_no_horizontal_overflow(page, f"v2 containers ({viewport_profile_name})")
 
