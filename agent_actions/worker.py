@@ -6,6 +6,8 @@ import argparse
 import signal
 import threading
 import time
+from collections.abc import Callable
+from datetime import datetime, timezone
 
 from agent_actions.ledger import ActionLedger, ActionState
 from limeops.client import LimeOpsClient
@@ -15,7 +17,12 @@ DEFAULT_SOCKET_PATH = "/run/limeos-actions/actions.sock"
 DEFAULT_LEDGER_PATH = "/var/lib/limeos/agent-actions/actions.sqlite3"
 
 
-def run_once(ledger: ActionLedger, client: LimeOpsClient) -> bool:
+def run_once(
+    ledger: ActionLedger,
+    client: LimeOpsClient,
+    *,
+    clock: Callable[[], datetime] | None = None,
+) -> bool:
     action = next(
         (
             item
@@ -31,6 +38,26 @@ def run_once(ledger: ActionLedger, client: LimeOpsClient) -> bool:
         {"action_id": action.action_id},
         {"type": "system", "id": "limeops-action-worker"},
     )
+    if not response.get("ok"):
+        error = response.get("error")
+        code = error.get("code") if isinstance(error, dict) else None
+        cause = {
+            "audit_failure": "audit_failure",
+            "denied_operation": "identity_failure",
+        }.get(code)
+        authorization = ledger.supervision_authorization(action.action_id)
+        if cause is not None and authorization is not None:
+            now = (clock or (lambda: datetime.now(timezone.utc)))()
+            if not isinstance(now, datetime) or now.tzinfo is None:
+                return False
+            ledger.fail_supervised_authorization(
+                action.action_id,
+                cause=cause,
+                release_commit=authorization.release_commit,
+                failed_at=now.astimezone(timezone.utc).isoformat(),
+            )
+            return True
+        return False
     data = response.get("data")
     return bool(
         response.get("ok")

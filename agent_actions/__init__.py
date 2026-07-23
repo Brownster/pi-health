@@ -14,6 +14,10 @@ from agent_actions.ledger import (
     ActionRecord,
     ActionState,
     CanaryAttestationRecord,
+    DemotionRecord,
+    NewSupervisionAuthorization,
+    SupervisionAuthorizationRecord,
+    TargetLeaseRecord,
 )
 from agent_actions.policy import ActionPolicy
 from agent_actions.service import AgentActionService
@@ -31,6 +35,10 @@ __all__ = [
     "CanaryAttestationRecord",
     "CanaryGateError",
     "CanaryGateService",
+    "DemotionRecord",
+    "NewSupervisionAuthorization",
     "RiskClass",
+    "TargetLeaseRecord",
+    "SupervisionAuthorizationRecord",
     "TriggerType",
 ]

@@ -98,6 +98,21 @@ class AgentActionService:
             now = self._aware_now()
             if mode in {AuthorityMode.SUPERVISED, AuthorityMode.AUTONOMOUS}:
                 policy.require_execution_enabled()
+                if self._ledger.active_demotion(
+                    operation=operation, target=target
+                ) is not None:
+                    raise AgentActionError(
+                        "demoted",
+                        "Supervised authority is demoted to approval for this target",
+                    )
+                if (
+                    mode == AuthorityMode.SUPERVISED
+                    and trigger_type == TriggerType.SCHEDULED
+                ):
+                    raise AgentActionError(
+                        "supervision_required",
+                        "Scheduled repairs require supervision authorization",
+                    )
                 self._require_automatic_authority(
                     operation=operation,
                     target=target,
@@ -370,5 +385,11 @@ class AgentActionService:
             "idempotency_conflict": "Idempotency key belongs to another payload",
             "payload_changed": "Action payload has changed",
             "conflict": "Action changed concurrently",
+            "target_busy": "Another action is active for this exact target",
+            "target_lease_missing": "Action target lease is unavailable",
+            "demoted": "Supervised authority is demoted to approval for this target",
+            "supervision_required": (
+                "Scheduled repairs require supervision authorization"
+            ),
         }.get(code, str(exc) or "Agent action failed")
         return AgentActionError(code, public)

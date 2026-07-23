@@ -4299,7 +4299,10 @@ def cmd_agent_action_policy_write(params):
     policy = params.get('policy')
     try:
         from agent_actions.canary import CanaryGateError, CanaryGateService
-        from agent_actions.defaults import build_repair_registry
+        from agent_actions.defaults import (
+            build_repair_registry,
+            read_agent_release_commit,
+        )
         from agent_actions.ledger import ActionLedger, utc_now
         from agent_actions.policy import ActionPolicy
 
@@ -4339,7 +4342,10 @@ def cmd_agent_action_policy_write(params):
             gate = CanaryGateService(
                 registry=registry,
                 ledger=ActionLedger(os.path.join(ACTION_STATE_DIR, 'actions.sqlite3')),
-                release_commit_provider=lambda: '',
+                release_commit_provider=lambda: read_agent_release_commit(
+                    os.path.join(AGENT_LIB_DIR, '.release'),
+                    allowed_owner_ids=frozenset({0, os.geteuid()}),
+                ),
                 clock=utc_now,
                 id_factory=lambda: '',
             )

@@ -73,6 +73,8 @@ class ActionActuator:
             raise ActionActuatorError("invalid_input", "Action ID is invalid")
         if not isinstance(audit_id, str) or not _ACTION_ID_RE.fullmatch(audit_id):
             raise ActionActuatorError("invalid_input", "Action audit ID is invalid")
+        supervised_release: str | None = None
+        failure_cause = "execution_failed"
         try:
             now = self._now()
             action = self._ledger.get(action_id)
@@ -80,7 +82,21 @@ class ActionActuator:
             if action.state not in {ActionState.AUTHORISED, ActionState.VERIFYING}:
                 raise ActionActuatorError("invalid_state", "Action is not authorised")
             if not resuming_verification and self._parse_time(action.expires_at) <= now:
-                self._ledger.expire(action_id)
+                authorization = self._ledger.supervision_authorization(
+                    action_id
+                )
+                if (
+                    action.trigger == "scheduled"
+                    and action.authority_mode == "supervised"
+                    and authorization is not None
+                ):
+                    self._ledger.expire_supervised_authorization(
+                        action_id,
+                        release_commit=authorization.release_commit,
+                        expired_at=now.isoformat(),
+                    )
+                else:
+                    self._ledger.expire(action_id)
                 raise ActionActuatorError("expired", "Action has expired")
 
             capability = self._registry.require(action.operation)
@@ -121,6 +137,41 @@ class ActionActuator:
             trigger = TriggerType(action.trigger)
             if resuming_verification:
                 mode = AuthorityMode(action.authority_mode)
+                if mode == AuthorityMode.SUPERVISED:
+                    authorization = self._ledger.supervision_authorization(
+                        action_id
+                    )
+                    if (
+                        authorization is None
+                        or authorization.consumed_at is None
+                        or authorization.invalidated_at is not None
+                        or not self._ledger.has_supervised_execution_slot(
+                            action_id
+                        )
+                    ):
+                        raise ActionActuatorError(
+                            "authorization_required",
+                            "Supervised action authorization is unavailable",
+                        )
+                    supervised_release = authorization.release_commit
+                    if now >= self._parse_time(authorization.expires_at):
+                        failed = self._ledger.finish_execution(
+                            action_id,
+                            state=ActionState.VERIFICATION_FAILED,
+                            terminal_code="deadline_exceeded:no_safe_rollback",
+                            demotion_cause="deadline_exceeded",
+                            release_commit=supervised_release,
+                            finished_at=now.isoformat(),
+                        )
+                        self._record_outcome(
+                            action_id,
+                            "verification_failed",
+                            {
+                                "action_audit_id": audit_id,
+                                "code": "deadline_exceeded",
+                            },
+                        )
+                        return failed.public_dict()
             else:
                 policy = self._policy_provider()
                 policy.require_execution_enabled()
@@ -137,17 +188,55 @@ class ActionActuator:
                     AuthorityMode.SUPERVISED,
                     AuthorityMode.AUTONOMOUS,
                 }:
+                    if self._ledger.active_demotion(
+                        operation=action.operation, target=target
+                    ) is not None:
+                        raise ActionActuatorError(
+                            "demoted",
+                            "Supervised authority is demoted to approval",
+                        )
                     if self._canary_gate is None:
                         raise ActionActuatorError(
                             "canary_required",
                             "A current repair canary is required",
                         )
-                    self._canary_gate.require_supervised(
+                    canary = self._canary_gate.require_supervised(
                         operation=action.operation,
                         target=target,
                         trigger=trigger,
                         mode=mode,
                     )
+                    supervised_release = canary["release_commit"]
+                    authorization = self._ledger.supervision_authorization(
+                        action_id
+                    )
+                    if (
+                        authorization is None
+                        or authorization.consumed_at is not None
+                        or authorization.invalidated_at is not None
+                        or authorization.operation != action.operation
+                        or authorization.target != target
+                        or authorization.capability_version
+                        != action.capability_version
+                        or authorization.release_commit
+                        != canary["release_commit"]
+                    ):
+                        raise ActionActuatorError(
+                            "authorization_required",
+                            "Supervised action authorization is unavailable",
+                        )
+                    if now >= self._parse_time(
+                        authorization.window_deadline
+                    ) or now >= self._parse_time(authorization.expires_at):
+                        self._ledger.expire_supervised_authorization(
+                            action_id,
+                            release_commit=authorization.release_commit,
+                            expired_at=now.isoformat(),
+                        )
+                        raise ActionActuatorError(
+                            "authorization_expired",
+                            "Supervised action authorization has expired",
+                        )
             if mode not in capability.eligible_modes:
                 raise ActionActuatorError(
                     "ineligible_mode", "Action authority is ineligible"
@@ -171,19 +260,45 @@ class ActionActuator:
                     approval_required=mode == AuthorityMode.APPROVAL,
                     claimed_at=claimed_at,
                 )
-                self._ledger.record_event(
-                    action_id,
-                    phase="execution_started",
-                    created_at=claimed_at,
-                    details={"action_audit_id": audit_id, "before": before},
-                )
+                failure_cause = "audit_failure"
+                try:
+                    self._ledger.record_event(
+                        action_id,
+                        phase="execution_started",
+                        created_at=claimed_at,
+                        details={"action_audit_id": audit_id, "before": before},
+                    )
+                except ActionLedgerError as exc:
+                    self._ledger.finish_execution(
+                        action_id,
+                        state=ActionState.EXECUTION_FAILED,
+                        terminal_code="audit_failure",
+                        demotion_cause=(
+                            "audit_failure"
+                            if supervised_release is not None
+                            else None
+                        ),
+                        release_commit=supervised_release,
+                        finished_at=self._now().isoformat(),
+                    )
+                    raise ActionActuatorError(
+                        "audit_failure", "Action audit could not be persisted"
+                    ) from exc
 
+                failure_cause = "execution_failed"
                 result = executor.execute(params)
                 if not isinstance(result, Mapping) or result.get("error"):
                     failed = self._ledger.finish_execution(
                         action_id,
                         state=ActionState.EXECUTION_FAILED,
                         terminal_code="executor_failed",
+                        demotion_cause=(
+                            "execution_failed"
+                            if supervised_release is not None
+                            else None
+                        ),
+                        release_commit=supervised_release,
+                        finished_at=self._now().isoformat(),
                     )
                     self._record_outcome(
                         action_id,
@@ -192,16 +307,41 @@ class ActionActuator:
                     )
                     return failed.public_dict()
 
+                if (
+                    supervised_release is not None
+                    and authorization is not None
+                    and self._now()
+                    >= self._parse_time(authorization.expires_at)
+                ):
+                    failed = self._ledger.finish_execution(
+                        action_id,
+                        state=ActionState.EXECUTION_FAILED,
+                        terminal_code="deadline_exceeded",
+                        demotion_cause="deadline_exceeded",
+                        release_commit=supervised_release,
+                        finished_at=self._now().isoformat(),
+                    )
+                    self._record_outcome(
+                        action_id,
+                        "execution_failed",
+                        {
+                            "action_audit_id": audit_id,
+                            "code": "deadline_exceeded",
+                        },
+                    )
+                    return failed.public_dict()
                 self._ledger.begin_verification(action_id)
                 verification_started = now
                 approval_consumed = claimed.approval_used_at is not None
 
+            failure_cause = "verification_uncertain"
             verified, after = executor.verify(params, before)
             if not isinstance(after, Mapping):
-                raise ActionActuatorError(
-                    "verification_failure", "Verification returned invalid data"
-                )
+                raise ValueError("invalid verification result")
             safe_after = dict(after)
+            uncertain = verified is None
+            if verified is False:
+                failure_cause = "verification_failed"
             if verified is None:
                 timed_out = (
                     executor.max_verification_seconds is not None
@@ -214,11 +354,38 @@ class ActionActuator:
                     response["approval_consumed"] = approval_consumed
                     return response
                 verified = False
+            if (
+                supervised_release is not None
+                and authorization is not None
+                and self._now()
+                >= self._parse_time(authorization.expires_at)
+            ):
+                verified = False
+                uncertain = False
+                failure_cause = "deadline_exceeded"
             if not verified:
+                demotion_cause = (
+                    failure_cause
+                    if supervised_release is not None
+                    else None
+                )
+                if supervised_release is not None and failure_cause not in {
+                    "deadline_exceeded",
+                    "verification_uncertain",
+                    "verification_failed",
+                }:
+                    demotion_cause = (
+                        "verification_uncertain"
+                        if uncertain
+                        else "verification_failed"
+                    )
                 failed = self._ledger.finish_execution(
                     action_id,
                     state=ActionState.VERIFICATION_FAILED,
                     terminal_code="verification_failed:no_safe_rollback",
+                    demotion_cause=demotion_cause,
+                    release_commit=supervised_release,
+                    finished_at=self._now().isoformat(),
                 )
                 self._record_outcome(
                     action_id,
@@ -231,16 +398,31 @@ class ActionActuator:
                 )
                 return failed.public_dict()
 
+            failure_cause = "audit_failure"
             succeeded = self._ledger.finish_execution(
                 action_id,
                 state=ActionState.SUCCEEDED,
                 terminal_code="verified",
             )
-            self._record_outcome(
-                action_id,
-                "succeeded",
-                {"action_audit_id": audit_id, "after": safe_after},
-            )
+            try:
+                self._record_outcome(
+                    action_id,
+                    "succeeded",
+                    {"action_audit_id": audit_id, "after": safe_after},
+                )
+            except ActionLedgerError as exc:
+                if supervised_release is not None:
+                    self._ledger.create_demotion(
+                        operation=action.operation,
+                        target=target,
+                        cause="audit_failure",
+                        source_action_id=action_id,
+                        release_commit=supervised_release,
+                        demoted_at=self._now().isoformat(),
+                    )
+                raise ActionActuatorError(
+                    "audit_failure", "Action audit could not be persisted"
+                ) from exc
             response = succeeded.public_dict()
             response["verification"] = safe_after
             response["approval_consumed"] = approval_consumed
@@ -265,12 +447,39 @@ class ActionActuator:
                         action_id,
                         state=ActionState.EXECUTION_FAILED,
                         terminal_code="executor_exception",
+                        demotion_cause=(
+                            failure_cause
+                            if supervised_release is not None
+                            else None
+                        ),
+                        release_commit=supervised_release,
+                        finished_at=self._now().isoformat(),
                     )
                 elif current.state == ActionState.VERIFYING:
                     self._ledger.finish_execution(
                         action_id,
                         state=ActionState.VERIFICATION_FAILED,
                         terminal_code="verification_exception:no_safe_rollback",
+                        demotion_cause=(
+                            failure_cause
+                            if supervised_release is not None
+                            else None
+                        ),
+                        release_commit=supervised_release,
+                        finished_at=self._now().isoformat(),
+                    )
+                elif (
+                    current.state == ActionState.SUCCEEDED
+                    and supervised_release is not None
+                    and failure_cause == "audit_failure"
+                ):
+                    self._ledger.create_demotion(
+                        operation=current.operation,
+                        target=current.target,
+                        cause="audit_failure",
+                        source_action_id=current.action_id,
+                        release_commit=supervised_release,
+                        demoted_at=self._now().isoformat(),
                     )
             except Exception:
                 pass
@@ -330,6 +539,14 @@ class ActionActuator:
             "invalid_approval": "Action approval is not executable",
             "payload_changed": "Action payload has changed",
             "not_found": "Action was not found",
+            "target_lease_missing": "Action target lease is unavailable",
+            "demoted": "Supervised authority is demoted to approval",
+            "authorization_required": (
+                "Supervised action authorization is unavailable"
+            ),
+            "authorization_expired": "Supervised action authorization has expired",
+            "supervised_busy": "Another supervised mutation is executing",
+            "audit_failure": "Action audit could not be persisted",
         }.get(code, "Action execution was denied")
         return ActionActuatorError(code, message)
 

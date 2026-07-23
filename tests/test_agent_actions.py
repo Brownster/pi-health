@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import os
+import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+from threading import Barrier
 from unittest.mock import Mock
 
 import pytest
@@ -22,7 +25,7 @@ from agent_actions.capability import (
     CapabilityRegistry,
     CapabilitySpec,
     RiskClass,
-    TriggerType,
+    canonical_hash,
 )
 from agent_actions.ledger import ActionLedger, ActionLedgerError, ActionState, NewAction
 from agent_actions.policy import ActionPolicy, ActionPolicyError
@@ -139,6 +142,45 @@ def _new_action(**overrides):
     }
     values.update(overrides)
     return NewAction(**values)
+
+
+def _failed_supervised_action(ledger, *, action_id="action-1"):
+    ledger.create(
+        _new_action(
+            action_id=action_id,
+            idempotency_key=f"scheduler:{action_id}:repair",
+            trigger="scheduled",
+            authority_mode="supervised",
+            state=ActionState.EXECUTION_FAILED,
+        )
+    )
+
+
+def _authorised_supervised_action(*, action_id="action-2"):
+    params = {"name": "jellyfin"}
+    evidence = ["audit-1"]
+    return _new_action(
+        action_id=action_id,
+        idempotency_key=f"scheduler:{action_id}:repair",
+        trigger="scheduled",
+        authority_mode="supervised",
+        state=ActionState.AUTHORISED,
+        params=params,
+        evidence_ids=evidence,
+        payload_hash=canonical_hash(
+            {
+                "operation": "container.restart",
+                "capability_version": "1",
+                "target": "jellyfin",
+                "params": params,
+                "trigger": "scheduled",
+                "evidence_ids": evidence,
+            }
+        ),
+        precondition_hash=canonical_hash(
+            {"name": "jellyfin", "generation": 1}
+        ),
+    )
 
 
 # -- identity and capability contracts ---------------------------------------
@@ -308,6 +350,296 @@ def test_ledger_can_cancel_only_before_execution(tmp_path):
     assert repeated.value.code == "invalid_state"
 
 
+def test_exact_target_lease_blocks_every_non_terminal_action(tmp_path):
+    ledger = ActionLedger(tmp_path / "actions.sqlite3")
+    first, _ = ledger.create(_new_action())
+
+    lease = ledger.active_target_lease(
+        operation="container.restart", target="jellyfin"
+    )
+    assert lease is not None
+    assert lease.action_id == first.action_id
+
+    with pytest.raises(ActionLedgerError) as busy:
+        ledger.create(
+            _new_action(
+                action_id="action-2",
+                idempotency_key="mattermost:post-2:restart",
+            )
+        )
+    assert busy.value.code == "target_busy"
+
+    ledger.cancel("action-1", cancelled_at=NOW.isoformat())
+    assert (
+        ledger.active_target_lease(
+            operation="container.restart", target="jellyfin"
+        )
+        is None
+    )
+    replacement, created = ledger.create(
+        _new_action(
+            action_id="action-2",
+            idempotency_key="mattermost:post-2:restart",
+        )
+    )
+    assert created is True
+    assert replacement.action_id == "action-2"
+
+
+def test_exact_target_lease_claim_is_concurrency_safe(tmp_path):
+    ledger = ActionLedger(tmp_path / "actions.sqlite3")
+    barrier = Barrier(2)
+
+    def create(index):
+        barrier.wait()
+        try:
+            return ledger.create(
+                _new_action(
+                    action_id=f"action-{index}",
+                    idempotency_key=f"mattermost:post-{index}:restart",
+                )
+            )[1]
+        except ActionLedgerError as exc:
+            return exc.code
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(create, (1, 2)))
+
+    assert sorted(map(str, results)) == ["True", "target_busy"]
+
+
+def test_existing_active_action_gains_fail_closed_lease_on_migration(tmp_path):
+    path = tmp_path / "actions.sqlite3"
+    ledger = ActionLedger(path)
+    ledger.create(_new_action())
+    with sqlite3.connect(path) as connection:
+        connection.execute("DROP TABLE action_target_leases")
+
+    migrated = ActionLedger(path)
+
+    lease = migrated.active_target_lease(
+        operation="container.restart", target="jellyfin"
+    )
+    assert lease is not None
+    assert lease.action_id == "action-1"
+    assert lease.active is True
+
+
+def test_lease_survives_execution_and_releases_only_at_terminal_state(tmp_path):
+    ledger = ActionLedger(tmp_path / "actions.sqlite3")
+    ledger.create(_new_action(state=ActionState.AUTHORISED))
+
+    ledger.claim_execution(
+        "action-1",
+        payload_hash="a" * 64,
+        approval_required=False,
+        claimed_at=NOW.isoformat(),
+    )
+    ledger.begin_verification("action-1")
+
+    assert (
+        ledger.active_target_lease(
+            operation="container.restart", target="jellyfin"
+        ).action_id
+        == "action-1"
+    )
+    ledger.finish_execution(
+        "action-1",
+        state=ActionState.SUCCEEDED,
+        terminal_code="verified",
+    )
+    assert (
+        ledger.active_target_lease(
+            operation="container.restart", target="jellyfin"
+        )
+        is None
+    )
+
+
+def test_demotion_is_exact_durable_and_idempotent(tmp_path):
+    ledger = ActionLedger(tmp_path / "actions.sqlite3")
+    _failed_supervised_action(ledger)
+
+    demotion, created = ledger.create_demotion(
+        operation="container.restart",
+        target="jellyfin",
+        cause="execution_failed",
+        source_action_id="action-1",
+        release_commit="a" * 40,
+        demoted_at=NOW.isoformat(),
+    )
+    repeated, repeated_created = ledger.create_demotion(
+        operation="container.restart",
+        target="jellyfin",
+        cause="verification_failed",
+        source_action_id="action-1",
+        release_commit="a" * 40,
+        demoted_at=(NOW + timedelta(seconds=1)).isoformat(),
+    )
+
+    assert created is True
+    assert repeated_created is False
+    assert repeated == demotion
+    assert demotion.active is True
+    assert demotion.cause == "execution_failed"
+    assert ledger.active_demotion(
+        operation="container.restart", target="jellyfin"
+    ) == demotion
+    assert ledger.active_demotion(
+        operation="container.restart", target="sonarr"
+    ) is None
+
+
+def test_demotion_blocks_service_and_actuator_independently(tmp_path):
+    state = {"generation": 1}
+    ledger = ActionLedger(tmp_path / "actions.sqlite3")
+    _failed_supervised_action(ledger)
+    gate = Mock()
+    policy = _policy(scheduled="supervised")
+    registry = CapabilityRegistry([_capability(state)])
+    service = AgentActionService(
+        registry=registry,
+        policy_provider=lambda: policy,
+        ledger=ledger,
+        canary_gate=gate,
+        clock=lambda: NOW,
+        id_factory=lambda: "action-2",
+    )
+    ledger.create(_authorised_supervised_action())
+
+    ledger.create_demotion(
+        operation="container.restart",
+        target="jellyfin",
+        cause="execution_failed",
+        source_action_id="action-1",
+        release_commit="a" * 40,
+        demoted_at=NOW.isoformat(),
+    )
+    with pytest.raises(AgentActionError) as service_denied:
+        _propose(
+            service,
+            trigger="scheduled",
+            idempotency_key="scheduler:incident-3:repair",
+        )
+    assert service_denied.value.code == "demoted"
+
+    executor = ExecutionSpec(
+        operation="container.restart",
+        version="1",
+        execute=lambda params: pytest.fail("demoted action executed"),
+        verify=lambda params, before: (True, {}),
+        no_rollback_reason="No safe rollback",
+    )
+    with pytest.raises(ActionActuatorError) as actuator_denied:
+        _actuator(
+            ledger,
+            registry,
+            policy,
+            executor,
+            canary_gate=gate,
+        ).execute("action-2", audit_id="action-audit-2")
+    assert actuator_denied.value.code == "demoted"
+    assert ledger.get("action-2").state == ActionState.AUTHORISED
+
+
+def test_demotion_clear_requires_current_release_verified_recovery(tmp_path):
+    ledger = ActionLedger(tmp_path / "actions.sqlite3")
+    _failed_supervised_action(ledger)
+    demotion, _ = ledger.create_demotion(
+        operation="container.restart",
+        target="jellyfin",
+        cause="execution_failed",
+        source_action_id="action-1",
+        release_commit="a" * 40,
+        demoted_at=NOW.isoformat(),
+    )
+    recovery_time = NOW + timedelta(minutes=1)
+    recovery = _new_action(
+        action_id="action-recovery",
+        idempotency_key="mattermost:recovery:restart",
+        created_at=recovery_time.isoformat(),
+        expires_at=(recovery_time + timedelta(minutes=15)).isoformat(),
+    )
+    ledger.create(recovery)
+    ledger.approve(
+        recovery.action_id,
+        payload_hash=recovery.payload_hash,
+        approver_type="mattermost",
+        approver_id="user-1",
+        approver_username="marc",
+        approved_at=recovery_time.isoformat(),
+    )
+    ledger.claim_execution(
+        recovery.action_id,
+        payload_hash=recovery.payload_hash,
+        approval_required=True,
+        claimed_at=recovery_time.isoformat(),
+    )
+    ledger.begin_verification(recovery.action_id)
+    ledger.finish_execution(
+        recovery.action_id,
+        state=ActionState.SUCCEEDED,
+        terminal_code="verified",
+    )
+    ledger.record_event(
+        recovery.action_id,
+        phase="succeeded",
+        created_at=recovery_time.isoformat(),
+        details={
+            "action_audit_id": "audit-recovery",
+            "after": {"name": "jellyfin", "status": "running"},
+        },
+    )
+
+    with pytest.raises(ActionLedgerError) as no_canary:
+        ledger.clear_demotion(
+            demotion.demotion_id,
+            expected_revision=demotion.revision,
+            recovery_action_id=recovery.action_id,
+            release_commit="b" * 40,
+            cleared_by_type="local",
+            cleared_by_id="admin",
+            cleared_by_username="marc",
+            cleared_at=(recovery_time + timedelta(minutes=1)).isoformat(),
+        )
+    assert no_canary.value.code == "recovery_required"
+
+    ledger.attest_canary(
+        attestation_id="canary-recovery",
+        source_action_id=recovery.action_id,
+        operation="container.restart",
+        target="jellyfin",
+        capability_version="1",
+        risk="R1",
+        release_commit="b" * 40,
+        attested_by_type="local",
+        attested_by_id="admin",
+        attested_by_username="marc",
+        attested_at=(recovery_time + timedelta(minutes=1)).isoformat(),
+    )
+    cleared = ledger.clear_demotion(
+        demotion.demotion_id,
+        expected_revision=demotion.revision,
+        recovery_action_id=recovery.action_id,
+        release_commit="b" * 40,
+        cleared_by_type="local",
+        cleared_by_id="admin",
+        cleared_by_username="marc",
+        cleared_at=(recovery_time + timedelta(minutes=2)).isoformat(),
+    )
+
+    assert cleared.active is False
+    assert cleared.recovery_action_id == recovery.action_id
+    assert cleared.cleared_by_id == "admin"
+    assert cleared.revision == 2
+    assert (
+        ledger.active_demotion(
+            operation="container.restart", target="jellyfin"
+        )
+        is None
+    )
+
+
 def test_service_rejection_records_immutable_mattermost_actor(tmp_path):
     service = _service(tmp_path, {"generation": 1})
     _propose(service)
@@ -451,7 +783,7 @@ def test_automatic_mode_still_obeys_kill_switch(tmp_path):
     assert disabled.value.code == "kill_switch"
 
 
-def test_supervised_proposal_rechecks_exact_canary_gate(tmp_path):
+def test_generic_service_cannot_bypass_supervision_authorization(tmp_path):
     state = {"generation": 1}
     gate = Mock()
     service = AgentActionService(
@@ -463,16 +795,12 @@ def test_supervised_proposal_rechecks_exact_canary_gate(tmp_path):
         id_factory=lambda: "action-1",
     )
 
-    action, created = _propose(service, trigger="scheduled")
+    with pytest.raises(AgentActionError) as denied:
+        _propose(service, trigger="scheduled")
 
-    assert created is True
-    assert action["state"] == "authorised"
-    gate.require_supervised.assert_called_once_with(
-        operation="container.restart",
-        target="jellyfin",
-        trigger=TriggerType.SCHEDULED,
-        mode=AuthorityMode.SUPERVISED,
-    )
+    assert denied.value.code == "supervision_required"
+    gate.require_supervised.assert_not_called()
+    assert service.list()["actions"] == []
 
 
 def test_supervised_proposal_fails_closed_after_canary_revocation(tmp_path):
@@ -493,7 +821,7 @@ def test_supervised_proposal_fails_closed_after_canary_revocation(tmp_path):
     with pytest.raises(AgentActionError) as denied:
         _propose(service, trigger="scheduled")
 
-    assert denied.value.code == "canary_required"
+    assert denied.value.code == "supervision_required"
 
 
 def test_service_exposes_server_owned_capabilities_and_policy(tmp_path):
@@ -679,15 +1007,7 @@ def test_actuator_rechecks_canary_immediately_before_supervised_mutation(tmp_pat
     ledger = ActionLedger(tmp_path / "actions.sqlite3")
     registry = CapabilityRegistry([_capability(state)])
     gate = Mock()
-    service = AgentActionService(
-        registry=registry,
-        policy_provider=lambda: policy,
-        ledger=ledger,
-        canary_gate=gate,
-        clock=lambda: NOW,
-        id_factory=lambda: "action-1",
-    )
-    _propose(service, trigger="scheduled")
+    ledger.create(_authorised_supervised_action(action_id="action-1"))
     gate.require_supervised.reset_mock()
     gate.require_supervised.side_effect = CanaryGateError(
         "canary_required",

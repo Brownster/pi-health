@@ -1,5 +1,10 @@
 """Supervised repair schedules, assessments, incidents, and safety budgets."""
 
+from agent_supervision.authorization import (
+    SupervisionAuthorizationError,
+    SupervisionAuthorizer,
+    maintenance_window,
+)
 from agent_supervision.service import (
     ACTION_DEADLINE_SECONDS,
     ASSESSMENT_INTERVAL_SECONDS,
@@ -29,9 +34,12 @@ __all__ = [
     "SERVICE_PRIORITIES",
     "SUPERVISED_CATALOGUE",
     "SupervisionError",
+    "SupervisionAuthorizationError",
+    "SupervisionAuthorizer",
     "SupervisionService",
     "SupervisionStore",
     "assessment_bucket",
     "classify_container_status",
+    "maintenance_window",
     "normalize_schedule",
 ]

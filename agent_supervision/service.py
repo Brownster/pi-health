@@ -538,6 +538,10 @@ class SupervisionStore:
         self._path = Path(path)
         self._initialize()
 
+    @property
+    def path(self) -> Path:
+        return self._path
+
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self._path, timeout=5)
         connection.row_factory = sqlite3.Row

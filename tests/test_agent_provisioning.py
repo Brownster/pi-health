@@ -1044,9 +1044,14 @@ def test_action_policy_writer_is_fixed_validated_and_canary_gated(tmp_path):
     supervised["operations"]["container.restart"]["targets"]["jellyfin"][
         "scheduled"
     ] = "supervised"
+    agent_lib = tmp_path / "agent-lib"
+    agent_lib.mkdir()
+    (agent_lib / ".release").write_text("a" * 40 + "\n")
+    (agent_lib / ".release").chmod(0o644)
     with (
         patch.object(helper, "ACTION_POLICY_PATH", str(target)),
         patch.object(helper, "ACTION_STATE_DIR", str(action_state)),
+        patch.object(helper, "AGENT_LIB_DIR", str(agent_lib)),
         patch.object(helper, "_write_managed_file", return_value={"success": True}),
         patch.object(helper, "run_command", return_value={"returncode": 0}),
     ):
