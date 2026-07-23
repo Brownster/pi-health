@@ -30,12 +30,17 @@ AO-009 adds `limeops-supervised-repair.service` under a dedicated
 - its supervision SQLite database;
 - the action ledger and action policy;
 - the root-owned deployed-release marker; and
-- the existing webhook-only Mattermost credential projection.
+- a narrow Mattermost delivery projection containing the alerts channel, site URL, and
+  existing LimeOS bot posting credential.
 
 The service cannot access Docker, the privileged helper, the action socket, a shell
 interface, the model provider, the full credentials file, or the source checkout. It
 assesses targets through `limeopsd` and creates bounded scheduled actions through the
 action domain. The trusted worker and isolated actuator remain the only mutation path.
+Mattermost incoming webhooks return no created post identifier, so they cannot support
+durable follow-up replies. The supervisor receives a separate service-owned projection
+of the already-provisioned bot credential and uses only the create-post endpoint; it
+does not share the agent runtime environment file.
 
 AO-007's `limeops-report-scheduler.service` remains unchanged and read-only. Report
 schedules retain fixed zero-action budgets.

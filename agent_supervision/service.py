@@ -142,6 +142,7 @@ CREATE TABLE IF NOT EXISTS supervision_incidents (
     updated_at TEXT NOT NULL,
     resolved_at TEXT,
     terminal_code TEXT,
+    last_action_id TEXT,
     revision INTEGER NOT NULL DEFAULT 1
 );
 CREATE UNIQUE INDEX IF NOT EXISTS supervision_incidents_active_target_idx
@@ -176,7 +177,58 @@ CREATE INDEX IF NOT EXISTS supervision_budget_target_idx
     ON supervision_budget_charges(operation, target, charged_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS supervision_budget_window_idx
     ON supervision_budget_charges(operation, target, window_key);
+
+CREATE TABLE IF NOT EXISTS supervision_occurrences (
+    occurrence_id TEXT PRIMARY KEY,
+    schedule_id TEXT NOT NULL REFERENCES supervision_schedules(schedule_id),
+    assessed_for TEXT NOT NULL,
+    state TEXT NOT NULL,
+    assessment_id TEXT,
+    incident_id TEXT,
+    action_id TEXT,
+    terminal_code TEXT,
+    started_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    finished_at TEXT,
+    UNIQUE(schedule_id, assessed_for)
+);
+CREATE INDEX IF NOT EXISTS supervision_occurrences_state_idx
+    ON supervision_occurrences(state, assessed_for, occurrence_id);
+
+CREATE TABLE IF NOT EXISTS supervision_deliveries (
+    delivery_id TEXT PRIMARY KEY,
+    transition_id TEXT NOT NULL UNIQUE
+        REFERENCES supervision_incident_transitions(transition_id),
+    incident_id TEXT NOT NULL REFERENCES supervision_incidents(incident_id),
+    state TEXT NOT NULL,
+    message_kind TEXT NOT NULL,
+    thread_id TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    delivered_at TEXT
+);
+CREATE INDEX IF NOT EXISTS supervision_deliveries_state_idx
+    ON supervision_deliveries(state, created_at, delivery_id);
 """
+
+_DELIVERED_TRANSITIONS = frozenset(
+    {
+        "fault_confirmed",
+        "fault_reconfirmed",
+        "infrastructure_blocked",
+        "window_deferred",
+        "active_action_deferred",
+        "budget_blocked",
+        "supervision_blocked",
+        "action_authorized",
+        "action_started",
+        "verification_started",
+        "escalated",
+        "demoted",
+        "recovered",
+        "recovered_after_action",
+    }
+)
 
 
 class SupervisionError(RuntimeError):
@@ -531,6 +583,58 @@ def _validate_assessment_record(
         )
 
 
+def _validate_occurrence_times(assessed_for: str, started_at: str) -> None:
+    try:
+        assessed = _parse_iso(assessed_for)
+        started = _parse_iso(started_at)
+    except SupervisionError as exc:
+        raise SupervisionError(
+            "invalid_occurrence", "Assessment occurrence times are invalid"
+        ) from exc
+    if (
+        _iso(assessed) != assessed_for
+        or _iso(started) != started_at
+        or assessment_bucket(assessed) != assessed
+        or assessed > started
+    ):
+        raise SupervisionError(
+            "invalid_occurrence", "Assessment occurrence times are invalid"
+        )
+
+
+def _normalize_transition_details(details: Any) -> dict[str, Any]:
+    if not isinstance(details, Mapping) or len(details) > 8:
+        raise SupervisionError(
+            "invalid_transition", "Incident transition details are invalid"
+        )
+    normalized: dict[str, Any] = {}
+    for key, value in details.items():
+        name = _identifier(
+            key, "Transition detail name", error_code="invalid_transition"
+        )
+        if value is None or isinstance(value, bool):
+            normalized[name] = value
+        elif isinstance(value, int) and not isinstance(value, bool):
+            if not -(2**31) <= value <= 2**31 - 1:
+                raise SupervisionError(
+                    "invalid_transition",
+                    "Incident transition details are invalid",
+                )
+            normalized[name] = value
+        elif isinstance(value, str):
+            normalized[name] = _short_string(
+                value,
+                "Transition detail",
+                maximum=256,
+                error_code="invalid_transition",
+            )
+        else:
+            raise SupervisionError(
+                "invalid_transition", "Incident transition details are invalid"
+            )
+    return normalized
+
+
 class SupervisionStore:
     """Private SQLite state with transactional assessment and incident updates."""
 
@@ -558,6 +662,17 @@ class SupervisionStore:
         try:
             with self._connect() as connection:
                 connection.executescript(_SCHEMA)
+                columns = {
+                    row["name"]
+                    for row in connection.execute(
+                        "PRAGMA table_info(supervision_incidents)"
+                    ).fetchall()
+                }
+                if "last_action_id" not in columns:
+                    connection.execute(
+                        "ALTER TABLE supervision_incidents "
+                        "ADD COLUMN last_action_id TEXT"
+                    )
             try:
                 os.chmod(self._path, 0o660)
             except PermissionError:
@@ -870,6 +985,27 @@ class SupervisionStore:
             ) from exc
         return [self._assessment(row) for row in rows]
 
+    def get_assessment(self, assessment_id: str) -> dict[str, Any]:
+        _identifier(assessment_id, "Assessment ID")
+        try:
+            with self._connect() as connection:
+                row = connection.execute(
+                    """
+                    SELECT * FROM supervision_assessments
+                    WHERE assessment_id = ?
+                    """,
+                    (assessment_id,),
+                ).fetchone()
+        except sqlite3.Error as exc:
+            raise SupervisionError(
+                "store_failure", "Assessment could not be read"
+            ) from exc
+        if row is None:
+            raise SupervisionError(
+                "not_found", "Assessment was not found"
+            )
+        return self._assessment(row)
+
     def list_incidents(
         self, *, schedule_id: str | None = None
     ) -> list[dict[str, Any]]:
@@ -929,6 +1065,650 @@ class SupervisionStore:
                 "store_failure", "Incident transitions could not be read"
             ) from exc
         return [self._transition(row) for row in rows]
+
+    def get_transition(self, transition_id: str) -> dict[str, Any]:
+        _identifier(transition_id, "Transition ID")
+        try:
+            with self._connect() as connection:
+                row = connection.execute(
+                    """
+                    SELECT * FROM supervision_incident_transitions
+                    WHERE transition_id = ?
+                    """,
+                    (transition_id,),
+                ).fetchone()
+        except sqlite3.Error as exc:
+            raise SupervisionError(
+                "store_failure", "Incident transition could not be read"
+            ) from exc
+        if row is None:
+            raise SupervisionError(
+                "not_found", "Incident transition was not found"
+            )
+        return self._transition(row)
+
+    def begin_occurrence(
+        self,
+        *,
+        schedule_id: str,
+        assessed_for: str,
+        started_at: str,
+    ) -> tuple[dict[str, Any], bool]:
+        """Claim one schedule bucket without duplicating work after overlap."""
+
+        _identifier(schedule_id, "Schedule ID")
+        _validate_occurrence_times(assessed_for, started_at)
+        occurrence_id = self._stable_id(
+            "occurrence", schedule_id, assessed_for
+        )
+        try:
+            with self._connect() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                schedule = connection.execute(
+                    """
+                    SELECT 1 FROM supervision_schedules
+                    WHERE schedule_id = ? AND enabled = 1
+                    """,
+                    (schedule_id,),
+                ).fetchone()
+                if schedule is None:
+                    raise SupervisionError(
+                        "schedule_disabled", "Schedule is disabled"
+                    )
+                existing = connection.execute(
+                    """
+                    SELECT * FROM supervision_occurrences
+                    WHERE schedule_id = ? AND assessed_for = ?
+                    """,
+                    (schedule_id, assessed_for),
+                ).fetchone()
+                if existing is not None:
+                    return self._occurrence(existing), False
+                connection.execute(
+                    """
+                    INSERT INTO supervision_occurrences (
+                        occurrence_id, schedule_id, assessed_for, state,
+                        started_at, updated_at
+                    ) VALUES (?, ?, ?, 'claimed', ?, ?)
+                    """,
+                    (
+                        occurrence_id,
+                        schedule_id,
+                        assessed_for,
+                        started_at,
+                        started_at,
+                    ),
+                )
+                row = connection.execute(
+                    """
+                    SELECT * FROM supervision_occurrences
+                    WHERE occurrence_id = ?
+                    """,
+                    (occurrence_id,),
+                ).fetchone()
+            return self._occurrence(row), True
+        except SupervisionError:
+            raise
+        except sqlite3.Error as exc:
+            raise SupervisionError(
+                "store_failure", "Assessment occurrence could not be claimed"
+            ) from exc
+
+    def mark_occurrence_assessed(
+        self,
+        occurrence_id: str,
+        *,
+        assessment_id: str,
+        incident_id: str | None,
+        at: str,
+    ) -> dict[str, Any]:
+        _identifier(occurrence_id, "Occurrence ID")
+        _identifier(assessment_id, "Assessment ID")
+        if incident_id is not None:
+            _identifier(incident_id, "Incident ID")
+        _parse_iso(at)
+        try:
+            with self._connect() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                row = connection.execute(
+                    """
+                    SELECT * FROM supervision_occurrences
+                    WHERE occurrence_id = ?
+                    """,
+                    (occurrence_id,),
+                ).fetchone()
+                if row is None:
+                    raise SupervisionError(
+                        "not_found", "Assessment occurrence was not found"
+                    )
+                if row["state"] == "completed":
+                    return self._occurrence(row)
+                if row["state"] == "assessed":
+                    if (
+                        row["assessment_id"] != assessment_id
+                        or row["incident_id"] != incident_id
+                    ):
+                        raise SupervisionError(
+                            "conflict",
+                            "Assessment occurrence changed concurrently",
+                        )
+                    return self._occurrence(row)
+                cursor = connection.execute(
+                    """
+                    UPDATE supervision_occurrences SET
+                        state = 'assessed', assessment_id = ?,
+                        incident_id = ?, updated_at = ?
+                    WHERE occurrence_id = ? AND state = 'claimed'
+                    """,
+                    (assessment_id, incident_id, at, occurrence_id),
+                )
+                if cursor.rowcount != 1:
+                    raise SupervisionError(
+                        "conflict",
+                        "Assessment occurrence changed concurrently",
+                    )
+                updated = connection.execute(
+                    """
+                    SELECT * FROM supervision_occurrences
+                    WHERE occurrence_id = ?
+                    """,
+                    (occurrence_id,),
+                ).fetchone()
+            return self._occurrence(updated)
+        except SupervisionError:
+            raise
+        except sqlite3.Error as exc:
+            raise SupervisionError(
+                "store_failure", "Assessment occurrence could not be updated"
+            ) from exc
+
+    def link_occurrence_action(
+        self,
+        occurrence_id: str,
+        *,
+        incident_id: str,
+        action_id: str,
+        at: str,
+    ) -> dict[str, Any]:
+        """Atomically bind the authorised action to its occurrence and incident."""
+
+        for value, label in (
+            (occurrence_id, "Occurrence ID"),
+            (incident_id, "Incident ID"),
+            (action_id, "Action ID"),
+        ):
+            _identifier(value, label)
+        _parse_iso(at)
+        try:
+            with self._connect() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                occurrence = connection.execute(
+                    """
+                    SELECT * FROM supervision_occurrences
+                    WHERE occurrence_id = ?
+                    """,
+                    (occurrence_id,),
+                ).fetchone()
+                if occurrence is None:
+                    raise SupervisionError(
+                        "not_found", "Assessment occurrence was not found"
+                    )
+                if occurrence["action_id"] is not None:
+                    if (
+                        occurrence["action_id"] != action_id
+                        or occurrence["incident_id"] != incident_id
+                    ):
+                        raise SupervisionError(
+                            "conflict",
+                            "Assessment occurrence belongs to another action",
+                        )
+                    return self._occurrence(occurrence)
+                incident = connection.execute(
+                    """
+                    SELECT * FROM supervision_incidents
+                    WHERE incident_id = ? AND resolved_at IS NULL
+                    """,
+                    (incident_id,),
+                ).fetchone()
+                if (
+                    incident is None
+                    or occurrence["state"] != "assessed"
+                    or occurrence["incident_id"] != incident_id
+                ):
+                    raise SupervisionError(
+                        "incident_changed",
+                        "Supervision incident changed before action binding",
+                    )
+                connection.execute(
+                    """
+                    UPDATE supervision_occurrences SET
+                        action_id = ?, updated_at = ?
+                    WHERE occurrence_id = ?
+                    """,
+                    (action_id, at, occurrence_id),
+                )
+                connection.execute(
+                    """
+                    UPDATE supervision_incidents SET
+                        state = 'action_authorized', last_action_id = ?,
+                        updated_at = ?, revision = revision + 1
+                    WHERE incident_id = ?
+                    """,
+                    (action_id, at, incident_id),
+                )
+                self._add_runtime_transition(
+                    connection,
+                    incident_id=incident_id,
+                    transition_key=f"action:{action_id}:authorised",
+                    transition_type="action_authorized",
+                    details={
+                        "action_id": action_id,
+                        "action_state": "authorised",
+                    },
+                    at=at,
+                )
+                updated = connection.execute(
+                    """
+                    SELECT * FROM supervision_occurrences
+                    WHERE occurrence_id = ?
+                    """,
+                    (occurrence_id,),
+                ).fetchone()
+            return self._occurrence(updated)
+        except SupervisionError:
+            raise
+        except sqlite3.Error as exc:
+            raise SupervisionError(
+                "store_failure", "Supervised action binding could not be saved"
+            ) from exc
+
+    def finish_occurrence(
+        self,
+        occurrence_id: str,
+        *,
+        terminal_code: str,
+        at: str,
+    ) -> dict[str, Any]:
+        _identifier(occurrence_id, "Occurrence ID")
+        code = _identifier(terminal_code, "Terminal code")
+        _parse_iso(at)
+        try:
+            with self._connect() as connection:
+                connection.execute(
+                    """
+                    UPDATE supervision_occurrences SET
+                        state = 'completed', terminal_code = ?,
+                        updated_at = ?, finished_at = COALESCE(finished_at, ?)
+                    WHERE occurrence_id = ? AND state != 'completed'
+                    """,
+                    (code, at, at, occurrence_id),
+                )
+                row = connection.execute(
+                    """
+                    SELECT * FROM supervision_occurrences
+                    WHERE occurrence_id = ?
+                    """,
+                    (occurrence_id,),
+                ).fetchone()
+        except sqlite3.Error as exc:
+            raise SupervisionError(
+                "store_failure", "Assessment occurrence could not be completed"
+            ) from exc
+        if row is None:
+            raise SupervisionError(
+                "not_found", "Assessment occurrence was not found"
+            )
+        return self._occurrence(row)
+
+    def incomplete_occurrences(self) -> list[dict[str, Any]]:
+        try:
+            with self._connect() as connection:
+                rows = connection.execute(
+                    """
+                    SELECT * FROM supervision_occurrences
+                    WHERE state != 'completed'
+                    ORDER BY assessed_for, occurrence_id
+                    """
+                ).fetchall()
+        except sqlite3.Error as exc:
+            raise SupervisionError(
+                "store_failure", "Assessment occurrences could not be read"
+            ) from exc
+        return [self._occurrence(row) for row in rows]
+
+    def get_occurrence(self, occurrence_id: str) -> dict[str, Any]:
+        _identifier(occurrence_id, "Occurrence ID")
+        try:
+            with self._connect() as connection:
+                row = connection.execute(
+                    """
+                    SELECT * FROM supervision_occurrences
+                    WHERE occurrence_id = ?
+                    """,
+                    (occurrence_id,),
+                ).fetchone()
+        except sqlite3.Error as exc:
+            raise SupervisionError(
+                "store_failure", "Assessment occurrence could not be read"
+            ) from exc
+        if row is None:
+            raise SupervisionError(
+                "not_found", "Assessment occurrence was not found"
+            )
+        return self._occurrence(row)
+
+    def record_incident_event(
+        self,
+        incident_id: str,
+        *,
+        transition_key: str,
+        transition_type: str,
+        details: Mapping[str, Any],
+        state: str | None,
+        terminal_code: str | None,
+        resolved: bool,
+        at: str,
+    ) -> tuple[dict[str, Any], bool]:
+        """Record one code-owned incident transition with durable deduplication."""
+
+        _identifier(incident_id, "Incident ID")
+        key = _short_string(
+            transition_key,
+            "Transition key",
+            maximum=256,
+            error_code="invalid_transition",
+        )
+        kind = _identifier(
+            transition_type,
+            "Transition type",
+            error_code="invalid_transition",
+        )
+        if kind not in _DELIVERED_TRANSITIONS:
+            raise SupervisionError(
+                "invalid_transition", "Incident transition is unavailable"
+            )
+        normalized_details = _normalize_transition_details(details)
+        if state is not None:
+            state = _identifier(
+                state, "Incident state", error_code="invalid_transition"
+            )
+        if terminal_code is not None:
+            terminal_code = _identifier(
+                terminal_code,
+                "Incident terminal code",
+                error_code="invalid_transition",
+            )
+        _parse_iso(at)
+        try:
+            with self._connect() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                existing = connection.execute(
+                    """
+                    SELECT * FROM supervision_incident_transitions
+                    WHERE transition_key = ?
+                    """,
+                    (key,),
+                ).fetchone()
+                if existing is not None:
+                    if (
+                        existing["incident_id"] != incident_id
+                        or existing["transition_type"] != kind
+                        or json.loads(existing["details_json"])
+                        != normalized_details
+                    ):
+                        raise SupervisionError(
+                            "conflict",
+                            "Incident transition conflicts with stored evidence",
+                        )
+                    if state is not None:
+                        connection.execute(
+                            """
+                            UPDATE supervision_incidents SET
+                                state = ?, terminal_code = ?,
+                                updated_at = ?,
+                                resolved_at = CASE
+                                    WHEN ? THEN COALESCE(resolved_at, ?)
+                                    ELSE resolved_at
+                                END,
+                                revision = CASE
+                                    WHEN state != ? OR terminal_code IS NOT ?
+                                         OR (? AND resolved_at IS NULL)
+                                    THEN revision + 1 ELSE revision
+                                END
+                            WHERE incident_id = ?
+                            """,
+                            (
+                                state,
+                                terminal_code,
+                                at,
+                                int(resolved),
+                                at,
+                                state,
+                                terminal_code,
+                                int(resolved),
+                                incident_id,
+                            ),
+                        )
+                    return self._transition(existing), False
+                incident = connection.execute(
+                    """
+                    SELECT * FROM supervision_incidents
+                    WHERE incident_id = ?
+                    """,
+                    (incident_id,),
+                ).fetchone()
+                if incident is None:
+                    raise SupervisionError(
+                        "not_found", "Incident was not found"
+                    )
+                if incident["resolved_at"] is not None and not resolved:
+                    raise SupervisionError(
+                        "incident_changed", "Incident is already resolved"
+                    )
+                if state is not None:
+                    connection.execute(
+                        """
+                        UPDATE supervision_incidents SET
+                            state = ?, terminal_code = ?,
+                            updated_at = ?,
+                            resolved_at = CASE WHEN ? THEN ? ELSE resolved_at END,
+                            revision = revision + 1
+                        WHERE incident_id = ?
+                        """,
+                        (
+                            state,
+                            terminal_code,
+                            at,
+                            int(resolved),
+                            at,
+                            incident_id,
+                        ),
+                    )
+                transition = self._add_runtime_transition(
+                    connection,
+                    incident_id=incident_id,
+                    transition_key=key,
+                    transition_type=kind,
+                    details=normalized_details,
+                    at=at,
+                )
+            return self._transition(transition), True
+        except SupervisionError:
+            raise
+        except sqlite3.Error as exc:
+            raise SupervisionError(
+                "store_failure", "Incident transition could not be saved"
+            ) from exc
+
+    def pending_deliveries(self) -> list[dict[str, Any]]:
+        try:
+            with self._connect() as connection:
+                rows = connection.execute(
+                    """
+                    SELECT * FROM supervision_deliveries
+                    WHERE state = 'pending'
+                    ORDER BY created_at, rowid
+                    """
+                ).fetchall()
+        except sqlite3.Error as exc:
+            raise SupervisionError(
+                "store_failure", "Incident deliveries could not be read"
+            ) from exc
+        return [self._delivery(row) for row in rows]
+
+    def claim_delivery(self, delivery_id: str, *, at: str) -> dict[str, Any]:
+        _identifier(delivery_id, "Delivery ID")
+        _parse_iso(at)
+        try:
+            with self._connect() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                row = connection.execute(
+                    """
+                    SELECT d.*, i.thread_id AS incident_thread_id
+                    FROM supervision_deliveries d
+                    JOIN supervision_incidents i
+                      ON i.incident_id = d.incident_id
+                    WHERE d.delivery_id = ?
+                    """,
+                    (delivery_id,),
+                ).fetchone()
+                if row is None:
+                    raise SupervisionError(
+                        "not_found", "Incident delivery was not found"
+                    )
+                if row["state"] != "pending":
+                    raise SupervisionError(
+                        "delivery_changed", "Incident delivery is not pending"
+                    )
+                if (
+                    row["message_kind"] == "reply"
+                    and row["incident_thread_id"] is None
+                ):
+                    raise SupervisionError(
+                        "thread_unavailable",
+                        "Incident thread is unavailable",
+                    )
+                connection.execute(
+                    """
+                    UPDATE supervision_deliveries SET
+                        state = 'delivering', updated_at = ?
+                    WHERE delivery_id = ? AND state = 'pending'
+                    """,
+                    (at, delivery_id),
+                )
+                updated = connection.execute(
+                    """
+                    SELECT d.*, i.thread_id AS incident_thread_id
+                    FROM supervision_deliveries d
+                    JOIN supervision_incidents i
+                      ON i.incident_id = d.incident_id
+                    WHERE d.delivery_id = ?
+                    """,
+                    (delivery_id,),
+                ).fetchone()
+            return self._delivery(updated)
+        except SupervisionError:
+            raise
+        except sqlite3.Error as exc:
+            raise SupervisionError(
+                "store_failure", "Incident delivery could not be claimed"
+            ) from exc
+
+    def finish_delivery(
+        self,
+        delivery_id: str,
+        *,
+        delivered: bool,
+        post_id: str | None,
+        at: str,
+    ) -> dict[str, Any]:
+        _identifier(delivery_id, "Delivery ID")
+        if delivered:
+            _identifier(post_id, "Mattermost post ID")
+        elif post_id is not None:
+            raise SupervisionError(
+                "invalid_delivery", "Failed delivery cannot include a post ID"
+            )
+        _parse_iso(at)
+        try:
+            with self._connect() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                row = connection.execute(
+                    """
+                    SELECT * FROM supervision_deliveries
+                    WHERE delivery_id = ?
+                    """,
+                    (delivery_id,),
+                ).fetchone()
+                if row is None:
+                    raise SupervisionError(
+                        "not_found", "Incident delivery was not found"
+                    )
+                if row["state"] != "delivering":
+                    raise SupervisionError(
+                        "delivery_changed", "Incident delivery is not active"
+                    )
+                state = "delivered" if delivered else "failed"
+                connection.execute(
+                    """
+                    UPDATE supervision_deliveries SET
+                        state = ?, thread_id = ?, updated_at = ?,
+                        delivered_at = CASE WHEN ? THEN ? ELSE NULL END
+                    WHERE delivery_id = ?
+                    """,
+                    (state, post_id, at, int(delivered), at, delivery_id),
+                )
+                if delivered and row["message_kind"] == "root":
+                    cursor = connection.execute(
+                        """
+                        UPDATE supervision_incidents SET
+                            thread_id = ?, updated_at = ?,
+                            revision = revision + 1
+                        WHERE incident_id = ? AND thread_id IS NULL
+                        """,
+                        (post_id, at, row["incident_id"]),
+                    )
+                    if cursor.rowcount != 1:
+                        raise SupervisionError(
+                            "conflict", "Incident thread changed concurrently"
+                        )
+                updated = connection.execute(
+                    """
+                    SELECT d.*, i.thread_id AS incident_thread_id
+                    FROM supervision_deliveries d
+                    JOIN supervision_incidents i
+                      ON i.incident_id = d.incident_id
+                    WHERE d.delivery_id = ?
+                    """,
+                    (delivery_id,),
+                ).fetchone()
+            return self._delivery(updated)
+        except SupervisionError:
+            raise
+        except sqlite3.Error as exc:
+            raise SupervisionError(
+                "store_failure", "Incident delivery could not be completed"
+            ) from exc
+
+    def recover_deliveries(self, *, at: str) -> int:
+        """Fail closed for posts whose outcome became unknowable after restart."""
+
+        _parse_iso(at)
+        try:
+            with self._connect() as connection:
+                cursor = connection.execute(
+                    """
+                    UPDATE supervision_deliveries SET
+                        state = 'delivery_unknown', updated_at = ?
+                    WHERE state = 'delivering'
+                    """,
+                    (at,),
+                )
+                return cursor.rowcount
+        except sqlite3.Error as exc:
+            raise SupervisionError(
+                "store_failure", "Incident delivery recovery failed"
+            ) from exc
 
     def charge_budget(
         self,
@@ -1148,6 +1928,7 @@ class SupervisionStore:
         if outcome == "healthy":
             if active is None:
                 return None, None
+            recovered_after_action = active["last_action_id"] is not None
             self._update_incident(
                 connection,
                 active["incident_id"],
@@ -1156,13 +1937,21 @@ class SupervisionStore:
                 assessment_id=assessment["assessment_id"],
                 at=recorded_at,
                 resolved_at=recorded_at,
-                terminal_code="healthy_before_action",
+                terminal_code=(
+                    "healthy_after_action"
+                    if recovered_after_action
+                    else "healthy_before_action"
+                ),
             )
             transition = self._add_transition(
                 connection,
                 incident_id=active["incident_id"],
                 assessment=assessment,
-                transition_type="recovered",
+                transition_type=(
+                    "recovered_after_action"
+                    if recovered_after_action
+                    else "recovered"
+                ),
                 at=recorded_at,
             )
         elif outcome == "unknown":
@@ -1235,6 +2024,17 @@ class SupervisionStore:
                     (incident_id,),
                 ).fetchone()
                 transition_type = "fault_confirmed"
+            elif active["last_action_id"] is not None:
+                self._update_incident(
+                    connection,
+                    active["incident_id"],
+                    state=active["state"],
+                    consecutive_failures=streak,
+                    assessment_id=assessment["assessment_id"],
+                    at=recorded_at,
+                    terminal_code=active["terminal_code"],
+                )
+                transition_type = "failure_observed"
             else:
                 self._update_incident(
                     connection,
@@ -1361,13 +2161,111 @@ class SupervisionStore:
                 at,
             ),
         )
-        return connection.execute(
+        transition = connection.execute(
             """
             SELECT * FROM supervision_incident_transitions
             WHERE transition_id = ?
             """,
             (transition_id,),
         ).fetchone()
+        self._queue_transition_delivery(
+            connection,
+            transition=transition,
+            incident_id=incident_id,
+            at=at,
+        )
+        return transition
+
+    def _add_runtime_transition(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        incident_id: str,
+        transition_key: str,
+        transition_type: str,
+        details: Mapping[str, Any],
+        at: str,
+    ) -> sqlite3.Row:
+        transition_id = self._stable_id("transition", transition_key)
+        connection.execute(
+            """
+            INSERT INTO supervision_incident_transitions (
+                transition_id, incident_id, transition_key, transition_type,
+                assessment_id, details_json, created_at
+            ) VALUES (?, ?, ?, ?, NULL, ?, ?)
+            """,
+            (
+                transition_id,
+                incident_id,
+                transition_key,
+                transition_type,
+                _json(details),
+                at,
+            ),
+        )
+        transition = connection.execute(
+            """
+            SELECT * FROM supervision_incident_transitions
+            WHERE transition_id = ?
+            """,
+            (transition_id,),
+        ).fetchone()
+        self._queue_transition_delivery(
+            connection,
+            transition=transition,
+            incident_id=incident_id,
+            at=at,
+        )
+        return transition
+
+    def _queue_transition_delivery(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        transition: sqlite3.Row,
+        incident_id: str,
+        at: str,
+    ) -> None:
+        if transition["transition_type"] not in _DELIVERED_TRANSITIONS:
+            return
+        incident = connection.execute(
+            """
+            SELECT thread_id FROM supervision_incidents
+            WHERE incident_id = ?
+            """,
+            (incident_id,),
+        ).fetchone()
+        prior = connection.execute(
+            """
+            SELECT 1 FROM supervision_deliveries
+            WHERE incident_id = ? LIMIT 1
+            """,
+            (incident_id,),
+        ).fetchone()
+        message_kind = (
+            "root"
+            if incident["thread_id"] is None and prior is None
+            else "reply"
+        )
+        delivery_id = self._stable_id(
+            "delivery", transition["transition_id"]
+        )
+        connection.execute(
+            """
+            INSERT INTO supervision_deliveries (
+                delivery_id, transition_id, incident_id, state,
+                message_kind, created_at, updated_at
+            ) VALUES (?, ?, ?, 'pending', ?, ?, ?)
+            """,
+            (
+                delivery_id,
+                transition["transition_id"],
+                incident_id,
+                message_kind,
+                at,
+                at,
+            ),
+        )
 
     @staticmethod
     def _incident_for_assessment(
@@ -1459,6 +2357,7 @@ class SupervisionStore:
             "updated_at": row["updated_at"],
             "resolved_at": row["resolved_at"],
             "terminal_code": row["terminal_code"],
+            "last_action_id": row["last_action_id"],
             "revision": row["revision"],
         }
 
@@ -1484,6 +2383,42 @@ class SupervisionStore:
             "occurrence_key": row["occurrence_key"],
             "action_id": row["action_id"],
             "charged_at": row["charged_at"],
+        }
+
+    @staticmethod
+    def _occurrence(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": row["occurrence_id"],
+            "schedule_id": row["schedule_id"],
+            "assessed_for": row["assessed_for"],
+            "state": row["state"],
+            "assessment_id": row["assessment_id"],
+            "incident_id": row["incident_id"],
+            "action_id": row["action_id"],
+            "terminal_code": row["terminal_code"],
+            "started_at": row["started_at"],
+            "updated_at": row["updated_at"],
+            "finished_at": row["finished_at"],
+        }
+
+    @staticmethod
+    def _delivery(row: sqlite3.Row) -> dict[str, Any]:
+        keys = set(row.keys())
+        return {
+            "id": row["delivery_id"],
+            "transition_id": row["transition_id"],
+            "incident_id": row["incident_id"],
+            "state": row["state"],
+            "message_kind": row["message_kind"],
+            "thread_id": row["thread_id"],
+            "incident_thread_id": (
+                row["incident_thread_id"]
+                if "incident_thread_id" in keys
+                else None
+            ),
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+            "delivered_at": row["delivered_at"],
         }
 
 

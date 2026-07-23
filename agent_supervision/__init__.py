@@ -5,6 +5,11 @@ from agent_supervision.authorization import (
     SupervisionAuthorizer,
     maintenance_window,
 )
+from agent_supervision.runtime import (
+    MAX_CONCURRENT_ASSESSMENTS,
+    SUPERVISOR_POLL_SECONDS,
+    SupervisedRepairRuntime,
+)
 from agent_supervision.service import (
     ACTION_DEADLINE_SECONDS,
     ASSESSMENT_INTERVAL_SECONDS,
@@ -31,6 +36,7 @@ __all__ = [
     "MAX_ACTIONS_PER_WINDOW",
     "MAX_AUTOMATIC_RETRIES",
     "MAX_CONCURRENT_SUPERVISED_MUTATIONS",
+    "MAX_CONCURRENT_ASSESSMENTS",
     "SERVICE_PRIORITIES",
     "SUPERVISED_CATALOGUE",
     "SupervisionError",
@@ -38,6 +44,8 @@ __all__ = [
     "SupervisionAuthorizer",
     "SupervisionService",
     "SupervisionStore",
+    "SupervisedRepairRuntime",
+    "SUPERVISOR_POLL_SECONDS",
     "assessment_bucket",
     "classify_container_status",
     "maintenance_window",
