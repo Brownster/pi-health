@@ -2,7 +2,7 @@
 
 Date: 2026-07-22
 
-Status: Accepted implementation detail for AO-007
+Status: Accepted and target-Pi signed off 2026-07-23
 
 Parent plan: `docs/plans/2026-07-20-agent-operations-autonomy-implementation-plan.md`
 
@@ -132,3 +132,20 @@ and browser tests cover schedule creation and disablement.
 The target-Pi check keeps the action kill switch engaged, creates one short-lived
 report-only schedule, observes one delivered report and one occurrence, restarts the
 dashboard, and confirms that no duplicate report or action record appears.
+
+### Target-Pi Signoff
+
+Holly passed the release check on 2026-07-23 at commit
+`99f78242fdc6b9f5b51083227cb27d3c24c0545e`:
+
+- `limeops-report-scheduler.service` was active and enabled under the dedicated
+  `limeops-report` identity.
+- The scheduler could reach the read broker, automation database, and projected webhook.
+  The action socket, Docker socket, source checkout, and helper remained inaccessible.
+- The action kill switch stayed engaged. The short-lived schedule used one
+  `system.status` check and zero action, downtime, retry, or model-invocation budgets.
+- Occurrence `0a045ee3ecacbd9d9a10fc9cd0fc9b33` completed as `delivered` with one
+  healthy check.
+- Restarting the dashboard and scheduler left one occurrence and zero rows in both the
+  action and action-event tables.
+- The signoff schedule was disabled at revision 2 and retained as durable evidence.

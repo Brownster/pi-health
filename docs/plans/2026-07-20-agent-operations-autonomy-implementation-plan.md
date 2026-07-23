@@ -2,7 +2,7 @@
 
 Date: 2026-07-20
 
-Status: Implementation underway; AO-007 report-only scheduler implemented 2026-07-22
+Status: Implementation underway; AO-007 completed 2026-07-23
 
 Precondition: AA-009 read-only target signoff
 
@@ -37,9 +37,10 @@ restart recovery, and one-attempt Mattermost delivery. A dedicated `limeops-repo
 can reach only the read broker, shared schedule database, and a webhook-only credential
 projection. The administrator API and Automation screen create, edit, enable, and disable
 schedules without giving the dashboard access to the broker. Local implementation and
-browser acceptance are complete; target-Pi deployment evidence remains the release signoff.
-Installation, configuration, optimisation, GitHub publication, and agent-authored pull
-requests remain later work packages.
+browser acceptance are complete. Target-Pi signoff on Holly confirmed the dedicated
+identity and sandbox, one successful Mattermost report, restart deduplication, an engaged
+action kill switch, and zero action records. Installation, configuration, optimisation,
+GitHub publication, and agent-authored pull requests remain later work packages.
 
 ## Goal
 
