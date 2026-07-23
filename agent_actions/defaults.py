@@ -506,22 +506,33 @@ def build_action_service(
     extension_job_status: Callable[[str], Mapping[str, Any]] | None = None,
     policy_path: str | Path = DEFAULT_ACTION_POLICY_PATH,
     ledger_path: str | Path = DEFAULT_ACTION_LEDGER_PATH,
+    release_commit_provider: Callable[[], str] | None = None,
 ) -> AgentActionService:
+    registry = build_repair_registry(
+        container_status=container_status,
+        stack_status=stack_status,
+        package_status=package_status,
+        package_job_status=package_job_status,
+        integration_status=integration_status,
+        integration_job_status=integration_job_status,
+        mattermost_status=mattermost_status,
+        mattermost_job_status=mattermost_job_status,
+        extension_status=extension_status,
+        extension_job_status=extension_job_status,
+    )
+    ledger = ActionLedger(ledger_path)
+    canary_gate = CanaryGateService(
+        registry=registry,
+        ledger=ledger,
+        release_commit_provider=release_commit_provider or read_agent_release_commit,
+        clock=utc_now,
+        id_factory=lambda: str(uuid.uuid4()),
+    )
     return AgentActionService(
-        registry=build_repair_registry(
-            container_status=container_status,
-            stack_status=stack_status,
-            package_status=package_status,
-            package_job_status=package_job_status,
-            integration_status=integration_status,
-            integration_job_status=integration_job_status,
-            mattermost_status=mattermost_status,
-            mattermost_job_status=mattermost_job_status,
-            extension_status=extension_status,
-            extension_job_status=extension_job_status,
-        ),
+        registry=registry,
         policy_provider=lambda: ActionPolicy.from_file(policy_path),
-        ledger=ActionLedger(ledger_path),
+        ledger=ledger,
+        canary_gate=canary_gate,
     )
 
 

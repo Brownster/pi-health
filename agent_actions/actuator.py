@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from agent_actions.canary import CanaryGateError, CanaryGateService
 from agent_actions.capability import (
     AuthorityMode,
     CapabilityError,
@@ -57,12 +58,14 @@ class ActionActuator:
         executors: Mapping[str, ExecutionSpec],
         policy_provider: Callable[[], ActionPolicy],
         ledger: ActionLedger,
+        canary_gate: CanaryGateService | None = None,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         self._registry = registry
         self._executors = dict(executors)
         self._policy_provider = policy_provider
         self._ledger = ledger
+        self._canary_gate = canary_gate
         self._clock = clock or (lambda: datetime.now(timezone.utc))
 
     def execute(self, action_id: str, *, audit_id: str) -> dict[str, Any]:
@@ -129,6 +132,21 @@ class ActionActuator:
                 }:
                     raise ActionActuatorError(
                         "policy_changed", "Action authority has changed"
+                    )
+                if mode in {
+                    AuthorityMode.SUPERVISED,
+                    AuthorityMode.AUTONOMOUS,
+                }:
+                    if self._canary_gate is None:
+                        raise ActionActuatorError(
+                            "canary_required",
+                            "A current repair canary is required",
+                        )
+                    self._canary_gate.require_supervised(
+                        operation=action.operation,
+                        target=target,
+                        trigger=trigger,
+                        mode=mode,
                     )
             if mode not in capability.eligible_modes:
                 raise ActionActuatorError(
@@ -231,6 +249,7 @@ class ActionActuator:
             raise
         except (
             CapabilityError,
+            CanaryGateError,
             ActionPolicyError,
             ActionLedgerError,
             ValueError,

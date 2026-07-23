@@ -20,6 +20,7 @@ from agent_actions.capability import (
 )
 from agent_actions.ledger import ActionLedger, ActionState, NewAction
 from agent_actions.defaults import read_agent_release_commit
+from agent_actions.policy import ActionPolicy
 
 
 NOW = datetime(2026, 7, 23, 10, 0, tzinfo=timezone.utc)
@@ -140,6 +141,35 @@ def _service(
 
 def _local_admin(username: str = "marc") -> dict[str, str]:
     return {"type": "local", "id": "admin", "username": username}
+
+
+def _action_policy(
+    *,
+    target: str = "get_iplayer",
+    interactive: str = "approval",
+    scheduled: str = "observe",
+    event: str = "observe",
+) -> ActionPolicy:
+    return ActionPolicy.from_mapping(
+        {
+            "schema_version": "1",
+            "kill_switch": True,
+            "defaults": {"proposal_ttl_seconds": 900},
+            "operations": {
+                "container.restart": {
+                    "enabled": True,
+                    "approvers": ["local:admin"],
+                    "targets": {
+                        target: {
+                            "interactive": interactive,
+                            "scheduled": scheduled,
+                            "event": event,
+                        }
+                    },
+                }
+            },
+        }
+    )
 
 
 def test_attestation_derives_exact_evidence_and_is_idempotent(tmp_path):
@@ -449,6 +479,26 @@ def test_snapshot_distinguishes_eligible_and_revoked_evidence(tmp_path):
 
     assert service.snapshot()["canaries"][0]["status"] == "revoked"
     assert service.snapshot()["gate"]["eligible_count"] == 0
+
+
+def test_policy_validation_grants_only_attested_scheduled_supervision(tmp_path):
+    service, ledger = _service(tmp_path)
+    _successful_action(ledger)
+    service.attest("action-1", actor=_local_admin())
+
+    accepted = service.validate_policy(_action_policy(scheduled="supervised"))
+
+    assert accepted["operations"]["container.restart"]["targets"]["get_iplayer"][
+        "scheduled"
+    ] == "supervised"
+    for policy, code in (
+        (_action_policy(target="other", scheduled="supervised"), "canary_required"),
+        (_action_policy(interactive="supervised"), "scheduled_only"),
+        (_action_policy(scheduled="autonomous"), "autonomous_unavailable"),
+    ):
+        with pytest.raises(CanaryGateError) as denied:
+            service.validate_policy(policy)
+        assert denied.value.code == code
 
 
 def test_release_commit_reader_accepts_only_secure_owned_regular_file(tmp_path):

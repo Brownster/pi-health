@@ -8,6 +8,7 @@ from collections.abc import Callable, Sequence
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from agent_actions.canary import CanaryGateError, CanaryGateService
 from agent_actions.capability import (
     ActionActor,
     AuthorityMode,
@@ -42,12 +43,14 @@ class AgentActionService:
         registry: CapabilityRegistry,
         policy_provider: Callable[[], ActionPolicy],
         ledger: ActionLedger,
+        canary_gate: CanaryGateService | None = None,
         clock: Callable[[], datetime] | None = None,
         id_factory: Callable[[], str] | None = None,
     ) -> None:
         self._registry = registry
         self._policy_provider = policy_provider
         self._ledger = ledger
+        self._canary_gate = canary_gate
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._id_factory = id_factory or (lambda: uuid.uuid4().hex)
 
@@ -95,6 +98,12 @@ class AgentActionService:
             now = self._aware_now()
             if mode in {AuthorityMode.SUPERVISED, AuthorityMode.AUTONOMOUS}:
                 policy.require_execution_enabled()
+                self._require_automatic_authority(
+                    operation=operation,
+                    target=target,
+                    trigger=trigger_type,
+                    mode=mode,
+                )
                 state = ActionState.AUTHORISED
             elif mode == AuthorityMode.APPROVAL:
                 state = ActionState.AWAITING_APPROVAL
@@ -240,6 +249,11 @@ class AgentActionService:
     def validate_policy(self, value: Any) -> dict[str, Any]:
         try:
             policy = ActionPolicy.from_mapping(value)
+            if self._canary_gate is not None:
+                try:
+                    return self._canary_gate.validate_policy(policy)
+                except CanaryGateError as exc:
+                    raise AgentActionError("invalid_policy", str(exc)) from exc
             configured = set(policy.public_dict()["operations"])
             registered = set(self._registry.operations)
             if configured != registered:
@@ -270,6 +284,29 @@ class AgentActionService:
             raise
         except (ActionPolicyError, CapabilityError, ValueError) as exc:
             raise self._public_error(exc) from exc
+
+    def _require_automatic_authority(
+        self,
+        *,
+        operation: str,
+        target: str,
+        trigger: TriggerType,
+        mode: AuthorityMode,
+    ) -> None:
+        if self._canary_gate is None:
+            raise AgentActionError(
+                "canary_required",
+                "A current repair canary is required for automatic authority",
+            )
+        try:
+            self._canary_gate.require_supervised(
+                operation=operation,
+                target=target,
+                trigger=trigger,
+                mode=mode,
+            )
+        except CanaryGateError as exc:
+            raise AgentActionError(exc.code, str(exc)) from exc
 
     def list(self, *, limit: int = 50) -> dict[str, Any]:
         try:

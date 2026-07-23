@@ -9,12 +9,14 @@ import shutil
 import stat
 import subprocess
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import pihealth_helper as helper
 
+from agent_actions.ledger import ActionLedger, ActionState, NewAction
 from agent_provider.claude import ClaudeCodeConfig
 from agent_provider.provisioning import (
     ACTION_BROKER_UNIT_PATH,
@@ -944,9 +946,11 @@ def test_action_policy_writer_is_fixed_validated_and_canary_gated(tmp_path):
         },
     }
     target = tmp_path / "agent-action-policy.json"
+    action_state = tmp_path / "agent-actions"
     written = {}
     with (
         patch.object(helper, "ACTION_POLICY_PATH", str(target)),
+        patch.object(helper, "ACTION_STATE_DIR", str(action_state)),
         patch.object(
             helper,
             "_write_managed_file",
@@ -966,10 +970,90 @@ def test_action_policy_writer_is_fixed_validated_and_canary_gated(tmp_path):
     automatic["operations"]["container.restart"]["targets"]["jellyfin"][
         "interactive"
     ] = "autonomous"
-    assert helper.cmd_agent_action_policy_write({"policy": automatic}) == {
-        "success": False,
-        "error": "Automatic authority requires the repair canary gate",
-    }
+    with patch.object(helper, "ACTION_STATE_DIR", str(action_state)):
+        assert helper.cmd_agent_action_policy_write({"policy": automatic}) == {
+            "success": False,
+            "error": "Action policy is not authorised by the repair canary gate",
+        }
+
+    now = datetime(2026, 7, 23, 10, 0, tzinfo=timezone.utc)
+    ledger = ActionLedger(action_state / "actions.sqlite3")
+    source = NewAction(
+        action_id="action-1",
+        idempotency_key="canary:action-1",
+        operation="container.restart",
+        capability_version="1",
+        target="jellyfin",
+        risk="R1",
+        trigger="interactive",
+        authority_mode="approval",
+        params={"name": "jellyfin"},
+        evidence_ids=["audit-1"],
+        payload_hash="a" * 64,
+        reason="Jellyfin remained unhealthy after repeated checks.",
+        impact="Restart container jellyfin",
+        precondition_hash="b" * 64,
+        actor_type="mattermost",
+        actor_id="user-1",
+        actor_username="marc",
+        state=ActionState.AWAITING_APPROVAL,
+        created_at=now.isoformat(),
+        expires_at=(now + timedelta(minutes=15)).isoformat(),
+    )
+    ledger.create(source)
+    ledger.approve(
+        "action-1",
+        payload_hash=source.payload_hash,
+        approver_type="mattermost",
+        approver_id="user-1",
+        approver_username="marc",
+        approved_at=now.isoformat(),
+    )
+    ledger.claim_execution(
+        "action-1",
+        payload_hash=source.payload_hash,
+        approval_required=True,
+        claimed_at=now.isoformat(),
+    )
+    ledger.begin_verification("action-1")
+    ledger.finish_execution(
+        "action-1",
+        state=ActionState.SUCCEEDED,
+        terminal_code="verified",
+    )
+    ledger.record_event(
+        "action-1",
+        phase="succeeded",
+        created_at=now.isoformat(),
+        details={"action_audit_id": "audit-1", "after": {"status": "running"}},
+    )
+    ledger.attest_canary(
+        attestation_id="canary-1",
+        source_action_id="action-1",
+        operation="container.restart",
+        target="jellyfin",
+        capability_version="1",
+        risk="R1",
+        release_commit="a" * 40,
+        attested_by_type="local",
+        attested_by_id="admin",
+        attested_by_username="admin",
+        attested_at=now.isoformat(),
+    )
+    supervised = json.loads(json.dumps(policy))
+    supervised["operations"]["container.restart"]["targets"]["jellyfin"][
+        "scheduled"
+    ] = "supervised"
+    with (
+        patch.object(helper, "ACTION_POLICY_PATH", str(target)),
+        patch.object(helper, "ACTION_STATE_DIR", str(action_state)),
+        patch.object(helper, "_write_managed_file", return_value={"success": True}),
+        patch.object(helper, "run_command", return_value={"returncode": 0}),
+    ):
+        assert helper.cmd_agent_action_policy_write({"policy": supervised})[
+            "success"
+        ] is True
+
     unknown = json.loads(json.dumps(policy))
     unknown["operations"]["shell.execute"] = {"enabled": False, "approvers": [], "targets": {}}
     assert helper.cmd_agent_action_policy_write({"policy": unknown})["success"] is False

@@ -17,6 +17,7 @@ from agent_actions.capability import (
     TriggerType,
 )
 from agent_actions.ledger import ActionLedger, ActionLedgerError, ActionState
+from agent_actions.policy import ActionPolicy
 
 
 _RELEASE_COMMIT_RE = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
@@ -263,6 +264,41 @@ class CanaryGateService:
             raise CanaryGateError(
                 "gate_unavailable", "Canary gate is unavailable"
             ) from exc
+
+    def validate_policy(self, policy: ActionPolicy) -> dict[str, Any]:
+        configured = policy.public_dict()
+        if set(configured["operations"]) != set(self._registry.operations):
+            raise CanaryGateError(
+                "invalid_policy", "Action policy operations do not match the registry"
+            )
+        for operation in self._registry.operations:
+            capability = self._registry.require(operation)
+            operation_policy = configured["operations"][operation]
+            for target, modes in operation_policy["targets"].items():
+                for raw_trigger, raw_mode in modes.items():
+                    trigger = TriggerType(raw_trigger)
+                    mode = AuthorityMode(raw_mode)
+                    if mode == AuthorityMode.AUTONOMOUS:
+                        raise CanaryGateError(
+                            "autonomous_unavailable",
+                            "Autonomous authority is unavailable",
+                        )
+                    if mode == AuthorityMode.SUPERVISED:
+                        self.require_supervised(
+                            operation=operation,
+                            target=target,
+                            trigger=trigger,
+                            mode=mode,
+                        )
+                    elif (
+                        mode != AuthorityMode.OBSERVE
+                        and mode not in capability.eligible_modes
+                    ):
+                        raise CanaryGateError(
+                            "ineligible_capability",
+                            "Capability does not permit the configured authority",
+                        )
+        return configured
 
     @staticmethod
     def _local_actor(value: Mapping[str, Any]) -> ActionActor:

@@ -4298,6 +4298,9 @@ def cmd_agent_action_policy_write(params):
         return {'success': False, 'error': 'Invalid agent action policy request'}
     policy = params.get('policy')
     try:
+        from agent_actions.canary import CanaryGateError, CanaryGateService
+        from agent_actions.defaults import build_repair_registry
+        from agent_actions.ledger import ActionLedger, utc_now
         from agent_actions.policy import ActionPolicy
 
         parsed = ActionPolicy.from_mapping(policy)
@@ -4311,17 +4314,42 @@ def cmd_agent_action_policy_write(params):
                 'error': 'Action policy operations do not match the fixed profile',
             }
         configured = parsed.public_dict()
-        automatic_modes = {'supervised', 'autonomous'}
-        if any(
-            mode in automatic_modes
+        automatic = any(
+            mode in {'supervised', 'autonomous'}
             for operation in configured['operations'].values()
             for target in operation['targets'].values()
             for mode in target.values()
-        ):
-            return {
-                'success': False,
-                'error': 'Automatic authority requires the repair canary gate',
-            }
+        )
+        if automatic:
+            def unavailable(*_args, **_kwargs):
+                return {}
+
+            registry = build_repair_registry(
+                container_status=unavailable,
+                stack_status=unavailable,
+                package_status=unavailable,
+                package_job_status=unavailable,
+                integration_status=unavailable,
+                integration_job_status=unavailable,
+                mattermost_status=unavailable,
+                mattermost_job_status=unavailable,
+                extension_status=unavailable,
+                extension_job_status=unavailable,
+            )
+            gate = CanaryGateService(
+                registry=registry,
+                ledger=ActionLedger(os.path.join(ACTION_STATE_DIR, 'actions.sqlite3')),
+                release_commit_provider=lambda: '',
+                clock=utc_now,
+                id_factory=lambda: '',
+            )
+            try:
+                gate.validate_policy(parsed)
+            except CanaryGateError:
+                return {
+                    'success': False,
+                    'error': 'Action policy is not authorised by the repair canary gate',
+                }
     except Exception:
         return {'success': False, 'error': 'Invalid agent action policy'}
     written = _write_managed_file(
