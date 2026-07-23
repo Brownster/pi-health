@@ -2,7 +2,7 @@
 
 Date: 2026-07-20
 
-Status: Implementation underway; AO-007 completed 2026-07-23
+Status: Implementation underway; AO-008 completed 2026-07-23
 
 Precondition: AA-009 read-only target signoff
 
@@ -39,8 +39,18 @@ projection. The administrator API and Automation screen create, edit, enable, an
 schedules without giving the dashboard access to the broker. Local implementation and
 browser acceptance are complete. Target-Pi signoff on Holly confirmed the dedicated
 identity and sandbox, one successful Mattermost report, restart deduplication, an engaged
-action kill switch, and zero action records. Installation, configuration, optimisation,
-GitHub publication, and agent-authored pull requests remain later work packages.
+action kill switch, and zero action records.
+
+AO-008 now adds durable, release-bound repair attestations and an exact canary gate across
+the application policy validator, proposal service, isolated actuator, and independent
+root helper. The administrator API and Automation screen expose eligible, stale, and
+revoked evidence without enabling autonomous authority. Target-Pi signoff on Holly
+confirmed one approval-bound, verified `container.restart:get_iplayer` action; exact-only
+scheduled supervision validation; unrelated-target denial; singular persistence across
+service restarts; and byte-for-byte restoration of the disabled, kill-switched baseline
+policy. The active attestation is retained for AO-009, but no scheduled repair is enabled.
+Installation, configuration, optimisation, GitHub publication, and agent-authored pull
+requests remain later work packages.
 
 ## Goal
 
