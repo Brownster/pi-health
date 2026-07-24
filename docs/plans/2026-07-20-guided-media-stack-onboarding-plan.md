@@ -241,8 +241,8 @@ Deliverables:
 - [ ] Install Docker, Compose, and advertised filesystem packages.
 - [ ] Create and correctly own runtime, stack, and application directories.
 - [ ] Prompt securely for the dashboard administrator credentials.
-- [ ] Start the privileged helper before the dashboard.
-- [ ] Verify Docker, Compose, systemd units, helper connectivity, and port 8002.
+- [x] Start the privileged helper before the dashboard.
+- [x] Verify Docker, Compose, systemd units, helper connectivity, and port 8002.
 - [ ] Print the dashboard URL and recovery commands.
 - [ ] Make every installer step safe to rerun.
 

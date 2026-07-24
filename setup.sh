@@ -17,6 +17,7 @@ HELPER_SERVICE_FILE="/etc/systemd/system/pihealth-helper.service"
 HELPER_LINK="/usr/local/bin/pihealth_helper.py"
 METRICS_SERVICE_FILE="/etc/systemd/system/limeos-metrics-collector.service"
 METRICS_TIMER_FILE="/etc/systemd/system/limeos-metrics-collector.timer"
+INSTALL_CHECK_SCRIPT="${LIMEOS_INSTALL_CHECK_SCRIPT:-${REPO_DIR}/scripts/onboarding-install-check.sh}"
 
 CONFIG_DIR="${CONFIG_DIR:-/home/pi/docker}"
 DOCKER_COMPOSE_PATH="${DOCKER_COMPOSE_PATH:-${CONFIG_DIR}/docker-compose.yml}"
@@ -309,8 +310,9 @@ echo ">>> Writing systemd service..."
 cat > "$SERVICE_FILE" <<EOF
 [Unit]
 Description=Pi-Health Dashboard
-After=network.target docker.service
+After=network.target docker.service pihealth-helper.service
 Wants=docker.service
+Requires=pihealth-helper.service
 
 [Service]
 Type=simple
@@ -382,9 +384,23 @@ WantedBy=timers.target
 EOF
 
 systemctl daemon-reload
-systemctl enable --now pi-health.service
 systemctl enable --now pihealth-helper.service
+systemctl enable --now pi-health.service
 systemctl enable --now limeos-metrics-collector.timer
+
+if [[ ! -x "${INSTALL_CHECK_SCRIPT}" ]]; then
+  printf 'Installation verifier is missing or not executable: %s\n' \
+    "${INSTALL_CHECK_SCRIPT}" >&2
+  exit 2
+fi
+
+install_check_args=()
+if [[ "${INSTALL_DOCKER}" == "0" ]]; then
+  install_check_args+=("--skip-docker")
+fi
+
+echo ">>> Verifying installed services..."
+"${INSTALL_CHECK_SCRIPT}" "${install_check_args[@]}"
 
 echo ">>> Pi-Health is running."
 echo "Open: http://$(hostname -I | awk '{print $1}'):8002"
