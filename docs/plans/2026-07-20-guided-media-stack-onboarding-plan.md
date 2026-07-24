@@ -1,6 +1,6 @@
 # Guided Media-Stack Onboarding Delivery Plan
 
-Status: Proposed
+Status: Active
 Owner: LimeOS maintainers
 Created: 2026-07-20
 Target platforms: Debian Bookworm on Raspberry Pi arm64 and x86-64
@@ -102,6 +102,27 @@ Create one versioned storage configuration consumed by:
 
 Retire the split between media-path and media-layout state after a compatibility migration.
 
+### Preserve existing installations explicitly
+
+Compatibility follows these rules:
+
+1. A valid `storage-contract.json` is authoritative for host paths and the media UID/GID.
+2. When the contract is absent, existing `media_paths.json`, `media_layout.json`, and legacy
+   defaults continue to behave exactly as before.
+3. An invalid or unreadable contract fails closed. Consumers must not silently fall back to a
+   legacy file and create split-brain storage state.
+4. Legacy path and layout endpoints may return contract-derived values, but they must reject
+   writes with a conflict once guided storage owns the configuration.
+5. Existing `/home/pi` paths remain valid for legacy installations. They are not valid
+   fresh-install defaults.
+6. LimeOS never synthesizes a storage contract from legacy path files automatically. Those files
+   do not contain enough evidence to infer filesystem UUIDs, disk roles, or safe mount ownership.
+7. A future migration flow must discover the attached filesystems, match the proposed paths,
+   display the resulting role assignments, and require explicit confirmation before saving the
+   contract.
+8. Removing or disabling guided storage is not a rollback mechanism. A supported rollback must
+   restore a reviewed legacy configuration explicitly.
+
 ### Protect the OS filesystem
 
 LimeOS must verify every required mount before it creates content directories, starts containers,
@@ -179,18 +200,18 @@ SnapRAID parity is not a backup.
 
 ### OB-000: Freeze the onboarding contract
 
-Status: Not started
+Status: In progress
 
 Deliverables:
 
-- [ ] Define the versioned storage configuration schema.
-- [ ] Define fixed container paths and standard library names.
-- [ ] Define disk roles and valid role combinations.
-- [ ] Define the application configuration root.
+- [x] Define the versioned storage configuration schema.
+- [x] Define fixed container paths and standard library names.
+- [x] Define disk roles and valid role combinations.
+- [x] Define the application configuration root.
 - [ ] Define the dashboard service account and media UID/GID model.
 - [ ] Define supported filesystems and formatting policy.
 - [ ] Define `running`, `integrated`, and `operational` completion states.
-- [ ] Document compatibility rules for existing installations.
+- [x] Document compatibility rules for existing installations.
 
 Recommended ownership model:
 
@@ -503,7 +524,7 @@ requiring application reconfiguration.
 
 | ID | Milestone | Status | Depends on |
 | --- | --- | --- | --- |
-| OB-000 | Onboarding contract | Not started | None |
+| OB-000 | Onboarding contract | In progress | None |
 | OB-100 | Reliable bootstrap | Not started | OB-000 |
 | OB-200 | Storage discovery and roles | Not started | OB-000, OB-100 |
 | OB-300 | First-run media wizard | Not started | OB-200 |
