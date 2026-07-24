@@ -10,6 +10,8 @@ readonly SCRIPT_NAME="${SCRIPT_PATH##*/}"
 readonly DEFAULT_OS_RELEASE_FILE="/etc/os-release"
 
 BLOCKERS=0
+ALLOW_UNSUPPORTED=0
+ALLOW_EXISTING_INSTALL=0
 
 fct_usage() {
 	printf '%s\n' \
@@ -18,6 +20,7 @@ fct_usage() {
 		"" \
 		"Usage:" \
 		"  ${SCRIPT_NAME} [--help] [--version]" \
+		"  ${SCRIPT_NAME} [--allow-unsupported | --allow-existing-install]" \
 		"" \
 		"Exit codes:" \
 		"  0  Host is supported" \
@@ -30,6 +33,10 @@ fct_pass() {
 
 fct_info() {
 	printf '[INFO] %s: %s\n' "${1}" "${2}"
+}
+
+fct_warn() {
+	printf '[WARN] %s: %s\n' "${1}" "${2}"
 }
 
 fct_block() {
@@ -191,6 +198,14 @@ fct_parse_arguments() {
 			printf '%s v%s\n' "${SCRIPT_NAME}" "${SCRIPT_VERSION}"
 			exit 0
 			;;
+		--allow-unsupported)
+			ALLOW_UNSUPPORTED=1
+			shift
+			;;
+		--allow-existing-install)
+			ALLOW_EXISTING_INSTALL=1
+			shift
+			;;
 		*)
 			printf 'Unknown option: %s\n' "${1}" >&2
 			fct_usage >&2
@@ -209,6 +224,18 @@ fct_main() {
 	fct_check_usb_storage
 
 	if ((BLOCKERS > 0)); then
+		if ((ALLOW_EXISTING_INSTALL == 1)); then
+			fct_warn "compatibility" \
+				"Continuing an existing installation on an unsupported host"
+			printf 'Result: LEGACY-RERUN (%d unsupported check(s))\n' "${BLOCKERS}"
+			exit 0
+		fi
+		if ((ALLOW_UNSUPPORTED == 1)); then
+			fct_warn "compatibility" \
+				"Unsupported-host override accepted; this configuration is untested"
+			printf 'Result: OVERRIDDEN (%d unsupported check(s))\n' "${BLOCKERS}"
+			exit 0
+		fi
 		printf 'Result: BLOCKED (%d issue(s))\n' "${BLOCKERS}"
 		exit 2
 	fi

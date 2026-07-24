@@ -2,10 +2,12 @@
 set -Eeuo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RUN_USER="${SUDO_USER:-$USER}"
+RUN_USER="${SUDO_USER:-${USER:-$(id -un)}}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 VENV_DIR="${REPO_DIR}/.venv"
 SERVICE_FILE="/etc/systemd/system/pi-health.service"
+PREFLIGHT_SCRIPT="${LIMEOS_PREFLIGHT_SCRIPT:-${REPO_DIR}/scripts/onboarding-preflight.sh}"
+ALLOW_UNSUPPORTED_HOST="${LIMEOS_ALLOW_UNSUPPORTED_HOST:-0}"
 LEGACY_ENV_FILE="/etc/pi-health.env"
 LIMEOS_CONFIG_DIR="${LIMEOS_CONFIG_DIR:-/etc/limeos}"
 LIMEOS_STATE_DIR="${LIMEOS_STATE_DIR:-/var/lib/limeos}"
@@ -34,6 +36,31 @@ if [[ $EUID -ne 0 ]]; then
   echo "Please run as root (sudo)." >&2
   exit 1
 fi
+
+fct_run_onboarding_preflight() {
+  local preflight_args=()
+
+  if [[ ! -x "${PREFLIGHT_SCRIPT}" ]]; then
+    printf 'Onboarding preflight is missing or not executable: %s\n' \
+      "${PREFLIGHT_SCRIPT}" >&2
+    exit 2
+  fi
+
+  if [[ -f "${SERVICE_FILE}" ]]; then
+    preflight_args+=("--allow-existing-install")
+  elif [[ "${ALLOW_UNSUPPORTED_HOST}" == "1" ]]; then
+    preflight_args+=("--allow-unsupported")
+  fi
+
+  printf '>>> Checking host compatibility before installation...\n'
+  if ! "${PREFLIGHT_SCRIPT}" "${preflight_args[@]}"; then
+    printf '%s\n' \
+      "Host preflight failed. Resolve the blockers above before rerunning setup." >&2
+    exit 2
+  fi
+}
+
+fct_run_onboarding_preflight
 
 prompt_install() {
   local label="$1"

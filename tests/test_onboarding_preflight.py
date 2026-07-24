@@ -10,7 +10,14 @@ SCRIPT = Path("scripts/onboarding-preflight.sh").resolve()
 CURRENT_USER = pwd.getpwuid(os.getuid()).pw_name
 
 
-def _run(tmp_path, *, os_id="debian", codename="bookworm", **overrides):
+def _run(
+    tmp_path,
+    *,
+    os_id="debian",
+    codename="bookworm",
+    arguments=None,
+    **overrides,
+):
     os_release = tmp_path / "os-release"
     os_release.write_text(f'ID="{os_id}"\nVERSION_CODENAME={codename}\n')
     env = {
@@ -23,7 +30,7 @@ def _run(tmp_path, *, os_id="debian", codename="bookworm", **overrides):
         **overrides,
     }
     return subprocess.run(
-        ["bash", str(SCRIPT)],
+        ["bash", str(SCRIPT), *(arguments or [])],
         env=env,
         text=True,
         capture_output=True,
@@ -73,6 +80,31 @@ def test_unresolvable_operator_is_blocked(tmp_path):
     assert "[BLOCK] operator: Unable to resolve the interactive SSH user" in result.stdout
 
 
+def test_explicit_unsupported_override_is_visible_and_successful(tmp_path):
+    result = _run(
+        tmp_path,
+        codename="trixie",
+        arguments=["--allow-unsupported"],
+    )
+
+    assert result.returncode == 0
+    assert "[WARN] compatibility: Unsupported-host override accepted" in result.stdout
+    assert "Result: OVERRIDDEN (1 unsupported check(s))" in result.stdout
+
+
+def test_existing_install_override_preserves_legacy_reruns(tmp_path):
+    result = _run(
+        tmp_path,
+        os_id="ubuntu",
+        codename="jammy",
+        arguments=["--allow-existing-install"],
+    )
+
+    assert result.returncode == 0
+    assert "Continuing an existing installation on an unsupported host" in result.stdout
+    assert "Result: LEGACY-RERUN (1 unsupported check(s))" in result.stdout
+
+
 def test_help_is_read_only_and_successful():
     result = subprocess.run(
         ["bash", str(SCRIPT), "--help"],
@@ -83,3 +115,11 @@ def test_help_is_read_only_and_successful():
 
     assert result.returncode == 0
     assert "Read-only Debian Bookworm onboarding preflight." in result.stdout
+
+
+def test_setup_runs_preflight_before_first_package_mutation():
+    setup = Path("setup.sh").read_text()
+
+    assert setup.index("\nfct_run_onboarding_preflight\n") < setup.index("apt-get update")
+    assert "--allow-existing-install" in setup
+    assert "LIMEOS_ALLOW_UNSUPPORTED_HOST" in setup
