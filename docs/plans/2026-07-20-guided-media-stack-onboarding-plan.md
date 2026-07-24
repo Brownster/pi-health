@@ -240,7 +240,7 @@ Deliverables:
 - [x] Install Git or document a bootstrap command that does not require it.
 - [ ] Install Docker, Compose, and advertised filesystem packages.
 - [x] Create and correctly own runtime, stack, and application directories.
-- [ ] Prompt securely for the dashboard administrator credentials.
+- [x] Prompt securely for the dashboard administrator credentials.
 - [x] Start the privileged helper before the dashboard.
 - [x] Verify Docker, Compose, systemd units, helper connectivity, and port 8002.
 - [x] Print the dashboard URL and recovery commands.

@@ -85,29 +85,20 @@ must identify the operating-system disk before making storage changes.
    Continue only when it prints `Result: READY`. The check reports the Debian release,
    architecture, SSH user, privilege access, bootstrap tools, and detected USB disks.
 
-3. Generate the dashboard password hash and store it:
-
-   ```bash
-   PASSWORD_HASH="$(python3 scripts/generate_password_hash.py)"
-   sudo install -d -m 0750 /etc/limeos
-   printf 'PIHEALTH_USER=admin\nPIHEALTH_PASSWORD_HASH=%s\n' "${PASSWORD_HASH}" \
-     | sudo tee /etc/limeos/credentials.env >/dev/null
-   sudo chmod 0640 /etc/limeos/credentials.env
-   unset PASSWORD_HASH
-   ```
-
-4. Install and start Pi-Health:
+3. Install and start Pi-Health:
 
    ```bash
    ./start.sh
    ```
 
    The installer repeats the preflight before its first package or system change. It then installs
-   Python, Docker CE, the Compose plugin, the privileged helper, and the systemd services.
+   Python, Docker CE, the Compose plugin, the privileged helper, and the systemd services. On a
+   fresh installation it securely prompts twice for the `admin` dashboard password. Existing
+   credentials are preserved on reruns.
 
-5. Open the URL printed by the installer, normally `http://<host-ip>:8002`, and log in as `admin`.
+4. Open the URL printed by the installer, normally `http://<host-ip>:8002`, and log in as `admin`.
 
-6. In the dashboard, inspect **Disks** before configuring **Storage**. Do not run **Apps → Media
+5. In the dashboard, inspect **Disks** before configuring **Storage**. Do not run **Apps → Media
    server quickstart** until every selected storage path is mounted and verified. Guided disk-role
    assignment is the next onboarding milestone.
 
@@ -121,6 +112,9 @@ LIMEOS_ALLOW_UNSUPPORTED_HOST=1 ./start.sh
 Optional installation settings:
 
 ```bash
+# Unattended installation with a pre-generated password hash
+LIMEOS_ADMIN_PASSWORD_HASH="$(python3 scripts/generate_password_hash.py)" ./start.sh
+
 # Install Tailscale
 ENABLE_TAILSCALE=1 ./start.sh
 
@@ -172,9 +166,10 @@ PIHEALTH_PASSWORD_HASH='scrypt:32768:8:1$generated-salt$generated-hash'
 PIHEALTH_USERS='admin:scrypt:32768:8:1$salt1$hash1,user2:scrypt:32768:8:1$salt2$hash2'
 ```
 
-Generate each hash with the command in Quick Start. Quote values containing `$` when setting them
-in an interactive shell. Remove the deprecated `PIHEALTH_PASSWORD` variable; startup rejects it
-even when a hash is also configured. Five failed logins from one client trigger a 60-second lockout.
+Generate each hash with `python3 scripts/generate_password_hash.py`. Quote values containing `$`
+when setting them in an interactive shell. Remove the deprecated `PIHEALTH_PASSWORD` variable;
+startup rejects it even when a hash is also configured. Five failed logins from one client trigger
+a 60-second lockout.
 
 LimeOS serves the React v2 interface exclusively. Remove the retired `PIHEALTH_UI_MODE`,
 `PIHEALTH_UI_V2_PAGES`, and `THEME` entries from existing environment files. These variables no
