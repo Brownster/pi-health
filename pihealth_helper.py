@@ -3580,6 +3580,9 @@ def _check_supervisor_runtime():
     result = run_command(
         [
             'runuser', '-u', 'limeops-supervisor', '--',
+            'env',
+            f'PYTHONPATH={AGENT_LIB_DIR}',
+            'PYTHONDONTWRITEBYTECODE=1',
             os.path.join(SUPERVISOR_VENV_DIR, 'bin', 'python'),
             '-m', 'agent_supervision.runner', '--check',
         ],
@@ -4042,7 +4045,24 @@ def cmd_agent_converge_if_stale(params):
             ),
         )
     )
-    if head and deployed == head and supervisor_complete:
+    supervisor_operational = True
+    if supervisor_complete:
+        feature = _read_agent_lifecycle_feature_state()
+        if feature.get('state') == 'enabled':
+            supervisor_operational = (
+                _unit_state(
+                    'limeops-supervised-repair.service', 'is-enabled'
+                ) == 'enabled'
+                and _unit_state(
+                    'limeops-supervised-repair.service', 'is-active'
+                ) == 'active'
+            )
+    if (
+        head
+        and deployed == head
+        and supervisor_complete
+        and supervisor_operational
+    ):
         return {'success': True, 'skipped': True, 'reason': 'agent runtime is current'}
     return _pihealth_update_agent(ctx={})
 
