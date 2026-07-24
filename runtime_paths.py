@@ -19,6 +19,7 @@ INTEGRATION_LIFECYCLE_STATUS_SCHEMA_PATH = (
 INTEGRATION_LIFECYCLE_TOMBSTONE_SCHEMA_PATH = (
     STATIC_SCHEMA_DIR / "integration-lifecycle-tombstone.schema.json"
 )
+STORAGE_CONTRACT_SCHEMA_PATH = STATIC_SCHEMA_DIR / "storage-contract.schema.json"
 
 CONFIG_DIR = Path(os.getenv("LIMEOS_CONFIG_DIR", "/etc/limeos"))
 STATE_DIR = Path(os.getenv("LIMEOS_STATE_DIR", "/var/lib/limeos"))
@@ -33,6 +34,7 @@ INTEGRATIONS_CONFIG_DIR = CONFIG_DIR / "integrations"
 INTEGRATIONS_STATE_DIR = STATE_DIR / "integrations"
 MATTERMOST_LIFECYCLE_PATH = INTEGRATIONS_STATE_DIR / "mattermost-lifecycle.json"
 AGENT_LIFECYCLE_PATH = INTEGRATIONS_STATE_DIR / "agents-lifecycle.json"
+STORAGE_CONTRACT_PATH = CONFIG_DIR / "storage-contract.json"
 MATTERMOST_RECOVERY_DIR = STATE_DIR / "integration-recovery"
 MATTERMOST_RECOVERY_CREDENTIAL_PATH = MATTERMOST_RECOVERY_DIR / "mattermost.env"
 SNAPRAID_LOG_DIR = LOG_DIR / "snapraid"
