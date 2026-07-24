@@ -6,6 +6,8 @@ Communicates with the privileged helper service over Unix socket.
 """
 
 import os
+from collections.abc import Callable
+
 from flask import Blueprint, current_app, has_app_context, jsonify, request
 from auth_utils import login_required
 from helper_client import helper_available, HelperError, HELPER_SOCKET
@@ -25,9 +27,11 @@ from disk_mount_service import (
 )
 from media_paths_service import (
     MediaPathValidationError,
+    MediaPathsManagedError,
     MediaPathsService,
     startup_service_params,
 )
+from storage_contract import StorageContract
 from seedbox_service import (
     SeedboxOperationError,
     SeedboxService,
@@ -112,7 +116,11 @@ def default_disk_mount_service(helper=None, docker_client=None):
     )
 
 
-def default_media_paths_service(helper=None, repository=None):
+def default_media_paths_service(
+    helper=None,
+    repository=None,
+    storage_contract_loader: Callable[[], StorageContract | None] | None = None,
+):
     return MediaPathsService(
         helper=helper if helper is not None else HelperClientAdapter(),
         repository=repository if repository is not None else JsonFileRepository(),
@@ -120,6 +128,7 @@ def default_media_paths_service(helper=None, repository=None):
         compose_path_provider=lambda: DOCKER_COMPOSE_PATH,
         defaults=DEFAULT_MEDIA_PATHS,
         startup_renderer=render_startup_files,
+        storage_contract_loader=storage_contract_loader,
     )
 
 
@@ -406,6 +415,8 @@ def api_set_media_paths():
 
     try:
         return jsonify(_media_paths().update(data))
+    except MediaPathsManagedError as exc:
+        return jsonify({'error': str(exc)}), 409
     except MediaPathValidationError as exc:
         return jsonify({'error': str(exc)}), 400
     except Exception as e:

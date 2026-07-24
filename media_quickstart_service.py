@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from catalog_service import CatalogError, _render_template
@@ -25,6 +25,7 @@ class MediaQuickstartService:
         stack_operations_service: Any,
         media_seed_service: Any,
         media_profile_service: Any | None = None,
+        media_identity_provider: Callable[[], Mapping[str, Any] | None] | None = None,
         bundle_id: str = "media-server",
     ) -> None:
         self._media_layout_service = media_layout_service
@@ -32,6 +33,7 @@ class MediaQuickstartService:
         self._stack_operations_service = stack_operations_service
         self._media_seed_service = media_seed_service
         self._media_profile_service = media_profile_service
+        self._media_identity_provider = media_identity_provider or (lambda: None)
         self._bundle_id = bundle_id
 
     def stream_quickstart(
@@ -175,6 +177,10 @@ class MediaQuickstartService:
                 resolved[str(key)] = str(value)
         for key, value in overrides.items():
             resolved[str(key)] = str(value)
+        identity = self._media_identity_provider() or {}
+        for key in ("PUID", "PGID"):
+            if key in identity:
+                resolved[key] = str(identity[key])
         return resolved
 
     @staticmethod

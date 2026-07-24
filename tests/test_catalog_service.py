@@ -46,6 +46,7 @@ def make_service(
     run_compose=None,
     stream=None,
     recorder=None,
+    media_identity_loader=None,
     path_exists=lambda path: False,
     is_dir=lambda path: True,
 ):
@@ -77,6 +78,7 @@ def make_service(
             "storage": "/st",
             "backup": "/bk",
         },
+        media_identity_loader=media_identity_loader,
         load_stack_compose=load_stack_compose,
         save_stack_compose=save_stack_compose,
         list_stacks=lambda: stacks,
@@ -182,6 +184,25 @@ def test_get_item_applies_media_paths(tmp_path):
     write_item(tmp_path, item)
     result = make_service(tmp_path).get_item("sonarr", apply_media_paths=True)
     assert result["item"]["fields"][0]["default"] == "/cfg"
+
+
+def test_get_item_applies_managed_media_identity(tmp_path):
+    item = dict(
+        SAMPLE,
+        fields=[
+            {"key": "PUID", "default": "1000"},
+            {"key": "PGID", "default": "1000"},
+        ],
+    )
+    write_item(tmp_path, item)
+
+    result = make_service(
+        tmp_path,
+        media_identity_loader=lambda: {"PUID": "1200", "PGID": "1300"},
+    ).get_item("sonarr", apply_media_paths=True)
+
+    fields = {field["key"]: field["default"] for field in result["item"]["fields"]}
+    assert fields == {"PUID": "1200", "PGID": "1300"}
 
 
 def test_get_item_applies_explicit_media_layout_defaults(tmp_path):

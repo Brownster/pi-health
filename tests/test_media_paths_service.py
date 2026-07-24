@@ -6,7 +6,12 @@ from unittest.mock import Mock, call
 
 import pytest
 
-from media_paths_service import MediaPathValidationError, MediaPathsService
+from media_paths_service import (
+    MediaPathValidationError,
+    MediaPathsManagedError,
+    MediaPathsService,
+)
+from storage_contract import parse_storage_contract
 
 
 DEFAULTS = {
@@ -18,7 +23,13 @@ DEFAULTS = {
 
 
 def make_service(
-    *, helper=None, repository=None, renderer=None, file_exists=None, file_reader=None
+    *,
+    helper=None,
+    repository=None,
+    renderer=None,
+    file_exists=None,
+    file_reader=None,
+    storage_contract_loader=None,
 ):
     if helper is None:
         helper = Mock()
@@ -37,6 +48,7 @@ def make_service(
             if renderer is not None
             else Mock(return_value=("script", "service"))
         ),
+        storage_contract_loader=storage_contract_loader,
         file_exists=file_exists
         if file_exists is not None
         else Mock(return_value=False),
@@ -45,6 +57,34 @@ def make_service(
             if file_reader is not None
             else Mock(side_effect=FileNotFoundError)
         ),
+    )
+
+
+def managed_contract():
+    return parse_storage_contract(
+        {
+            "schema_version": "1",
+            "profile": "single_disk",
+            "media_identity": {"uid": 1100, "gid": 1100},
+            "locations": {
+                "media_host": "/mnt/storage/media",
+                "downloads_host": "/mnt/storage/downloads",
+                "application_config_host": "/var/lib/limeos/apps",
+                "backup_host": "/mnt/backup/limeos",
+                "media_container": "/data/media",
+                "downloads_container": "/data/downloads",
+                "config_container": "/config",
+            },
+            "devices": [
+                {
+                    "id": "storage",
+                    "role": "data",
+                    "filesystem_uuid": "storage-uuid",
+                    "filesystem": "ext4",
+                    "mountpoint": "/mnt/storage",
+                }
+            ],
+        }
     )
 
 
@@ -63,6 +103,62 @@ def test_paths_falls_back_after_repository_failure():
     repository.read_json.side_effect = PermissionError
 
     assert make_service(repository=repository).paths() == DEFAULTS
+
+
+def test_paths_prefer_authoritative_storage_contract_without_reading_legacy_file():
+    repository = Mock()
+
+    paths = make_service(
+        repository=repository,
+        storage_contract_loader=lambda: managed_contract(),
+    ).paths()
+
+    assert paths == {
+        "storage": "/mnt/storage/media",
+        "downloads": "/mnt/storage/downloads",
+        "config": "/var/lib/limeos/apps",
+        "backup": "/mnt/backup/limeos",
+    }
+    repository.read_json.assert_not_called()
+
+
+def test_update_rejects_legacy_write_when_storage_contract_is_active():
+    repository = Mock()
+
+    with pytest.raises(MediaPathsManagedError, match="guided storage"):
+        make_service(
+            repository=repository,
+            storage_contract_loader=lambda: managed_contract(),
+        ).update({"storage": "/mnt/other"})
+
+    repository.write_json.assert_not_called()
+
+
+def test_direct_save_rejects_legacy_write_when_storage_contract_is_active():
+    repository = Mock()
+
+    with pytest.raises(MediaPathsManagedError, match="guided storage"):
+        make_service(
+            repository=repository,
+            storage_contract_loader=lambda: managed_contract(),
+        ).save(DEFAULTS)
+
+    repository.write_json.assert_not_called()
+
+
+def test_contract_read_failure_never_falls_back_to_legacy_paths():
+    repository = Mock()
+
+    def fail():
+        raise RuntimeError("contract unavailable")
+
+    with pytest.raises(RuntimeError, match="contract unavailable"):
+        make_service(
+            repository=repository,
+            storage_contract_loader=fail,
+        ).paths()
+
+    repository.read_json.assert_not_called()
 
 
 def test_update_validates_before_write():

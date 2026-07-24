@@ -540,6 +540,26 @@ class TestMediaPaths:
         service.preview_startup_service.assert_called_once_with()
         service.apply_startup_service.assert_called_once_with()
 
+    def test_media_path_write_returns_conflict_when_guided_storage_owns_paths(
+        self, authenticated_client, app
+    ):
+        from media_paths_service import MediaPathsManagedError
+
+        service = Mock()
+        service.update.side_effect = MediaPathsManagedError(
+            "Storage paths are managed by guided storage"
+        )
+        app.extensions["media_paths_service"] = service
+
+        response = authenticated_client.post(
+            "/api/disks/media-paths", json={"storage": "/mnt/other"}
+        )
+
+        assert response.status_code == 409
+        assert response.get_json() == {
+            "error": "Storage paths are managed by guided storage"
+        }
+
 
 class TestSuggestedMounts:
     """Test mount suggestions endpoint."""

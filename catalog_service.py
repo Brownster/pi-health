@@ -155,16 +155,26 @@ def _field_default_from_layout(field: Mapping[str, Any], layout: MediaLayout) ->
     return None
 
 
-def _apply_layout_defaults(item: Mapping[str, Any], media_paths: Mapping[str, Any]) -> dict:
+def _apply_layout_defaults(
+    item: Mapping[str, Any],
+    media_paths: Mapping[str, Any],
+    media_identity: Mapping[str, Any] | None = None,
+) -> dict:
     """Return an item copy with field defaults derived from the media layout."""
     layout = MediaLayout.from_media_paths(media_paths)
+    identity = media_identity or {}
     item_copy = dict(item)
     if 'fields' not in item_copy:
         return item_copy
     item_copy['fields'] = []
     for field in item.get('fields', []):
         field_copy = dict(field)
-        default = _field_default_from_layout(field_copy, layout)
+        key = str(field_copy.get("key", ""))
+        default = (
+            str(identity[key])
+            if key in ("PUID", "PGID") and key in identity
+            else _field_default_from_layout(field_copy, layout)
+        )
         if default is not None:
             field_copy['default'] = default
         item_copy['fields'].append(field_copy)
@@ -196,11 +206,13 @@ class CatalogService:
         stream_compose_command: Callable[[str, str], Any],
         stack_lock: Callable[[str], Any],
         compose_conflict_error: type,
+        media_identity_loader: Callable[[], Mapping[str, Any] | None] | None = None,
         path_exists: Callable[[str], bool] = os.path.exists,
         is_dir: Callable[[str], bool] = os.path.isdir,
     ) -> None:
         self._catalog_dir_provider = catalog_dir_provider
         self._media_paths_loader = media_paths_loader
+        self._media_identity_loader = media_identity_loader or (lambda: None)
         self._load_stack_compose = load_stack_compose
         self._save_stack_compose = save_stack_compose
         self._list_stacks = list_stacks
@@ -257,7 +269,11 @@ class CatalogService:
             raise CatalogError({'error': 'Catalog item not found'}, 404)
 
         if apply_media_paths:
-            item = _apply_layout_defaults(item, self._media_paths_loader())
+            item = _apply_layout_defaults(
+                item,
+                self._media_paths_loader(),
+                self._media_identity_loader(),
+            )
 
         return {'item': item}
 
@@ -368,7 +384,11 @@ class CatalogService:
     def _install_locked(self, data, item, *, operation_registry, owner, username):
         item_id = data.get('id')
         values = dict(data.get('values', {}))
-        item = _apply_layout_defaults(item, self._media_paths_loader())
+        item = _apply_layout_defaults(
+            item,
+            self._media_paths_loader(),
+            self._media_identity_loader(),
+        )
 
         valid, error = _validate_install_request(item, values)
         if not valid:

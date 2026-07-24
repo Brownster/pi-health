@@ -10,14 +10,16 @@ from app import AppDependencies, create_app
 from auth_utils import LoginRateLimiter
 from media_layout import MediaLayout
 from media_layout_service import (
+    MediaLayoutManagedError,
     MediaLayoutProvisionError,
     MediaLayoutService,
     MediaLayoutValidationError,
 )
 from operation_manager import OperationRegistry
+from storage_contract import parse_storage_contract
 
 
-def make_service(*, helper=None, repository=None):
+def make_service(*, helper=None, repository=None, storage_contract_loader=None):
     if helper is None:
         helper = Mock()
         helper.available.return_value = False
@@ -28,6 +30,35 @@ def make_service(*, helper=None, repository=None):
         helper=helper,
         repository=repository,
         config_path_provider=lambda: "/config/media_layout.json",
+        storage_contract_loader=storage_contract_loader,
+    )
+
+
+def managed_contract():
+    return parse_storage_contract(
+        {
+            "schema_version": "1",
+            "profile": "single_disk",
+            "media_identity": {"uid": 1100, "gid": 1200},
+            "locations": {
+                "media_host": "/mnt/storage/media",
+                "downloads_host": "/mnt/storage/downloads",
+                "application_config_host": "/var/lib/limeos/apps",
+                "backup_host": "/mnt/backup/limeos",
+                "media_container": "/data/media",
+                "downloads_container": "/data/downloads",
+                "config_container": "/config",
+            },
+            "devices": [
+                {
+                    "id": "storage",
+                    "role": "data",
+                    "filesystem_uuid": "storage-uuid",
+                    "filesystem": "ext4",
+                    "mountpoint": "/mnt/storage",
+                }
+            ],
+        }
     )
 
 
@@ -52,6 +83,50 @@ def test_layout_falls_back_after_repository_failure():
     repository.read_json.side_effect = PermissionError
 
     assert make_service(repository=repository).layout() == MediaLayout()
+
+
+def test_layout_prefers_authoritative_contract_without_reading_legacy_file():
+    repository = Mock()
+
+    layout = make_service(
+        repository=repository,
+        storage_contract_loader=lambda: managed_contract(),
+    ).layout()
+
+    assert layout.as_dict() == {
+        "storage_root": "/mnt/storage/media",
+        "downloads_root": "/mnt/storage/downloads",
+        "config_root": "/var/lib/limeos/apps",
+        "backup_root": "/mnt/backup/limeos",
+    }
+    repository.read_json.assert_not_called()
+
+
+def test_save_rejects_legacy_write_when_storage_contract_is_active():
+    repository = Mock()
+
+    with pytest.raises(MediaLayoutManagedError, match="guided storage"):
+        make_service(
+            repository=repository,
+            storage_contract_loader=lambda: managed_contract(),
+        ).save({"storage_root": "/mnt/other"})
+
+    repository.write_json.assert_not_called()
+
+
+def test_contract_read_failure_never_falls_back_to_legacy_layout():
+    repository = Mock()
+
+    def fail():
+        raise RuntimeError("contract unavailable")
+
+    with pytest.raises(RuntimeError, match="contract unavailable"):
+        make_service(
+            repository=repository,
+            storage_contract_loader=fail,
+        ).layout()
+
+    repository.read_json.assert_not_called()
 
 
 def test_save_validates_absolute_roots_before_write():
@@ -112,6 +187,30 @@ def test_provision_calls_helper_with_layout_roots_and_ids():
     assert result["success"] is True
     assert result["layout"]["storage_root"] == "/mnt/media"
     assert result["created"] == ["/mnt/storage/tv"]
+
+
+def test_managed_provision_uses_contract_paths_and_identity():
+    helper = Mock()
+    helper.available.return_value = True
+    helper.call.return_value = {"success": True, "created": [], "existing": []}
+    repository = Mock()
+
+    make_service(
+        helper=helper,
+        repository=repository,
+        storage_contract_loader=lambda: managed_contract(),
+    ).provision(puid=9999, pgid=9999)
+
+    helper.call.assert_called_once_with(
+        "media_layout_provision",
+        {
+            "storage_root": "/mnt/storage/media",
+            "downloads_root": "/mnt/storage/downloads",
+            "puid": "1100",
+            "pgid": "1200",
+        },
+    )
+    repository.read_json.assert_not_called()
 
 
 def test_provision_requires_available_helper():
@@ -193,6 +292,24 @@ def test_layout_save_route_maps_validation_error():
     )
 
     assert response.status_code == 400
+
+
+def test_layout_save_route_returns_conflict_for_managed_storage():
+    service = Mock()
+    service.save.side_effect = MediaLayoutManagedError(
+        "Media layout is managed by guided storage"
+    )
+
+    response = _authed_client(service).post(
+        "/api/media/layout",
+        data=json.dumps({"storage_root": "/mnt/other"}),
+        content_type="application/json",
+    )
+
+    assert response.status_code == 409
+    assert json.loads(response.data) == {
+        "error": "Media layout is managed by guided storage"
+    }
 
 
 def test_layout_provision_route_delegates_to_service():

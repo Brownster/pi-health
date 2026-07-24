@@ -7,6 +7,8 @@ from typing import Any
 
 from media_layout import MediaLayout
 from ports import ConfigRepository, HelperPort
+from storage_compatibility import media_layout_from_contract
+from storage_contract import StorageContract
 
 
 class MediaLayoutProvisionError(Exception):
@@ -15,6 +17,10 @@ class MediaLayoutProvisionError(Exception):
 
 class MediaLayoutValidationError(Exception):
     """Raised when a requested media layout is not valid."""
+
+
+class MediaLayoutManagedError(Exception):
+    """Raised when guided storage owns the canonical layout."""
 
 
 class MediaLayoutService:
@@ -27,14 +33,22 @@ class MediaLayoutService:
         repository: ConfigRepository,
         config_path_provider: Callable[[], str],
         defaults: MediaLayout | None = None,
+        storage_contract_loader: Callable[[], StorageContract | None] | None = None,
     ) -> None:
         self._helper = helper
         self._repository = repository
         self._config_path_provider = config_path_provider
         self._defaults = defaults or MediaLayout()
+        self._storage_contract_loader = storage_contract_loader
 
     def layout(self) -> MediaLayout:
-        """Read persisted layout roots merged over defaults."""
+        """Read the authoritative contract layout or the persisted legacy layout."""
+        contract = self._load_storage_contract()
+        if contract is not None:
+            return media_layout_from_contract(contract)
+        return self._legacy_layout()
+
+    def _legacy_layout(self) -> MediaLayout:
         try:
             configured = self._repository.read_json(
                 self._config_path_provider(), default={}
@@ -52,7 +66,11 @@ class MediaLayoutService:
 
     def save(self, changes: Mapping[str, Any]) -> MediaLayout:
         """Persist selected layout roots after validation."""
-        layout = self.layout()
+        if self._load_storage_contract() is not None:
+            raise MediaLayoutManagedError(
+                "Media layout is managed by guided storage"
+            )
+        layout = self._legacy_layout()
         next_layout = MediaLayout(
             storage_root=_selected_root(changes, "storage_root", layout.storage_root),
             downloads_root=_selected_root(changes, "downloads_root", layout.downloads_root),
@@ -66,7 +84,13 @@ class MediaLayoutService:
 
     def provision(self, *, puid: str | int = "1000", pgid: str | int = "1000") -> dict:
         """Provision library and download directories through the privileged helper."""
-        layout = self.layout()
+        contract = self._load_storage_contract()
+        if contract is not None:
+            layout = media_layout_from_contract(contract)
+            puid = contract.media_identity.uid
+            pgid = contract.media_identity.gid
+        else:
+            layout = self._legacy_layout()
         if not self._helper.available():
             raise MediaLayoutProvisionError("Helper service unavailable")
 
@@ -82,6 +106,11 @@ class MediaLayoutService:
         if not result.get("success"):
             raise MediaLayoutProvisionError(result.get("error", "Provisioning failed"))
         return {"success": True, "layout": layout.as_dict(), **result}
+
+    def _load_storage_contract(self) -> StorageContract | None:
+        if self._storage_contract_loader is None:
+            return None
+        return self._storage_contract_loader()
 
 
 def _root_from(configured: Mapping[str, Any], key: str, fallback: str) -> str:

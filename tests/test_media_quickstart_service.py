@@ -143,13 +143,22 @@ class FakeProfileService:
         return profile
 
 
-def make_service(*, catalog=None, stack_ops=None, seed=None, layout=None, profile=None):
+def make_service(
+    *,
+    catalog=None,
+    stack_ops=None,
+    seed=None,
+    layout=None,
+    profile=None,
+    media_identity_provider=None,
+):
     return MediaQuickstartService(
         media_layout_service=layout or FakeLayoutService(),
         catalog_service=catalog or FakeCatalogService(),
         stack_operations_service=stack_ops or FakeStackOperationsService(),
         media_seed_service=seed or FakeSeedService(),
         media_profile_service=profile,
+        media_identity_provider=media_identity_provider,
     )
 
 
@@ -184,6 +193,29 @@ def test_quickstart_provisions_installs_starts_and_seeds_bundle():
     assert stack_ops.calls == [("media", "up")]
     assert seed.calls == ["media"]
     assert not any(event.get("done") for event in events[:-1])
+
+
+def test_quickstart_uses_managed_identity_for_provisioning_and_containers():
+    layout = FakeLayoutService()
+    catalog = FakeCatalogService()
+    service = make_service(
+        layout=layout,
+        catalog=catalog,
+        media_identity_provider=lambda: {"PUID": "1200", "PGID": "1300"},
+    )
+
+    events = list(
+        service.stream_quickstart(
+            values={"PUID": "9999", "PGID": "9999"},
+            username="alice",
+        )
+    )
+
+    assert events[-1]["done"] is True
+    assert layout.provision_calls == [{"puid": "1200", "pgid": "1300"}]
+    transmission = catalog.install_calls[1]["data"]["values"]
+    assert transmission["PUID"] == "1200"
+    assert transmission["PGID"] == "1300"
 
 
 def test_quickstart_persists_resolved_media_profile_before_completion():

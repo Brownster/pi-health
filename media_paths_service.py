@@ -7,6 +7,8 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from ports import ConfigRepository, HelperPort
+from storage_compatibility import media_paths_from_contract
+from storage_contract import StorageContract
 
 
 MEDIA_PATH_KEYS = ("downloads", "storage", "backup", "config")
@@ -17,6 +19,10 @@ STARTUP_UNIT_NAME = "docker-compose-start.service"
 
 class MediaPathValidationError(Exception):
     """Raised when a configured media path is not absolute."""
+
+
+class MediaPathsManagedError(Exception):
+    """Raised when guided storage owns paths formerly managed by this service."""
 
 
 def startup_service_params(paths: Mapping[str, Any], compose_file: str) -> dict:
@@ -44,6 +50,7 @@ class MediaPathsService:
         compose_path_provider: Callable[[], str],
         defaults: Mapping[str, str],
         startup_renderer: Callable[[list[str], str], tuple[str, str]],
+        storage_contract_loader: Callable[[], StorageContract | None] | None = None,
         file_exists: Callable[[str], bool] = os.path.exists,
         file_reader: Callable[[str], str] | None = None,
     ) -> None:
@@ -53,6 +60,7 @@ class MediaPathsService:
         self._compose_path_provider = compose_path_provider
         self._defaults = dict(defaults)
         self._startup_renderer = startup_renderer
+        self._storage_contract_loader = storage_contract_loader
         self._file_exists = file_exists
         self._file_reader = file_reader or self._read_text
 
@@ -62,7 +70,13 @@ class MediaPathsService:
             return handle.read()
 
     def paths(self) -> dict[str, str]:
-        """Read configured paths merged over defaults."""
+        """Read authoritative contract paths or legacy paths merged over defaults."""
+        contract = self._load_storage_contract()
+        if contract is not None:
+            return media_paths_from_contract(contract)
+        return self._legacy_paths()
+
+    def _legacy_paths(self) -> dict[str, str]:
         try:
             configured = self._repository.read_json(
                 self._config_path_provider(), default={}
@@ -75,11 +89,22 @@ class MediaPathsService:
 
     def save(self, paths: Mapping[str, str]) -> None:
         """Persist a complete path mapping."""
+        if self._load_storage_contract() is not None:
+            raise MediaPathsManagedError(
+                "Storage paths are managed by guided storage"
+            )
+        self._save_legacy(paths)
+
+    def _save_legacy(self, paths: Mapping[str, str]) -> None:
         self._repository.write_json(self._config_path_provider(), dict(paths))
 
     def update(self, changes: Mapping[str, Any]) -> dict:
         """Validate and persist selected paths, then refresh startup files."""
-        paths = self.paths()
+        if self._load_storage_contract() is not None:
+            raise MediaPathsManagedError(
+                "Storage paths are managed by guided storage"
+            )
+        paths = self._legacy_paths()
         for key in MEDIA_PATH_KEYS:
             if key not in changes:
                 continue
@@ -88,7 +113,7 @@ class MediaPathsService:
                 raise MediaPathValidationError(f"Invalid path for {key}")
             paths[key] = path
 
-        self.save(paths)
+        self._save_legacy(paths)
         startup_result = self.apply_startup_service(paths)
         response = {"status": "updated", "paths": paths}
         if not startup_result.get("success"):
@@ -148,3 +173,8 @@ class MediaPathsService:
             "exists": exists,
             "changed": current != proposed,
         }
+
+    def _load_storage_contract(self) -> StorageContract | None:
+        if self._storage_contract_loader is None:
+            return None
+        return self._storage_contract_loader()

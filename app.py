@@ -103,10 +103,13 @@ from disk_mount_service import DiskMountService
 from media_layout import DOWNLOAD_CATEGORIES, LIBRARY_KINDS
 from media_paths_service import MediaPathsService
 from media_layout_service import (
+    MediaLayoutManagedError,
     MediaLayoutProvisionError,
     MediaLayoutService,
     MediaLayoutValidationError,
 )
+from storage_contract_service import StorageContractService
+from storage_compatibility import media_identity_from_contract
 from seedbox_service import SeedboxService
 from disk_suggestion_service import DiskSuggestionService
 from smart_service import SmartService
@@ -242,6 +245,7 @@ class AppDependencies:
     disk_mount_service: DiskMountService | None = None
     media_paths_service: MediaPathsService | None = None
     media_layout_service: MediaLayoutService | None = None
+    storage_contract_service: StorageContractService | None = None
     media_profile_service: MediaProfileService | None = None
     media_seed_service: MediaSeedService | None = None
     media_quickstart_service: MediaQuickstartService | None = None
@@ -310,12 +314,24 @@ def _default_container_inventory_service(docker_port):
     )
 
 
-def _default_media_layout_service(helper, repository):
+def _default_media_layout_service(helper, repository, storage_contract_loader=None):
     return MediaLayoutService(
         helper=helper,
         repository=repository,
         config_path_provider=lambda: MEDIA_LAYOUT_CONFIG,
+        storage_contract_loader=storage_contract_loader,
     )
+
+
+def _default_storage_contract_service(repository):
+    return StorageContractService(repository=repository)
+
+
+def _managed_media_identity(storage_contract_service):
+    contract = storage_contract_service.load()
+    if contract is None:
+        return None
+    return media_identity_from_contract(contract)
 
 
 def _default_media_profile_service(repository):
@@ -342,6 +358,7 @@ def _default_media_quickstart_service(
     stack_operations_service,
     media_seed_service,
     media_profile_service,
+    media_identity_provider=None,
 ):
     return MediaQuickstartService(
         media_layout_service=media_layout_service,
@@ -349,6 +366,7 @@ def _default_media_quickstart_service(
         stack_operations_service=stack_operations_service,
         media_seed_service=media_seed_service,
         media_profile_service=media_profile_service,
+        media_identity_provider=media_identity_provider,
     )
 
 
@@ -1243,6 +1261,8 @@ def api_media_layout_save():
     """Persist canonical media layout roots."""
     try:
         layout = _media_layout_service().save(request.get_json() or {})
+    except MediaLayoutManagedError as exc:
+        return jsonify({"error": str(exc)}), 409
     except MediaLayoutValidationError as exc:
         return jsonify({"error": str(exc)}), 400
     return jsonify({"status": "saved", "layout": layout.as_dict()})
@@ -1559,16 +1579,24 @@ def create_app(config=None, dependencies=None):
         resolved.disk_mount_service
         or default_disk_mount_service(application.extensions["helper"], resolved.docker_client)
     )
+    application.extensions["storage_contract_service"] = (
+        resolved.storage_contract_service
+        or _default_storage_contract_service(application.extensions["config_repo"])
+    )
     application.extensions["media_paths_service"] = (
         resolved.media_paths_service
         or default_media_paths_service(
-            application.extensions["helper"], application.extensions["config_repo"]
+            application.extensions["helper"],
+            application.extensions["config_repo"],
+            application.extensions["storage_contract_service"].load,
         )
     )
     application.extensions["media_layout_service"] = (
         resolved.media_layout_service
         or _default_media_layout_service(
-            application.extensions["helper"], application.extensions["config_repo"]
+            application.extensions["helper"],
+            application.extensions["config_repo"],
+            application.extensions["storage_contract_service"].load,
         )
     )
     application.extensions["media_profile_service"] = (
@@ -1613,7 +1641,13 @@ def create_app(config=None, dependencies=None):
         or default_backup_service(application.extensions["config_repo"])
     )
     application.extensions["catalog_service"] = (
-        resolved.catalog_service or default_catalog_service()
+        resolved.catalog_service
+        or default_catalog_service(
+            application.extensions["media_paths_service"].paths,
+            lambda: _managed_media_identity(
+                application.extensions["storage_contract_service"]
+            ),
+        )
     )
     application.extensions["media_quickstart_service"] = (
         resolved.media_quickstart_service
@@ -1623,6 +1657,9 @@ def create_app(config=None, dependencies=None):
             application.extensions["stack_operations_service"],
             application.extensions["media_seed_service"],
             application.extensions["media_profile_service"],
+            lambda: _managed_media_identity(
+                application.extensions["storage_contract_service"]
+            ),
         )
     )
     application.extensions["tools_service"] = (

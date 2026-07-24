@@ -85,11 +85,12 @@ def _save_stack_compose(stack_dir, data, filename=None):
 # Service construction and resolution
 # =============================================================================
 
-def default_catalog_service():
+def default_catalog_service(media_paths_loader=None, media_identity_loader=None):
     """Build a CatalogService bound to this module's providers and stack ops."""
     return CatalogService(
         catalog_dir_provider=lambda: CATALOG_DIR,
-        media_paths_loader=_load_media_paths,
+        media_paths_loader=media_paths_loader or _load_media_paths,
+        media_identity_loader=media_identity_loader,
         load_stack_compose=lambda stack_dir: _load_stack_compose(stack_dir),
         save_stack_compose=lambda stack_dir, data, filename=None: _save_stack_compose(
             stack_dir, data, filename
