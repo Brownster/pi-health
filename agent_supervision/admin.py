@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from agent_actions.capability import TriggerType
+from agent_actions.capability import AuthorityMode, TriggerType
 from agent_actions.defaults import read_agent_release_commit
 from agent_actions.ledger import ActionLedger, ActionLedgerError
 from agent_actions.policy import ActionPolicy, ActionPolicyError
@@ -351,6 +351,8 @@ class SupervisionAdminService:
                 TriggerType.SCHEDULED,
             ).value
         except ActionPolicyError as exc:
+            if exc.code in {"denied_operation", "denied_target"}:
+                return AuthorityMode.OBSERVE.value
             raise SupervisionAdminError(exc.code, str(exc)) from exc
 
     def _action(self, action_id: str | None) -> dict[str, Any] | None:

@@ -140,6 +140,57 @@ def test_admin_schedule_projection_exposes_read_only_safety_state(tmp_path):
     assert listed["schedules"][0]["id"] == "schedule-1"
 
 
+@pytest.mark.parametrize(
+    "operation_policy",
+    [
+        {"enabled": False, "approvers": [], "targets": {}},
+        {"enabled": True, "approvers": [], "targets": {}},
+    ],
+)
+def test_admin_keeps_retained_schedule_visible_when_policy_denies_it(
+    tmp_path, operation_policy
+):
+    admin = _admin(tmp_path)
+    admin.create(
+        _schedule(),
+        owner={"type": "local", "id": "admin", "username": "admin"},
+    )
+    (tmp_path / "policy.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "1",
+                "kill_switch": True,
+                "defaults": {"proposal_ttl_seconds": 900},
+                "operations": {
+                    "container.restart": operation_policy,
+                },
+            }
+        )
+    )
+
+    projected = admin.get("schedule-1")
+    listed = admin.list()["schedules"][0]
+
+    assert projected["enabled"] is False
+    assert projected["status"]["configured_authority"] == "observe"
+    assert projected["status"]["effective_authority"] == "observe"
+    assert listed == projected
+
+
+def test_admin_still_fails_closed_for_malformed_policy(tmp_path):
+    admin = _admin(tmp_path)
+    admin.create(
+        _schedule(),
+        owner={"type": "local", "id": "admin", "username": "admin"},
+    )
+    (tmp_path / "policy.json").write_text("{}")
+
+    with pytest.raises(SupervisionAdminError) as invalid:
+        admin.get("schedule-1")
+
+    assert invalid.value.code == "invalid_policy"
+
+
 def test_admin_incident_detail_keeps_bounded_assessment_and_transition_history(
     tmp_path,
 ):
