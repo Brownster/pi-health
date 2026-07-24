@@ -229,15 +229,15 @@ Exit gate:
 
 ### OB-100: Build a reliable bootstrap
 
-Status: Not started
+Status: In progress
 Depends on: OB-000
 
 Deliverables:
 
-- [ ] Establish one canonical README installation path.
-- [ ] Check the Debian release and architecture.
-- [ ] Detect the interactive user, home directory, UID, and GID.
-- [ ] Install Git or document a bootstrap command that does not require it.
+- [x] Establish one canonical README installation path.
+- [x] Check the Debian release and architecture.
+- [x] Detect the interactive user, home directory, UID, and GID.
+- [x] Install Git or document a bootstrap command that does not require it.
 - [ ] Install Docker, Compose, and advertised filesystem packages.
 - [ ] Create and correctly own runtime, stack, and application directories.
 - [ ] Prompt securely for the dashboard administrator credentials.
@@ -525,7 +525,7 @@ requiring application reconfiguration.
 | ID | Milestone | Status | Depends on |
 | --- | --- | --- | --- |
 | OB-000 | Onboarding contract | In progress | None |
-| OB-100 | Reliable bootstrap | Not started | OB-000 |
+| OB-100 | Reliable bootstrap | In progress | OB-000 |
 | OB-200 | Storage discovery and roles | Not started | OB-000, OB-100 |
 | OB-300 | First-run media wizard | Not started | OB-200 |
 | OB-400 | Deterministic deployment | Not started | OB-300 |

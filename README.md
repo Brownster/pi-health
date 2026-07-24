@@ -35,7 +35,7 @@ Pi-Health is a full home lab management interface for Raspberry Pi and small ser
 |--------------|-------------|----------|
 | **Raspberry Pi 4/5 (4GB+)** | Primary target platform | Home server, media management |
 | **Raspberry Pi 4/5 (8GB)** | For running more containers | NAS, Plex/Jellyfin with transcoding |
-| **x86/x64 Linux** | Any Debian/Ubuntu-based system | Development, VMs, repurposed PCs |
+| **x86-64 system** | Debian 12 Bookworm | Home server, VM, repurposed PC |
 
 ### Storage Configurations
 
@@ -59,65 +59,80 @@ When connecting multiple drives to a Raspberry Pi:
 - Recommended: 10+ port hub with 5V/4A+ power supply
 - Avoid bus-powered hubs for HDDs
 
-## Installation (Host Service Only)
+## Install from SSH
 
-Pi-Health runs as a systemd service on the host. Docker deployment is no longer supported.
+Fresh installations support Debian 12 Bookworm on arm64 and amd64. Pi-Health runs as a systemd
+service on the host; Docker deployment of Pi-Health itself is unsupported.
 
-### Bare Metal Install (Recommended)
+Connect the USB drives before starting, but do not format or mount them manually. The storage flow
+must identify the operating-system disk before making storage changes.
+
+1. Install Git, clone the repository, and enter it:
+
+   ```bash
+   sudo apt-get update
+   sudo apt-get install -y git
+   git clone https://github.com/Brownster/pi-health.git
+   cd pi-health
+   ```
+
+2. Run the read-only host check:
+
+   ```bash
+   ./scripts/onboarding-preflight.sh
+   ```
+
+   Continue only when it prints `Result: READY`. The check reports the Debian release,
+   architecture, SSH user, privilege access, bootstrap tools, and detected USB disks.
+
+3. Generate the dashboard password hash and store it:
+
+   ```bash
+   PASSWORD_HASH="$(python3 scripts/generate_password_hash.py)"
+   sudo install -d -m 0750 /etc/limeos
+   printf 'PIHEALTH_USER=admin\nPIHEALTH_PASSWORD_HASH=%s\n' "${PASSWORD_HASH}" \
+     | sudo tee /etc/limeos/credentials.env >/dev/null
+   sudo chmod 0640 /etc/limeos/credentials.env
+   unset PASSWORD_HASH
+   ```
+
+4. Install and start Pi-Health:
+
+   ```bash
+   ./start.sh
+   ```
+
+   The installer repeats the preflight before its first package or system change. It then installs
+   Python, Docker CE, the Compose plugin, the privileged helper, and the systemd services.
+
+5. Open the URL printed by the installer, normally `http://<host-ip>:8002`, and log in as `admin`.
+
+6. In the dashboard, inspect **Disks** before configuring **Storage**. Do not run **Apps → Media
+   server quickstart** until every selected storage path is mounted and verified. Guided disk-role
+   assignment is the next onboarding milestone.
+
+The installer is safe to rerun on an existing installation. Maintainers testing a fresh,
+unsupported host must opt in explicitly:
 
 ```bash
-git clone https://github.com/Brownster/pi-health.git
-cd pi-health
-./start.sh
+LIMEOS_ALLOW_UNSUPPORTED_HOST=1 ./start.sh
 ```
 
-This will:
-- Install Python and Docker CE (including Docker Compose plugin)
-- Create a Python virtual environment
-- Set up the privileged helper service (for disk operations)
-- Register a systemd service for pi-health
-- Register a five-minute metric-history timer
-- Create the `pihealth` group for socket permissions
-
-Optional flags:
+Optional installation settings:
 
 ```bash
 # Install Tailscale
 ENABLE_TAILSCALE=1 ./start.sh
 
-# Configure VPN (Gluetun) network + PIA credentials
+# Configure a Gluetun network with PIA credentials
 ENABLE_VPN=1 PIA_USERNAME=your_user PIA_PASSWORD=your_pass ./start.sh
 ```
 
-Access the dashboard at `http://<host-ip>:8002`
-
-## Quick Start
-
-1. Generate a password hash (enter the password at the prompt):
-   ```bash
-   python3 scripts/generate_password_hash.py
-   ```
-2. Create `/etc/limeos/credentials.env` with the generated hash:
-   ```bash
-   sudo install -d -m 0750 /etc/limeos
-   sudo tee /etc/limeos/credentials.env >/dev/null <<'EOF'
-   PIHEALTH_USER=admin
-   PIHEALTH_PASSWORD_HASH=replace-with-generated-hash
-   EOF
-   sudo chmod 0640 /etc/limeos/credentials.env
-   ```
-3. Install and start Pi-Health:
-   ```bash
-   ./start.sh
-   ```
-4. Log in at `http://<host-ip>:8002`. The service refuses to start without an explicit hashed credential.
-5. Go to **Settings > Plugins** and enable the storage/share plugins you need.
-6. Use **Disks**, **Storage**, **Apps**, and **Tools** to configure mounts, pools, apps, and CopyParty.
-
-### Example: Split VPN and Non-VPN Stacks
+### Legacy Compose examples
 
 Services that use `network_mode: "service:vpn"` must live in the same stack as the `vpn` container.
-For a quick bootstrap, see:
+The files below preserve the old `/home/pi` layout for existing deployments. Do not use them for a
+fresh guided installation:
 
 - `examples/stacks/vpn-stack/docker-compose.yml`
 - `examples/stacks/media-stack/docker-compose.yml`
