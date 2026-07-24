@@ -255,6 +255,12 @@ echo ">>> Migrating legacy runtime data..."
   --log-dir "${LIMEOS_LOG_DIR}" \
   --legacy-credentials "${LEGACY_ENV_FILE}" \
   --credentials-file "${CREDENTIALS_FILE}"
+LIMEOS_CREDENTIALS_FILE="${CREDENTIALS_FILE}" \
+LIMEOS_CREDENTIAL_OWNER="${RUN_USER}" \
+LIMEOS_CREDENTIAL_GROUP="pihealth" \
+LIMEOS_PYTHON_BIN="${PYTHON_BIN}" \
+LIMEOS_PASSWORD_HASH_GENERATOR="${REPO_DIR}/scripts/generate_password_hash.py" \
+  "${REPO_DIR}/scripts/onboarding-credentials.sh"
 chown -R "${RUN_USER}:pihealth" \
   "${LIMEOS_CONFIG_DIR}" "${LIMEOS_STATE_DIR}" "${LIMEOS_LOG_DIR}"
 find "${LIMEOS_CONFIG_DIR}" "${LIMEOS_STATE_DIR}" "${LIMEOS_LOG_DIR}" \
