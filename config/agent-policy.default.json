@@ -88,6 +88,9 @@
     "action.propose": {
       "enabled": true
     },
+    "action.precondition": {
+      "enabled": true
+    },
     "action.approve": {
       "enabled": true
     },

@@ -187,6 +187,17 @@ def _finding_proposal_params(params: Mapping[str, Any]) -> Mapping[str, Any]:
     return {"finding": dict(finding), "evidence_ids": list(evidence_ids)}
 
 
+def _action_precondition_params(
+    params: Mapping[str, Any],
+) -> Mapping[str, Any]:
+    _require_fields(params, {"operation", "params"})
+    operation = _name(params, "operation")
+    action_params = params.get("params")
+    if not isinstance(action_params, Mapping):
+        raise ValueError("Parameter 'params' must be an object")
+    return {"operation": operation, "params": dict(action_params)}
+
+
 def _action_decision_params(params: Mapping[str, Any]) -> Mapping[str, Any]:
     _require_fields(params, {"action_id"})
     return {"action_id": _name(params, "action_id")}
@@ -213,6 +224,12 @@ class DiagnosticDependencies:
     installation_inventory: Callable[[], dict]
     package_status: Callable[[], dict]
     package_pending: Callable[[], dict] = lambda: {"pending": []}
+    action_precondition: Callable[[str, Mapping[str, Any]], dict] = (
+        lambda operation, params: {
+            "available": False,
+            "message": "Action precondition service is unavailable",
+        }
+    )
     action_propose: Callable[[Mapping[str, Any], Mapping[str, str], str], dict] = (
         lambda params, actor, audit_id: {
             "available": False,
@@ -256,7 +273,14 @@ def build_operations(deps: DiagnosticDependencies) -> dict[str, OperationDefinit
         return {
             "capabilities": "read-and-propose",
             "operations": sorted(
-                name for name in operations if name not in {"action.approve", "action.reject"}
+                name
+                for name in operations
+                if name
+                not in {
+                    "action.approve",
+                    "action.precondition",
+                    "action.reject",
+                }
             ),
         }
 
@@ -316,6 +340,13 @@ def build_operations(deps: DiagnosticDependencies) -> dict[str, OperationDefinit
     )
     add("packages.status", lambda p, c: deps.package_status(), _no_params)
     add("packages.pending", lambda p, c: deps.package_pending(), _no_params)
+    add(
+        "action.precondition",
+        lambda p, c: deps.action_precondition(
+            p["operation"], p["params"]
+        ),
+        _action_precondition_params,
+    )
     add(
         "action.propose",
         lambda p, c: deps.action_propose(p, c.actor, c.audit_id),
