@@ -1,0 +1,100 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://limeos.local/schemas/storage-contract-v1.json",
+  "title": "LimeOS guided-onboarding storage contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "profile",
+    "media_identity",
+    "locations",
+    "devices"
+  ],
+  "properties": {
+    "schema_version": {"const": "1"},
+    "profile": {
+      "enum": ["single_disk", "separate_downloads", "protected_pool"]
+    },
+    "media_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["uid", "gid"],
+      "properties": {
+        "uid": {"type": "integer", "minimum": 1, "maximum": 2147483647},
+        "gid": {"type": "integer", "minimum": 1, "maximum": 2147483647}
+      }
+    },
+    "locations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "media_host",
+        "downloads_host",
+        "application_config_host",
+        "backup_host",
+        "media_container",
+        "downloads_container",
+        "config_container"
+      ],
+      "properties": {
+        "media_host": {"$ref": "#/definitions/mountPath"},
+        "downloads_host": {"$ref": "#/definitions/mountPath"},
+        "application_config_host": {
+          "type": "string",
+          "pattern": "^/(?!$).{1,510}[^/]$"
+        },
+        "backup_host": {"$ref": "#/definitions/mountPath"},
+        "media_container": {"const": "/data/media"},
+        "downloads_container": {"const": "/data/downloads"},
+        "config_container": {"const": "/config"}
+      }
+    },
+    "devices": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "items": {"$ref": "#/definitions/device"}
+    }
+  },
+  "definitions": {
+    "mountPath": {
+      "type": "string",
+      "pattern": "^/mnt/(?!.*(?:^|/)\\.\\.(?:/|$)).{1,506}[^/]$"
+    },
+    "device": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "role",
+        "filesystem_uuid",
+        "filesystem",
+        "mountpoint"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+        },
+        "role": {
+          "enum": ["data", "downloads", "parity", "config_backup"]
+        },
+        "filesystem_uuid": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+        },
+        "filesystem": {
+          "enum": ["btrfs", "exfat", "ext2", "ext3", "ext4", "ntfs", "vfat", "xfs"]
+        },
+        "mountpoint": {"$ref": "#/definitions/mountPath"},
+        "serial": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[^\\u0000-\\u001f]+$"
+        }
+      }
+    }
+  }
+}
