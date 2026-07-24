@@ -148,6 +148,11 @@ def _build_actuator(action_policy_path: str, ledger_path: str) -> ActionActuator
             return {}
         return result if isinstance(result, dict) else {}
 
+    def supervision_enabled():
+        return helper_status("agent_supervision_enabled", {}).get(
+            "enabled"
+        ) is True
+
     def start_mattermost_repair():
         try:
             result = helper_call("agent_mattermost_repair_start", {}, timeout=15)
@@ -218,6 +223,7 @@ def _build_actuator(action_policy_path: str, ledger_path: str) -> ActionActuator
         policy_provider=lambda: ActionPolicy.from_file(action_policy_path),
         ledger=ledger,
         canary_gate=canary_gate,
+        supervision_enabled=supervision_enabled,
     )
 
 

@@ -626,12 +626,13 @@ export function AgentsIntegrationCard({
               {detailLoading ? <div className="flex min-h-36 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-primary" aria-label="Loading agent details" /></div> : null}
               {!detailLoading && tab === "overview" ? (
                 <div className="space-y-5">
-                  <div className="grid gap-px overflow-hidden rounded-md border border-border bg-border sm:grid-cols-2 xl:grid-cols-5">
+                  <div className="grid gap-px overflow-hidden rounded-md border border-border bg-border sm:grid-cols-2 xl:grid-cols-6">
                     {[
                       ["Identity", "@limeos"],
                       ["Channel", `~${status.mattermost.channel ?? "unknown"}`],
                       ["Gateway", status.gateway.state],
                       ["Broker", status.gateway.broker_state],
+                      ["Supervisor", status.automation?.supervisor_state ?? "inactive"],
                       ["Last turn", formatTime(status.last_successful_turn?.at)],
                     ].map(([label, value]) => (
                       <div className="min-w-0 bg-card p-3" key={label}>

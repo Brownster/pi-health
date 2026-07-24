@@ -570,6 +570,53 @@ def test_agent_report_schedule_can_be_created_then_disabled(
     }
 
 
+def test_agent_supervised_repair_starts_disabled_then_requires_confirmation(
+    page: Page,
+    v2_server,
+    v2_login,
+    install_v2_integrations_api_mocks,
+):
+    requests = []
+    page.on("request", lambda request: requests.append(request))
+    _open(page, v2_server["base_url"], v2_login, install_v2_integrations_api_mocks)
+
+    agent = page.locator("[data-agent-integration]")
+    agent.get_by_role("tab", name="Automation").click()
+    expect(agent.get_by_role("heading", name="Supervised repairs")).to_be_visible()
+    expect(agent.get_by_text("Fixed safety envelope")).to_be_visible()
+    agent.get_by_role("button", name="New repair").click()
+    expect(agent.get_by_role("heading", name="Create supervised repair")).to_be_visible()
+    expect(agent.get_by_text("container.restart:get_iplayer", exact=True)).to_be_visible()
+    agent.get_by_role("button", name="Save disabled schedule").click()
+
+    expect(agent.get_by_role("heading", name="Recover get_iplayer")).to_be_visible()
+    expect(agent.get_by_text("supervised R1", exact=True)).to_be_visible()
+    agent.get_by_role("button", name="Enable schedule").click()
+    expect(agent.get_by_text("Enable supervised assessment and repair?")).to_be_visible()
+    agent.get_by_role("button", name="Confirm enable").click()
+    expect(agent.get_by_text("enabled", exact=True)).to_be_visible()
+
+    created = next(
+        request for request in requests
+        if request.method == "POST"
+        and request.url.endswith("/api/integrations/agents/automation/repairs")
+    )
+    assert created.post_data_json["enabled"] is False
+    assert created.post_data_json["operation"] == "container.restart"
+    assert created.post_data_json["params"] == {"name": "get_iplayer"}
+    enabled = next(
+        request for request in requests
+        if request.method == "POST"
+        and request.url.endswith(
+            "/api/integrations/agents/automation/repairs/repair-1/enable"
+        )
+    )
+    assert enabled.post_data_json == {
+        "revision": 1,
+        "confirmation": "ENABLE SUPERVISION",
+    }
+
+
 def test_agent_setup_streams_progress_then_requests_claude_authentication(
     page: Page,
     v2_server,

@@ -120,8 +120,22 @@ class AgentIntegrationService:
             state = "setup_required"
         elif mattermost.get("state") == "disconnected":
             state = "disconnected"
-        elif runtime.get("agent_active") == "active" and runtime.get("broker_active") == "active":
-            state = "degraded" if mattermost.get("state") == "degraded" else "connected"
+        elif (
+            runtime.get("agent_active") == "active"
+            and runtime.get("broker_active") == "active"
+        ):
+            support_states = (
+                runtime.get("action_broker_active"),
+                runtime.get("action_worker_active"),
+                runtime.get("report_scheduler_active"),
+                runtime.get("supervisor_active"),
+            )
+            state = (
+                "degraded"
+                if mattermost.get("state") == "degraded"
+                or any(value != "active" for value in support_states)
+                else "connected"
+            )
         elif runtime.get("agent_active") in {"failed", "activating"}:
             state = "degraded"
         else:
@@ -854,6 +868,20 @@ class AgentIntegrationService:
             "gateway": {
                 "state": runtime.get("agent_active", "inactive"),
                 "broker_state": runtime.get("broker_active", "inactive"),
+            },
+            "automation": {
+                "action_broker_state": runtime.get(
+                    "action_broker_active", "inactive"
+                ),
+                "action_worker_state": runtime.get(
+                    "action_worker_active", "inactive"
+                ),
+                "report_scheduler_state": runtime.get(
+                    "report_scheduler_active", "inactive"
+                ),
+                "supervisor_state": runtime.get(
+                    "supervisor_active", "inactive"
+                ),
             },
             "provider": {
                 "id": "claude",

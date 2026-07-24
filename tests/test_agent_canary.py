@@ -368,6 +368,48 @@ def test_revoke_retains_evidence_and_closes_exact_gate(tmp_path):
     assert repeated.value.code == "already_revoked"
 
 
+def test_deployed_release_change_stales_existing_canary(tmp_path):
+    current = {"commit": RELEASE_COMMIT}
+    service, ledger = _service(tmp_path)
+    service._release_commit_provider = lambda: current["commit"]
+    _successful_action(ledger)
+    service.attest("action-1", actor=_local_admin())
+
+    current["commit"] = "f" * 40
+
+    with pytest.raises(CanaryGateError) as stale:
+        service.require_supervised(
+            operation="container.restart",
+            target="get_iplayer",
+            trigger=TriggerType.SCHEDULED,
+            mode=AuthorityMode.SUPERVISED,
+        )
+    assert stale.value.code == "stale_release"
+    snapshot = service.snapshot()
+    assert snapshot["canaries"][0]["status"] == "stale"
+    assert snapshot["gate"]["eligible_count"] == 0
+
+
+def test_release_lookup_failure_blocks_canary_use(tmp_path):
+    service, ledger = _service(tmp_path)
+    _successful_action(ledger)
+    service.attest("action-1", actor=_local_admin())
+    service._release_commit_provider = lambda: (_ for _ in ()).throw(
+        RuntimeError("private")
+    )
+
+    with pytest.raises(CanaryGateError) as unavailable:
+        service.require_supervised(
+            operation="container.restart",
+            target="get_iplayer",
+            trigger=TriggerType.SCHEDULED,
+            mode=AuthorityMode.SUPERVISED,
+        )
+
+    assert unavailable.value.code == "release_unavailable"
+    assert "private" not in str(unavailable.value)
+
+
 def test_concurrent_revocation_is_a_single_transition(tmp_path):
     service, ledger = _service(tmp_path)
     _successful_action(ledger)

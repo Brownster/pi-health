@@ -1771,6 +1771,7 @@ def install_v2_integrations_api_mocks():
             "agent_uninstall_attempts": 0,
             "agent_warnings": [],
             "agent_schedules": [],
+            "agent_repair_schedules": [],
             "policy": {
                 "version": 1,
                 "categories": {
@@ -1886,6 +1887,166 @@ def install_v2_integrations_api_mocks():
             path = urlparse(route.request.url).path
             method = route.request.method
             schedules_path = "/api/integrations/agents/automation/schedules"
+            repairs_path = "/api/integrations/agents/automation/repairs"
+            if path == repairs_path and method == "GET":
+                route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps(
+                        {
+                            "schedules": state["agent_repair_schedules"],
+                            "catalogue": [
+                                {
+                                    "operation": "container.restart",
+                                    "params": {"name": "get_iplayer"},
+                                    "target": "get_iplayer",
+                                    "risk": "R1",
+                                    "capability_version": "1",
+                                    "assessment_operation": "container.status",
+                                    "assessment_interval_seconds": 600,
+                                    "failure_threshold": 2,
+                                    "budgets": {
+                                        "max_actions_per_target_24h": 1,
+                                        "max_actions_per_window": 1,
+                                        "max_automatic_retries": 0,
+                                        "max_concurrent_mutations": 1,
+                                        "action_deadline_seconds": 120,
+                                    },
+                                }
+                            ],
+                            "service_priorities": [
+                                "critical",
+                                "high",
+                                "normal",
+                                "low",
+                            ],
+                            "limits": {
+                                "max_actions_per_target_24h": 1,
+                                "max_actions_per_window": 1,
+                            },
+                        }
+                    ),
+                )
+                return
+            if path == repairs_path and method == "POST":
+                values = route.request.post_data_json
+                schedule = {
+                    **values,
+                    "id": "repair-1",
+                    "target": "get_iplayer",
+                    "risk": "R1",
+                    "capability_version": "1",
+                    "assessment_operation": "container.status",
+                    "assessment_interval_seconds": 600,
+                    "failure_threshold": 2,
+                    "owner": {
+                        "type": "local",
+                        "id": "admin",
+                        "username": "admin",
+                    },
+                    "created_at": "2026-07-23T10:00:00+00:00",
+                    "updated_at": "2026-07-23T10:00:00+00:00",
+                    "revision": 1,
+                    "status": {
+                        "assessments": [],
+                        "incident": None,
+                        "last_action": None,
+                        "canary": {
+                            "id": "canary-1",
+                            "operation": "container.restart",
+                            "target": "get_iplayer",
+                            "trigger": "scheduled",
+                            "capability_version": "1",
+                            "risk": "R1",
+                            "source_action_id": "action-canary-source",
+                            "release_commit": "a" * 40,
+                            "attested_by": {
+                                "type": "local",
+                                "id": "admin",
+                                "username": "admin",
+                            },
+                            "attested_at": "2026-07-23T10:00:00+00:00",
+                            "revoked_by": None,
+                            "revoked_at": None,
+                            "status": "eligible",
+                        },
+                        "demotion": None,
+                        "configured_authority": "supervised",
+                        "effective_authority": "supervised",
+                        "maintenance_window": None,
+                        "budget": {
+                            "rolling_24h": {"used": 0, "limit": 1},
+                            "window": {"used": 0, "limit": 1},
+                            "last_charge": None,
+                            "cooldown_until": None,
+                        },
+                    },
+                }
+                state["agent_repair_schedules"] = [schedule]
+                route.fulfill(
+                    status=201,
+                    content_type="application/json",
+                    body=json.dumps({"schedule": schedule}),
+                )
+                return
+            if path.startswith(repairs_path + "/") and method == "PUT":
+                values = route.request.post_data_json
+                current = state["agent_repair_schedules"][0]
+                schedule = {
+                    **current,
+                    **{
+                        key: value
+                        for key, value in values.items()
+                        if key != "revision"
+                    },
+                    "revision": current["revision"] + 1,
+                    "updated_at": "2026-07-23T10:05:00+00:00",
+                }
+                state["agent_repair_schedules"] = [schedule]
+                route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps({"schedule": schedule}),
+                )
+                return
+            if path.endswith("/enable") and path.startswith(
+                repairs_path + "/"
+            ) and method == "POST":
+                values = route.request.post_data_json
+                current = state["agent_repair_schedules"][0]
+                if values != {
+                    "revision": current["revision"],
+                    "confirmation": "ENABLE SUPERVISION",
+                }:
+                    route.fulfill(status=400)
+                    return
+                schedule = {
+                    **current,
+                    "enabled": True,
+                    "revision": current["revision"] + 1,
+                    "updated_at": "2026-07-23T10:05:00+00:00",
+                }
+                state["agent_repair_schedules"] = [schedule]
+                route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps({"schedule": schedule}),
+                )
+                return
+            if path == "/api/integrations/agents/automation/incidents":
+                route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps({"incidents": []}),
+                )
+                return
+            if path == "/api/integrations/agents/automation/demotions":
+                route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps({"demotions": []}),
+                )
+                return
             if path == schedules_path and method == "GET":
                 route.fulfill(
                     status=200,

@@ -53,6 +53,7 @@ def _runtime_health():
         "action_broker_active": "active",
         "action_worker_active": "active",
         "report_scheduler_active": "active",
+        "supervisor_active": "active",
         "claude_installed": True,
         "claude_compatible": True,
         "claude_authenticated": True,
@@ -123,7 +124,7 @@ def test_integration_precondition_rejects_disabled_or_running_repair():
     before = safe_integration_precondition(_integration_status, lambda: _job())
 
     assert before["name"] == "agents"
-    assert len(before["units"]) == 5
+    assert len(before["units"]) == 6
     with pytest.raises(CapabilityError, match="must be enabled"):
         safe_integration_precondition(
             lambda: _integration_status(agent_enabled=False), lambda: _job()
@@ -264,6 +265,7 @@ def test_runtime_health_sanitizer_drops_identifiers_and_credentials():
         "action_broker_active",
         "action_worker_active",
         "report_scheduler_active",
+        "supervisor_active",
         "claude_installed",
         "claude_compatible",
         "claude_authenticated",

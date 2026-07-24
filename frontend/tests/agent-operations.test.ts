@@ -7,11 +7,19 @@ import {
   actionCanBeCancelled,
   actionCanBeRejected,
   editableFinding,
+  editableRepairSchedule,
   editableSchedule,
+  newAgentRepairSchedule,
   newAgentSchedule,
+  repairScheduleReady,
   scheduleReady,
 } from "../src/lib/agent-operations-contract.ts";
-import type { AgentAction, AgentFinding, AgentSchedule } from "../src/lib/agent-operations.ts";
+import type {
+  AgentAction,
+  AgentFinding,
+  AgentRepairSchedule,
+  AgentSchedule,
+} from "../src/lib/agent-operations.ts";
 
 function action(state: AgentAction["state"], authority_mode: AgentAction["authority_mode"] = "approval"): AgentAction {
   return { state, authority_mode } as AgentAction;
@@ -104,6 +112,37 @@ test("schedule editor is report-only and copies mutable nested values", () => {
   editable.checks[0].operation = "disk.health";
 
   assert.equal(schedule.checks[0].operation, "system.status");
+  assert.equal(editable.revision, 3);
+  assert.equal("owner" in editable, false);
+});
+
+test("supervised repair schedules start disabled and copy mutable fields", () => {
+  const created = newAgentRepairSchedule();
+  assert.equal(created.enabled, false);
+  assert.deepEqual(created.params, { name: "get_iplayer" });
+  assert.equal(created.delivery.mode, "threaded");
+  assert.equal(repairScheduleReady(created), true);
+
+  const schedule = {
+    ...created,
+    id: "repair-1",
+    target: "get_iplayer",
+    risk: "R1",
+    capability_version: "1",
+    assessment_operation: "container.status",
+    assessment_interval_seconds: 600,
+    failure_threshold: 2,
+    owner: { type: "local", id: "admin", username: "admin" },
+    created_at: "2026-07-23T10:00:00Z",
+    updated_at: "2026-07-23T10:00:00Z",
+    revision: 3,
+    status: {},
+  } as AgentRepairSchedule;
+  const editable = editableRepairSchedule(schedule);
+  editable.params.name = "get_iplayer";
+  editable.window.duration_minutes = 90;
+
+  assert.equal(schedule.window.duration_minutes, 60);
   assert.equal(editable.revision, 3);
   assert.equal("owner" in editable, false);
 });

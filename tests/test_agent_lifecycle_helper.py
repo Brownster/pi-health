@@ -66,6 +66,16 @@ def test_agent_uninstall_requires_exactly_one_boolean():
         assert "boolean" in result["error"]
 
 
+def test_supervisor_runtime_is_owned_but_action_evidence_is_retained():
+    assert (
+        "limeops-supervised-repair.service",
+        helper.SUPERVISOR_UNIT_PATH,
+    ) in helper.AGENT_CLEANUP_UNITS
+    assert helper.SUPERVISOR_STATE_DIR in helper.AGENT_CLEANUP_DIRECTORIES
+    assert helper.SUPERVISOR_CONFIG_DIR in helper.AGENT_CLEANUP_DIRECTORIES
+    assert helper.ACTION_STATE_DIR not in helper.AGENT_CLEANUP_DIRECTORIES
+
+
 def test_agent_uninstall_removes_only_fixed_owned_paths_and_is_idempotent(tmp_path):
     units, files, directories = _runtime_paths(tmp_path)
     source = tmp_path / "claude-code.list"
@@ -271,6 +281,40 @@ def test_feature_state_requires_report_scheduler_after_convergence(tmp_path):
         for name, path in paths.items():
             stack.enter_context(patch.object(helper, name, str(path)))
         state = helper._read_agent_lifecycle_feature_state()
+    assert state["state"] == "cleanup_required"
+
+
+def test_feature_state_rejects_partial_supervisor_convergence(tmp_path):
+    paths = {
+        "AGENT_UNIT_PATH": tmp_path / "agent.service",
+        "LIMEOPS_UNIT_PATH": tmp_path / "broker.service",
+        "AGENT_CONFIG_PATH": tmp_path / "agents.json",
+        "ACTION_BROKER_UNIT_PATH": tmp_path / "action-broker.service",
+        "ACTION_WORKER_UNIT_PATH": tmp_path / "action-worker.service",
+        "ACTION_POLICY_PATH": tmp_path / "action-policy.json",
+        "ACTION_BROKER_POLICY_PATH": tmp_path / "actuator-policy.json",
+        "REPORT_SCHEDULER_UNIT_PATH": tmp_path / "report-scheduler.service",
+        "SUPERVISOR_UNIT_PATH": tmp_path / "supervisor.service",
+    }
+    for name, path in paths.items():
+        if name != "SUPERVISOR_UNIT_PATH":
+            path.write_text(
+                '{"enabled": true}'
+                if name == "AGENT_CONFIG_PATH"
+                else "fixed"
+            )
+    paths["SUPERVISOR_UNIT_PATH"].symlink_to(tmp_path / "missing-unit")
+    lifecycle = tmp_path / "no-lifecycle.json"
+    with ExitStack() as stack:
+        stack.enter_context(
+            patch.object(
+                helper, "AGENT_LIFECYCLE_TOMBSTONE", str(lifecycle)
+            )
+        )
+        for name, path in paths.items():
+            stack.enter_context(patch.object(helper, name, str(path)))
+        state = helper._read_agent_lifecycle_feature_state()
+
     assert state["state"] == "cleanup_required"
 
 

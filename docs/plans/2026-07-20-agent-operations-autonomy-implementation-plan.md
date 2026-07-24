@@ -2,7 +2,7 @@
 
 Date: 2026-07-20
 
-Status: Implementation underway; AO-008 completed 2026-07-23
+Status: Implementation underway; AO-009 design accepted 2026-07-23
 
 Precondition: AA-009 read-only target signoff
 
@@ -51,6 +51,14 @@ service restarts; and byte-for-byte restoration of the disabled, kill-switched b
 policy. The active attestation is retained for AO-009, but no scheduled repair is enabled.
 Installation, configuration, optimisation, GitHub publication, and agent-authored pull
 requests remain later work packages.
+
+AO-009 will add a dedicated supervised-repair scheduler without widening AO-007's
+read-only service. It will assess canaried R1 targets every ten minutes, require two
+consecutive failures and a fresh in-window failure, enforce one repair per target per
+24 hours with no retry, serialize mutation across priorities, and demote failed targets
+through a durable fail-closed overlay. The first released target is
+`container.restart:get_iplayer`. AI Agents installation, update, repair, disable, and
+uninstall own the supervisor lifecycle.
 
 ## Goal
 

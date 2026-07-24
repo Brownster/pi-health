@@ -18,6 +18,7 @@ AGENT_RUNTIME_UNITS = (
     "limeops-actuatord.service",
     "limeops-action-worker.service",
     "limeops-report-scheduler.service",
+    "limeops-supervised-repair.service",
 )
 
 
@@ -150,6 +151,9 @@ def safe_agent_runtime_health(status: Mapping[str, Any]) -> dict[str, Any]:
         ).lower(),
         "report_scheduler_active": str(
             status.get("report_scheduler_active") or "unknown"
+        ).lower(),
+        "supervisor_active": str(
+            status.get("supervisor_active") or "unknown"
         ).lower(),
         "claude_installed": status.get("claude_installed") is True,
         "claude_compatible": status.get("claude_compatible") is True,

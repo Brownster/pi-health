@@ -13,6 +13,8 @@ from agent_actions.canary import CanaryGateError
 from agent_actions.service import AgentActionError
 from agent_findings.service import FindingError
 from agent_automation.service import AutomationError
+from agent_supervision.admin import SupervisionAdminError
+from agent_supervision.service import SupervisionError
 from agent_integration_service import AgentIntegrationError
 from auth_utils import csrf_protect, login_required
 from helper_client import helper_call
@@ -59,6 +61,10 @@ def _agent_findings_service():
 
 def _agent_automation_service():
     return current_app.extensions["agent_automation_service"]
+
+
+def _agent_supervision_service():
+    return current_app.extensions["agent_supervision_service"]
 
 
 def _stack_notifications_service():
@@ -141,6 +147,26 @@ def _automation_error(exc):
         "unsafe_store": 503,
         "store_unavailable": 503,
         "store_failure": 503,
+    }.get(exc.code, 400)
+    return _lifecycle_error(exc.code, str(exc), status)
+
+
+def _supervision_error(exc):
+    status = {
+        "not_found": 404,
+        "denied_actor": 403,
+        "conflict": 409,
+        "confirmation_required": 409,
+        "already_enabled": 409,
+        "already_cleared": 409,
+        "recovery_required": 409,
+        "incident_changed": 409,
+        "schedule_disabled": 409,
+        "unsafe_store": 503,
+        "store_unavailable": 503,
+        "store_failure": 503,
+        "release_unavailable": 503,
+        "invalid_policy": 503,
     }.get(exc.code, 400)
     return _lifecycle_error(exc.code, str(exc), status)
 
@@ -1232,6 +1258,236 @@ def agent_automation_schedule_details(schedule_id):
     except AutomationError as exc:
         return _automation_error(exc)
     response = jsonify({"schedule": schedule})
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@integrations_manager.route(
+    "/api/integrations/agents/automation/repairs",
+    methods=["GET", "POST"],
+)
+@login_required
+def agent_supervision_schedules():
+    denied = _require_action_permission("extensions.admin")
+    if denied is not None:
+        return denied
+    try:
+        if request.method == "GET":
+            response = jsonify(_agent_supervision_service().list())
+        else:
+            values = request.get_json(silent=True)
+            if not isinstance(values, dict):
+                return _lifecycle_error(
+                    "invalid_schedule", "Schedule must be an object.", 400
+                )
+            username = session.get("username", "unknown")
+            schedule = _agent_supervision_service().create(
+                values,
+                owner={
+                    "type": "local",
+                    "id": username,
+                    "username": username,
+                },
+            )
+            response = jsonify({"schedule": schedule})
+            response.status_code = 201
+    except (SupervisionError, SupervisionAdminError) as exc:
+        return _supervision_error(exc)
+    except Exception:
+        logger.error("Supervised repair schedule request failed")
+        return _lifecycle_error(
+            "supervision_unavailable",
+            "Supervised repair scheduling is unavailable.",
+            503,
+        )
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@integrations_manager.route(
+    "/api/integrations/agents/automation/repairs/<schedule_id>",
+    methods=["GET", "PUT"],
+)
+@login_required
+def agent_supervision_schedule_details(schedule_id):
+    denied = _require_action_permission("extensions.admin")
+    if denied is not None:
+        return denied
+    try:
+        if request.method == "GET":
+            schedule = _agent_supervision_service().get(schedule_id)
+        else:
+            values = request.get_json(silent=True)
+            if not isinstance(values, dict):
+                return _lifecycle_error(
+                    "invalid_schedule", "Schedule must be an object.", 400
+                )
+            schedule = _agent_supervision_service().update(
+                schedule_id, values
+            )
+    except (SupervisionError, SupervisionAdminError) as exc:
+        return _supervision_error(exc)
+    except Exception:
+        logger.error("Supervised repair schedule request failed")
+        return _lifecycle_error(
+            "supervision_unavailable",
+            "Supervised repair scheduling is unavailable.",
+            503,
+        )
+    response = jsonify({"schedule": schedule})
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@integrations_manager.route(
+    "/api/integrations/agents/automation/repairs/<schedule_id>/enable",
+    methods=["POST"],
+)
+@login_required
+def agent_supervision_schedule_enable(schedule_id):
+    denied = _require_action_permission("extensions.admin")
+    if denied is not None:
+        return denied
+    values = request.get_json(silent=True)
+    if not isinstance(values, dict):
+        return _lifecycle_error(
+            "invalid_enablement", "Enablement must be an object.", 400
+        )
+    try:
+        schedule = _agent_supervision_service().enable(schedule_id, values)
+    except (SupervisionError, SupervisionAdminError) as exc:
+        return _supervision_error(exc)
+    except Exception:
+        logger.error("Supervised repair enablement request failed")
+        return _lifecycle_error(
+            "supervision_unavailable",
+            "Supervised repair enablement is unavailable.",
+            503,
+        )
+    response = jsonify({"schedule": schedule})
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@integrations_manager.route(
+    "/api/integrations/agents/automation/incidents", methods=["GET"]
+)
+@login_required
+def agent_supervision_incidents():
+    denied = _require_action_permission("extensions.admin")
+    if denied is not None:
+        return denied
+    try:
+        result = _agent_supervision_service().incidents(
+            limit=_query_limit()
+        )
+    except AgentIntegrationError as exc:
+        return _lifecycle_error("invalid_limit", str(exc), 400)
+    except (SupervisionError, SupervisionAdminError) as exc:
+        return _supervision_error(exc)
+    except Exception:
+        logger.error("Supervised repair incidents request failed")
+        return _lifecycle_error(
+            "supervision_unavailable",
+            "Supervised repair incidents are unavailable.",
+            503,
+        )
+    response = jsonify(result)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@integrations_manager.route(
+    "/api/integrations/agents/automation/incidents/<incident_id>",
+    methods=["GET"],
+)
+@login_required
+def agent_supervision_incident_details(incident_id):
+    denied = _require_action_permission("extensions.admin")
+    if denied is not None:
+        return denied
+    try:
+        result = _agent_supervision_service().incident(incident_id)
+    except (SupervisionError, SupervisionAdminError) as exc:
+        return _supervision_error(exc)
+    except Exception:
+        logger.error("Supervised repair incident request failed")
+        return _lifecycle_error(
+            "supervision_unavailable",
+            "Supervised repair incident is unavailable.",
+            503,
+        )
+    response = jsonify(result)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@integrations_manager.route(
+    "/api/integrations/agents/automation/demotions", methods=["GET"]
+)
+@login_required
+def agent_supervision_demotions():
+    denied = _require_action_permission("extensions.admin")
+    if denied is not None:
+        return denied
+    try:
+        result = _agent_supervision_service().demotions(
+            limit=_query_limit()
+        )
+    except AgentIntegrationError as exc:
+        return _lifecycle_error("invalid_limit", str(exc), 400)
+    except SupervisionAdminError as exc:
+        return _supervision_error(exc)
+    except Exception:
+        logger.error("Supervised repair demotions request failed")
+        return _lifecycle_error(
+            "supervision_unavailable",
+            "Supervised repair demotions are unavailable.",
+            503,
+        )
+    response = jsonify(result)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@integrations_manager.route(
+    "/api/integrations/agents/automation/demotions/"
+    "<demotion_id>/clear",
+    methods=["POST"],
+)
+@login_required
+def clear_agent_supervision_demotion(demotion_id):
+    denied = _require_action_permission("extensions.admin")
+    if denied is not None:
+        return denied
+    values = request.get_json(silent=True)
+    if not isinstance(values, dict):
+        return _lifecycle_error(
+            "invalid_clearance",
+            "Demotion clearance must be an object.",
+            400,
+        )
+    username = session.get("username", "unknown")
+    try:
+        demotion = _agent_supervision_service().clear_demotion(
+            demotion_id,
+            values,
+            actor={
+                "type": "local",
+                "id": username,
+                "username": username,
+            },
+        )
+    except SupervisionAdminError as exc:
+        return _supervision_error(exc)
+    except Exception:
+        logger.error("Supervised repair demotion clearance failed")
+        return _lifecycle_error(
+            "supervision_unavailable",
+            "Supervised repair demotion could not be cleared.",
+            503,
+        )
+    response = jsonify({"demotion": demotion})
     response.headers["Cache-Control"] = "no-store"
     return response
 

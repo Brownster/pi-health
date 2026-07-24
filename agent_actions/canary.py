@@ -183,6 +183,10 @@ class CanaryGateService:
     def snapshot(self, *, limit: int = 200) -> dict[str, Any]:
         canaries = self.list(limit=limit)
         eligible_count = 0
+        try:
+            release_commit = self._current_release()
+        except CanaryGateError:
+            release_commit = None
         for canary in canaries:
             status = "revoked"
             if canary["revoked_at"] is None:
@@ -190,7 +194,9 @@ class CanaryGateService:
                 try:
                     capability = self._registry.require(canary["operation"])
                     if (
-                        capability.version == canary["capability_version"]
+                        release_commit is not None
+                        and canary["release_commit"] == release_commit
+                        and capability.version == canary["capability_version"]
                         and capability.risk.value == canary["risk"]
                         and AuthorityMode.SUPERVISED in capability.eligible_modes
                     ):
@@ -251,6 +257,11 @@ class CanaryGateService:
                     "canary_required",
                     "A current repair canary is required for supervised authority",
                 )
+            if record.release_commit != self._current_release():
+                raise CanaryGateError(
+                    "stale_release",
+                    "Repair canary belongs to another deployed release",
+                )
             return record.public_dict()
         except CanaryGateError:
             raise
@@ -264,6 +275,22 @@ class CanaryGateService:
             raise CanaryGateError(
                 "gate_unavailable", "Canary gate is unavailable"
             ) from exc
+
+    def _current_release(self) -> str:
+        try:
+            release_commit = self._release_commit_provider()
+        except Exception as exc:
+            raise CanaryGateError(
+                "release_unavailable", "Deployed release identity is unavailable"
+            ) from exc
+        if (
+            not isinstance(release_commit, str)
+            or not _RELEASE_COMMIT_RE.fullmatch(release_commit)
+        ):
+            raise CanaryGateError(
+                "release_unavailable", "Deployed release identity is unavailable"
+            )
+        return release_commit
 
     def validate_policy(self, policy: ActionPolicy) -> dict[str, Any]:
         configured = policy.public_dict()

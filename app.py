@@ -52,6 +52,8 @@ from mattermost_integration_service import MattermostIntegrationService
 from stack_notifications_service import StackNotificationsService
 from agent_integration_service import AgentIntegrationService
 from agent_actions.defaults import (
+    DEFAULT_ACTION_LEDGER_PATH,
+    DEFAULT_ACTION_POLICY_PATH,
     LazyAgentActionService,
     LazyCanaryGateService,
     build_action_service,
@@ -66,6 +68,10 @@ from agent_actions.integrations import (
 )
 from agent_findings.service import LazyFindingsService
 from agent_automation.service import LazyScheduleAdminService
+from agent_supervision.admin import (
+    LazySupervisionAdminService,
+    SupervisionAdminService,
+)
 from alert_history import AlertEventLedger
 from media_profile_service import MediaProfileService
 from media_quickstart_service import MediaQuickstartService
@@ -254,6 +260,7 @@ class AppDependencies:
     agent_canary_service: object | None = None
     agent_findings_service: object | None = None
     agent_automation_service: object | None = None
+    agent_supervision_service: object | None = None
     overview_service: OverviewService | None = None
     metric_history_service: MetricHistoryStore | None = None
     capability_registry_service: CapabilityRegistryService | None = None
@@ -544,6 +551,20 @@ def _default_agent_findings_service():
 def _default_agent_automation_service():
     return LazyScheduleAdminService(
         RUNTIME_STATE_DIR / "agent-actions" / "automation.sqlite3"
+    )
+
+
+def _default_agent_supervision_service():
+    return LazySupervisionAdminService(
+        lambda: SupervisionAdminService(
+            supervision_path=(
+                RUNTIME_STATE_DIR
+                / "agent-actions"
+                / "supervision.sqlite3"
+            ),
+            ledger_path=DEFAULT_ACTION_LEDGER_PATH,
+            policy_path=DEFAULT_ACTION_POLICY_PATH,
+        )
     )
 
 
@@ -1645,6 +1666,10 @@ def create_app(config=None, dependencies=None):
     )
     application.extensions["agent_automation_service"] = (
         resolved.agent_automation_service or _default_agent_automation_service()
+    )
+    application.extensions["agent_supervision_service"] = (
+        resolved.agent_supervision_service
+        or _default_agent_supervision_service()
     )
     application.extensions["overview_service"] = (
         resolved.overview_service
