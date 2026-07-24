@@ -767,6 +767,36 @@ def test_agent_release_marker_is_group_readable_for_isolated_services(
     )
 
 
+def test_supervisor_runtime_check_uses_installed_package_environment():
+    with (
+        patch.object(helper, "AGENT_LIB_DIR", "/usr/lib/fixed-agent"),
+        patch.object(helper, "SUPERVISOR_VENV_DIR", "/var/lib/fixed-supervisor/venv"),
+        patch.object(helper, "SUPERVISOR_STATE_DIR", "/var/lib/fixed-supervisor"),
+        patch.object(
+            helper, "run_command", return_value={"returncode": 0}
+        ) as run,
+    ):
+        assert helper._check_supervisor_runtime() is True
+
+    run.assert_called_once_with(
+        [
+            "runuser",
+            "-u",
+            "limeops-supervisor",
+            "--",
+            "env",
+            "PYTHONPATH=/usr/lib/fixed-agent",
+            "PYTHONDONTWRITEBYTECODE=1",
+            "/var/lib/fixed-supervisor/venv/bin/python",
+            "-m",
+            "agent_supervision.runner",
+            "--check",
+        ],
+        timeout=60,
+        cwd="/var/lib/fixed-supervisor",
+    )
+
+
 def test_shared_stack_locks_reject_unexpected_entries(tmp_path):
     valid = tmp_path / "media.lock"
     unexpected = tmp_path / "unexpected"
@@ -1456,6 +1486,18 @@ def test_converge_if_stale_skips_when_up_to_date(tmp_path):
         patch.object(helper, "AGENT_LIB_DIR", str(tmp_path)),
         patch.object(helper, "_agent_repo_dir", return_value="/repo"),
         patch.object(helper, "_agent_repo_commit", return_value="abc123"),
+        patch.object(
+            helper,
+            "_read_agent_lifecycle_feature_state",
+            return_value={"state": "enabled", "reconcile_allowed": True},
+        ),
+        patch.object(
+            helper,
+            "_unit_state",
+            side_effect=lambda _unit, action: (
+                "enabled" if action == "is-enabled" else "active"
+            ),
+        ),
     ):
         result = helper.cmd_agent_converge_if_stale({})
     assert result["skipped"] is True and "current" in result["reason"]
@@ -1475,6 +1517,38 @@ def test_converge_if_stale_repairs_current_release_without_supervisor(
         patch.object(helper, "AGENT_LIB_DIR", str(tmp_path)),
         patch.object(helper, "_agent_repo_dir", return_value="/repo"),
         patch.object(helper, "_agent_repo_commit", return_value="abc123"),
+        patch.object(
+            helper,
+            "_pihealth_update_agent",
+            return_value={"success": True, "refreshed": True},
+        ) as step,
+    ):
+        result = helper.cmd_agent_converge_if_stale({})
+
+    assert result["refreshed"] is True
+    step.assert_called_once_with(ctx={})
+
+
+def test_converge_if_stale_repairs_enabled_but_inactive_supervisor(
+    tmp_path,
+):
+    (tmp_path / ".release").write_text("abc123\n")
+
+    def unit_state(_unit, action):
+        return "disabled" if action == "is-enabled" else "inactive"
+
+    with (
+        patch.object(helper.os.path, "exists", return_value=True),
+        patch.object(helper.os.path, "isfile", return_value=True),
+        patch.object(helper, "AGENT_LIB_DIR", str(tmp_path)),
+        patch.object(helper, "_agent_repo_dir", return_value="/repo"),
+        patch.object(helper, "_agent_repo_commit", return_value="abc123"),
+        patch.object(
+            helper,
+            "_read_agent_lifecycle_feature_state",
+            return_value={"state": "enabled", "reconcile_allowed": True},
+        ),
+        patch.object(helper, "_unit_state", side_effect=unit_state),
         patch.object(
             helper,
             "_pihealth_update_agent",
