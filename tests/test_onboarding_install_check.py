@@ -133,3 +133,28 @@ def test_setup_starts_helper_first_and_runs_verifier_before_success():
     assert helper_start < dashboard_start < verifier < success
     assert "Requires=pihealth-helper.service" in setup
     assert "After=network.target docker.service pihealth-helper.service" in setup
+
+
+def test_setup_uses_managed_config_root_and_preserves_legacy_reruns():
+    setup = Path("setup.sh").read_text()
+
+    assert 'CONFIG_DIR="${LIMEOS_STATE_DIR}/apps"' in setup
+    assert 'CONFIG_DIR="/home/pi/docker"' in setup
+    assert (
+        "Environment=DOCKER_COMPOSE_PATH=/home/pi/docker/docker-compose.yml"
+        in setup
+    )
+    assert '"${CONFIG_DIR}" "${STACKS_PATH}"' in setup
+
+
+def test_setup_prints_recovery_commands_after_success():
+    setup = Path("setup.sh").read_text()
+
+    success = setup.index('echo ">>> Pi-Health is running."')
+    recovery = setup.index('echo "Recovery commands:"')
+
+    assert success < recovery
+    assert "systemctl status pihealth-helper.service pi-health.service" in setup
+    assert "journalctl -u pihealth-helper.service -u pi-health.service" in setup
+    assert "systemctl restart pihealth-helper.service pi-health.service" in setup
+    assert "sudo ${INSTALL_CHECK_SCRIPT}" in setup

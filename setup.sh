@@ -19,7 +19,15 @@ METRICS_SERVICE_FILE="/etc/systemd/system/limeos-metrics-collector.service"
 METRICS_TIMER_FILE="/etc/systemd/system/limeos-metrics-collector.timer"
 INSTALL_CHECK_SCRIPT="${LIMEOS_INSTALL_CHECK_SCRIPT:-${REPO_DIR}/scripts/onboarding-install-check.sh}"
 
-CONFIG_DIR="${CONFIG_DIR:-/home/pi/docker}"
+if [[ -z "${CONFIG_DIR+x}" ]]; then
+  if [[ -f "${SERVICE_FILE}" ]] &&
+    grep -Fq "Environment=DOCKER_COMPOSE_PATH=/home/pi/docker/docker-compose.yml" \
+      "${SERVICE_FILE}"; then
+    CONFIG_DIR="/home/pi/docker"
+  else
+    CONFIG_DIR="${LIMEOS_STATE_DIR}/apps"
+  fi
+fi
 DOCKER_COMPOSE_PATH="${DOCKER_COMPOSE_PATH:-${CONFIG_DIR}/docker-compose.yml}"
 STACKS_PATH="${STACKS_PATH:-/opt/stacks}"
 INSTALL_DOCKER="${INSTALL_DOCKER:-auto}"
@@ -233,7 +241,8 @@ touch /etc/.pwd.lock
 install -d -m 0750 -o "${RUN_USER}" -g pihealth \
   "${LIMEOS_CONFIG_DIR}" "${LIMEOS_CONFIG_DIR}/storage_plugins" \
   "${LIMEOS_STATE_DIR}" "${LIMEOS_STATE_DIR}/storage_plugins" \
-  "${LIMEOS_LOG_DIR}" "${LIMEOS_LOG_DIR}/snapraid"
+  "${LIMEOS_LOG_DIR}" "${LIMEOS_LOG_DIR}/snapraid" \
+  "${CONFIG_DIR}" "${STACKS_PATH}"
 # These fixed roots must exist before systemd builds the helper's write sandbox.
 # Agent setup assigns their final service ownership when the integration is enabled.
 install -d -m 0750 /var/lib/lime-agent /var/lib/limeops
@@ -407,3 +416,9 @@ echo "Open: http://$(hostname -I | awk '{print $1}'):8002"
 echo "Credentials: ${CREDENTIALS_FILE}"
 echo "Helper service: pihealth-helper.service"
 echo "Metrics timer: limeos-metrics-collector.timer"
+echo
+echo "Recovery commands:"
+echo "  sudo systemctl status pihealth-helper.service pi-health.service --no-pager"
+echo "  sudo journalctl -u pihealth-helper.service -u pi-health.service -n 100 --no-pager"
+echo "  sudo systemctl restart pihealth-helper.service pi-health.service"
+echo "  sudo ${INSTALL_CHECK_SCRIPT}${install_check_args[*]:+ ${install_check_args[*]}}"
