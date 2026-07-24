@@ -18,6 +18,7 @@ from agent_actions.capability import (
     CapabilityRegistry,
     CapabilitySpec,
     RiskClass,
+    canonical_hash,
 )
 from agent_actions.ledger import (
     ActionLedger,
@@ -197,7 +198,7 @@ def _canary(ledger, registry):
     return gate
 
 
-def _setup(tmp_path, *, clock=None):
+def _setup(tmp_path, *, clock=None, precondition_provider=None):
     store = SupervisionStore(tmp_path / "supervision.sqlite3")
     schedules = SupervisionService(
         store=store,
@@ -225,6 +226,7 @@ def _setup(tmp_path, *, clock=None):
         policy_provider=_policy,
         canary_gate=gate,
         clock=clock or (lambda: NOW),
+        precondition_provider=precondition_provider,
         id_factory=lambda: "action-supervised",
     )
     return (
@@ -319,6 +321,28 @@ def test_authorization_atomically_creates_action_lease_and_budget(tmp_path):
     )
     assert budget["rolling_24h"]["used"] == 1
     assert budget["window"]["used"] == 1
+
+
+def test_authorization_uses_trusted_precondition_instead_of_public_status(
+    tmp_path,
+):
+    trusted_hash = "f" * 64
+    authorizer, _schedules, ledger, incident_id, _registry, _gate = _setup(
+        tmp_path,
+        precondition_provider=lambda operation, params: {
+            "operation": operation,
+            "capability_version": "1",
+            "target": params["name"],
+            "params": dict(params),
+            "precondition_hash": trusted_hash,
+        },
+    )
+
+    result, created = authorizer.authorize("schedule-1", incident_id)
+
+    assert created is True
+    assert result["action"]["id"] == "action-supervised"
+    assert ledger.get("action-supervised").precondition_hash == trusted_hash
 
 
 def test_authorization_occurrence_replay_does_not_duplicate_charge(tmp_path):
@@ -553,6 +577,72 @@ def test_actuator_independently_accepts_bound_authorization(tmp_path):
     assert completed["approval_consumed"] is False
     assert calls == [{"name": "get_iplayer"}]
     assert ledger.has_supervised_execution_slot(result["action"]["id"]) is False
+
+
+def test_trusted_fingerprint_matches_actuator_private_status_reader(tmp_path):
+    private_before = {
+        "name": "get_iplayer",
+        "id": "container-id",
+        "status": "exited",
+        "health": "",
+        "started_at": "2026-07-23T09:00:00Z",
+        "image_id": "sha256:image-id",
+    }
+    trusted_hash = canonical_hash(private_before)
+    authorizer, _schedules, ledger, incident_id, _registry, gate = _setup(
+        tmp_path,
+        precondition_provider=lambda operation, params: {
+            "operation": operation,
+            "capability_version": "1",
+            "target": params["name"],
+            "params": dict(params),
+            "precondition_hash": trusted_hash,
+        },
+    )
+    result, _ = authorizer.authorize("schedule-1", incident_id)
+    base = _capability()
+    actuator_registry = CapabilityRegistry(
+        [
+            CapabilitySpec(
+                operation=base.operation,
+                version=base.version,
+                risk=base.risk,
+                eligible_modes=base.eligible_modes,
+                normalize_params=base.normalize_params,
+                select_target=base.select_target,
+                read_precondition=lambda _params: private_before,
+                render_impact=base.render_impact,
+            )
+        ]
+    )
+    calls = []
+    actuator = ActionActuator(
+        registry=actuator_registry,
+        executors={
+            "container.restart": ExecutionSpec(
+                operation="container.restart",
+                version="1",
+                execute=lambda params: calls.append(dict(params))
+                or {"status": "restarted"},
+                verify=lambda _params, _before: (
+                    True,
+                    {"status": "running"},
+                ),
+                no_rollback_reason="No safe rollback",
+            )
+        },
+        policy_provider=_policy,
+        ledger=ledger,
+        canary_gate=gate,
+        clock=lambda: NOW + timedelta(seconds=30),
+    )
+
+    completed = actuator.execute(
+        result["action"]["id"], audit_id="audit-private-fingerprint"
+    )
+
+    assert completed["state"] == "succeeded"
+    assert calls == [{"name": "get_iplayer"}]
 
 
 def test_disablement_atomically_cancels_queued_supervised_action(tmp_path):

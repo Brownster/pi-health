@@ -166,6 +166,13 @@ policy, canary, demotion, target lease, capability contract, precondition, and k
 switch. The supervisor never calls the action socket. Worker restart and scheduler
 restart address the existing action and occurrence instead of creating another action.
 
+The supervisor obtains the action precondition through the internal, non-model-advertised
+`action.precondition` broker read. The privileged broker calculates an opaque hash with
+the same private capability status reader used by the actuator; raw container IDs, image
+IDs, and start timestamps do not enter the public `container.status` response. The
+authorizer requires the returned operation, capability version, target, normalized
+parameters, and hash to match its current contract before it creates an action.
+
 ## Budgets, Demotion, and Recovery
 
 A successful supervised repair starts a rolling 24-hour cooldown. Another confirmed

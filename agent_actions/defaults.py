@@ -630,6 +630,9 @@ class LazyAgentActionService:
     def propose(self, **kwargs):
         return self._get().propose(**kwargs)
 
+    def precondition(self, **kwargs):
+        return self._get().precondition(**kwargs)
+
     def approve(self, *args, **kwargs):
         return self._get().approve(*args, **kwargs)
 

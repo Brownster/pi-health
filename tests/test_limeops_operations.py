@@ -47,6 +47,13 @@ def make_deps(**overrides):
         "network_check": lambda target: {"target": target, "ok": True},
         "installation_inventory": lambda: {"units": {}},
         "package_status": lambda: {"ok": True, "drift": [], "packages": []},
+        "action_precondition": lambda operation, params: {
+            "operation": operation,
+            "capability_version": "1",
+            "target": params["name"],
+            "params": dict(params),
+            "precondition_hash": "a" * 64,
+        },
     }
     values.update(overrides)
     return DiagnosticDependencies(**values)
@@ -178,7 +185,11 @@ def test_gateway_allowlist_matches_the_shipped_read_only_policy():
     with open("config/agent-policy.default.json") as handle:
         policy_operations = set(json.load(handle)["operations"])
     model_operations = set(GatewayConfig().allowed_operations)
-    assert policy_operations - model_operations == {"action.approve", "action.reject"}
+    assert policy_operations - model_operations == {
+        "action.approve",
+        "action.precondition",
+        "action.reject",
+    }
     assert model_operations < policy_operations
     assert set(build_operations(make_deps())) == policy_operations
 
@@ -188,6 +199,7 @@ def test_context_reports_read_and_propose_capabilities_and_operations():
     data = operations["context"].handler({}, None)
     assert data["capabilities"] == "read-and-propose"
     assert "container.logs" in data["operations"]
+    assert "action.precondition" not in data["operations"]
 
 
 # -- through the real broker ---------------------------------------------------------
@@ -248,6 +260,65 @@ def test_action_propose_forwards_actor_and_current_audit_as_evidence():
     assert params["evidence_ids"] == ["earlier-audit"]
     assert actor == ACTOR
     assert audit_id == response["audit_id"]
+
+
+def test_action_precondition_returns_only_the_trusted_hash_contract():
+    calls = []
+
+    def precondition(operation, params):
+        calls.append((operation, params))
+        return {
+            "operation": operation,
+            "capability_version": "1",
+            "target": params["name"],
+            "params": dict(params),
+            "precondition_hash": "b" * 64,
+        }
+
+    broker = make_broker(
+        build_operations(make_deps(action_precondition=precondition))
+    )
+    response = call(
+        broker,
+        "action.precondition",
+        {
+            "operation": "container.restart",
+            "params": {"name": "jellyfin"},
+        },
+    )
+
+    assert response["ok"] is True
+    assert response["data"]["precondition_hash"] == "b" * 64
+    assert calls == [
+        ("container.restart", {"name": "jellyfin"})
+    ]
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"operation": "container.restart", "params": []},
+        {"operation": "", "params": {"name": "jellyfin"}},
+        {
+            "operation": "container.restart",
+            "params": {"name": "jellyfin"},
+            "precondition_hash": "forged",
+        },
+    ],
+)
+def test_action_precondition_rejects_malformed_or_forged_fields(params):
+    calls = []
+    broker = make_broker(
+        build_operations(
+            make_deps(action_precondition=lambda *args: calls.append(args))
+        )
+    )
+
+    response = call(broker, "action.precondition", params)
+
+    assert response["ok"] is False
+    assert response["error"]["code"] == "invalid_input"
+    assert calls == []
 
 
 @pytest.mark.parametrize(

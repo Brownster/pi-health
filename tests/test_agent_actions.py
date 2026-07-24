@@ -211,6 +211,28 @@ def test_sensitive_capability_cannot_declare_automatic_authority():
         )
 
 
+def test_precondition_returns_exact_private_capability_fingerprint(tmp_path):
+    state = {"generation": 7}
+    service = _service(
+        tmp_path, state, policy=_policy(scheduled="supervised")
+    )
+
+    result = service.precondition(
+        operation="container.restart",
+        params={"name": "jellyfin"},
+    )
+
+    assert result == {
+        "operation": "container.restart",
+        "capability_version": "1",
+        "target": "jellyfin",
+        "params": {"name": "jellyfin"},
+        "precondition_hash": canonical_hash(
+            {"name": "jellyfin", "generation": 7}
+        ),
+    }
+
+
 # -- policy ------------------------------------------------------------------
 def test_policy_is_deny_by_default_per_operation_target_and_trigger():
     policy = _policy()

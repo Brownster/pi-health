@@ -16,6 +16,7 @@ from agent_actions.capability import (
     AuthorityMode,
     CapabilityError,
     CapabilityRegistry,
+    CapabilitySpec,
     TriggerType,
     canonical_hash,
 )
@@ -102,6 +103,9 @@ class SupervisionAuthorizer:
         policy_provider: Callable[[], ActionPolicy],
         canary_gate: CanaryGateService,
         clock: Callable[[], datetime],
+        precondition_provider: (
+            Callable[[str, Mapping[str, Any]], Mapping[str, Any]] | None
+        ) = None,
         id_factory: Callable[[], str] | None = None,
     ) -> None:
         self._store = store
@@ -110,6 +114,7 @@ class SupervisionAuthorizer:
         self._policy_provider = policy_provider
         self._canary_gate = canary_gate
         self._clock = clock
+        self._precondition_provider = precondition_provider
         self._id_factory = id_factory or (lambda: uuid.uuid4().hex)
 
     def authorize(
@@ -222,6 +227,12 @@ class SupervisionAuthorizer:
                     "evidence_ids": evidence,
                 }
             )
+            precondition_hash = self._precondition_hash(
+                capability=capability,
+                operation=schedule["operation"],
+                params=params,
+                target=target,
+            )
             action = NewAction(
                 action_id=action_id,
                 idempotency_key=occurrence_key,
@@ -238,9 +249,7 @@ class SupervisionAuthorizer:
                     f"Code-owned health assessment failed twice for {target}."
                 ),
                 impact=capability.impact(params),
-                precondition_hash=canonical_hash(
-                    capability.precondition(params)
-                ),
+                precondition_hash=precondition_hash,
                 actor_type="system",
                 actor_id="limeops-supervisor",
                 actor_username=None,
@@ -298,6 +307,55 @@ class SupervisionAuthorizer:
                 "clock_failure", "Supervision clock is unavailable"
             )
         return value.astimezone(timezone.utc)
+
+    def _precondition_hash(
+        self,
+        *,
+        capability: CapabilitySpec,
+        operation: str,
+        params: Mapping[str, Any],
+        target: str,
+    ) -> str:
+        if self._precondition_provider is None:
+            return canonical_hash(capability.precondition(params))
+        value = self._precondition_provider(operation, params)
+        if not isinstance(value, Mapping) or not value:
+            raise SupervisionAuthorizationError(
+                "precondition_unavailable",
+                "Trusted action precondition is unavailable",
+            )
+        expected_keys = {
+            "operation",
+            "capability_version",
+            "target",
+            "params",
+            "precondition_hash",
+        }
+        if (
+            set(value) != expected_keys
+            or value.get("operation") != operation
+            or value.get("capability_version") != capability.version
+            or value.get("target") != target
+            or value.get("params") != dict(params)
+        ):
+            raise SupervisionAuthorizationError(
+                "contract_changed",
+                "Trusted action precondition contract changed",
+            )
+        precondition_hash = value.get("precondition_hash")
+        if (
+            not isinstance(precondition_hash, str)
+            or len(precondition_hash) != 64
+            or any(
+                character not in "0123456789abcdef"
+                for character in precondition_hash
+            )
+        ):
+            raise SupervisionAuthorizationError(
+                "precondition_unavailable",
+                "Trusted action precondition is unavailable",
+            )
+        return precondition_hash
 
     @staticmethod
     def _time(value: Any, label: str) -> datetime:

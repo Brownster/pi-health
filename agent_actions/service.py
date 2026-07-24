@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -53,6 +53,47 @@ class AgentActionService:
         self._canary_gate = canary_gate
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._id_factory = id_factory or (lambda: uuid.uuid4().hex)
+
+    def precondition(
+        self, *, operation: str, params: Any
+    ) -> dict[str, Any]:
+        """Return the trusted scheduled-action fingerprint without private fields."""
+
+        try:
+            capability = self._registry.require(operation)
+            normalized = capability.normalize(params)
+            target = capability.target(normalized)
+            policy = self._policy_provider()
+            policy.require_execution_enabled()
+            mode = policy.mode_for(
+                operation, target, TriggerType.SCHEDULED
+            )
+            if mode != AuthorityMode.SUPERVISED:
+                raise AgentActionError(
+                    "supervision_required",
+                    "Scheduled repairs require supervision authorization",
+                )
+            if mode not in capability.eligible_modes:
+                raise AgentActionError(
+                    "ineligible_mode",
+                    "Capability cannot use the configured authority mode",
+                )
+            before = capability.precondition(normalized)
+            if not isinstance(before, Mapping):
+                raise CapabilityError(
+                    "Capability precondition returned invalid data"
+                )
+            return {
+                "operation": operation,
+                "capability_version": capability.version,
+                "target": target,
+                "params": normalized,
+                "precondition_hash": canonical_hash(before),
+            }
+        except AgentActionError:
+            raise
+        except (CapabilityError, ActionPolicyError, ValueError) as exc:
+            raise self._public_error(exc) from exc
 
     def propose(
         self,

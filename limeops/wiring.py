@@ -382,6 +382,13 @@ def _action_propose(params, actor, audit_id) -> dict:  # pragma: no cover - targ
     return {"action": action, "created": created}
 
 
+def _action_precondition(operation, params) -> dict:  # pragma: no cover - target integration
+    return _ACTION_SERVICE.precondition(
+        operation=operation,
+        params=params,
+    )
+
+
 def _finding_propose(params, actor, audit_id) -> dict:  # pragma: no cover - target integration
     evidence_ids = list(params["evidence_ids"])
     if audit_id not in evidence_ids:
@@ -430,6 +437,7 @@ def default_dependencies() -> DiagnosticDependencies:  # pragma: no cover - targ
         installation_inventory=_installation_inventory,
         package_status=_package_status,
         package_pending=_package_pending,
+        action_precondition=_action_precondition,
         action_propose=_action_propose,
         finding_propose=_finding_propose,
         action_approve=_action_approve,

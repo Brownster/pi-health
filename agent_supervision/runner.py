@@ -87,6 +87,17 @@ def build_runtime(
         data = response.get("data") if isinstance(response, Mapping) else None
         return data if isinstance(data, Mapping) else {}
 
+    def action_precondition(
+        operation: str, params: Mapping[str, object]
+    ) -> Mapping:
+        response = diagnostic(
+            "action.precondition",
+            {"operation": operation, "params": dict(params)},
+            {"type": "system", "id": "limeops-supervisor"},
+        )
+        data = response.get("data") if isinstance(response, Mapping) else None
+        return data if isinstance(data, Mapping) else {}
+
     def unavailable(*_args):
         return {}
     registry = build_repair_registry(
@@ -115,6 +126,7 @@ def build_runtime(
         policy_provider=lambda: ActionPolicy.from_file(args.policy),
         canary_gate=canary_gate,
         clock=clock,
+        precondition_provider=action_precondition,
     )
     service = SupervisionService(store=store, clock=clock)
     return SupervisedRepairRuntime(
