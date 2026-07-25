@@ -118,9 +118,18 @@ LIMEOS_ADMIN_PASSWORD_HASH="$(python3 scripts/generate_password_hash.py)" ./star
 # Install Tailscale
 ENABLE_TAILSCALE=1 ./start.sh
 
+# Install optional multi-disk or remote-mount tools
+INSTALL_SNAPRAID=1 INSTALL_MERGERFS=1 ./start.sh
+INSTALL_SSHFS=1 ./start.sh
+
 # Configure a Gluetun network with PIA credentials
 ENABLE_VPN=1 PIA_USERNAME=your_user PIA_PASSWORD=your_pass ./start.sh
 ```
+
+Docker CE, the Compose plugin, and `smartmontools` install by default. Set an `INSTALL_*` option to
+`0` to skip it, `1` to install it without asking, or `auto` to ask when a terminal is available.
+Tailscale, VPN support, multi-disk tools, SSHFS, and legacy examples remain disabled unless
+explicitly enabled.
 
 ### Legacy Compose examples
 

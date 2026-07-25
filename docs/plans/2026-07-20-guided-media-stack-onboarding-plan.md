@@ -238,7 +238,7 @@ Deliverables:
 - [x] Check the Debian release and architecture.
 - [x] Detect the interactive user, home directory, UID, and GID.
 - [x] Install Git or document a bootstrap command that does not require it.
-- [ ] Install Docker, Compose, and advertised filesystem packages.
+- [x] Install Docker, Compose, and advertised filesystem packages.
 - [x] Create and correctly own runtime, stack, and application directories.
 - [x] Prompt securely for the dashboard administrator credentials.
 - [x] Start the privileged helper before the dashboard.
