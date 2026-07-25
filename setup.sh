@@ -30,16 +30,17 @@ if [[ -z "${CONFIG_DIR+x}" ]]; then
 fi
 DOCKER_COMPOSE_PATH="${DOCKER_COMPOSE_PATH:-${CONFIG_DIR}/docker-compose.yml}"
 STACKS_PATH="${STACKS_PATH:-/opt/stacks}"
-INSTALL_DOCKER="${INSTALL_DOCKER:-auto}"
-ENABLE_TAILSCALE="${ENABLE_TAILSCALE:-auto}"
+INSTALL_DOCKER="${INSTALL_DOCKER:-1}"
+ENABLE_TAILSCALE="${ENABLE_TAILSCALE:-0}"
 ENABLE_VPN="${ENABLE_VPN:-0}"
 TAILSCALE_AUTH_KEY="${TAILSCALE_AUTH_KEY:-}"
 PIA_USERNAME="${PIA_USERNAME:-}"
 PIA_PASSWORD="${PIA_PASSWORD:-}"
-INSTALL_SNAPRAID="${INSTALL_SNAPRAID:-auto}"
-INSTALL_MERGERFS="${INSTALL_MERGERFS:-auto}"
-INSTALL_SMARTMONTOOLS="${INSTALL_SMARTMONTOOLS:-auto}"
-INSTALL_SSHFS="${INSTALL_SSHFS:-auto}"
+INSTALL_SNAPRAID="${INSTALL_SNAPRAID:-0}"
+INSTALL_MERGERFS="${INSTALL_MERGERFS:-0}"
+INSTALL_SMARTMONTOOLS="${INSTALL_SMARTMONTOOLS:-1}"
+INSTALL_SSHFS="${INSTALL_SSHFS:-0}"
+INSTALL_LEGACY_EXAMPLE_STACKS="${INSTALL_LEGACY_EXAMPLE_STACKS:-0}"
 
 if [[ $EUID -ne 0 ]]; then
   echo "Please run as root (sudo)." >&2
@@ -71,31 +72,100 @@ fct_run_onboarding_preflight() {
 
 fct_run_onboarding_preflight
 
-prompt_install() {
-  local label="$1"
-  local var_name="$2"
-  local installed_check="$3"
+fct_validate_install_options() {
+  local option_name=""
+  local option_value=""
 
-  if eval "$installed_check"; then
-    printf ">>> %s already installed.\n" "$label"
+  for option_name in \
+    INSTALL_DOCKER ENABLE_TAILSCALE INSTALL_SNAPRAID \
+    INSTALL_MERGERFS INSTALL_SMARTMONTOOLS INSTALL_SSHFS; do
+    option_value="${!option_name}"
+    if [[ "${option_value}" != "0" && "${option_value}" != "1" &&
+      "${option_value}" != "auto" ]]; then
+      printf '%s must be 0, 1, or auto; received %s.\n' \
+        "${option_name}" "${option_value}" >&2
+      exit 2
+    fi
+  done
+  for option_name in ENABLE_VPN INSTALL_LEGACY_EXAMPLE_STACKS; do
+    option_value="${!option_name}"
+    if [[ "${option_value}" != "0" && "${option_value}" != "1" ]]; then
+      printf '%s must be 0 or 1; received %s.\n' \
+        "${option_name}" "${option_value}" >&2
+      exit 2
+    fi
+  done
+}
+
+fct_prompt_install() {
+  local label="${1}"
+  local var_name="${2}"
+  local installed_command="${3}"
+  local require_compose="${4:-0}"
+  local current=""
+  local reply=""
+
+  if command -v "${installed_command}" >/dev/null 2>&1 &&
+    { [[ "${require_compose}" == "0" ]] ||
+      "${installed_command}" compose version >/dev/null 2>&1; }; then
+    printf '>>> %s already installed.\n' "${label}"
     return 1
   fi
 
-  local current="${!var_name}"
-  if [[ "$current" == "1" ]]; then
+  current="${!var_name}"
+  if [[ "${current}" == "1" ]]; then
     return 0
   fi
-  if [[ "$current" == "0" ]]; then
-    printf ">>> Skipping %s install (%s=0).\n" "$label" "$var_name"
+  if [[ "${current}" == "0" ]]; then
+    printf '>>> Skipping %s install (%s=0).\n' "${label}" "${var_name}"
     return 1
   fi
 
+  if [[ ! -t 0 ]]; then
+    printf '>>> Skipping %s install (%s=auto without a terminal).\n' \
+      "${label}" "${var_name}"
+    return 1
+  fi
   read -r -p "Install ${label}? [y/N] " reply
-  if [[ "$reply" =~ ^[Yy]$ ]]; then
+  if [[ "${reply}" =~ ^[Yy]$ ]]; then
     return 0
   fi
   return 1
 }
+
+fct_install_legacy_example_stacks() {
+  local stack=""
+
+  if [[ "${INSTALL_LEGACY_EXAMPLE_STACKS}" != "1" ]]; then
+    return
+  fi
+  if [[ ! -d "${REPO_DIR}/examples/stacks" ]]; then
+    printf 'Legacy example stacks not found under %s.\n' \
+      "${REPO_DIR}/examples/stacks" >&2
+    exit 2
+  fi
+
+  printf '>>> Installing legacy example stacks into %s...\n' "${STACKS_PATH}"
+  install -d -m 0750 -o "${RUN_USER}" -g pihealth "${STACKS_PATH}"
+  for stack in vpn-stack media-stack; do
+    if [[ -d "${REPO_DIR}/examples/stacks/${stack}" &&
+      ! -d "${STACKS_PATH}/${stack}" ]]; then
+      cp -R "${REPO_DIR}/examples/stacks/${stack}" "${STACKS_PATH}/"
+      chown -R "${RUN_USER}:pihealth" "${STACKS_PATH}/${stack}"
+      printf 'Copied %s to %s/%s.\n' \
+        "${stack}" "${STACKS_PATH}" "${stack}"
+    fi
+    if [[ -d "${STACKS_PATH}/${stack}" &&
+      ! -f "${STACKS_PATH}/${stack}/.env" ]]; then
+      install -m 0640 -o "${RUN_USER}" -g pihealth \
+        "${REPO_DIR}/examples/stacks/.env.example" \
+        "${STACKS_PATH}/${stack}/.env"
+      printf 'Created %s/%s/.env.\n' "${STACKS_PATH}" "${stack}"
+    fi
+  done
+}
+
+fct_validate_install_options
 
 echo ">>> Installing system dependencies..."
 apt-get update
@@ -103,7 +173,7 @@ apt-get install -y \
   "${PYTHON_BIN}" python3-venv python3-pip \
   git curl jq zstd
 
-if prompt_install "Docker" INSTALL_DOCKER "command -v docker >/dev/null 2>&1"; then
+if fct_prompt_install "Docker and Compose" INSTALL_DOCKER docker 1; then
   echo ">>> Installing Docker CE from official repository..."
   apt-get remove -y docker.io docker-doc docker-compose podman-docker containerd runc || true
   apt-get install -y ca-certificates
@@ -114,16 +184,18 @@ if prompt_install "Docker" INSTALL_DOCKER "command -v docker >/dev/null 2>&1"; t
     | tee /etc/apt/sources.list.d/docker.list > /dev/null
   apt-get update
   apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+fi
+
+if [[ "${INSTALL_DOCKER}" != "0" ]] && command -v docker >/dev/null 2>&1; then
   systemctl enable --now docker
+  if ! id -nG "${RUN_USER}" | grep -q "\bdocker\b"; then
+    echo ">>> Adding ${RUN_USER} to docker group..."
+    usermod -aG docker "${RUN_USER}"
+    echo "NOTE: ${RUN_USER} must re-login for docker group to take effect."
+  fi
 fi
 
-if command -v docker >/dev/null 2>&1 && ! id -nG "$RUN_USER" | grep -q "\bdocker\b"; then
-  echo ">>> Adding ${RUN_USER} to docker group..."
-  usermod -aG docker "$RUN_USER"
-  echo "NOTE: ${RUN_USER} must re-login for docker group to take effect."
-fi
-
-if prompt_install "Tailscale" ENABLE_TAILSCALE "command -v tailscale >/dev/null 2>&1"; then
+if fct_prompt_install "Tailscale" ENABLE_TAILSCALE tailscale; then
   echo ">>> Installing Tailscale..."
   curl -fsSL https://tailscale.com/install.sh | sh
   echo ">>> Starting Tailscale..."
@@ -134,20 +206,20 @@ if prompt_install "Tailscale" ENABLE_TAILSCALE "command -v tailscale >/dev/null 
   fi
 fi
 
-if prompt_install "SnapRAID" INSTALL_SNAPRAID "command -v snapraid >/dev/null 2>&1"; then
+if fct_prompt_install "SnapRAID" INSTALL_SNAPRAID snapraid; then
   apt-get install -y snapraid
 fi
 
-if prompt_install "MergerFS" INSTALL_MERGERFS "command -v mergerfs >/dev/null 2>&1"; then
+if fct_prompt_install "MergerFS" INSTALL_MERGERFS mergerfs; then
   apt-get install -y mergerfs
   apt-get install -y mergerfs-tools 2>/dev/null || echo ">>> mergerfs-tools not available (optional)"
 fi
 
-if prompt_install "smartmontools" INSTALL_SMARTMONTOOLS "command -v smartctl >/dev/null 2>&1"; then
+if fct_prompt_install "smartmontools" INSTALL_SMARTMONTOOLS smartctl; then
   apt-get install -y smartmontools
 fi
 
-if prompt_install "SSHFS (seedbox mounts)" INSTALL_SSHFS "command -v sshfs >/dev/null 2>&1"; then
+if fct_prompt_install "SSHFS (seedbox mounts)" INSTALL_SSHFS sshfs; then
   apt-get install -y sshfs sshpass
 fi
 
@@ -177,42 +249,6 @@ EOF
   fi
 fi
 
-if [[ -d "${REPO_DIR}/examples/stacks" ]]; then
-  needs_seed=0
-  for stack in vpn-stack media-stack; do
-    if [[ -d "${REPO_DIR}/examples/stacks/${stack}" && ! -f "${REPO_DIR}/examples/stacks/${stack}/.env" ]]; then
-      needs_seed=1
-    fi
-  done
-
-  if [[ "$needs_seed" == "1" ]]; then
-    read -r -p "Create example stack .env files now? [y/N] " reply
-    if [[ "$reply" =~ ^[Yy]$ ]]; then
-      for stack in vpn-stack media-stack; do
-        if [[ -d "${REPO_DIR}/examples/stacks/${stack}" && ! -f "${REPO_DIR}/examples/stacks/${stack}/.env" ]]; then
-          cp "${REPO_DIR}/examples/stacks/.env.example" "${REPO_DIR}/examples/stacks/${stack}/.env"
-          echo "Created ${REPO_DIR}/examples/stacks/${stack}/.env"
-        fi
-      done
-    fi
-  fi
-
-  read -r -p "Copy example stacks to ${STACKS_PATH}? [y/N] " copy_reply
-  if [[ "$copy_reply" =~ ^[Yy]$ ]]; then
-    mkdir -p "${STACKS_PATH}"
-    for stack in vpn-stack media-stack; do
-      if [[ -d "${REPO_DIR}/examples/stacks/${stack}" && ! -d "${STACKS_PATH}/${stack}" ]]; then
-        cp -r "${REPO_DIR}/examples/stacks/${stack}" "${STACKS_PATH}/"
-        echo "Copied ${stack} to ${STACKS_PATH}/${stack}"
-      fi
-      if [[ -d "${STACKS_PATH}/${stack}" && ! -f "${STACKS_PATH}/${stack}/.env" ]]; then
-        cp "${REPO_DIR}/examples/stacks/.env.example" "${STACKS_PATH}/${stack}/.env"
-        echo "Created ${STACKS_PATH}/${stack}/.env"
-      fi
-    done
-  fi
-fi
-
 echo ">>> Setting up virtual environment..."
 if [[ ! -d "$VENV_DIR" ]]; then
   runuser -u "${RUN_USER}" -- "${PYTHON_BIN}" -m venv "$VENV_DIR"
@@ -234,6 +270,7 @@ if ! getent group pihealth >/dev/null 2>&1; then
   groupadd pihealth
 fi
 usermod -aG pihealth "$RUN_USER"
+fct_install_legacy_example_stacks
 
 # Create directories required by helper service (ReadWritePaths needs them to exist)
 mkdir -p /backups /run/pihealth /etc/sshfs /mnt
