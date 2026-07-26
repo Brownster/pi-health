@@ -89,6 +89,47 @@ def get_cpu_usage_delta(interval=0.1, *, stat_reader=_read_proc_stat_cpu):
     return None, []
 
 
+def get_swap_usage():
+    """Swap totals, or ``None`` when the host runs without swap."""
+    try:
+        swap = psutil.swap_memory()
+    except Exception:
+        return None
+    if not swap.total:
+        return {"total": 0, "used": 0, "free": 0, "percent": 0.0}
+    return {
+        "total": swap.total,
+        "used": swap.used,
+        "free": swap.free,
+        "percent": swap.percent,
+    }
+
+
+def get_load_average(cpu_count=None):
+    """1/5/15 minute run-queue averages, plus the same values per core."""
+    try:
+        one, five, fifteen = os.getloadavg()
+    except (AttributeError, OSError):
+        return None
+    cores = cpu_count or psutil.cpu_count(logical=True) or 1
+    return {
+        "one": round(one, 2),
+        "five": round(five, 2),
+        "fifteen": round(fifteen, 2),
+        "cpu_count": cores,
+        # Per-core load is the comparable figure across hosts: 1.0 means the run
+        # queue is exactly as long as the machine is wide.
+        "per_core": round(one / cores, 2),
+    }
+
+
+def get_uptime_seconds():
+    try:
+        return max(0, int(time.time() - psutil.boot_time()))
+    except Exception:
+        return None
+
+
 def _safe_disk_usage(path):
     try:
         usage = psutil.disk_usage(path)
@@ -151,6 +192,9 @@ def get_system_stats(
             "free": memory.available,
             "percent": memory.percent,
         },
+        "swap_usage": get_swap_usage(),
+        "load_average": get_load_average(),
+        "uptime_seconds": get_uptime_seconds(),
         "disk_usage": disk_usage,
         "disk_usage_2": disk_usage_2,
         "temperature_celsius": temperature,
