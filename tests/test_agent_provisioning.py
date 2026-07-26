@@ -124,6 +124,14 @@ def test_action_units_keep_worker_unprivileged_and_socket_separate():
     assert "SupplementaryGroups=docker" not in worker
     assert "limeops-client" not in broker
     assert "limeops-client" not in worker
+    broker_inaccessible = next(
+        line for line in broker.splitlines() if line.startswith("InaccessiblePaths=")
+    )
+    worker_inaccessible = next(
+        line for line in worker.splitlines() if line.startswith("InaccessiblePaths=")
+    )
+    assert "/run/pihealth" not in broker_inaccessible
+    assert "/run/pihealth" in worker_inaccessible
 
 
 def test_report_scheduler_unit_has_read_broker_and_report_state_only():
