@@ -54,6 +54,7 @@ class DockerPort(Protocol):
     def available(self) -> bool: ...
     def list_containers(self, all: bool = True) -> list: ...
     def get_container(self, container_id: str): ...
+    def container_stats(self, container_id: str) -> dict | None: ...
     def pull_image(self, tag: str): ...
     def ping(self) -> bool: ...
 
@@ -63,6 +64,7 @@ class DockerClientAdapter:
 
     def __init__(self, client: Any | None):
         self._client = client
+        self._one_shot_stats = True
 
     @property
     def available(self) -> bool:
@@ -77,6 +79,35 @@ class DockerClientAdapter:
         if self._client is None:
             return None
         return self._client.containers.get(container_id)
+
+    def container_stats(self, container_id: str) -> dict | None:
+        """Read one stats sample, preferring the daemon's non-blocking one-shot form.
+
+        ``stats(stream=False)`` makes the daemon collect its own CPU baseline,
+        which costs about a second per container. The ``one-shot`` query
+        parameter (Docker API 1.41+) returns immediately with an empty
+        ``precpu_stats``; callers that track their own previous sample do not
+        need the daemon's. Daemons or SDK builds without it fall back.
+        """
+        if self._client is None:
+            return None
+        if self._one_shot_stats:
+            try:
+                return self._one_shot(container_id)
+            except Exception:
+                self._one_shot_stats = False
+        container = self.get_container(container_id)
+        if container is None:
+            return None
+        return container.stats(stream=False)
+
+    def _one_shot(self, container_id: str) -> dict:
+        api = self._client.api
+        response = api._get(
+            api._url("/containers/{0}/stats", container_id),
+            params={"stream": False, "one-shot": True},
+        )
+        return api._result(response, json=True)
 
     def pull_image(self, tag: str):
         if self._client is None:
