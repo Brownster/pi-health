@@ -278,3 +278,77 @@ def test_cold_cache_primes_a_baseline_before_answering():
 
     entry = service.snapshot()["containers"]["999988887777"]
     assert entry["cpu_percent"] == pytest.approx(8.0)
+
+
+def test_the_background_loop_skips_sampling_while_nothing_reads():
+    docker = FakeDocker(
+        [FakeContainer("aaaa000011112222", "idle-dashboard")],
+        [{"aaaa000011112222": payload(cpu_total=1, cpu_system=10)}],
+    )
+    service = make_service(docker)
+
+    # A dashboard nobody has open must not cost a Docker round trip every tick.
+    assert service._has_a_reader() is False
+
+
+def test_a_read_wakes_the_sampler_and_idling_puts_it_back_to_sleep():
+    docker = FakeDocker(
+        [FakeContainer("bbbb000011112222", "watched")],
+        [{"bbbb000011112222": payload(cpu_total=1, cpu_system=10)}],
+    )
+    clock = ManualClock()
+    service = ContainerStatsService(
+        docker=docker,
+        clock=clock,
+        wall_clock=lambda: NOW,
+        sleep=lambda _seconds: None,
+        idle_after_seconds=60.0,
+    )
+
+    service.snapshot()
+    assert service._has_a_reader() is True
+
+    clock.advance(30.0)
+    assert service._has_a_reader() is True
+
+    clock.advance(31.0)
+    assert service._has_a_reader() is False
+
+
+def test_idle_backoff_can_be_switched_off():
+    docker = FakeDocker([], [{}])
+    service = ContainerStatsService(
+        docker=docker,
+        clock=ManualClock(),
+        wall_clock=lambda: NOW,
+        sleep=lambda _seconds: None,
+        idle_after_seconds=0.0,
+    )
+
+    assert service._has_a_reader() is True
+
+
+def test_a_reader_returning_after_a_long_idle_gets_a_fresh_baseline():
+    """Rates must describe the moment, not average across the idle gap."""
+    docker = FakeDocker(
+        [FakeContainer("cccc000011112222", "resumed")],
+        [
+            # First read: a priming pair.
+            {"cccc000011112222": payload(cpu_total=1_000, cpu_system=100_000)},
+            {"cccc000011112222": payload(cpu_total=9_000, cpu_system=900_000)},
+            # After the idle gap: a second priming pair, barely busy.
+            {"cccc000011112222": payload(cpu_total=9_100, cpu_system=1_000_000)},
+            {"cccc000011112222": payload(cpu_total=9_200, cpu_system=1_100_000)},
+        ],
+    )
+    clock = ManualClock()
+    service = make_service(docker, clock=clock, sleep=clock.advance)
+
+    service.snapshot()
+    # Long enough that the cached counters are stale, not merely old.
+    clock.advance(600.0)
+
+    entry = service.snapshot()["containers"]["cccc00001111"]
+    # 100/100000 across the fresh pair, scaled to 4 cores — not a busy
+    # ten-minute average carried over from before the host went quiet.
+    assert entry["cpu_percent"] == pytest.approx(0.4)

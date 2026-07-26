@@ -22,10 +22,15 @@ from datetime import datetime, timezone
 from ports import DockerPort
 
 
-DEFAULT_INTERVAL_SECONDS = 5.0
+# Matches the dashboard's own poll; sampling faster than anything reads is waste.
+DEFAULT_INTERVAL_SECONDS = 10.0
 # Beyond this the cached numbers describe a host that has moved on, so a reader
 # re-samples inline rather than serving them.
 DEFAULT_MAX_AGE_SECONDS = 30.0
+# Sampling 18 containers costs real CPU on a Pi, and a dashboard nobody has open
+# is the normal case. Stop after this long without a reader; the next read wakes
+# the sampler again.
+DEFAULT_IDLE_AFTER_SECONDS = 60.0
 # Gap between the two priming samples that establish a CPU baseline on first use.
 BASELINE_GAP_SECONDS = 0.25
 MAX_WORKERS = 8
@@ -168,6 +173,7 @@ class ContainerStatsService:
         docker: DockerPort,
         interval_seconds: float = DEFAULT_INTERVAL_SECONDS,
         max_age_seconds: float = DEFAULT_MAX_AGE_SECONDS,
+        idle_after_seconds: float = DEFAULT_IDLE_AFTER_SECONDS,
         clock: Callable[[], float] = time.monotonic,
         wall_clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
         sleep: Callable[[float], None] = time.sleep,
@@ -176,6 +182,7 @@ class ContainerStatsService:
         self._docker = docker
         self._interval = max(1.0, float(interval_seconds))
         self._max_age = max(self._interval, float(max_age_seconds))
+        self._idle_after = max(0.0, float(idle_after_seconds))
         self._clock = clock
         self._wall_clock = wall_clock
         self._sleep = sleep
@@ -185,6 +192,7 @@ class ContainerStatsService:
         self._results: dict[str, dict] = {}
         self._sampled_at: float | None = None
         self._sampled_wall: datetime | None = None
+        self._last_read_at: float | None = None
         self._thread: threading.Thread | None = None
         self._stopping = threading.Event()
 
@@ -211,11 +219,22 @@ class ContainerStatsService:
     def _run(self) -> None:
         while not self._stopping.is_set():
             try:
-                self.sample()
+                if self._has_a_reader():
+                    self.sample()
             except Exception:
                 # Sampling is best-effort telemetry; never kill the thread.
                 pass
             self._stopping.wait(self._interval)
+
+    def _has_a_reader(self) -> bool:
+        """Whether anything has asked for these numbers recently enough to matter."""
+        if self._idle_after <= 0:
+            return True
+        with self._lock:
+            last_read = self._last_read_at
+        if last_read is None:
+            return False
+        return (self._clock() - last_read) <= self._idle_after
 
     # --- sampling ----------------------------------------------------------
 
@@ -293,18 +312,24 @@ class ContainerStatsService:
     # --- reads -------------------------------------------------------------
 
     def _ensure_fresh(self) -> None:
-        with self._lock:
-            sampled_at = self._sampled_at
-            primed = bool(self._previous)
         now = self._clock()
+        with self._lock:
+            # Reading is what keeps the background sampler awake.
+            self._last_read_at = now
+            sampled_at = self._sampled_at
         if sampled_at is not None and (now - sampled_at) <= self._max_age:
             return
+
+        # Either nothing has sampled yet, or the sampler went idle and the stored
+        # counters are too old to derive a rate from — a delta across that gap
+        # would describe minutes, not the moment. Take a fresh pair instead.
+        with self._lock:
+            self._previous = {}
         self.sample()
-        if not primed:
-            # One-shot payloads carry no CPU baseline, so a cold cache needs a
-            # second reading before any rate can be reported.
-            self._sleep(BASELINE_GAP_SECONDS)
-            self.sample()
+        # One-shot payloads carry no CPU baseline of their own, so the second
+        # reading is what makes any rate reportable.
+        self._sleep(BASELINE_GAP_SECONDS)
+        self.sample()
 
     def snapshot(self) -> dict:
         """Return every sampled container plus the host's accounting capabilities."""
