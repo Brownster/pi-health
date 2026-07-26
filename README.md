@@ -367,20 +367,30 @@ dmesg | tail -20
 
 ### Container Memory Stats Not Showing
 
-On Raspberry Pi OS, cgroup memory accounting is disabled by default. Container CPU and network stats will work, but memory will show as "—".
+Raspberry Pi OS boots without cgroup memory accounting, so Docker reports no memory usage
+for any container. CPU and network stats are unaffected; memory shows as "—".
 
-To enable memory stats, add these parameters to your kernel command line:
+The installer and every UI update add the required kernel parameters for you and then show
+a "reboot required" banner, because the change only takes effect at the next boot. Reboot
+and the memory column fills in:
 
 ```bash
+sudo reboot
+```
+
+To check or apply it by hand:
+
+```bash
+# Is the controller active? Look for "memory" in the list.
+cat /sys/fs/cgroup/cgroup.controllers
+
+# Add to the end of the single line in cmdline.txt, then reboot.
 sudo nano /boot/firmware/cmdline.txt
+#   cgroup_enable=memory cgroup_memory=1
 ```
 
-Add to the **end** of the existing line (keep it all on one line):
-```
-cgroup_enable=memory cgroup_memory=1
-```
-
-Then reboot. Note: This uses slightly more RAM for memory tracking.
+Keep `cmdline.txt` on one line — a second line stops the Pi from booting. Memory tracking
+costs a small amount of RAM.
 
 ## License
 
