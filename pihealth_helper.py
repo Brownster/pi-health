@@ -2515,6 +2515,82 @@ def cmd_copyparty_status(params):
     }
 
 
+# Kernel command line files, most specific first. Fixed on purpose: the caller
+# never chooses which boot file the helper rewrites.
+KERNEL_CMDLINE_PATHS = ("/boot/firmware/cmdline.txt", "/boot/cmdline.txt")
+# Enables the cgroup v2 memory controller, without which Docker reports no
+# container memory usage at all.
+REQUIRED_KERNEL_PARAMETERS = ("cgroup_enable=memory", "cgroup_memory=1")
+
+
+def _find_kernel_cmdline():
+    for path in KERNEL_CMDLINE_PATHS:
+        if os.path.isfile(path):
+            return path
+    return None
+
+
+def cmd_host_prerequisites_apply(params):
+    """Add LimeOS's required kernel parameters to the boot command line.
+
+    Idempotent: parameters already present are left alone and the file is only
+    rewritten when something is genuinely missing. The original is backed up
+    first, and the result stays a single line — a second line silently breaks
+    boot on a Raspberry Pi.
+    """
+    cmdline_path = _find_kernel_cmdline()
+    if cmdline_path is None:
+        return {
+            'success': True,
+            'changed': False,
+            'supported': False,
+            'reason': 'This host does not boot from a cmdline.txt',
+        }
+
+    try:
+        with open(cmdline_path) as handle:
+            original = handle.readline().strip()
+    except OSError as error:
+        return {'success': False, 'error': f'Unable to read {cmdline_path}: {error}'}
+
+    existing = original.split()
+    missing = [item for item in REQUIRED_KERNEL_PARAMETERS if item not in existing]
+    if not missing:
+        return {'success': True, 'changed': False, 'supported': True, 'path': cmdline_path}
+
+    updated = " ".join([*existing, *missing])
+    stamp = datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')
+    backup_path = f"{cmdline_path}.limeos-bak-{stamp}"
+    try:
+        shutil.copy2(cmdline_path, backup_path)
+        directory = os.path.dirname(cmdline_path)
+        descriptor, temporary_path = tempfile.mkstemp(
+            dir=directory, prefix=".cmdline.", suffix=".tmp"
+        )
+        try:
+            with os.fdopen(descriptor, "w") as handle:
+                handle.write(updated + "\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            shutil.copymode(cmdline_path, temporary_path)
+            os.replace(temporary_path, cmdline_path)
+        except BaseException:
+            if os.path.exists(temporary_path):
+                os.remove(temporary_path)
+            raise
+    except OSError as error:
+        return {'success': False, 'error': f'Unable to update {cmdline_path}: {error}'}
+
+    return {
+        'success': True,
+        'changed': True,
+        'supported': True,
+        'path': cmdline_path,
+        'backup': backup_path,
+        'added': missing,
+    }
+
+
 def _validate_pihealth_update_params(params):
     """Return (context, error) for a Pi-Health self-update request.
 
@@ -5558,6 +5634,7 @@ COMMANDS = {
     'copyparty_configure': cmd_copyparty_configure,
     'copyparty_status': cmd_copyparty_status,
     'pihealth_update': cmd_pihealth_update,
+    'host_prerequisites_apply': cmd_host_prerequisites_apply,
     'plugin_install': cmd_plugin_install,
     'plugin_remove': cmd_plugin_remove,
     'plugin_update': cmd_plugin_update,
@@ -5631,6 +5708,7 @@ _MUTATING_COMMANDS = frozenset({
     'mattermost_recovery_credential_retain',
     'mattermost_recovery_credential_restore',
     'mattermost_recovery_credential_discard',
+    'host_prerequisites_apply',
 })
 
 _mutation_lock = threading.Lock()
