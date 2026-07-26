@@ -13,6 +13,13 @@ MAX_ACTIVE_INCIDENTS = 50
 MAX_RECENT_RECOVERIES = 5
 MAX_ISSUES = 100
 MAX_WARNINGS = 50
+MAX_CONSUMERS = 5
+
+SWAP_WARNING_PERCENT = 25.0
+SWAP_CRITICAL_PERCENT = 60.0
+# A run queue longer than this many jobs per core means work is waiting on CPU.
+LOAD_WARNING_PER_CORE = 1.5
+LOAD_CRITICAL_PER_CORE = 3.0
 
 METRIC_RULES = {
     "cpu": (60.0, 85.0, "CPU usage", "%"),
@@ -57,6 +64,8 @@ class OverviewService:
         stack_provider: Callable[[], tuple[list[dict], str | None]],
         alert_status_provider: Callable[[], Mapping],
         recent_recoveries_provider: Callable[[], list[dict]] | None = None,
+        container_stats_provider: Callable[[], Mapping] | None = None,
+        process_provider: Callable[[], Mapping] | None = None,
         clock: Callable[[], datetime] = _utcnow,
     ) -> None:
         self._system_stats_provider = system_stats_provider
@@ -64,6 +73,8 @@ class OverviewService:
         self._stack_provider = stack_provider
         self._alert_status_provider = alert_status_provider
         self._recent_recoveries_provider = recent_recoveries_provider or (lambda: [])
+        self._container_stats_provider = container_stats_provider or (lambda: {})
+        self._process_provider = process_provider or (lambda: {})
         self._clock = clock
 
     def snapshot(self) -> dict:
@@ -84,6 +95,8 @@ class OverviewService:
         active, alert_issues = self._alert_health(alert_status)
         issues = [
             *self._metric_issues(metrics),
+            *self._swap_issues(metrics),
+            *self._load_issues(stats),
             *container_issues,
             *stack_issues,
             *alert_issues,
@@ -115,6 +128,7 @@ class OverviewService:
         return {
             "health": {"state": health_state, "issues": issues},
             "metrics": metrics,
+            "pressure": self._pressure(stats, warnings),
             "workloads": {"containers": container_counts, "stacks": stack_counts},
             "alerts": {"active": active, "recent_recoveries": recoveries},
             "applications": self._applications(containers, warnings),
@@ -201,23 +215,95 @@ class OverviewService:
             return []
 
     @staticmethod
+    def _usage(stats: Mapping, key: str) -> Mapping:
+        value = stats.get(key)
+        return value if isinstance(value, Mapping) else {}
+
+    @staticmethod
     def _metrics(stats: Mapping) -> dict:
-        memory = (
-            stats.get("memory_usage")
-            if isinstance(stats.get("memory_usage"), Mapping)
-            else {}
-        )
-        disk = stats.get("disk_usage") if isinstance(stats.get("disk_usage"), Mapping) else {}
+        memory = OverviewService._usage(stats, "memory_usage")
+        disk = OverviewService._usage(stats, "disk_usage")
+        swap = OverviewService._usage(stats, "swap_usage")
         return {
             "cpu_percent": _number(stats.get("cpu_usage_percent")),
             "memory_percent": _number(memory.get("percent")),
             "memory_used": _number(memory.get("used")),
             "memory_total": _number(memory.get("total")),
+            "swap_percent": _number(swap.get("percent")),
+            "swap_used": _number(swap.get("used")),
+            "swap_total": _number(swap.get("total")),
             "temperature_celsius": _number(stats.get("temperature_celsius")),
             "disk_percent": _number(disk.get("percent")),
             "disk_used": _number(disk.get("used")),
             "disk_total": _number(disk.get("total")),
         }
+
+    def _pressure(self, stats: Mapping, warnings: list[dict]) -> dict:
+        """Name the workloads behind the headline numbers."""
+        containers = self._read_mapping(
+            "container_stats",
+            "Container resource usage is unavailable",
+            self._container_stats_provider,
+            warnings,
+        )
+        processes = self._read_mapping(
+            "processes", "Host process usage is unavailable", self._process_provider, warnings
+        )
+        sampled = [
+            item
+            for item in (containers.get("containers") or {}).values()
+            if isinstance(item, Mapping)
+        ]
+        return {
+            "load_average": self._load_average(stats),
+            "uptime_seconds": _number(stats.get("uptime_seconds")),
+            "containers": {
+                "by_cpu": self._consumers(sampled, "cpu_percent"),
+                "by_memory": self._consumers(sampled, "memory_used"),
+                "capabilities": dict(containers.get("capabilities") or {}),
+                "sampled_at": _text(containers.get("sampled_at")) or None,
+            },
+            "processes": {
+                "by_cpu": self._consumers(processes.get("by_cpu"), "cpu_percent"),
+                "by_memory": self._consumers(processes.get("by_memory"), "memory_bytes"),
+                "total": _number(processes.get("total")),
+            },
+        }
+
+    @staticmethod
+    def _load_average(stats: Mapping) -> dict | None:
+        load = OverviewService._usage(stats, "load_average")
+        if not load:
+            return None
+        return {
+            "one": _number(load.get("one")),
+            "five": _number(load.get("five")),
+            "fifteen": _number(load.get("fifteen")),
+            "cpu_count": _number(load.get("cpu_count")),
+            "per_core": _number(load.get("per_core")),
+        }
+
+    @staticmethod
+    def _consumers(entries, key: str) -> list[dict]:
+        items = [item for item in (entries or []) if isinstance(item, Mapping)]
+        ranked = [item for item in items if _number(item.get(key)) is not None]
+        ranked.sort(key=lambda item: item[key], reverse=True)
+        return [
+            {
+                "id": _text(item.get("id"))
+                or (str(item["pid"]) if isinstance(item.get("pid"), int) else "")
+                or _text(item.get("name")),
+                "name": _text(item.get("name"), "unknown"),
+                "cpu_percent": _number(item.get("cpu_percent")),
+                "memory_bytes": _number(item.get("memory_used"))
+                if item.get("memory_used") is not None
+                else _number(item.get("memory_bytes")),
+                "memory_percent": _number(item.get("memory_percent")),
+                "detail": _text(item.get("user")) or None,
+            }
+            for item in ranked[:MAX_CONSUMERS]
+            if item[key] > 0
+        ]
 
     @staticmethod
     def _metric_issues(metrics: Mapping) -> list[dict]:
@@ -261,6 +347,58 @@ class OverviewService:
                     )
                 )
         return issues
+
+    @staticmethod
+    def _swap_issues(metrics: Mapping) -> list[dict]:
+        """Flag swap in use. A host with no swap configured is not a problem."""
+        total = metrics.get("swap_total")
+        percent = metrics.get("swap_percent")
+        if not total or percent is None:
+            return []
+        if percent >= SWAP_CRITICAL_PERCENT:
+            return [
+                _issue(
+                    "metric.swap.critical",
+                    "critical",
+                    "Swap usage is critical",
+                    f"Current value: {percent:.1f}% - the host is short of memory",
+                    "/system",
+                )
+            ]
+        if percent >= SWAP_WARNING_PERCENT:
+            return [
+                _issue(
+                    "metric.swap.warning",
+                    "attention",
+                    "Swap is in active use",
+                    f"Current value: {percent:.1f}%",
+                    "/system",
+                )
+            ]
+        return []
+
+    @staticmethod
+    def _load_issues(stats: Mapping) -> list[dict]:
+        load = OverviewService._usage(stats, "load_average")
+        per_core = _number(load.get("per_core"))
+        one = _number(load.get("one"))
+        if per_core is None or one is None:
+            return []
+        if per_core >= LOAD_CRITICAL_PER_CORE:
+            severity, label, code = "critical", "Load average is critical", "metric.load.critical"
+        elif per_core >= LOAD_WARNING_PER_CORE:
+            severity, label, code = "attention", "Load average is high", "metric.load.warning"
+        else:
+            return []
+        return [
+            _issue(
+                code,
+                severity,
+                label,
+                f"Current value: {one:.2f} ({per_core:.2f} per core)",
+                "/system",
+            )
+        ]
 
     @staticmethod
     def _container_health(containers: list[dict]) -> tuple[dict, list[dict]]:

@@ -145,6 +145,11 @@ from container_inventory_service import (
     ContainerInspectUnavailableError,
 )
 from container_operations_service import ContainerOperationsService
+from container_stats_service import ContainerStatsService
+from process_stats import ProcessSampler
+from activity_service import ActivityService
+from host_prerequisites import HostPrerequisiteService
+from pending_actions import PendingActionStore, REBOOT_REQUIRED
 from network_diagnostics_service import (  # noqa: F401  (several names re-exported for tests)
     ContainerNotFoundError,
     DockerUnavailableError,
@@ -233,6 +238,11 @@ class AppDependencies:
     audit: AuditPort | None = None
     config_repo: ConfigRepository | None = None
     system_service: SystemService | None = None
+    container_stats_service: ContainerStatsService | None = None
+    process_sampler: ProcessSampler | None = None
+    activity_service: ActivityService | None = None
+    host_prerequisite_service: HostPrerequisiteService | None = None
+    pending_action_store: PendingActionStore | None = None
     container_inventory_service: ContainerInventoryService | None = None
     container_operations_service: ContainerOperationsService | None = None
     network_diagnostics_service: NetworkDiagnosticsService | None = None
@@ -306,11 +316,26 @@ def _default_capability_registry_service(application):
     )
 
 
-def _default_container_inventory_service(docker_port):
+def _default_container_inventory_service(docker_port, stats_service=None):
     return ContainerInventoryService(
         docker=docker_port,
-        stats_reader=get_container_stats_cached,
+        stats_reader=(
+            stats_service.stats_for if stats_service is not None else get_container_stats_cached
+        ),
         update_reader=lambda container_id: container_updates.get(container_id, False),
+    )
+
+
+def _default_container_stats_service(docker_port):
+    return ContainerStatsService(docker=docker_port)
+
+
+def _default_activity_service(container_inventory_service):
+    return ActivityService(
+        container_provider=lambda: container_inventory_service.list_containers(
+            include_stats=False
+        ),
+        inspect_reader=container_inventory_service.inspect,
     )
 
 
@@ -487,6 +512,8 @@ def _default_overview_service(
     stack_service,
     mattermost_service,
     *,
+    container_stats_service=None,
+    process_sampler=None,
     alert_history=None,
 ):
     alert_history = alert_history or AlertEventLedger(
@@ -498,6 +525,10 @@ def _default_overview_service(
         stack_provider=lambda: stack_service.list_with_status(include_status=True),
         alert_status_provider=mattermost_service.status,
         recent_recoveries_provider=lambda: alert_history.recent(event="recovery", limit=5),
+        container_stats_provider=(
+            container_stats_service.snapshot if container_stats_service is not None else None
+        ),
+        process_provider=(process_sampler.top if process_sampler is not None else None),
     )
 
 
@@ -720,7 +751,11 @@ def get_system_stats():
 
 
 def get_container_stats_cached(container_id):
-    """Fetch container stats with TTL caching."""
+    """Fetch container stats, preferring the app's background sampler."""
+    service = _extension("container_stats_service")
+    if service is not None:
+        return service.stats_for(container_id)
+
     now = time.time()
 
     # Check cache
@@ -1099,6 +1134,21 @@ def api_container_stats_batch():
     if not container_ids:
         return jsonify({})
 
+    service = current_app.extensions.get("container_stats_service")
+    if service is None:
+        return jsonify(_legacy_container_stats(container_ids))
+
+    sampled = service.snapshot()["containers"]
+    return jsonify(
+        {
+            container_id: sampled[container_id]
+            for container_id in container_ids
+            if container_id in sampled
+        }
+    )
+
+
+def _legacy_container_stats(container_ids):
     result = {}
     for container_id in container_ids:
         stats = get_container_stats_cached(container_id)
@@ -1111,7 +1161,48 @@ def api_container_stats_batch():
                 'net_rx': stats.get('network', {}).get('rx'),
                 'net_tx': stats.get('network', {}).get('tx'),
             }
-    return jsonify(result)
+    return result
+
+
+@core_api.route('/api/activity', methods=['GET'])
+@login_required
+def api_activity():
+    """Return what the media services are currently doing."""
+    return jsonify(current_app.extensions["activity_service"].snapshot())
+
+
+@core_api.route('/api/host/prerequisites', methods=['GET'])
+@login_required
+def api_host_prerequisites():
+    """Report the host boot settings LimeOS depends on."""
+    return jsonify(current_app.extensions["host_prerequisite_service"].status())
+
+
+@core_api.route('/api/pending-actions', methods=['GET'])
+@login_required
+def api_pending_actions():
+    """List manual work LimeOS is waiting on, dropping anything now resolved."""
+    store = current_app.extensions["pending_action_store"]
+    _reconcile_reboot_notice(store)
+    return jsonify({"actions": store.list()})
+
+
+@core_api.route('/api/pending-actions/<action_id>/dismiss', methods=['POST'])
+@login_required
+def api_dismiss_pending_action(action_id):
+    """Dismiss one outstanding action."""
+    store = current_app.extensions["pending_action_store"]
+    return jsonify({"dismissed": store.dismiss(action_id)})
+
+
+def _reconcile_reboot_notice(store):
+    """Clear the reboot notice once the host has actually rebooted into the fix."""
+    try:
+        if current_app.extensions["host_prerequisite_service"].status()["satisfied"]:
+            store.resolve(REBOOT_REQUIRED)
+    except Exception:
+        # A detection failure must not hide the notice it was meant to clear.
+        pass
 
 
 @core_api.route('/api/containers/<container_id>', methods=['GET'])
@@ -1422,9 +1513,16 @@ def api_pihealth_update():
     """Start a streamed self-update and return its read-only event stream."""
     config = _load_pihealth_update_config()
     config["user"] = getpass.getuser()
+    prerequisite_service = current_app.extensions["host_prerequisite_service"]
+    pending_actions = current_app.extensions["pending_action_store"]
 
     def produce_events():
-        yield from stream_pihealth_update(helper_call, config)
+        yield from stream_pihealth_update(
+            helper_call,
+            config,
+            prerequisite_service=prerequisite_service,
+            pending_actions=pending_actions,
+        )
 
     try:
         operation = current_app.extensions["operation_registry"].create(
@@ -1547,9 +1645,28 @@ def create_app(config=None, dependencies=None):
     application.extensions["system_service"] = (
         resolved.system_service or _default_system_service()
     )
+    application.extensions["container_stats_service"] = (
+        resolved.container_stats_service
+        or _default_container_stats_service(application.extensions["docker"])
+    )
+    application.extensions["process_sampler"] = resolved.process_sampler or ProcessSampler()
+    application.extensions["host_prerequisite_service"] = (
+        resolved.host_prerequisite_service
+        or HostPrerequisiteService(helper=application.extensions["helper"])
+    )
+    application.extensions["pending_action_store"] = (
+        resolved.pending_action_store or PendingActionStore()
+    )
     application.extensions["container_inventory_service"] = (
         resolved.container_inventory_service
-        or _default_container_inventory_service(application.extensions["docker"])
+        or _default_container_inventory_service(
+            application.extensions["docker"],
+            application.extensions["container_stats_service"],
+        )
+    )
+    application.extensions["activity_service"] = (
+        resolved.activity_service
+        or _default_activity_service(application.extensions["container_inventory_service"])
     )
     application.extensions["container_operations_service"] = (
         resolved.container_operations_service
@@ -1715,6 +1832,8 @@ def create_app(config=None, dependencies=None):
             application.extensions["container_inventory_service"],
             application.extensions["stack_read_service"],
             application.extensions["mattermost_integration_service"],
+            container_stats_service=application.extensions["container_stats_service"],
+            process_sampler=application.extensions["process_sampler"],
         )
     )
     application.extensions["metric_history_service"] = (
@@ -1758,9 +1877,49 @@ def create_app(config=None, dependencies=None):
         init_backup_scheduler(application)
         _start_agent_convergence()
         _ensure_package_reconcile_timer()
+        # Keeps container CPU and byte rates warm so dashboard reads never block
+        # on Docker, and so the first read already has a delta baseline.
+        application.extensions["container_stats_service"].start()
+        _converge_host_prerequisites(application)
 
     print(f"Loaded {len(resolved.users)} user(s) for authentication")
     return application
+
+
+def _converge_host_prerequisites(application):
+    """Apply host boot settings after startup, in the background.
+
+    The update that first ships a new prerequisite runs against the *previous*
+    helper, which does not know the repair command yet. Both services restart at
+    the end of that update, so converging here closes the gap on the same update
+    rather than leaving it to the next one. Idempotent and best-effort: a host
+    that is already correct does no work and raises no notice.
+    """
+    import threading
+
+    prerequisites = application.extensions["host_prerequisite_service"]
+    pending_actions = application.extensions["pending_action_store"]
+
+    def converge():
+        try:
+            result = prerequisites.apply()
+        except Exception:
+            return
+        if not result.get("reboot_required"):
+            return
+        pending_actions.record(
+            REBOOT_REQUIRED,
+            title="Reboot required to finish setup",
+            detail=(
+                "LimeOS enabled the kernel memory cgroup so Docker can report container "
+                "memory. The change takes effect at the next boot."
+            ),
+            severity="attention",
+            source="startup",
+            command="sudo reboot",
+        )
+
+    threading.Thread(target=converge, name="host-prerequisites", daemon=True).start()
 
 
 def _start_agent_convergence(snapshot_reader=None, helper=None):
