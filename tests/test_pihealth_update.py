@@ -112,9 +112,11 @@ def test_update_streams_full_sequence_end_to_end(authenticated_client, monkeypat
     steps = [event.get("step") for event in events]
     assert steps[:2] == ["pull", "pull"]
     assert steps[-2:] == ["restart", "restart"]
-    # Every stage is represented, in order, exactly once as a group.
+    # Every stage is represented, in order, exactly once as a group. Host
+    # prerequisites run last before the restart so a boot-config repair is applied
+    # against the freshly pulled helper.
     assert [step for step in dict.fromkeys(steps)] == [
-        "pull", "deps", "migrate", "build", "agent", "restart"
+        "pull", "deps", "migrate", "build", "agent", "prerequisites", "restart"
     ]
 
     lines = {event.get("step"): event.get("line", "") for event in events}

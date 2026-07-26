@@ -15,6 +15,8 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import Any
 
+from pending_actions import REBOOT_REQUIRED
+
 HelperCall = Callable[[str, Mapping[str, Any]], Mapping[str, Any]]
 
 _SHORT = 8
@@ -39,7 +41,13 @@ def _short(commit: str | None) -> str:
     return (commit or "")[:_SHORT] or "unknown"
 
 
-def stream_update(helper_call: HelperCall, config: Mapping[str, Any]):
+def stream_update(
+    helper_call: HelperCall,
+    config: Mapping[str, Any],
+    *,
+    prerequisite_service=None,
+    pending_actions=None,
+):
     """Yield operation events while running the self-update through the helper.
 
     Each yielded dict carries a ``step`` label plus either a human ``line``, an
@@ -143,6 +151,12 @@ def stream_update(helper_call: HelperCall, config: Mapping[str, Any]):
     else:
         yield {"step": "agent", "line": "No agent changes."}
 
+    # -- host prerequisites --------------------------------------------------
+    # Boot settings LimeOS needs that a running kernel cannot be given. Applying
+    # one is inert until the next boot, so the reboot is recorded as pending work
+    # rather than performed here — this update is restarting a media server.
+    yield from _apply_prerequisites(prerequisite_service, pending_actions)
+
     # -- restart (terminal) --------------------------------------------------
     yield {"step": "restart", "line": "Restarting service…"}
     restart = call("restart")
@@ -156,4 +170,51 @@ def stream_update(helper_call: HelperCall, config: Mapping[str, Any]):
         "restarting": True,
         "new_commit": new_commit,
         "done": True,
+    }
+
+
+def _apply_prerequisites(prerequisite_service, pending_actions):
+    """Repair host boot settings, recording any reboot the fix now waits on."""
+    if prerequisite_service is None:
+        return
+
+    yield {"step": "prerequisites", "line": "Checking host prerequisites…"}
+    try:
+        result = prerequisite_service.apply()
+    except Exception as error:
+        # Never fail an otherwise good update over an optional host setting.
+        yield {"step": "prerequisites", "line": f"⚠ Host prerequisite check failed: {error}"}
+        return
+
+    for message in result.get("errors") or []:
+        yield {"step": "prerequisites", "line": f"⚠ {message}"}
+
+    if not result.get("changed"):
+        yield {"step": "prerequisites", "line": "Host prerequisites already met."}
+        return
+
+    yield {
+        "step": "prerequisites",
+        "line": "Applied host boot settings: " + ", ".join(result.get("applied") or []),
+    }
+
+    if not result.get("reboot_required"):
+        return
+
+    if pending_actions is not None:
+        pending_actions.record(
+            REBOOT_REQUIRED,
+            title="Reboot required to finish the update",
+            detail=(
+                "LimeOS changed the kernel command line so Docker can report container "
+                "memory. The change takes effect at the next boot."
+            ),
+            severity="attention",
+            source="update",
+            command="sudo reboot",
+        )
+    yield {
+        "step": "prerequisites",
+        "line": "⚠ A reboot is required to finish applying these settings.",
+        "reboot_required": True,
     }

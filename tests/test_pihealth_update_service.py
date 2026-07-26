@@ -206,3 +206,122 @@ def test_agent_changes_cannot_block_the_release_restart():
     assert helper.calls[-1] == "restart"
     assert events[-1]["step"] == "restart"
     assert events[-1]["done"] is True
+
+
+class FakePrerequisites:
+    def __init__(self, result=None, error=None):
+        self.result = result or {
+            "changed": True,
+            "reboot_required": True,
+            "applied": ["memory_cgroup"],
+            "errors": [],
+        }
+        self.error = error
+        self.calls = 0
+
+    def apply(self):
+        self.calls += 1
+        if self.error:
+            raise self.error
+        return self.result
+
+
+class FakePendingActions:
+    def __init__(self):
+        self.records = []
+
+    def record(self, action_id, **fields):
+        self.records.append((action_id, fields))
+        return {"id": action_id, **fields}
+
+
+def _successful_results():
+    return {
+        "pull": {
+            "success": True,
+            "old_commit": OLD,
+            "new_commit": NEW,
+            "changed_files": ["app.py"],
+        },
+        "migrate": {"success": True},
+        "build": {"success": True, "skipped": True, "reason": "Web UI already current."},
+        "restart": {"success": True},
+    }
+
+
+def _run_with_prerequisites(prerequisites, pending_actions=None):
+    helper = FakeHelper(_successful_results())
+    return list(
+        stream_update(
+            helper,
+            {"user": "pi"},
+            prerequisite_service=prerequisites,
+            pending_actions=pending_actions,
+        )
+    )
+
+
+def test_an_applied_prerequisite_records_the_reboot_and_still_restarts():
+    prerequisites = FakePrerequisites()
+    pending = FakePendingActions()
+
+    events = _run_with_prerequisites(prerequisites, pending)
+
+    assert "prerequisites" in _steps(events)
+    assert any(event.get("reboot_required") for event in events)
+    assert pending.records[0][0] == "reboot_required"
+    assert pending.records[0][1]["command"] == "sudo reboot"
+    # The reboot is the user's to schedule; the update finishes regardless.
+    assert events[-1]["restarting"] is True
+    assert events[-1]["done"] is True
+
+
+def test_a_satisfied_host_records_nothing():
+    prerequisites = FakePrerequisites(
+        {"changed": False, "reboot_required": False, "applied": [], "errors": []}
+    )
+    pending = FakePendingActions()
+
+    events = _run_with_prerequisites(prerequisites, pending)
+
+    assert pending.records == []
+    assert any("already met" in event.get("line", "") for event in events)
+    assert events[-1]["done"] is True
+
+
+def test_a_prerequisite_failure_never_fails_the_update():
+    prerequisites = FakePrerequisites(error=RuntimeError("helper unavailable"))
+    pending = FakePendingActions()
+
+    events = _run_with_prerequisites(prerequisites, pending)
+
+    assert any("helper unavailable" in event.get("line", "") for event in events)
+    assert not any("error" in event for event in events)
+    assert events[-1]["done"] is True
+    assert pending.records == []
+
+
+def test_prerequisite_errors_are_surfaced_as_warning_lines():
+    prerequisites = FakePrerequisites(
+        {
+            "changed": False,
+            "reboot_required": False,
+            "applied": [],
+            "errors": ["The privileged helper is unavailable"],
+        }
+    )
+
+    events = _run_with_prerequisites(prerequisites)
+
+    assert any(
+        "The privileged helper is unavailable" in event.get("line", "") for event in events
+    )
+    assert events[-1]["done"] is True
+
+
+def test_the_step_is_skipped_when_no_prerequisite_service_is_wired():
+    helper = FakeHelper(_successful_results())
+    events = list(stream_update(helper, {"user": "pi"}))
+
+    assert "prerequisites" not in _steps(events)
+    assert events[-1]["done"] is True
