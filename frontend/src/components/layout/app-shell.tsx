@@ -18,6 +18,7 @@ import {
 import { NavLink, useLocation } from "react-router-dom";
 
 import { navRoutes } from "@/app/routes";
+import { PendingActionsBanner } from "@/components/layout/pending-actions-banner";
 import { useAuth } from "@/components/auth/auth-provider";
 import { SetupTasksModal } from "@/components/setup/setup-tasks-modal";
 import { logoutToLogin } from "@/lib/auth";
@@ -252,7 +253,10 @@ export function AppShell({ children }: PropsWithChildren) {
           id="lime-os-main-content"
           tabIndex={-1}
         >
-          <div className="mx-auto w-full max-w-[1440px]">{children}</div>
+          <div className="mx-auto w-full max-w-[1440px]">
+            <PendingActionsBanner />
+            {children}
+          </div>
         </main>
       </div>
 

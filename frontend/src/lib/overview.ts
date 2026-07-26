@@ -16,10 +16,46 @@ export interface OverviewMetrics {
   memory_percent: number | null;
   memory_used: number | null;
   memory_total: number | null;
+  swap_percent: number | null;
+  swap_used: number | null;
+  swap_total: number | null;
   temperature_celsius: number | null;
   disk_percent: number | null;
   disk_used: number | null;
   disk_total: number | null;
+}
+
+export interface OverviewConsumer {
+  id: string;
+  name: string;
+  cpu_percent: number | null;
+  memory_bytes: number | null;
+  memory_percent: number | null;
+  detail: string | null;
+}
+
+export interface OverviewLoadAverage {
+  one: number | null;
+  five: number | null;
+  fifteen: number | null;
+  cpu_count: number | null;
+  per_core: number | null;
+}
+
+export interface OverviewPressure {
+  load_average: OverviewLoadAverage | null;
+  uptime_seconds: number | null;
+  containers: {
+    by_cpu: OverviewConsumer[];
+    by_memory: OverviewConsumer[];
+    capabilities: { memory?: boolean; network?: boolean; block_io?: boolean };
+    sampled_at: string | null;
+  };
+  processes: {
+    by_cpu: OverviewConsumer[];
+    by_memory: OverviewConsumer[];
+    total: number | null;
+  };
 }
 
 export interface OverviewContainerCounts {
@@ -68,6 +104,7 @@ export interface OverviewSnapshot {
     issues: OverviewIssue[];
   };
   metrics: OverviewMetrics;
+  pressure: OverviewPressure;
   workloads: {
     containers: OverviewContainerCounts;
     stacks: OverviewStackCounts;
@@ -81,8 +118,17 @@ export interface OverviewSnapshot {
   collected_at: string;
 }
 
+const EMPTY_PRESSURE: OverviewPressure = {
+  load_average: null,
+  uptime_seconds: null,
+  containers: { by_cpu: [], by_memory: [], capabilities: {}, sampled_at: null },
+  processes: { by_cpu: [], by_memory: [], total: null },
+};
+
 export async function fetchOverview(signal?: AbortSignal): Promise<OverviewSnapshot> {
-  return requestApi<OverviewSnapshot>("/api/overview", { method: "GET", signal });
+  const payload = await requestApi<OverviewSnapshot>("/api/overview", { method: "GET", signal });
+  // A dashboard served by an older backend still renders; it just has no pressure detail.
+  return { ...payload, pressure: { ...EMPTY_PRESSURE, ...(payload.pressure ?? {}) } };
 }
 
 export function getOverviewApplicationUrl(

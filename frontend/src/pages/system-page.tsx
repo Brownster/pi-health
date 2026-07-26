@@ -8,7 +8,7 @@ import { MetricBar } from "@/components/ui/metric-bar";
 import { PageHeader } from "@/components/ui/page-header";
 import { RefreshControls } from "@/components/ui/refresh-controls";
 import { type SystemStats, type UsageSummary, fetchSystemStats } from "@/lib/system";
-import { formatBytes, formatClockTime, formatPercent } from "@/lib/format";
+import { formatBytes, formatClockTime, formatDuration, formatPercent } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 const PerformanceHistory = lazy(() =>
@@ -201,7 +201,7 @@ export function SystemPage() {
         </Card>
       ) : stats ? (
         <>
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
             <MetricCard
               detail={stats.cpuFreqMhz ? `${Math.round(stats.cpuFreqMhz)} MHz` : undefined}
               label="cpu"
@@ -213,6 +213,12 @@ export function SystemPage() {
               label="mem"
               percent={stats.memory.percent}
               value={formatPercent(stats.memory.percent)}
+            />
+            <MetricCard
+              detail={stats.swap.total ? usageDetail(stats.swap) : "not configured"}
+              label="swap"
+              percent={stats.swap.percent}
+              value={stats.swap.total ? formatPercent(stats.swap.percent) : "none"}
             />
             <MetricCard
               label="temp"
@@ -227,6 +233,22 @@ export function SystemPage() {
               value={formatPercent(stats.disk.percent)}
             />
           </div>
+
+          {stats.loadAverage || stats.uptimeSeconds !== null ? (
+            <div className="flex flex-wrap items-center gap-2">
+              {stats.loadAverage ? (
+                <Badge tone="neutral">
+                  load {stats.loadAverage.one?.toFixed(2) ?? "—"} ·{" "}
+                  {stats.loadAverage.five?.toFixed(2) ?? "—"} ·{" "}
+                  {stats.loadAverage.fifteen?.toFixed(2) ?? "—"}
+                  {stats.loadAverage.cpuCount ? ` / ${stats.loadAverage.cpuCount} cores` : ""}
+                </Badge>
+              ) : null}
+              {stats.uptimeSeconds !== null ? (
+                <Badge tone="neutral">up {formatDuration(stats.uptimeSeconds)}</Badge>
+              ) : null}
+            </div>
+          ) : null}
 
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             <Card>

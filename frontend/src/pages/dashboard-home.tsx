@@ -14,18 +14,22 @@ import {
 } from "lucide-react";
 import { Link } from "react-router-dom";
 
+import { ActivityPanel } from "@/components/dashboard/activity-panel";
+import { PressurePanel } from "@/components/dashboard/pressure-panel";
 import { Badge, StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { MetricBar } from "@/components/ui/metric-bar";
 import { PageHeader } from "@/components/ui/page-header";
 import { RefreshControls } from "@/components/ui/refresh-controls";
+import { type ActivitySnapshot, fetchActivity } from "@/lib/activity";
 import { formatBytes, formatClockTime, formatPercent } from "@/lib/format";
 import {
   type OverviewAlertRecord,
   type OverviewApplication,
   type OverviewHealthState,
   type OverviewIssue,
+  type OverviewMetrics,
   fetchOverview,
   getOverviewApplicationUrl,
   type OverviewSnapshot,
@@ -33,6 +37,8 @@ import {
 import { cn } from "@/lib/utils";
 
 const INITIAL_APPLICATION_LIMIT = 12;
+// Streams and download rates are only interesting while they are current.
+const POLL_INTERVAL_MS = 10_000;
 
 const applicationNames: Record<string, string> = {
   transmission: "Transmission",
@@ -105,6 +111,30 @@ function getToneTextClass(tone: MetricTone): string {
     danger: "text-danger",
     info: "text-info",
   }[tone];
+}
+
+/**
+ * Swap needs its own reading: a host with none configured is healthy, not
+ * unknown, and swap in use at all is worth noticing well before it fills.
+ */
+function getSwapPresentation(metrics: OverviewMetrics | null): {
+  value: string;
+  detail?: string;
+  percent: number | null;
+  tone: MetricTone;
+} {
+  if (!metrics || metrics.swap_total === null) {
+    return { value: "—", percent: null, tone: "info" };
+  }
+  if (metrics.swap_total === 0) {
+    return { value: "none", detail: "not configured", percent: 0, tone: "success" };
+  }
+  return {
+    value: formatPercent(metrics.swap_percent),
+    detail: `${formatBytes(metrics.swap_used)} / ${formatBytes(metrics.swap_total)}`,
+    percent: metrics.swap_percent,
+    tone: getTone(metrics.swap_percent, 25, 60),
+  };
 }
 
 function getErrorMessage(error: unknown): string {
@@ -247,6 +277,8 @@ function ApplicationLauncher({ application }: { application: OverviewApplication
 
 export function DashboardHomePage() {
   const [snapshot, setSnapshot] = useState<OverviewSnapshot | null>(null);
+  const [activity, setActivity] = useState<ActivitySnapshot | null>(null);
+  const [activityError, setActivityError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
@@ -276,11 +308,40 @@ export function DashboardHomePage() {
     }
   }, []);
 
+  // Activity is fetched separately: it reaches out to Jellyfin, SABnzbd and the
+  // Servarr APIs, so a slow or absent service must never hold up the dashboard.
+  const loadActivity = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const next = await fetchActivity(signal);
+      if (signal?.aborted) {
+        return;
+      }
+      setActivity(next);
+      setActivityError(null);
+    } catch (caughtError) {
+      if (!signal?.aborted) {
+        setActivityError(getErrorMessage(caughtError));
+      }
+    }
+  }, []);
+
+  const refreshAll = useCallback(
+    (reason: "initial" | "manual" | "poll", signal?: AbortSignal) =>
+      Promise.all([loadOverview(reason, signal), loadActivity(signal)]),
+    [loadActivity, loadOverview],
+  );
+
   useEffect(() => {
     const controller = new AbortController();
-    void loadOverview("initial", controller.signal);
-    return () => controller.abort();
-  }, [loadOverview]);
+    void refreshAll("initial", controller.signal);
+    const intervalId = window.setInterval(() => {
+      void refreshAll("poll", controller.signal);
+    }, POLL_INTERVAL_MS);
+    return () => {
+      controller.abort();
+      window.clearInterval(intervalId);
+    };
+  }, [refreshAll]);
 
   const applications = useMemo(
     () => showAllApplications
@@ -291,6 +352,7 @@ export function DashboardHomePage() {
 
   const metrics = snapshot?.metrics;
   const temperature = metrics?.temperature_celsius ?? null;
+  const swap = getSwapPresentation(metrics ?? null);
   const healthState = snapshot?.health.state ?? "unknown";
   const headerStatus = !snapshot ? (
     <StatusBadge label="syncing" tone="info" />
@@ -307,7 +369,7 @@ export function DashboardHomePage() {
         actions={
           <RefreshControls
             isRefreshing={isRefreshing}
-            onRefresh={() => void loadOverview("manual")}
+            onRefresh={() => void refreshAll("manual")}
           />
         }
         description={lastUpdated ? `last updated: ${formatClockTime(lastUpdated)}` : "collecting current status"}
@@ -327,7 +389,7 @@ export function DashboardHomePage() {
 
       {snapshot ? <HealthSummary issues={snapshot.health.issues} state={snapshot.health.state} /> : null}
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <MetricCard
           label="cpu"
           percent={metrics?.cpu_percent ?? null}
@@ -342,6 +404,13 @@ export function DashboardHomePage() {
           value={formatPercent(metrics?.memory_percent)}
         />
         <MetricCard
+          detail={swap.detail}
+          label="swap"
+          percent={swap.percent}
+          tone={swap.tone}
+          value={swap.value}
+        />
+        <MetricCard
           label="temperature"
           percent={temperature === null ? null : (temperature / 90) * 100}
           tone={getTone(temperature, 65, 80)}
@@ -354,6 +423,11 @@ export function DashboardHomePage() {
           tone={getTone(metrics?.disk_percent ?? null, 75, 90)}
           value={formatPercent(metrics?.disk_percent)}
         />
+      </div>
+
+      <div className="grid gap-3 xl:grid-cols-2">
+        {snapshot ? <PressurePanel pressure={snapshot.pressure} /> : null}
+        <ActivityPanel error={activityError} snapshot={activity} />
       </div>
 
       <div className="grid gap-3 xl:grid-cols-2">

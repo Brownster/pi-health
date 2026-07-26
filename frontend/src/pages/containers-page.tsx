@@ -36,6 +36,7 @@ import {
   fetchContainerStats,
   fetchContainers,
   filterContainers,
+  isMemoryAccountingUnavailable,
   runContainerAction,
   runContainerNetworkTest,
   runHostNetworkTest,
@@ -182,10 +183,6 @@ export function ContainersPage() {
   const vpnRolesRef = useRef<VpnRoleMap>({});
   const [providerUpdate, setProviderUpdate] = useState<ContainerSummary | null>(null);
   const [checkAll, setCheckAll] = useState<{ done: number; total: number } | null>(null);
-  const previousNetworkStatsRef = useRef<
-    Map<string, { rx: number; tx: number }>
-  >(new Map());
-  const lastStatsFetchRef = useRef<number | null>(null);
   const statsInFlightRef = useRef(false);
 
   const applyContainers = useCallback((next: ContainerSummary[]) => {
@@ -246,6 +243,10 @@ export function ContainersPage() {
             memory_limit: previous.memory_limit,
             net_rx: previous.net_rx,
             net_tx: previous.net_tx,
+            net_rx_rate: previous.net_rx_rate,
+            net_tx_rate: previous.net_tx_rate,
+            block_read_rate: previous.block_read_rate,
+            block_write_rate: previous.block_write_rate,
           };
         });
         applyContainers(merged);
@@ -289,34 +290,14 @@ export function ContainersPage() {
           return;
         }
 
-        const now = Date.now();
-        const lastFetch = lastStatsFetchRef.current;
-        const previousStats = previousNetworkStatsRef.current;
-        const nextPreviousStats = new Map<string, { rx: number; tx: number }>();
+        // Rates come from the server sampler, which measures them against its own
+        // previous reading rather than the gap between two browser polls.
         const nextRates: NetworkRateMap = {};
-
         for (const [id, summary] of Object.entries(stats)) {
-          const rx = summary.net_rx;
-          const tx = summary.net_tx;
-          if (rx === null || tx === null) {
-            continue;
+          if (summary.net_rx_rate !== null || summary.net_tx_rate !== null) {
+            nextRates[id] = { rxRate: summary.net_rx_rate, txRate: summary.net_tx_rate };
           }
-
-          const previous = previousStats.get(id);
-          if (previous && lastFetch !== null) {
-            const elapsedSeconds = (now - lastFetch) / 1000;
-            if (elapsedSeconds > 0) {
-              nextRates[id] = {
-                rxRate: Math.max(0, (rx - previous.rx) / elapsedSeconds),
-                txRate: Math.max(0, (tx - previous.tx) / elapsedSeconds),
-              };
-            }
-          }
-          nextPreviousStats.set(id, { rx, tx });
         }
-
-        previousNetworkStatsRef.current = nextPreviousStats;
-        lastStatsFetchRef.current = now;
         setNetworkRates(nextRates);
 
         const merged = containersRef.current.map((container) => {
@@ -324,15 +305,7 @@ export function ContainersPage() {
           if (!summary) {
             return container;
           }
-          return {
-            ...container,
-            cpu_percent: summary.cpu_percent,
-            memory_percent: summary.memory_percent,
-            memory_used: summary.memory_used,
-            memory_limit: summary.memory_limit,
-            net_rx: summary.net_rx,
-            net_tx: summary.net_tx,
-          };
+          return { ...container, ...summary };
         });
         applyContainers(merged);
       } catch {
@@ -598,6 +571,11 @@ export function ContainersPage() {
   const filteredContainers = useMemo(
     () => filterContainers(containers, filter),
     [containers, filter],
+  );
+
+  const memoryAccountingOff = useMemo(
+    () => isMemoryAccountingUnavailable(containers),
+    [containers],
   );
 
   // Network groups drive the VPN provider/member/orphaned badges. Fetched once; refreshed
@@ -889,6 +867,27 @@ export function ContainersPage() {
             Refresh failed: {error}
           </CardContent>
         </Card>
+      ) : null}
+
+      {memoryAccountingOff ? (
+        <div className="flex items-start gap-3 border-l-2 border-warning/60 bg-warning/[0.04] px-4 py-3 text-sm">
+          <TriangleAlert
+            aria-hidden="true"
+            className="mt-0.5 h-4 w-4 shrink-0 text-warning"
+          />
+          <p className="text-muted-foreground">
+            <span className="font-medium text-warning">
+              Container memory is not accounted for on this host.
+            </span>{" "}
+            The kernel was booted without the memory cgroup, so Docker reports no
+            usage for any container. Add{" "}
+            <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs text-foreground">
+              cgroup_enable=memory cgroup_memory=1
+            </code>{" "}
+            to <code className="font-mono text-xs">/boot/firmware/cmdline.txt</code>{" "}
+            and reboot. CPU and network figures are unaffected.
+          </p>
+        </div>
       ) : null}
 
       {isLoading ? (

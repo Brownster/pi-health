@@ -26,6 +26,10 @@ export interface ContainerSummary {
   memory_limit: number | null;
   net_rx: number | null;
   net_tx: number | null;
+  net_rx_rate: number | null;
+  net_tx_rate: number | null;
+  block_read_rate: number | null;
+  block_write_rate: number | null;
   web_url: string | null;
   web_scheme: "http" | "https" | null;
 }
@@ -120,6 +124,10 @@ export interface ContainerStatsSummary {
   memory_limit: number | null;
   net_rx: number | null;
   net_tx: number | null;
+  net_rx_rate: number | null;
+  net_tx_rate: number | null;
+  block_read_rate: number | null;
+  block_write_rate: number | null;
 }
 
 function normalizePortBinding(
@@ -166,6 +174,10 @@ function normalizeContainer(
     memory_limit: toNullableNumber(container?.memory_limit),
     net_rx: toNullableNumber(container?.net_rx),
     net_tx: toNullableNumber(container?.net_tx),
+    net_rx_rate: toNullableNumber(container?.net_rx_rate),
+    net_tx_rate: toNullableNumber(container?.net_tx_rate),
+    block_read_rate: toNullableNumber(container?.block_read_rate),
+    block_write_rate: toNullableNumber(container?.block_write_rate),
     web_url: toNullableString(container?.web_url),
     web_scheme: webScheme === "http" || webScheme === "https" ? webScheme : null,
   };
@@ -331,22 +343,10 @@ export async function fetchContainerStats(
     return {};
   }
 
-  const payload = await requestApi<
-    Record<
-      string,
-      Partial<{
-        cpu_percent: unknown;
-        memory_percent: unknown;
-        memory_used: unknown;
-        memory_limit: unknown;
-        net_rx: unknown;
-        net_tx: unknown;
-      }>
-    >
-  >(`/api/containers/stats?ids=${encodeURIComponent(ids)}`, {
-    method: "GET",
-    signal,
-  });
+  const payload = await requestApi<Record<string, Record<string, unknown>>>(
+    `/api/containers/stats?ids=${encodeURIComponent(ids)}`,
+    { method: "GET", signal },
+  );
 
   return Object.entries(payload).reduce<Record<string, ContainerStatsSummary>>((acc, [id, value]) => {
     acc[id] = {
@@ -356,10 +356,16 @@ export async function fetchContainerStats(
       memory_limit: toNullableNumber(value.memory_limit),
       net_rx: toNullableNumber(value.net_rx),
       net_tx: toNullableNumber(value.net_tx),
+      net_rx_rate: toNullableNumber(value.net_rx_rate),
+      net_tx_rate: toNullableNumber(value.net_tx_rate),
+      block_read_rate: toNullableNumber(value.block_read_rate),
+      block_write_rate: toNullableNumber(value.block_write_rate),
     };
     return acc;
   }, {});
 }
+
+export { isMemoryAccountingUnavailable } from "@/lib/container-metrics";
 
 const STOPPED_STATUSES = new Set(["stopped", "exited"]);
 

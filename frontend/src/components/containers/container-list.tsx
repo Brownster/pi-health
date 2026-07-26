@@ -19,7 +19,7 @@ import {
   type ContainerSummary,
   getContainerWebUrl,
 } from "@/lib/containers";
-import { formatBytes, formatPercent } from "@/lib/format";
+import { formatBytes, formatPercent, formatRate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 export interface NetworkRate {
@@ -87,6 +87,14 @@ function isUnavailable(status: string): boolean {
   return status === "unavailable" || status === "error";
 }
 
+/** Omit the "used / limit" line entirely when the host accounts for neither. */
+function memoryDetail(container: ContainerSummary): string | undefined {
+  if (container.memory_used === null && container.memory_limit === null) {
+    return undefined;
+  }
+  return `${formatBytes(container.memory_used)} / ${formatBytes(container.memory_limit)}`;
+}
+
 function MetricCell({
   percent,
   detail,
@@ -128,12 +136,8 @@ function NetworkCell({
   const useRate = Boolean(
     rate && (rate.rxRate !== null || rate.txRate !== null),
   );
-  const down = useRate
-    ? `${formatBytes(rate?.rxRate ?? null)}/s`
-    : formatBytes(rx);
-  const up = useRate
-    ? `${formatBytes(rate?.txRate ?? null)}/s`
-    : formatBytes(tx);
+  const down = useRate ? formatRate(rate?.rxRate) : formatBytes(rx);
+  const up = useRate ? formatRate(rate?.txRate) : formatBytes(tx);
   return (
     <div className="space-y-1 text-xs">
       <p className="text-sky-300">
@@ -468,7 +472,7 @@ export function ContainerList(props: ListProps) {
                     </td>
                     <td className="px-4 py-3">
                       <MetricCell
-                        detail={`${formatBytes(container.memory_used)} / ${formatBytes(container.memory_limit)}`}
+                        detail={memoryDetail(container)}
                         percent={container.memory_percent}
                       />
                     </td>
@@ -540,7 +544,7 @@ export function ContainerList(props: ListProps) {
                       Memory
                     </p>
                     <MetricCell
-                      detail={`${formatBytes(container.memory_used)} / ${formatBytes(container.memory_limit)}`}
+                      detail={memoryDetail(container)}
                       percent={container.memory_percent}
                     />
                   </div>
