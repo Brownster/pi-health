@@ -72,6 +72,56 @@ fct_run_onboarding_preflight() {
 
 fct_run_onboarding_preflight
 
+REBOOT_REQUIRED=0
+
+fct_enable_memory_cgroup() {
+  # Raspberry Pi OS boots without the cgroup v2 memory controller, so Docker
+  # reports no memory usage for any container. Adding it here is idempotent and
+  # takes effect at the next boot; nothing is restarted on the operator's behalf.
+  local cmdline_file=""
+  local candidate
+  for candidate in /boot/firmware/cmdline.txt /boot/cmdline.txt; do
+    if [[ -f "${candidate}" ]]; then
+      cmdline_file="${candidate}"
+      break
+    fi
+  done
+
+  if [[ -z "${cmdline_file}" ]]; then
+    return 0
+  fi
+
+  local controllers_file="/sys/fs/cgroup/cgroup.controllers"
+  if [[ -r "${controllers_file}" ]] && [[ " $(<"${controllers_file}") " == *" memory "* ]]; then
+    return 0
+  fi
+
+  local line
+  line="$(head -n1 "${cmdline_file}")"
+
+  local missing=()
+  local parameter
+  for parameter in cgroup_enable=memory cgroup_memory=1; do
+    if [[ " ${line} " != *" ${parameter} "* ]]; then
+      missing+=("${parameter}")
+    fi
+  done
+
+  if ((${#missing[@]} == 0)); then
+    REBOOT_REQUIRED=1
+    return 0
+  fi
+
+  local backup="${cmdline_file}.limeos-bak-$(date +%Y%m%d%H%M%S)"
+  cp -a "${cmdline_file}" "${backup}"
+  # cmdline.txt must stay a single line; a second line stops the Pi from booting.
+  printf '%s %s\n' "${line}" "${missing[*]}" > "${cmdline_file}"
+  sync
+
+  echo ">>> Enabled the kernel memory cgroup in ${cmdline_file} (backup: ${backup})"
+  REBOOT_REQUIRED=1
+}
+
 fct_validate_install_options() {
   local option_name=""
   local option_value=""
@@ -454,12 +504,21 @@ fi
 echo ">>> Verifying installed services..."
 "${INSTALL_CHECK_SCRIPT}" "${install_check_args[@]}"
 
+fct_enable_memory_cgroup
+
 echo ">>> Pi-Health is running."
 echo "Open: http://$(hostname -I | awk '{print $1}'):8002"
 echo "Credentials: ${CREDENTIALS_FILE}"
 echo "Helper service: pihealth-helper.service"
 echo "Metrics timer: limeos-metrics-collector.timer"
 echo
+if ((REBOOT_REQUIRED == 1)); then
+  echo "Action required:"
+  echo "  Reboot to enable container memory reporting: sudo reboot"
+  echo "  Until then, container memory reads as unavailable in the dashboard."
+  echo
+fi
+
 echo "Recovery commands:"
 echo "  sudo systemctl status pihealth-helper.service pi-health.service --no-pager"
 echo "  sudo journalctl -u pihealth-helper.service -u pi-health.service -n 100 --no-pager"

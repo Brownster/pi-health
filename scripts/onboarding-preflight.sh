@@ -187,6 +187,27 @@ fct_check_usb_storage() {
 	fi
 }
 
+fct_check_memory_cgroup() {
+	local controllers_file="${LIMEOS_CGROUP_CONTROLLERS_FILE:-/sys/fs/cgroup/cgroup.controllers}"
+	local controllers=""
+
+	if [[ ! -r "${controllers_file}" ]]; then
+		fct_info "memory-cgroup" "Controller list unreadable; skipping check"
+		return 0
+	fi
+
+	controllers="$(<"${controllers_file}")"
+	if [[ " ${controllers} " == *" memory "* ]]; then
+		fct_pass "memory-cgroup" "Kernel memory controller is enabled"
+		return 0
+	fi
+
+	# Raspberry Pi OS ships with this off, which makes Docker report no memory
+	# usage for any container. The installer adds it; the host needs a reboot.
+	fct_warn "memory-cgroup" \
+		"Kernel memory controller is off; container memory will read as unavailable until reboot"
+}
+
 fct_parse_arguments() {
 	while [[ $# -gt 0 ]]; do
 		case "${1}" in
@@ -222,6 +243,7 @@ fct_main() {
 	fct_check_operator
 	fct_check_bootstrap_tools
 	fct_check_usb_storage
+	fct_check_memory_cgroup
 
 	if ((BLOCKERS > 0)); then
 		if ((ALLOW_EXISTING_INSTALL == 1)); then
