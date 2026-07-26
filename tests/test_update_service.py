@@ -453,3 +453,39 @@ def test_logs_route_delegates():
     response = client.get("/api/auto-update/logs")
     assert response.status_code == 200
     service.logs.assert_called_once()
+
+
+# --- Scheduler wiring --------------------------------------------------------
+
+def test_update_lister_unwraps_the_stacks_error_pair(monkeypatch):
+    """list_stacks() answers (stacks, error); the service takes the list alone."""
+    import update_scheduler
+
+    monkeypatch.setattr(
+        update_scheduler, "list_stacks", lambda: ([{"name": "media"}, {"name": "chat"}], None)
+    )
+
+    assert update_scheduler._list_stacks_for_update() == [{"name": "media"}, {"name": "chat"}]
+
+
+def test_update_lister_raises_when_stacks_cannot_be_listed(monkeypatch):
+    import pytest
+
+    import update_scheduler
+
+    monkeypatch.setattr(update_scheduler, "list_stacks", lambda: ([], "stacks path unreadable"))
+
+    with pytest.raises(RuntimeError, match="stacks path unreadable"):
+        update_scheduler._list_stacks_for_update()
+
+
+def test_a_failing_lister_is_reported_rather_than_crashing_the_job():
+    def explode():
+        raise RuntimeError("stacks path unreadable")
+
+    results = make_service(stack_lister=explode).run()
+
+    assert results["failed"] == [
+        {"name": "_system", "error": "Failed to list stacks: stacks path unreadable"}
+    ]
+    assert results["updated"] == []

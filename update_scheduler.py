@@ -39,6 +39,21 @@ scheduler = BackgroundScheduler(daemon=True)
 # Service construction and resolution
 # =============================================================================
 
+def _list_stacks_for_update():
+    """Return stack summaries alone, raising if they could not be listed.
+
+    ``list_stacks()`` answers ``(stacks, error)`` but AutoUpdateService takes the
+    list by itself, so passing the pair straight through made it iterate a tuple
+    and call ``.get()`` on a list — every scheduled auto-update died there. The
+    service already reports a raised exception as a ``_system`` failure, which is
+    where a listing error belongs.
+    """
+    stacks, error = list_stacks()
+    if error:
+        raise RuntimeError(error)
+    return stacks
+
+
 def default_update_service(repository=None, scheduler_port=None):
     """Build an AutoUpdateService bound to this module's paths and scheduler."""
     return AutoUpdateService(
@@ -47,7 +62,7 @@ def default_update_service(repository=None, scheduler_port=None):
             scheduler_port if scheduler_port is not None else ApschedulerAdapter(scheduler)
         ),
         config_path_provider=lambda: CONFIG_FILE,
-        stack_lister=lambda: list_stacks(),
+        stack_lister=_list_stacks_for_update,
         compose_runner=lambda name, command: run_compose_command(name, command),
         trigger_factory=CronTrigger.from_crontab,
     )
