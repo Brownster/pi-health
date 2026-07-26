@@ -180,7 +180,7 @@ LockPersonality=true
 RestrictAddressFamilies=AF_UNIX
 ReadOnlyPaths={AGENT_LIB_DIR} {ACTION_POLICY_PATH} {ACTION_BROKER_POLICY_PATH}
 ReadWritePaths={ACTION_SOCKET_DIR} {ACTION_STATE_DIR} /var/log/limeos {STACK_LOCK_DIR}
-InaccessiblePaths=/root {repo_dir} /run/pihealth /etc/limeos/credentials.env
+InaccessiblePaths=/root {repo_dir} /etc/limeos/credentials.env
 CapabilityBoundingSet=
 
 [Install]
