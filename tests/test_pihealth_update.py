@@ -128,3 +128,25 @@ def test_update_streams_full_sequence_end_to_end(authenticated_client, monkeypat
     assert terminal["restarting"] is True
     assert terminal["done"] is True
     assert terminal["new_commit"] == "b" * 40
+
+
+def test_access_logging_is_off_by_default_and_can_be_switched_back_on(monkeypatch):
+    """One open dashboard tab logs ~10k journal lines a day; a Pi writes those to SD."""
+    import logging
+
+    import app as app_module
+
+    werkzeug = logging.getLogger("werkzeug")
+    original = werkzeug.level
+    try:
+        werkzeug.setLevel(logging.INFO)
+        monkeypatch.delenv("LIMEOS_ACCESS_LOG", raising=False)
+        app_module._configure_request_logging()
+        assert werkzeug.level == logging.WARNING
+
+        werkzeug.setLevel(logging.INFO)
+        monkeypatch.setenv("LIMEOS_ACCESS_LOG", "1")
+        app_module._configure_request_logging()
+        assert werkzeug.level == logging.INFO
+    finally:
+        werkzeug.setLevel(original)

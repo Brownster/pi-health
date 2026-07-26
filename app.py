@@ -1978,6 +1978,22 @@ def _ensure_package_reconcile_timer():
     threading.Thread(target=_run, name="package-timer-ensure", daemon=True).start()
 
 
+def _configure_request_logging():
+    """Silence per-request access logs unless they are explicitly wanted.
+
+    The dashboard polls several endpoints every ten seconds, so one open tab
+    writes on the order of ten thousand journal lines a day — continuous SD-card
+    writes on a Pi for a log nobody reads. Warnings, errors and tracebacks from
+    the server are unaffected. Set LIMEOS_ACCESS_LOG=1 to get them back.
+    """
+    import logging
+
+    if os.environ.get("LIMEOS_ACCESS_LOG", "").strip().lower() in {"1", "true", "yes"}:
+        return
+    logging.getLogger("werkzeug").setLevel(logging.WARNING)
+
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8002))
+    _configure_request_logging()
     create_app().run(host="0.0.0.0", port=port)
