@@ -392,6 +392,20 @@ sudo nano /boot/firmware/cmdline.txt
 Keep `cmdline.txt` on one line — a second line stops the Pi from booting. Memory tracking
 costs a small amount of RAM.
 
+### Host settings LimeOS manages
+
+The installer and every UI update check a small set of host settings and repair what is
+missing. Each is idempotent, and any value you have already chosen is left alone.
+
+| Setting | Why | Takes effect |
+| --- | --- | --- |
+| `cgroup_enable=memory cgroup_memory=1` in `cmdline.txt` | Docker cannot report container memory without it | Next reboot |
+| `SystemMaxUse=200M` in `/etc/systemd/journald.conf.d/limeos.conf` | An uncapped journal grows to a tenth of the filesystem — constant SD-card writes | Immediately |
+
+Anything that needs a reboot shows as a banner in the dashboard until you reboot. To opt
+out of the journal cap, set your own `SystemMaxUse` anywhere in the journald config and
+LimeOS will not touch it.
+
 ## License
 
 MIT License - see LICENSE file for details.
