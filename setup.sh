@@ -122,6 +122,32 @@ fct_enable_memory_cgroup() {
   REBOOT_REQUIRED=1
 }
 
+fct_cap_journal() {
+  # An uncapped journal grows to a tenth of the filesystem. On a Pi that is years
+  # of avoidable SD-card writes for logs nobody reads. Written as a drop-in so the
+  # operator's own journald.conf is never touched, and skipped entirely if any cap
+  # is already set.
+  local dropin_dir="/etc/systemd/journald.conf.d"
+  local dropin="${dropin_dir}/limeos.conf"
+
+  if grep -rqs "^[[:space:]]*SystemMaxUse" /etc/systemd/journald.conf "${dropin_dir}" 2>/dev/null; then
+    return 0
+  fi
+
+  install -d -m 0755 "${dropin_dir}"
+  cat > "${dropin}" <<'JOURNALD'
+# Managed by LimeOS: bound journal growth on flash storage.
+[Journal]
+SystemMaxUse=200M
+JOURNALD
+  chmod 0644 "${dropin}"
+
+  systemctl restart systemd-journald || true
+  journalctl --vacuum-size=200M >/dev/null 2>&1 || true
+
+  echo ">>> Capped the systemd journal at 200M (${dropin})"
+}
+
 fct_validate_install_options() {
   local option_name=""
   local option_value=""
@@ -505,6 +531,7 @@ echo ">>> Verifying installed services..."
 "${INSTALL_CHECK_SCRIPT}" "${install_check_args[@]}"
 
 fct_enable_memory_cgroup
+fct_cap_journal
 
 echo ">>> Pi-Health is running."
 echo "Open: http://$(hostname -I | awk '{print $1}'):8002"

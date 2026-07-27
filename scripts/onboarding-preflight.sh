@@ -208,6 +208,19 @@ fct_check_memory_cgroup() {
 		"Kernel memory controller is off; container memory will read as unavailable until reboot"
 }
 
+fct_check_journal_cap() {
+	local config_file="${LIMEOS_JOURNALD_CONFIG_FILE:-/etc/systemd/journald.conf}"
+	local dropin_dir="${LIMEOS_JOURNALD_DROPIN_DIR:-/etc/systemd/journald.conf.d}"
+
+	if grep -rqs "^[[:space:]]*SystemMaxUse" "${config_file}" "${dropin_dir}" 2>/dev/null; then
+		fct_pass "journal-cap" "systemd journal has a size limit"
+		return 0
+	fi
+
+	# Uncapped, the journal grows to a tenth of the filesystem; the installer caps it.
+	fct_info "journal-cap" "systemd journal is uncapped; install will limit it to 200M"
+}
+
 fct_parse_arguments() {
 	while [[ $# -gt 0 ]]; do
 		case "${1}" in
@@ -244,6 +257,7 @@ fct_main() {
 	fct_check_bootstrap_tools
 	fct_check_usb_storage
 	fct_check_memory_cgroup
+	fct_check_journal_cap
 
 	if ((BLOCKERS > 0)); then
 		if ((ALLOW_EXISTING_INSTALL == 1)); then
