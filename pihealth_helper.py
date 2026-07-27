@@ -2521,6 +2521,14 @@ KERNEL_CMDLINE_PATHS = ("/boot/firmware/cmdline.txt", "/boot/cmdline.txt")
 # Enables the cgroup v2 memory controller, without which Docker reports no
 # container memory usage at all.
 REQUIRED_KERNEL_PARAMETERS = ("cgroup_enable=memory", "cgroup_memory=1")
+# Written as a drop-in rather than an edit to journald.conf, so the operator's
+# own file is never touched and removing the cap is one file deletion.
+JOURNALD_DROPIN_PATH = "/etc/systemd/journald.conf.d/limeos.conf"
+JOURNAL_MAX_USE = "200M"
+JOURNALD_DROPIN_CONTENT = f"""# Managed by LimeOS: bound journal growth on flash storage.
+[Journal]
+SystemMaxUse={JOURNAL_MAX_USE}
+"""
 
 
 def _find_kernel_cmdline():
@@ -2530,7 +2538,7 @@ def _find_kernel_cmdline():
     return None
 
 
-def cmd_host_prerequisites_apply(params):
+def _apply_memory_cgroup():
     """Add LimeOS's required kernel parameters to the boot command line.
 
     Idempotent: parameters already present are left alone and the file is only
@@ -2541,7 +2549,7 @@ def cmd_host_prerequisites_apply(params):
     cmdline_path = _find_kernel_cmdline()
     if cmdline_path is None:
         return {
-            'success': True,
+            'id': 'memory_cgroup',
             'changed': False,
             'supported': False,
             'reason': 'This host does not boot from a cmdline.txt',
@@ -2551,12 +2559,17 @@ def cmd_host_prerequisites_apply(params):
         with open(cmdline_path) as handle:
             original = handle.readline().strip()
     except OSError as error:
-        return {'success': False, 'error': f'Unable to read {cmdline_path}: {error}'}
+        return {'id': 'memory_cgroup', 'error': f'Unable to read {cmdline_path}: {error}'}
 
     existing = original.split()
     missing = [item for item in REQUIRED_KERNEL_PARAMETERS if item not in existing]
     if not missing:
-        return {'success': True, 'changed': False, 'supported': True, 'path': cmdline_path}
+        return {
+            'id': 'memory_cgroup',
+            'changed': False,
+            'supported': True,
+            'path': cmdline_path,
+        }
 
     updated = " ".join([*existing, *missing])
     stamp = datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')
@@ -2579,15 +2592,116 @@ def cmd_host_prerequisites_apply(params):
                 os.remove(temporary_path)
             raise
     except OSError as error:
-        return {'success': False, 'error': f'Unable to update {cmdline_path}: {error}'}
+        return {'id': 'memory_cgroup', 'error': f'Unable to update {cmdline_path}: {error}'}
 
     return {
-        'success': True,
+        'id': 'memory_cgroup',
         'changed': True,
         'supported': True,
         'path': cmdline_path,
         'backup': backup_path,
         'added': missing,
+    }
+
+
+def _journal_cap_is_set():
+    """Whether journald already has any size cap, from its config or a drop-in."""
+    paths = ["/etc/systemd/journald.conf"]
+    try:
+        paths.extend(
+            sorted(
+                os.path.join("/etc/systemd/journald.conf.d", name)
+                for name in os.listdir("/etc/systemd/journald.conf.d")
+                if name.endswith(".conf")
+            )
+        )
+    except OSError:
+        pass
+
+    for path in paths:
+        try:
+            with open(path) as handle:
+                for line in handle:
+                    if line.lstrip().startswith("SystemMaxUse"):
+                        return True
+        except OSError:
+            continue
+    return False
+
+
+def _apply_journal_cap():
+    """Bound journal growth, then reclaim whatever it already took.
+
+    An uncapped journal grows to a tenth of the filesystem, which on a Pi is
+    years of avoidable SD-card writes. Any existing cap is respected: an operator
+    who chose their own number has already made this decision.
+    """
+    if _journal_cap_is_set():
+        return {'id': 'journal_cap', 'changed': False, 'supported': True}
+
+    directory = os.path.dirname(JOURNALD_DROPIN_PATH)
+    try:
+        os.makedirs(directory, exist_ok=True)
+        descriptor, temporary_path = tempfile.mkstemp(
+            dir=directory, prefix=".limeos.", suffix=".tmp"
+        )
+        try:
+            with os.fdopen(descriptor, "w") as handle:
+                handle.write(JOURNALD_DROPIN_CONTENT)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.chmod(temporary_path, 0o644)
+            os.replace(temporary_path, JOURNALD_DROPIN_PATH)
+        except BaseException:
+            if os.path.exists(temporary_path):
+                os.remove(temporary_path)
+            raise
+    except OSError as error:
+        return {
+            'id': 'journal_cap',
+            'error': f'Unable to write {JOURNALD_DROPIN_PATH}: {error}',
+        }
+
+    # The cap governs journald from its next start; the vacuum reclaims what the
+    # uncapped run already wrote. Both are best-effort — the config is what
+    # matters, and it is already on disk.
+    run_command(["systemctl", "restart", "systemd-journald"], timeout=30)
+    run_command(["journalctl", f"--vacuum-size={JOURNAL_MAX_USE}"], timeout=120)
+
+    return {
+        'id': 'journal_cap',
+        'changed': True,
+        'supported': True,
+        'path': JOURNALD_DROPIN_PATH,
+        'limit': JOURNAL_MAX_USE,
+    }
+
+
+def cmd_host_prerequisites_apply(params):
+    """Apply every host setting LimeOS depends on, reporting each separately.
+
+    The caller supplies nothing: the helper owns the list, picks the files, and
+    checks each setting itself before touching anything. One failing setting does
+    not stop the others, so a partially repairable host still gets what it can.
+    """
+    # Each repair is paired with the prerequisite id it answers to, so a crash is
+    # still reported against something the caller can name.
+    repairs = (
+        ('memory_cgroup', _apply_memory_cgroup),
+        ('journal_cap', _apply_journal_cap),
+    )
+
+    results = []
+    for prerequisite_id, repair in repairs:
+        try:
+            results.append(repair())
+        except Exception as error:
+            results.append({'id': prerequisite_id, 'error': str(error)})
+
+    return {
+        'success': True,
+        'changed': any(item.get('changed') for item in results),
+        'results': results,
     }
 
 

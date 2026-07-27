@@ -195,7 +195,7 @@ def _apply_prerequisites(prerequisite_service, pending_actions):
 
     yield {
         "step": "prerequisites",
-        "line": "Applied host boot settings: " + ", ".join(result.get("applied") or []),
+        "line": "Applied host settings: " + ", ".join(result.get("applied") or []),
     }
 
     if not result.get("reboot_required"):
